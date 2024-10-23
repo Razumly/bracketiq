@@ -1,0 +1,12 @@
+[
+  {
+    "moduleId": "com.rickclephas.kmp:kmp-observableviewmodel-core:1.0.0-BETA-7",
+    "file": "C:\\Users\\camka\\AndroidStudioProjects\\MVP\\.kotlin\\metadata\\kotlinTransformedCInteropMetadataLibraries\\com.rickclephas.kmp-kmp-observableviewmodel-core-1.0.0-BETA-7-iosMain-cinterop\\com.rickclephas.kmp_kmp-observableviewmodel-core-cinterop-KMPObservableViewModelCoreObjC-GA4_5A.klib",
+    "sourceSetName": "iosMain"
+  },
+  {
+    "moduleId": "org.jetbrains.kotlinx:atomicfu:0.23.2",
+    "file": "C:\\Users\\camka\\AndroidStudioProjects\\MVP\\.kotlin\\metadata\\kotlinTransformedCInteropMetadataLibraries\\org.jetbrains.kotlinx-atomicfu-0.23.2-nativeMain-cinterop\\org.jetbrains.kotlinx_atomicfu-cinterop-interop-yBS35w.klib",
+    "sourceSetName": "nativeMain"
+  }
+]

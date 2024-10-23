@@ -30,10 +30,22 @@ kotlin {
     
     sourceSets {
         commonMain.dependencies {
-            //put your multiplatform dependencies here
+            api(libs.kmp.observableviewmodel.core)
+            implementation(libs.kotlinx.datetime)
+            api(libs.koin.core)
+            runtimeOnly(libs.androidx.lifecycle.runtime.compose)
+            api(libs.napier)
+        }
+        androidMain.dependencies {
+            implementation(libs.sdkForAndroid)
+            implementation(libs.koin.android)
+            implementation(libs.koin.androidx.compose)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
+        }
+        all {
+            languageSettings.optIn("kotlinx.cinterop.ExperimentalForeignApi")
         }
     }
 }
