@@ -1,20 +1,24 @@
 package com.razumly.mvp.core.presentation
 
-import com.razumly.mvp.core.data.Database
-import com.razumly.mvp.core.data.LoginState
-import com.razumly.mvp.core.data.UserData
+import com.razumly.mvp.core.data.AppwriteRepository
+import com.razumly.mvp.core.data.dataTypes.LoginState
+import com.razumly.mvp.core.data.dataTypes.UserData
 import com.rickclephas.kmp.observableviewmodel.ViewModel
 import com.rickclephas.kmp.observableviewmodel.launch
+import dev.icerock.moko.geo.LocationTracker
+import dev.icerock.moko.permissions.DeniedAlwaysException
+import dev.icerock.moko.permissions.DeniedException
+import dev.icerock.moko.permissions.Permission
+import dev.icerock.moko.permissions.PermissionsController
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.flow
 
-class MainViewModel(private val database: Database) : ViewModel() {
-    val currentTournament = flow {
-        database.getTournament("665fd4b40001fe3199da")
-            ?.let { emit(it) }
-    }
+class MainViewModel(
+    private val appwriteRepository: AppwriteRepository,
+    val permissionsController: PermissionsController,
+    val locationTracker: LocationTracker
+) : ViewModel() {
 
     private val _loginState = MutableStateFlow<LoginState>(LoginState.Initial)
     val loginState: StateFlow<LoginState> = _loginState.asStateFlow()
@@ -24,11 +28,34 @@ class MainViewModel(private val database: Database) : ViewModel() {
 
     init {
         viewModelScope.launch {
-            _currentUser.value = database.getCurrentUser()
+            _currentUser.value = appwriteRepository.getCurrentUser()
             if (_currentUser.value == null) {
                 _loginState.value = LoginState.Initial
             } else {
                 _loginState.value = LoginState.Success
+            }
+
+            try {
+                permissionsController.providePermission(Permission.LOCATION)
+            } catch (deniedAlways: DeniedAlwaysException) {
+                // Permission is always denied.
+            } catch (denied: DeniedException) {
+                // Permission was denied.
+            }
+        }
+    }
+
+    fun onStopTracking() {
+        locationTracker.stopTracking()
+    }
+
+    fun onStartTracking() {
+        viewModelScope.launch {
+            try {
+                permissionsController.providePermission(Permission.LOCATION)
+                locationTracker.startTracking()
+            } catch (e: Exception) {
+                // Handle permission denied
             }
         }
     }
@@ -37,7 +64,7 @@ class MainViewModel(private val database: Database) : ViewModel() {
         viewModelScope.launch {
             _loginState.value = LoginState.Loading
 
-            _currentUser.value = database.login(email, password)
+            _currentUser.value = appwriteRepository.login(email, password)
             if (_currentUser.value == null) {
                 _loginState.value = LoginState.Error("Invalid email or password")
                 return@launch
@@ -50,10 +77,11 @@ class MainViewModel(private val database: Database) : ViewModel() {
 
     fun logout() {
         viewModelScope.launch {
-            database.logout()
+            appwriteRepository.logout()
             _currentUser.value = null
             _loginState.value = LoginState.Initial
         }
     }
+
 
 }

@@ -1,4 +1,4 @@
-package com.razumly.mvp.android.loginScreen
+package com.razumly.mvp.android.userAuth.loginScreen
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -30,7 +30,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.razumly.mvp.android.R
-import com.razumly.mvp.core.data.LoginState
+import com.razumly.mvp.core.data.dataTypes.LoginState
 import com.razumly.mvp.core.presentation.MainViewModel
 
 

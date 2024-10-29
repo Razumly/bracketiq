@@ -1,4 +1,4 @@
-package com.razumly.mvp.core.data
+package com.razumly.mvp.core.data.dataTypes
 
 sealed class LoginState {
     data object Initial : LoginState()

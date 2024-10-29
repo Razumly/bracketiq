@@ -31,16 +31,19 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(libs.kmp.observableviewmodel.core)
-            implementation(libs.kotlinx.datetime)
+            api(libs.kotlinx.datetime)
             api(libs.koin.core)
             runtimeOnly(libs.androidx.lifecycle.runtime.compose)
             api(libs.napier)
+            api(libs.permissions)
+            api(libs.geo)
         }
         androidMain.dependencies {
             implementation(libs.sdkForAndroid)
             implementation(libs.koin.android)
             implementation(libs.koin.androidx.compose)
             implementation(libs.navigation.compose)
+            implementation(libs.moshi)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
@@ -61,4 +64,8 @@ android {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
+}
+dependencies {
+    implementation(libs.androidx.core)
+    implementation(libs.androidx.activity.ktx)
 }

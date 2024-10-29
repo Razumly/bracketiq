@@ -1,7 +1,6 @@
 package com.razumly.mvp.bracket.domain
 
-import com.razumly.mvp.core.data.Database
-import com.razumly.mvp.core.data.Match
+import com.razumly.mvp.core.data.AppwriteRepository
 
-class Bracket(private val database: Database) {
+class Bracket(private val appwriteRepository: AppwriteRepository) {
 }

@@ -1,5 +1,7 @@
 [versions]
 agp = "8.4.2"
+coilCompose = "3.0.0-rc01"
+geo = "0.7.0"
 kmpObservableviewmodelCore = "1.0.0-BETA-7"
 kotlin = "2.0.20"
 compose = "1.7.4"
@@ -8,12 +10,19 @@ androidx-activityCompose = "1.9.3"
 koin = "4.0.0"
 kotlinxDatetime = "0.6.1"
 lifecycleRuntimeCompose = "2.8.6"
+moshi = "1.15.1"
 napier = "2.7.1"
+permissions = "0.18.1"
 sdkForAndroid = "6.0.0"
 navigation-compose = "2.8.3"
+core = "1.13.1"
+activityKtx = "1.9.3"
 
 [libraries]
 androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycleRuntimeCompose" }
+coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coilCompose" }
+coil-network-okhttp = { module = "io.coil-kt.coil3:coil-network-okhttp", version.ref = "coilCompose" }
+geo = { module = "dev.icerock.moko:geo", version.ref = "geo" }
 kmp-observableviewmodel-core = { module = "com.rickclephas.kmp:kmp-observableviewmodel-core", version.ref = "kmpObservableviewmodelCore" }
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activityCompose" }
@@ -28,9 +37,13 @@ koin-android = { module = "io.insert-koin:koin-android", version.ref = "koin" }
 koin-androidx-compose = { module = "io.insert-koin:koin-androidx-compose-navigation", version.ref = "koin" }
 koin-compose = { module = "io.insert-koin:koin-compose-viewmodel-navigation", version.ref = "koin" }
 kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "kotlinxDatetime" }
+moshi = { module = "com.squareup.moshi:moshi", version.ref = "moshi" }
 napier = { module = "io.github.aakira:napier", version.ref = "napier" }
+permissions = { module = "dev.icerock.moko:permissions", version.ref = "permissions" }
 sdkForAndroid = { module = "io.appwrite:sdk-for-android", version.ref = "sdkForAndroid" }
 navigation-compose = { module = "androidx.navigation:navigation-compose", version.ref = "navigation-compose" }
+androidx-core = { group = "androidx.core", name = "core", version.ref = "core" }
+androidx-activity-ktx = { group = "androidx.activity", name = "activity-ktx", version.ref = "activityKtx" }
 
 [plugins]
 androidApplication = { id = "com.android.application", version.ref = "agp" }

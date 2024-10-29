@@ -10,7 +10,13 @@ actual class KoinInitializer(
     actual fun init() {
         GlobalContext.startKoin {
             androidContext(context)
-            modules(mainViewModelModule, databaseModule)
+            modules(
+                mainViewModelModule,
+                appwriteRepositoryModule,
+                permissionsControllerModule,
+                locationTrackerModule,
+                eventSearchViewModelModule,
+            )
         }
 
     }
