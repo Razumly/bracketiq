@@ -1,16 +1,18 @@
 package com.razumly.mvp.core.data.dataTypes
 
 import kotlinx.datetime.LocalDateTime
+import kotlinx.serialization.Serializable
 
+@Serializable
 data class Tournament(
     val name: String,
     val description: String,
     val doubleElimination: Boolean,
-    val matches: Map<String, Match?>,
-    val teams: Map<String, Team?>,
+    val matches: Map<String, Match>,
+    val teams: Map<String, Team>,
     val divisions: List<String>,
-    val fields: Map<String, Field?>,
-    val players: Map<String, UserData?>,
+    val fields: Map<String, Field>,
+    val players: Map<String, UserData>,
     val winnerSetCount: Int,
     val loserSetCount: Int,
     val winnerBracketPointsToVictory: List<Int>,

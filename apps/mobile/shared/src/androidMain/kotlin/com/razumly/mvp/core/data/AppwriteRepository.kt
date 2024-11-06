@@ -23,7 +23,6 @@ import io.appwrite.services.Account
 import io.appwrite.services.Databases
 import io.github.aakira.napier.Napier
 import kotlinx.datetime.Instant
-import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 
@@ -34,22 +33,22 @@ actual class AppwriteRepository(context: Context) {
         .setSelfSigned(true)
     private val account: Account = Account(client)
 
-    actual val currentUser: UserData? = null
-    private val _events = mutableListOf<EventAbs>()
-    actual val events: List<EventAbs>
-        get() = _events
-
     private val database: Databases = Databases(client)
 
     actual suspend fun login(email: String, password: String): UserData? {
-        account.createEmailPasswordSession(email, password)
-        return database.getDocument(
-            "mvp",
-            "userData",
-            account.get().id,
-            null,
-            UserData::class.java
-        ).data
+        try {
+            account.createEmailPasswordSession(email, password)
+            return database.getDocument(
+                "mvp",
+                "userData",
+                account.get().id,
+                null,
+                UserData::class.java
+            ).data
+        } catch (e: Exception) {
+            Napier.e("Failed to login", e, "Database")
+            return null
+        }
     }
 
     actual suspend fun logout() {
@@ -57,7 +56,7 @@ actual class AppwriteRepository(context: Context) {
     }
 
     actual suspend fun getTournament(tournamentId: String): Tournament? {
-        var response: Document<TournamentDTO>? = null
+        val response: Document<TournamentDTO>?
         try {
             response = database.getDocument(
                 "mvp",
@@ -70,8 +69,8 @@ actual class AppwriteRepository(context: Context) {
             Napier.e("Failed to get tournament", e, "Database")
             return null
         }
-        return response?.data?.copy(id = response.id, collectionId = response.collectionId)
-            ?.toTournament()
+        return response.data.copy(id = response.id, collectionId = response.collectionId)
+            .toTournament()
     }
 
     actual suspend fun getCurrentUser(): UserData? {
@@ -98,13 +97,13 @@ actual class AppwriteRepository(context: Context) {
 
     actual suspend fun getTeams(
         tournamentId: String,
-        currentPlayers: Map<String, UserData?>
-    ): Map<String, Team?> {
+        currentPlayers: Map<String, UserData>
+    ): Map<String, Team> {
         try {
             return database.listDocuments(
                 "mvp",
                 "volleyballTeams",
-                queries = listOf(Query.equal("tournament", tournamentId)),
+                queries = listOf(Query.equal("tournament", tournamentId), Query.limit(100)),
                 TeamDTO::class.java
             ).documents.map {
                 it.data.copy(id = it.id)
@@ -118,15 +117,15 @@ actual class AppwriteRepository(context: Context) {
 
     actual suspend fun getMatches(
         tournamentId: String,
-        currentTeams: Map<String, Team?>,
-        currentMatches: MutableMap<String, Match?>
+        currentTeams: Map<String, Team>,
+        currentMatches: MutableMap<String, Match>
     ) {
         val matchesDTO: Map<String, MatchDTO>
         try {
             matchesDTO = database.listDocuments(
                 "mvp",
                 "matches",
-                queries = listOf(Query.equal("tournament", tournamentId)),
+                queries = listOf(Query.equal("tournament", tournamentId), Query.limit(200)),
                 MatchDTO::class.java
             ).documents.map {
                 it.data.copy(id = it.id)
@@ -135,20 +134,18 @@ actual class AppwriteRepository(context: Context) {
             Napier.e("Failed to get matches", e, "Database")
             return
         }
-        matchesDTO.values.firstOrNull()?.let {
-            currentMatches[it.id] = it.toMatch(currentMatches, currentTeams, matchesDTO)
-        }
+        matchesDTO.values.firstOrNull()?.toMatch(currentMatches, currentTeams, matchesDTO)
     }
 
     actual suspend fun getFields(
         tournamentId: String,
-        currentMatches: Map<String, Match?>
-    ): Map<String, Field?> {
+        currentMatches: Map<String, Match>
+    ): Map<String, Field> {
         try {
             return database.listDocuments(
                 "mvp",
                 "fields",
-                queries = listOf(Query.equal("tournament", tournamentId)),
+                queries = listOf(Query.equal("tournament", tournamentId), Query.limit(100)),
                 FieldDTO::class.java
             ).documents.map { it.data.copy(id = it.id).toField(currentMatches) }
                 .associateBy { it.id }
@@ -158,14 +155,14 @@ actual class AppwriteRepository(context: Context) {
         }
     }
 
-    actual suspend fun getPlayers(tournamentId: String): Map<String, UserData?> {
+    actual suspend fun getPlayers(tournamentId: String): Map<String, UserData> {
         try {
             return database.listDocuments(
                 "mvp",
                 "userData",
-                listOf(Query.contains("tournaments", tournamentId)),
+                listOf(Query.contains("tournaments", tournamentId), Query.limit(500)),
                 UserData::class.java
-            ).documents.map { it.data }.associateBy { it.id }
+            ).documents.map { it.data.copy(id = it.id) }.associateBy { it.id }
         } catch (e: Exception) {
             Napier.e("Failed to get players", e, "Database")
             return emptyMap()
@@ -198,7 +195,7 @@ actual class AppwriteRepository(context: Context) {
         }
     }
 
-    private fun FieldDTO.toField(currentMatches: Map<String, Match?>): Field {
+    private fun FieldDTO.toField(currentMatches: Map<String, Match>): Field {
         return Field(
             inUse = inUse,
             fieldNumber = fieldNumber,
@@ -210,11 +207,11 @@ actual class AppwriteRepository(context: Context) {
     }
 
     private fun MatchDTO.toMatch(
-        newMatches: Map<String, Match?>,
-        newTeams: Map<String, Team?>,
+        newMatches: MutableMap<String, Match>,
+        newTeams: Map<String, Team>,
         matchesDTO: Map<String, MatchDTO>
     ): Match {
-        return Match(
+        val newMatch = Match(
             id = id,
             tournament = tournament,
             team1 = newTeams[team1],
@@ -224,33 +221,50 @@ actual class AppwriteRepository(context: Context) {
             field = null,
             start = Instant.parse(start).toLocalDateTime(TimeZone.UTC),
             end = end?.let { Instant.parse(it).toLocalDateTime(TimeZone.UTC) },
+            division = division,
             team1Points = team1Points,
             team2Points = team2Points,
             losersBracket = losersBracket,
-            winnerNextMatch = newMatches[winnerNextMatch] ?: matchesDTO[winnerNextMatch]?.toMatch(
-                newMatches,
-                newTeams,
-                matchesDTO
-            ),
-            loserNextMatch = newMatches[winnerNextMatch] ?: matchesDTO[winnerNextMatch]?.toMatch(
-                newMatches,
-                newTeams,
-                matchesDTO
-            ),
-            previousLeftMatch = newMatches[winnerNextMatch] ?: matchesDTO[winnerNextMatch]?.toMatch(
-                newMatches,
-                newTeams,
-                matchesDTO
-            ),
-            previousRightMatch = newMatches[winnerNextMatch]
-                ?: matchesDTO[winnerNextMatch]?.toMatch(newMatches, newTeams, matchesDTO),
+            winnerNextMatch = null,
+            loserNextMatch = null,
+            previousLeftMatch = null,
+            previousRightMatch = null,
             setResults = setResults,
         )
+
+        newMatches[id] = newMatch
+
+        newMatch.winnerNextMatch =
+            newMatches[winnerNextMatchId] ?: matchesDTO[winnerNextMatchId]?.toMatch(
+                newMatches,
+                newTeams,
+                matchesDTO
+            )
+        newMatch.loserNextMatch =
+            newMatches[loserNextMatchId] ?: matchesDTO[loserNextMatchId]?.toMatch(
+                newMatches,
+                newTeams,
+                matchesDTO
+            )
+        newMatch.previousLeftMatch =
+            newMatches[previousLeftId] ?: matchesDTO[previousLeftId]?.toMatch(
+                newMatches,
+                newTeams,
+                matchesDTO
+            )
+        newMatch.previousRightMatch =
+            newMatches[previousRightId] ?: matchesDTO[previousRightId]?.toMatch(
+                newMatches,
+                newTeams,
+                matchesDTO
+            )
+        return newMatch
     }
 
-    private fun TeamDTO.toTeam(newPlayers: Map<String, UserData?>): Team {
+    private fun TeamDTO.toTeam(newPlayers: Map<String, UserData>): Team {
         return Team(
             id = id,
+            name = name,
             players = players.mapNotNull { newPlayers[it] },
             tournament = tournament,
             seed = seed,
@@ -280,19 +294,20 @@ actual class AppwriteRepository(context: Context) {
     private suspend fun TournamentDTO.toTournament(): Tournament {
         val players = getPlayers(id)
         val teams = getTeams(id, players)
-        val matches = mutableMapOf<String, Match?>()
+        val matches = mutableMapOf<String, Match>()
         getMatches(id, teams, matches)
         val fields = getFields(id, matches)
 
         fields.forEach { field ->
-            field.value?.matches?.forEach { match ->
+            field.value.matches.forEach { match ->
                 match.field = field.value
             }
         }
+
         teams.forEach { team ->
-            team.value?.matches =
+            team.value.matches =
                 matches.values.filter {
-                    it?.team1 == team.value || it?.team2 == team.value || it?.refId == team.value
+                    it.team1 == team.value || it.team2 == team.value || it.refId == team.value
                 }
         }
 

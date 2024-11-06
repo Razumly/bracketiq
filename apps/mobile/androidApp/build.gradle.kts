@@ -2,11 +2,12 @@ plugins {
     alias(libs.plugins.androidApplication)
     alias(libs.plugins.kotlinAndroid)
     alias(libs.plugins.compose.compiler)
+    id("org.jetbrains.kotlin.plugin.serialization") version "2.1.0-Beta2"
 }
 
 android {
     namespace = "com.razumly.mvp.android"
-    compileSdk = 34
+    compileSdk = 35
     defaultConfig {
         applicationId = "com.razumly.mvp.android"
         minSdk = 27

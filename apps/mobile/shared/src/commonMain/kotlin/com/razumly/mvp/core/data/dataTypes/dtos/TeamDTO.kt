@@ -6,6 +6,7 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 
 data class TeamDTO(
     val id: String,
+    val name: String?,
     val players: List<String>,
     val tournament: String,
     val seed: Int,

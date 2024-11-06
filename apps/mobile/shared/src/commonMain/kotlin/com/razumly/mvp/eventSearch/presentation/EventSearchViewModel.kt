@@ -64,10 +64,8 @@ class EventSearchViewModel(
         }
     }
 
-    suspend fun selectEvent(event: EventAbs) {
-        if (event.collectionId == "tournaments") {
-            _selectedEvent.value = appwriteRepository.getTournament(event.id)
-        }
+    fun selectEvent(event: EventAbs?) {
+        _selectedEvent.value = event
     }
 
     private fun calcDistance(start: LatLng, end: LatLng): Double {

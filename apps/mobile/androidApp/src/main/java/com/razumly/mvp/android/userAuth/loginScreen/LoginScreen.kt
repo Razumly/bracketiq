@@ -1,5 +1,6 @@
 package com.razumly.mvp.android.userAuth.loginScreen
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -8,7 +9,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -22,6 +22,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -34,7 +35,6 @@ import com.razumly.mvp.core.data.dataTypes.LoginState
 import com.razumly.mvp.core.presentation.MainViewModel
 
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LoginScreen(viewModel: MainViewModel, onNavigateToHome: () -> Unit) {
     var email by remember { mutableStateOf("") }
@@ -52,7 +52,15 @@ fun LoginScreen(viewModel: MainViewModel, onNavigateToHome: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp),
+            .padding(16.dp)
+            .background(
+                Brush.sweepGradient(
+                    0.0f to MaterialTheme.colorScheme.primary,
+                    0.5f to MaterialTheme.colorScheme.secondary,
+                    1.0f to MaterialTheme.colorScheme.primary,
+                    center = androidx.compose.ui.geometry.Offset(100f, 100f)
+                )
+            ),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {

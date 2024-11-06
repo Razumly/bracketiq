@@ -1,7 +1,9 @@
 package com.razumly.mvp.core.data.dataTypes
 
 import kotlinx.datetime.LocalDateTime
+import kotlinx.serialization.Serializable
 
+@Serializable
 data class Match(
     val matchId: Int,
     val team1: Team?,
@@ -11,13 +13,14 @@ data class Match(
     var field: Field?,
     val start: LocalDateTime,
     val end: LocalDateTime?,
+    val division: String,
     val team1Points: List<Int>,
     val team2Points: List<Int>,
     val losersBracket: Boolean,
-    val winnerNextMatch: Match?,
-    val loserNextMatch: Match?,
-    val previousLeftMatch: Match?,
-    val previousRightMatch: Match?,
+    var winnerNextMatch: Match?,
+    var loserNextMatch: Match?,
+    var previousLeftMatch: Match?,
+    var previousRightMatch: Match?,
     val setResults: List<Int>,
     override val id: String,
 ) : Document()

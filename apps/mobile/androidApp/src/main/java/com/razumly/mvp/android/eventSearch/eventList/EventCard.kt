@@ -1,5 +1,6 @@
 package com.razumly.mvp.android.eventSearch.eventList
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,6 +27,7 @@ import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.navigation.compose.rememberNavController
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import com.razumly.mvp.core.data.dataTypes.EventAbs
@@ -37,10 +39,11 @@ import org.koin.androidx.compose.koinViewModel
 fun EventCard(
     event: EventAbs,
     onFavoriteClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
 ) {
     val viewModel = koinViewModel<EventSearchViewModel>()
     val coroutineScope = rememberCoroutineScope()
+
     Card(
         modifier = modifier
             .padding(horizontal = 16.dp, vertical = 8.dp)
@@ -49,7 +52,8 @@ fun EventCard(
                 coroutineScope.launch {
                     viewModel.selectEvent(event)
                 }
-            }),
+            })
+            .background(Color.Transparent),
         elevation = CardDefaults.cardElevation(4.dp)
 
     ) {
@@ -83,7 +87,8 @@ fun EventCard(
             }
 
             Column(
-                modifier = Modifier.padding(16.dp)
+                modifier = Modifier
+                    .padding(16.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),

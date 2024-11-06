@@ -16,6 +16,7 @@ actual class KoinInitializer(
                 permissionsControllerModule,
                 locationTrackerModule,
                 eventSearchViewModelModule,
+                tournamentContentViewModelModule,
             )
         }
 

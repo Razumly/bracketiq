@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.kotlinCocoapods)
     alias(libs.plugins.androidLibrary)
+    id("org.jetbrains.kotlin.plugin.serialization") version "2.1.0-Beta2"
 }
 
 kotlin {
@@ -37,6 +38,7 @@ kotlin {
             api(libs.napier)
             api(libs.permissions)
             api(libs.geo)
+            api(libs.kotlinx.serialization.json)
         }
         androidMain.dependencies {
             implementation(libs.sdkForAndroid)
