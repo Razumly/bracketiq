@@ -23,8 +23,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.razumly.mvp.android.R
 import com.razumly.mvp.android.eventSearch.eventList.EventCard
-import com.razumly.mvp.core.data.dataTypes.EventAbs
-import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.eventSearch.presentation.EventSearchViewModel
 import org.koin.androidx.compose.navigation.koinNavViewModel
 

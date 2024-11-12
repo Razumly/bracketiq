@@ -12,7 +12,7 @@ actual class KoinInitializer(
             androidContext(context)
             modules(
                 mainViewModelModule,
-                appwriteRepositoryModule,
+                AppwriteRepositoryImplementationModule,
                 permissionsControllerModule,
                 locationTrackerModule,
                 eventSearchViewModelModule,

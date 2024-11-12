@@ -1,5 +1,6 @@
 package com.razumly.mvp.core.data.dataTypes
 
+import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDateTime
 import kotlinx.serialization.Serializable
 
@@ -22,8 +23,8 @@ data class Tournament(
     override var id: String,
     override val location: String,
     override val type: String,
-    override val start: LocalDateTime,
-    override val end: LocalDateTime,
+    override val start: Instant,
+    override val end: Instant,
     override val price: String,
     override val rating: Float,
     override val imageUrl: String,

@@ -1,6 +1,6 @@
 package com.razumly.mvp.core.presentation
 
-import com.razumly.mvp.core.data.AppwriteRepository
+import com.razumly.mvp.core.data.IAppwriteRepository
 import com.razumly.mvp.core.data.dataTypes.LoginState
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.rickclephas.kmp.observableviewmodel.ViewModel
@@ -15,7 +15,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 class MainViewModel(
-    private val appwriteRepository: AppwriteRepository,
+    private val appwriteRepository: IAppwriteRepository,
     val permissionsController: PermissionsController,
     val locationTracker: LocationTracker
 ) : ViewModel() {

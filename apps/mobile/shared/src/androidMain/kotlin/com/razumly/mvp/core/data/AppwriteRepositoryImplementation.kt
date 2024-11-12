@@ -18,24 +18,43 @@ import io.appwrite.Client
 import io.appwrite.Query
 import io.appwrite.models.Document
 import io.appwrite.models.DocumentList
+import io.appwrite.models.RealtimeSubscription
 import io.appwrite.models.User
 import io.appwrite.services.Account
 import io.appwrite.services.Databases
+import io.appwrite.services.Realtime
 import io.github.aakira.napier.Napier
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 
-actual class AppwriteRepository(context: Context) {
+actual class AppwriteRepositoryImplementation(context: Context) : IAppwriteRepository {
     private val client: Client = Client(context)
         .setEndpoint("https://cloud.appwrite.io/v1") // Your API Endpoint
         .setProject("6656a4d60016b753f942") // Your project ID
         .setSelfSigned(true)
-    private val account: Account = Account(client)
+    private val account = Account(client)
 
-    private val database: Databases = Databases(client)
+    private val database = Databases(client)
 
-    actual suspend fun login(email: String, password: String): UserData? {
+    private val realTime = Realtime(client)
+
+    private val _matchUpdates = MutableSharedFlow<Match>()
+    override val matchUpdates: Flow<Match> = _matchUpdates.asSharedFlow()
+    private var subscription: RealtimeSubscription? = null
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    override suspend fun login(email: String, password: String): UserData? {
         try {
             account.createEmailPasswordSession(email, password)
             return database.getDocument(
@@ -51,11 +70,11 @@ actual class AppwriteRepository(context: Context) {
         }
     }
 
-    actual suspend fun logout() {
+    override suspend fun logout() {
         account.deleteSession("current")
     }
 
-    actual suspend fun getTournament(tournamentId: String): Tournament? {
+    override suspend fun getTournament(tournamentId: String): Tournament? {
         val response: Document<TournamentDTO>?
         try {
             response = database.getDocument(
@@ -73,7 +92,7 @@ actual class AppwriteRepository(context: Context) {
             .toTournament()
     }
 
-    actual suspend fun getCurrentUser(): UserData? {
+    override suspend fun getCurrentUser(): UserData? {
         val currentAccount: User<Map<String, Any>>
         try {
             currentAccount = account.get()
@@ -95,7 +114,7 @@ actual class AppwriteRepository(context: Context) {
         }
     }
 
-    actual suspend fun getTeams(
+    override suspend fun getTeams(
         tournamentId: String,
         currentPlayers: Map<String, UserData>
     ): Map<String, Team> {
@@ -115,7 +134,7 @@ actual class AppwriteRepository(context: Context) {
         }
     }
 
-    actual suspend fun getMatches(
+    override suspend fun getMatches(
         tournamentId: String,
         currentTeams: Map<String, Team>,
         currentMatches: MutableMap<String, Match>
@@ -137,7 +156,7 @@ actual class AppwriteRepository(context: Context) {
         matchesDTO.values.firstOrNull()?.toMatch(currentMatches, currentTeams, matchesDTO)
     }
 
-    actual suspend fun getFields(
+    override suspend fun getFields(
         tournamentId: String,
         currentMatches: Map<String, Match>
     ): Map<String, Field> {
@@ -155,7 +174,7 @@ actual class AppwriteRepository(context: Context) {
         }
     }
 
-    actual suspend fun getPlayers(tournamentId: String): Map<String, UserData> {
+    override suspend fun getPlayers(tournamentId: String): Map<String, UserData> {
         try {
             return database.listDocuments(
                 "mvp",
@@ -169,7 +188,7 @@ actual class AppwriteRepository(context: Context) {
         }
     }
 
-    actual suspend fun getEvents(
+    override suspend fun getEvents(
         bounds: Bounds
     ): List<EventAbs> {
         val docs: DocumentList<EventDTO>
@@ -195,6 +214,34 @@ actual class AppwriteRepository(context: Context) {
         }
     }
 
+    override suspend fun subscribeToMatches(tournament: Tournament) {
+        subscription?.close()
+        subscription = realTime.subscribe(
+            "databases.mvp.collections.matches.documents",
+            payloadType = MatchDTO::class.java
+        ) { response ->
+            val id = response.channels.last().split(".").last()
+            tournament.matches[id]?.let { match ->
+                val updatedMatch = match.copy(
+                    team1Points = response.payload.team1Points,
+                    team2Points = response.payload.team2Points,
+                    field = tournament.fields[response.payload.field],
+                    refId = tournament.teams[response.payload.refId],
+                    team1 = tournament.teams[response.payload.team1],
+                    team2 = tournament.teams[response.payload.team2]
+                )
+                scope.launch {
+                    _matchUpdates.emit(updatedMatch)
+                }
+            }
+        }
+    }
+
+    override suspend fun unsubscribeFromMatches() {
+        subscription?.close()
+    }
+
+
     private fun FieldDTO.toField(currentMatches: Map<String, Match>): Field {
         return Field(
             inUse = inUse,
@@ -219,8 +266,8 @@ actual class AppwriteRepository(context: Context) {
             matchId = matchId,
             refId = newTeams[refId],
             field = null,
-            start = Instant.parse(start).toLocalDateTime(TimeZone.UTC),
-            end = end?.let { Instant.parse(it).toLocalDateTime(TimeZone.UTC) },
+            start = Instant.parse(start),
+            end = end?.let { Instant.parse(it) },
             division = division,
             team1Points = team1Points,
             team2Points = team2Points,
@@ -280,8 +327,8 @@ actual class AppwriteRepository(context: Context) {
             id = id,
             location = location,
             type = type,
-            start = Instant.parse(start).toLocalDateTime(TimeZone.UTC),
-            end = Instant.parse(end).toLocalDateTime(TimeZone.UTC),
+            start = Instant.parse(start),
+            end = Instant.parse(end),
             price = price,
             rating = rating,
             imageUrl = imageUrl,
@@ -329,8 +376,8 @@ actual class AppwriteRepository(context: Context) {
             id = id,
             location = location,
             type = type,
-            start = Instant.parse(start).toLocalDateTime(TimeZone.UTC),
-            end = Instant.parse(end).toLocalDateTime(TimeZone.UTC),
+            start = Instant.parse(start),
+            end = Instant.parse(end),
             price = price,
             rating = rating,
             imageUrl = imageUrl,
@@ -338,5 +385,9 @@ actual class AppwriteRepository(context: Context) {
             long = long,
             collectionId = collectionId,
         )
+    }
+
+    fun cleanup() {
+        scope.cancel()
     }
 }

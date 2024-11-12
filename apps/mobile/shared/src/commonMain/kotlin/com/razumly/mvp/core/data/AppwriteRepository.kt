@@ -7,8 +7,10 @@ import com.razumly.mvp.core.data.dataTypes.Match
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.UserData
+import kotlinx.coroutines.flow.Flow
 
-expect class AppwriteRepository {
+interface IAppwriteRepository {
+    val matchUpdates: Flow<Match>
     suspend fun getTournament(tournamentId: String): Tournament?
     suspend fun getTeams(
         tournamentId: String,
@@ -31,4 +33,8 @@ expect class AppwriteRepository {
     suspend fun getCurrentUser(): UserData?
     suspend fun login(email: String, password: String): UserData?
     suspend fun logout()
+    suspend fun subscribeToMatches(tournament: Tournament)
+    suspend fun unsubscribeFromMatches()
 }
+
+expect class AppwriteRepositoryImplementation : IAppwriteRepository

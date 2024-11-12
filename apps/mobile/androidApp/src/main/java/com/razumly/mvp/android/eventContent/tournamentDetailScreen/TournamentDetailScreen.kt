@@ -1,5 +1,10 @@
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,12 +21,16 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.CardColors
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
@@ -44,9 +53,12 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.razumly.mvp.android.eventContent.tournamentDetailComponents.MatchCard
+import com.razumly.mvp.core.ceilDiv
 import com.razumly.mvp.core.data.dataTypes.Match
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.eventContent.presentation.TournamentContentViewModel
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import org.koin.compose.viewmodel.koinNavViewModel
 import org.koin.core.annotation.KoinExperimentalAPI
 
@@ -66,6 +78,7 @@ fun TournamentDetailScreen(
     val isBracketView by viewModel.isBracketView.collectAsStateWithLifecycle()
     val divisionMatches by viewModel.currentMatches.collectAsStateWithLifecycle()
     val roundsList by viewModel.rounds.collectAsStateWithLifecycle()
+    val losersBracket by viewModel.losersBracket.collectAsStateWithLifecycle()
 
     Column(modifier = modifier.fillMaxSize()) {
         // Tournament Header
@@ -101,6 +114,19 @@ fun TournamentDetailScreen(
                 style = MaterialTheme.typography.titleMedium
             )
             Switch(
+                checked = losersBracket,
+                onCheckedChange = { viewModel.toggleLosersBracket() },
+                thumbContent = {
+                    Icon(
+                        imageVector = if (losersBracket)
+                            Icons.Default.Delete
+                        else
+                            Icons.Default.Star,
+                        contentDescription = null,
+                        modifier = Modifier.size(SwitchDefaults.IconSize)
+                    )
+                })
+            Switch(
                 checked = isBracketView,
                 onCheckedChange = { viewModel.toggleBracketView() },
                 thumbContent = {
@@ -119,7 +145,7 @@ fun TournamentDetailScreen(
         // Content
         if (selectedDivision != null && tournament != null) {
             if (isBracketView) {
-                TournamentBracketView(roundsList)
+                TournamentBracketView(roundsList, losersBracket)
             } else {
                 TournamentListView(
                     divisionMatches = divisionMatches,
@@ -166,7 +192,11 @@ private fun TournamentHeader(tournament: Tournament) {
                     style = MaterialTheme.typography.labelMedium
                 )
                 Text(
-                    text = "${tournament.start.date} - ${tournament.end.date}",
+                    text = "${tournament.start.toLocalDateTime(TimeZone.UTC)} - ${
+                        tournament.end.toLocalDateTime(
+                            TimeZone.UTC
+                        )
+                    }",
                     style = MaterialTheme.typography.bodyMedium
                 )
             }
@@ -191,6 +221,12 @@ private fun TournamentListView(
                 MatchCard(
                     match = match,
                     onClick = { },
+                    cardColors = CardColors(
+                        MaterialTheme.colorScheme.primaryContainer,
+                        MaterialTheme.colorScheme.onPrimaryContainer,
+                        MaterialTheme.colorScheme.tertiaryContainer,
+                        MaterialTheme.colorScheme.onTertiaryContainer
+                    )
                 )
             }
         }
@@ -198,9 +234,8 @@ private fun TournamentListView(
 }
 
 @Composable
-fun TournamentBracketView(roundsList: List<List<Match?>>) {
+fun TournamentBracketView(roundsList: List<List<Match?>>, losersBracket: Boolean) {
     val lazyRowState = rememberLazyListState()
-    val currentIndex = remember { mutableIntStateOf(0) }
     val columnScrollState = rememberScrollState()
     val maxHeightInRowDp = remember { mutableStateOf(Dp.Unspecified) }
     val columnHeight by animateDpAsState(
@@ -213,20 +248,34 @@ fun TournamentBracketView(roundsList: List<List<Match?>>) {
     val cardContainerHeight = cardHeight + cardPadding
     val boxHeight = remember { mutableStateOf(Dp.Unspecified) }
     val width = localConfig.screenWidthDp / 1.5
+    val maxHeightIndex = remember { mutableIntStateOf(0) }
 
-    LaunchedEffect(lazyRowState) {
-        snapshotFlow { lazyRowState.firstVisibleItemIndex }
-            .collect { index ->
-                currentIndex.intValue = index
-                maxHeightInRowDp.value = if (roundsList[index].size > roundsList[index + 1].size) {
-                    roundsList[index].filterNotNull().size.dp * cardContainerHeight
+
+    LaunchedEffect(lazyRowState, roundsList) {
+        snapshotFlow { lazyRowState.firstVisibleItemIndex }.collect { index ->
+            var maxSize = 0
+            val itemsInViewCount = lazyRowState.layoutInfo.visibleItemsInfo.size
+            val lastItemInViewIndex = index + itemsInViewCount - 1
+            roundsList.slice(index..lastItemInViewIndex).forEachIndexed { i, round ->
+                val notNullSize = round.filterNotNull().size
+                val halfSize = round.size.ceilDiv(2)
+                if (notNullSize > halfSize || (losersBracket && i == 0) || (index != 0 && notNullSize == halfSize)) {
+                    if (round.size > maxSize) {
+                        maxSize = round.size
+                        maxHeightIndex.intValue = index + i
+                    }
                 } else {
-                    roundsList[index + 1].size.dp * cardContainerHeight
-                }
-                if (boxHeight.value == Dp.Unspecified) {
-                    boxHeight.value = maxHeightInRowDp.value
+                    if ((notNullSize) > maxSize) {
+                        maxSize = notNullSize
+                        maxHeightIndex.intValue = index + i
+                    }
                 }
             }
+            maxHeightInRowDp.value = maxSize.dp * cardContainerHeight
+            if (boxHeight.value == Dp.Unspecified) {
+                boxHeight.value = maxHeightInRowDp.value
+            }
+        }
     }
 
     // Track visible items to calculate max height
@@ -240,7 +289,9 @@ fun TournamentBracketView(roundsList: List<List<Match?>>) {
             modifier = Modifier
                 .fillMaxHeight(),
         ) {
-            items(roundsList) { round ->
+            itemsIndexed(roundsList, key = { _, round ->
+                round.filterNotNull().joinToString { it.id }
+            }) { colIndex, round ->
                 Column(
                     modifier = Modifier
                         .padding(start = 16.dp)
@@ -249,26 +300,56 @@ fun TournamentBracketView(roundsList: List<List<Match?>>) {
                         .height(columnHeight),
                     verticalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    round.chunked(2).forEach { matches ->
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight(),
-                            contentAlignment = Alignment.Center
+                    round.chunked(2).forEachIndexed { chunkIndex, matches ->
+                        val visible = remember(colIndex, chunkIndex, matches) {
+                            mutableStateOf(
+                                true
+                            )
+                        }
+                        LaunchedEffect(maxHeightIndex) {
+                            snapshotFlow { lazyRowState.firstVisibleItemIndex }.collect {
+                                visible.value = matches.filterNotNull().isNotEmpty() ||
+                                        maxHeightIndex.intValue == colIndex
+                            }
+                        }
+                        AnimatedVisibility(
+                            visible = visible.value,
+                            modifier = Modifier.weight(1f),
+                            enter = fadeIn() + expandVertically(),
+                            exit = fadeOut() + shrinkVertically()
                         ) {
-                            Column(
-                                modifier = Modifier.fillMaxHeight(),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.SpaceAround
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxHeight(),
+                                contentAlignment = Alignment.Center
                             ) {
-                                matches.filterNotNull().forEach { match ->
-                                    MatchCard(
-                                        match = match,
-                                        onClick = { },
-                                        modifier = Modifier
-                                            .height(cardHeight.dp)
-                                            .width(width.dp)
-                                    )
+                                Column(
+                                    modifier = Modifier.fillMaxHeight(),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.SpaceAround
+                                ) {
+                                    matches.filterNotNull().forEach { match ->
+                                        val matchCardColor =
+                                            if (match.losersBracket == losersBracket) {
+                                                MaterialTheme.colorScheme.tertiaryContainer
+                                            } else {
+                                                MaterialTheme.colorScheme.surface
+                                            }
+                                        MatchCard(
+                                            match = match,
+                                            onClick = { },
+                                            modifier = Modifier
+                                                .height(cardHeight.dp)
+                                                .width(width.dp)
+                                                .background(matchCardColor),
+                                            cardColors = CardColors(
+                                                matchCardColor,
+                                                MaterialTheme.colorScheme.onPrimaryContainer,
+                                                MaterialTheme.colorScheme.tertiaryContainer,
+                                                MaterialTheme.colorScheme.onTertiaryContainer
+                                            )
+                                        )
+                                    }
                                 }
                             }
                         }

@@ -33,6 +33,7 @@ kotlin {
         commonMain.dependencies {
             api(libs.kmp.observableviewmodel.core)
             api(libs.kotlinx.datetime)
+            api(libs.kotlinx.datetime.ext)
             api(libs.koin.core)
             runtimeOnly(libs.androidx.lifecycle.runtime.compose)
             api(libs.napier)
@@ -49,6 +50,8 @@ kotlin {
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
+            implementation(libs.koin.test)
+            implementation(libs.kotlinx.coroutines.test)
         }
         all {
             languageSettings.optIn("kotlinx.cinterop.ExperimentalForeignApi")
@@ -66,8 +69,11 @@ android {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
+
+
 }
 dependencies {
     implementation(libs.androidx.core)
     implementation(libs.androidx.activity.ktx)
+    testImplementation(libs.junit.jupiter)
 }

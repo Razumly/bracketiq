@@ -1,6 +1,6 @@
 package com.razumly.mvp.core.data.dataTypes
 
-import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.Instant
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -9,8 +9,8 @@ abstract class EventAbs : Document() {
     abstract val lat: Double
     abstract val long: Double
     abstract val type: String
-    abstract val start: LocalDateTime
-    abstract val end: LocalDateTime
+    abstract val start: Instant
+    abstract val end: Instant
     abstract val price: String
     abstract val rating: Float
     abstract val imageUrl: String

@@ -1,9 +1,8 @@
 package com.razumly.mvp.eventSearch.presentation
 
-import com.razumly.mvp.core.data.AppwriteRepository
+import com.razumly.mvp.core.data.IAppwriteRepository
 import com.razumly.mvp.core.data.dataTypes.Bounds
 import com.razumly.mvp.core.data.dataTypes.EventAbs
-import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.rickclephas.kmp.observableviewmodel.ViewModel
 import com.rickclephas.kmp.observableviewmodel.launch
 import com.rickclephas.kmp.observableviewmodel.stateIn
@@ -19,7 +18,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 class EventSearchViewModel(
-    private val appwriteRepository: AppwriteRepository,
+    private val appwriteRepository: IAppwriteRepository,
     locationTracker: LocationTracker
 ) : ViewModel() {
     private val _events = MutableStateFlow<List<EventAbs>>(emptyList())
