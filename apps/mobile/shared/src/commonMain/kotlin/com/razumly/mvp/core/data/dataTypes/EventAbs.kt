@@ -15,4 +15,5 @@ abstract class EventAbs : Document() {
     abstract val rating: Float
     abstract val imageUrl: String
     abstract val collectionId: String
+    abstract val lastUpdated: Instant
 }

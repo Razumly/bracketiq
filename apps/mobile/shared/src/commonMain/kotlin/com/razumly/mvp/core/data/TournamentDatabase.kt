@@ -1,0 +1,46 @@
+package com.razumly.mvp.core.data
+
+import androidx.room.Database
+import androidx.room.RoomDatabase
+import androidx.room.TypeConverters
+import com.razumly.mvp.core.data.dataTypes.EventImp
+import com.razumly.mvp.core.data.dataTypes.Field
+import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
+import com.razumly.mvp.core.data.dataTypes.MatchFieldCrossRef
+import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
+import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.TeamPlayerCrossRef
+import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
+import com.razumly.mvp.core.data.dataTypes.Tournament
+import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.daos.EventImpDao
+import com.razumly.mvp.core.data.dataTypes.daos.FieldDao
+import com.razumly.mvp.core.data.dataTypes.daos.MatchDao
+import com.razumly.mvp.core.data.dataTypes.daos.TeamDao
+import com.razumly.mvp.core.data.dataTypes.daos.TournamentDao
+import com.razumly.mvp.core.data.dataTypes.daos.UserDataDao
+import com.razumly.mvp.core.util.Converters
+
+@Database(
+    entities = [
+        Tournament::class,
+        UserData::class,
+        MatchMVP::class,
+        Field::class,
+        Team::class,
+        EventImp::class,
+        MatchFieldCrossRef::class,
+        TeamPlayerCrossRef::class,
+    ],
+    version = 3
+)
+@TypeConverters(Converters::class)
+abstract class TournamentDatabase : RoomDatabase() {
+    abstract fun getTournamentDao(): TournamentDao
+    abstract fun getMatchDao(): MatchDao
+    abstract fun getTeamDao(): TeamDao
+    abstract fun getFieldDao(): FieldDao
+    abstract fun getUserDataDao(): UserDataDao
+    abstract fun getEventImpDao(): EventImpDao
+}

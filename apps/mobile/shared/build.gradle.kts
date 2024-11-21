@@ -3,6 +3,8 @@ plugins {
     alias(libs.plugins.kotlinCocoapods)
     alias(libs.plugins.androidLibrary)
     id("org.jetbrains.kotlin.plugin.serialization") version "2.1.0-Beta2"
+    alias(libs.plugins.ksp)
+    alias(libs.plugins.room)
 }
 
 kotlin {
@@ -31,6 +33,7 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
+            implementation(libs.kotlinx.coroutines.core)
             api(libs.kmp.observableviewmodel.core)
             api(libs.kotlinx.datetime)
             api(libs.kotlinx.datetime.ext)
@@ -40,8 +43,11 @@ kotlin {
             api(libs.permissions)
             api(libs.geo)
             api(libs.kotlinx.serialization.json)
+            implementation(libs.androidx.room.runtime)
+            implementation(libs.androidx.sqlite.bundled)
         }
         androidMain.dependencies {
+            implementation(libs.kotlinx.coroutines.android)
             implementation(libs.sdkForAndroid)
             implementation(libs.koin.android)
             implementation(libs.koin.androidx.compose)
@@ -72,8 +78,16 @@ android {
 
 
 }
+
+room {
+    schemaDirectory("$projectDir/schemas")
+}
+
 dependencies {
     implementation(libs.androidx.core)
     implementation(libs.androidx.activity.ktx)
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.lifecycle.viewmodel.ktx)
     testImplementation(libs.junit.jupiter)
+    add("kspAndroid", libs.androidx.room.compiler)
 }

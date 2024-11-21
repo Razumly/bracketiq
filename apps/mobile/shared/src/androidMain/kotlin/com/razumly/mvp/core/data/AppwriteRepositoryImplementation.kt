@@ -3,19 +3,23 @@ package com.razumly.mvp.core.data
 import android.content.Context
 import com.razumly.mvp.core.data.dataTypes.Bounds
 import com.razumly.mvp.core.data.dataTypes.EventAbs
-import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.razumly.mvp.core.data.dataTypes.Field
-import com.razumly.mvp.core.data.dataTypes.Match
+import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.dtos.EventDTO
-import com.razumly.mvp.core.data.dataTypes.dtos.FieldDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.MatchDTO
-import com.razumly.mvp.core.data.dataTypes.dtos.TeamDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.TournamentDTO
+import com.razumly.mvp.core.data.dataTypes.dtos.toEvent
+import com.razumly.mvp.core.data.dataTypes.dtos.toMatch
+import com.razumly.mvp.core.data.dataTypes.dtos.toTournament
+import com.razumly.mvp.core.util.DbConstants
 import io.appwrite.Client
 import io.appwrite.Query
+import io.appwrite.extensions.toJson
 import io.appwrite.models.Document
 import io.appwrite.models.DocumentList
 import io.appwrite.models.RealtimeSubscription
@@ -28,28 +32,33 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
-import kotlinx.datetime.Instant
+import kotlinx.datetime.Clock
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.format
 import kotlinx.datetime.toLocalDateTime
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.minutes
 
 actual class AppwriteRepositoryImplementation(context: Context) : IAppwriteRepository {
     private val client: Client = Client(context)
         .setEndpoint("https://cloud.appwrite.io/v1") // Your API Endpoint
         .setProject("6656a4d60016b753f942") // Your project ID
         .setSelfSigned(true)
+
+    private val tournamentDB = getTournamentDatabase(context)
+
     private val account = Account(client)
 
     private val database = Databases(client)
 
-    private val realTime = Realtime(client)
+    private val realtime = Realtime(client)
 
-    private val _matchUpdates = MutableSharedFlow<Match>()
-    override val matchUpdates: Flow<Match> = _matchUpdates.asSharedFlow()
+    private val _matchUpdates = MutableSharedFlow<MatchWithRelations>()
+    override val matchUpdates: Flow<MatchWithRelations> = _matchUpdates.asSharedFlow()
     private var subscription: RealtimeSubscription? = null
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -57,15 +66,17 @@ actual class AppwriteRepositoryImplementation(context: Context) : IAppwriteRepos
     override suspend fun login(email: String, password: String): UserData? {
         try {
             account.createEmailPasswordSession(email, password)
-            return database.getDocument(
-                "mvp",
-                "userData",
+            val currentUser = database.getDocument(
+                DbConstants.DATABASE_NAME,
+                DbConstants.USER_DATA_COLLECTION,
                 account.get().id,
                 null,
                 UserData::class.java
-            ).data
+            ).data.copy(id = account.get().id)
+            tournamentDB.getUserDataDao().upsertUserData(currentUser)
+            return currentUser
         } catch (e: Exception) {
-            Napier.e("Failed to login", e, "Database")
+            Napier.e("Failed to login", e, DbConstants.ERROR_TAG)
             return null
         }
     }
@@ -75,115 +86,222 @@ actual class AppwriteRepositoryImplementation(context: Context) : IAppwriteRepos
     }
 
     override suspend fun getTournament(tournamentId: String): Tournament? {
+        var tournament = tournamentDB.getTournamentDao().getTournamentById(tournamentId)
+        val update = true
+        if (tournament != null) {
+            if (Clock.System.now() - tournament.lastUpdated < 5.minutes) {
+                return tournament
+            }
+        }
+
         val response: Document<TournamentDTO>?
         try {
             response = database.getDocument(
-                "mvp",
-                "tournaments",
+                DbConstants.DATABASE_NAME,
+                DbConstants.TOURNAMENT_COLLECTION,
                 tournamentId,
                 queries = null,
                 TournamentDTO::class.java
             )
         } catch (e: Exception) {
-            Napier.e("Failed to get tournament", e, "Database")
+            Napier.e("Failed to get tournament", e, DbConstants.ERROR_TAG)
             return null
         }
-        return response.data.copy(id = response.id, collectionId = response.collectionId)
+        getMatches(tournamentId, update)
+        getTeams(tournamentId, update)
+        getPlayers(tournamentId, update)
+        getFields(tournamentId, update)
+        tournament = response.data.copy(id = response.id, collectionId = response.collectionId)
             .toTournament()
+        tournamentDB.getTournamentDao().upsertTournament(tournament)
+        return tournament
     }
 
-    override suspend fun getCurrentUser(): UserData? {
+    override suspend fun getCurrentUser(update: Boolean): UserData? {
         val currentAccount: User<Map<String, Any>>
         try {
             currentAccount = account.get()
         } catch (e: Exception) {
-            Napier.e("Failed to get current user", e, "Database")
+            Napier.e("Failed to get current user", e, DbConstants.ERROR_TAG)
             return null
         }
+        var currentUserData: UserData?
+        if (!update) {
+            currentUserData = tournamentDB.getUserDataDao().getUserDataById(currentAccount.id)
+            if (currentUserData != null) {
+                return currentUserData
+            }
+        }
         try {
-            return database.getDocument(
-                "mvp",
-                "userData",
+            currentUserData = database.getDocument(
+                DbConstants.DATABASE_NAME,
+                DbConstants.USER_DATA_COLLECTION,
                 currentAccount.id,
                 null,
                 UserData::class.java
-            ).data
+            ).data.copy(id = currentAccount.id)
+            tournamentDB.getUserDataDao().upsertUserData(currentUserData)
+            return currentUserData
         } catch (e: Exception) {
-            Napier.e("Failed to get current user", e, "Database")
+            Napier.e("Failed to get current user", e, DbConstants.ERROR_TAG)
             return null
         }
     }
 
     override suspend fun getTeams(
         tournamentId: String,
-        currentPlayers: Map<String, UserData>
-    ): Map<String, Team> {
+        update: Boolean,
+    ): Map<String, TeamWithPlayers> {
+        var teamsWithPlayers: Map<String, TeamWithPlayers>
+        if (!update) {
+            teamsWithPlayers =
+                tournamentDB.getTeamDao().getTeamsWithPlayers(tournamentId)
+                    .associateBy { it.team.id }
+            if (teamsWithPlayers.isNotEmpty()) {
+                return teamsWithPlayers
+            }
+        }
         try {
-            return database.listDocuments(
-                "mvp",
-                "volleyballTeams",
-                queries = listOf(Query.equal("tournament", tournamentId), Query.limit(100)),
-                TeamDTO::class.java
+            val teams = database.listDocuments(
+                DbConstants.DATABASE_NAME,
+                DbConstants.VOLLEYBALL_TEAMS_COLLECTION,
+                queries = listOf(
+                    Query.equal(DbConstants.TOURNAMENT_ATTRIBUTE, tournamentId),
+                    Query.limit(200)
+                ),
+                Team::class.java
             ).documents.map {
                 it.data.copy(id = it.id)
-                    .toTeam(currentPlayers)
             }.associateBy { it.id }
+            tournamentDB.getTeamDao().upsertTeams(teams.values.toList())
+            teamsWithPlayers = tournamentDB.getTeamDao().getTeamsWithPlayers(tournamentId)
+                .associateBy { it.team.id }
+            return teamsWithPlayers
         } catch (e: Exception) {
-            Napier.e("Failed to get teams", e, "Database")
+            Napier.e("Failed to get teams", e, DbConstants.ERROR_TAG)
             return emptyMap()
         }
     }
 
     override suspend fun getMatches(
         tournamentId: String,
-        currentTeams: Map<String, Team>,
-        currentMatches: MutableMap<String, Match>
-    ) {
-        val matchesDTO: Map<String, MatchDTO>
+        update: Boolean
+    ): Map<String, MatchWithRelations> {
+        var matchesWithTeams: Map<String, MatchWithRelations>
+        if (!update) {
+            matchesWithTeams =
+                tournamentDB.getMatchDao().getMatchesByTournamentId(tournamentId)
+                    .associateBy { it.match.id }
+            if (matchesWithTeams.isNotEmpty()) {
+                return matchesWithTeams
+            }
+        }
         try {
-            matchesDTO = database.listDocuments(
-                "mvp",
-                "matches",
-                queries = listOf(Query.equal("tournament", tournamentId), Query.limit(200)),
+            val matches = database.listDocuments(
+                DbConstants.DATABASE_NAME,
+                DbConstants.MATCHES_COLLECTION,
+                listOf(
+                    Query.equal(DbConstants.TOURNAMENT_ATTRIBUTE, tournamentId),
+                    Query.limit(200)
+                ),
                 MatchDTO::class.java
             ).documents.map {
-                it.data.copy(id = it.id)
+                it.data.copy(id = it.id).toMatch()
             }.associateBy { it.id }
+            tournamentDB.getMatchDao().upsertMatches(matches.values.toList())
+            matchesWithTeams = tournamentDB.getMatchDao().getMatchesByTournamentId(tournamentId)
+                .associateBy { it.match.id }
+            return matchesWithTeams
         } catch (e: Exception) {
-            Napier.e("Failed to get matches", e, "Database")
-            return
-        }
-        matchesDTO.values.firstOrNull()?.toMatch(currentMatches, currentTeams, matchesDTO)
-    }
-
-    override suspend fun getFields(
-        tournamentId: String,
-        currentMatches: Map<String, Match>
-    ): Map<String, Field> {
-        try {
-            return database.listDocuments(
-                "mvp",
-                "fields",
-                queries = listOf(Query.equal("tournament", tournamentId), Query.limit(100)),
-                FieldDTO::class.java
-            ).documents.map { it.data.copy(id = it.id).toField(currentMatches) }
-                .associateBy { it.id }
-        } catch (e: Exception) {
-            Napier.e("Failed to get fields", e, "Database")
+            Napier.e("Failed to get matches", e, DbConstants.ERROR_TAG)
             return emptyMap()
         }
     }
 
-    override suspend fun getPlayers(tournamentId: String): Map<String, UserData> {
+    override suspend fun getMatch(matchId: String, update: Boolean): MatchWithRelations? {
+        if (!update) {
+            val matchWithRel = tournamentDB.getMatchDao().getMatchById(matchId)
+            if (matchWithRel != null) {
+                return matchWithRel
+            }
+        }
         try {
-            return database.listDocuments(
-                "mvp",
-                "userData",
-                listOf(Query.contains("tournaments", tournamentId), Query.limit(500)),
+            val response = database.getDocument(
+                DbConstants.DATABASE_NAME,
+                DbConstants.MATCHES_COLLECTION,
+                matchId,
+                null,
+                MatchDTO::class.java
+            )
+            val match = response.data.toMatch()
+            tournamentDB.getMatchDao().upsertMatch(match)
+            return tournamentDB.getMatchDao().getMatchById(matchId)
+        } catch (e: Exception) {
+            Napier.e("Failed to get match", e, DbConstants.ERROR_TAG)
+            return null
+        }
+    }
+
+    override suspend fun getFields(
+        tournamentId: String,
+        update: Boolean
+    ): Map<String, Field> {
+        var fields: Map<String, Field>
+        if (!update) {
+            fields =
+                tournamentDB.getFieldDao().getFieldsByTournamentId(tournamentId)
+                    .associateBy { it.id }
+            if (fields.isNotEmpty()) {
+                return fields
+            }
+        }
+        try {
+            fields = database.listDocuments(
+                DbConstants.DATABASE_NAME,
+                DbConstants.FIELDS_COLLECTION,
+                queries = listOf(
+                    Query.equal(DbConstants.TOURNAMENT_ATTRIBUTE, tournamentId),
+                    Query.limit(100)
+                ),
+                Field::class.java
+            ).documents.map { it.data.copy(id = it.id) }
+                .associateBy { it.id }
+            tournamentDB.getFieldDao().upsertFields(fields.values.toList())
+            return fields
+        } catch (e: Exception) {
+            Napier.e("Failed to get fields", e, DbConstants.ERROR_TAG)
+            return emptyMap()
+        }
+    }
+
+    override suspend fun getPlayers(
+        tournamentId: String,
+        update: Boolean
+    ): Map<String, UserData> {
+        var players: Map<String, UserData>
+        if (!update) {
+            players =
+                tournamentDB.getUserDataDao().getUserDataByTournamentId(tournamentId)
+                    .associateBy { it.id }
+            if (players.isNotEmpty()) {
+                return players
+            }
+        }
+        try {
+            players = database.listDocuments(
+                DbConstants.DATABASE_NAME,
+                DbConstants.USER_DATA_COLLECTION,
+                listOf(
+                    Query.contains(DbConstants.TOURNAMENTS_ATTRIBUTE, tournamentId),
+                    Query.limit(500)
+                ),
                 UserData::class.java
             ).documents.map { it.data.copy(id = it.id) }.associateBy { it.id }
+
+            tournamentDB.getUserDataDao().upsertUsersData(players.values.toList())
+            return players
         } catch (e: Exception) {
-            Napier.e("Failed to get players", e, "Database")
+            Napier.e("Failed to get players", e, DbConstants.ERROR_TAG)
             return emptyMap()
         }
     }
@@ -194,18 +312,18 @@ actual class AppwriteRepositoryImplementation(context: Context) : IAppwriteRepos
         val docs: DocumentList<EventDTO>
         try {
             docs = database.listDocuments(
-                "mvp",
-                "tournaments",
+                DbConstants.DATABASE_NAME,
+                DbConstants.TOURNAMENT_COLLECTION,
                 queries = listOf(
-                    Query.greaterThan("lat", bounds.south),
-                    Query.lessThan("lat", bounds.north),
-                    Query.greaterThan("long", bounds.west),
-                    Query.lessThan("long", bounds.east),
+                    Query.greaterThan(DbConstants.LAT_ATTRIBUTE, bounds.south),
+                    Query.lessThan(DbConstants.LAT_ATTRIBUTE, bounds.north),
+                    Query.greaterThan(DbConstants.LONG_ATTRIBUTE, bounds.west),
+                    Query.lessThan(DbConstants.LONG_ATTRIBUTE, bounds.east),
                 ),
                 EventDTO::class.java
             )
         } catch (e: Exception) {
-            Napier.e("Failed to get events", e, "Database")
+            Napier.e("Failed to get events", e, DbConstants.ERROR_TAG)
             return emptyList()
         }
 
@@ -214,178 +332,67 @@ actual class AppwriteRepositoryImplementation(context: Context) : IAppwriteRepos
         }
     }
 
-    override suspend fun subscribeToMatches(tournament: Tournament) {
+    override suspend fun subscribeToMatches() {
         subscription?.close()
-        subscription = realTime.subscribe(
-            "databases.mvp.collections.matches.documents",
+        val channel = String.format(
+            DbConstants.CHANNEL,
+            DbConstants.DATABASE_NAME,
+            DbConstants.MATCHES_COLLECTION
+        )
+        subscription = realtime.subscribe(
+            channel,
             payloadType = MatchDTO::class.java
         ) { response ->
-            val id = response.channels.last().split(".").last()
-            tournament.matches[id]?.let { match ->
-                val updatedMatch = match.copy(
-                    team1Points = response.payload.team1Points,
-                    team2Points = response.payload.team2Points,
-                    field = tournament.fields[response.payload.field],
-                    refId = tournament.teams[response.payload.refId],
-                    team1 = tournament.teams[response.payload.team1],
-                    team2 = tournament.teams[response.payload.team2]
-                )
-                scope.launch {
+            scope.launch {
+                val id = response.channels.last().split(".").last()
+                val dbMatch = tournamentDB.getMatchDao().getMatchById(id)
+                dbMatch?.let { match ->
+                    val updatedMatch = match.copy(
+                        match = match.match.copy(
+                            team1Points = response.payload.team1Points,
+                            team2Points = response.payload.team2Points,
+                            field = response.payload.field,
+                            refId = response.payload.refId,
+                            team1 = response.payload.team1,
+                            team2 = response.payload.team2,
+                            refCheckedIn = response.payload.refereeCheckedIn,
+                        )
+                    )
+                    tournamentDB.getMatchDao().upsertMatch(updatedMatch.match)
                     _matchUpdates.emit(updatedMatch)
                 }
             }
         }
     }
 
-    override suspend fun unsubscribeFromMatches() {
+    override suspend fun updateMatch(match: MatchWithRelations) {
+        tournamentDB.getMatchDao().upsertMatch(match.match)
+        try {
+            val updateData = mapOf(
+                "setResults" to match.match.setResults,
+                "refereeCheckedIn" to match.match.refCheckedIn,
+                "refId" to match.match.refId,
+                "team1Points" to match.match.team1Points,
+                "team2Points" to match.match.team2Points,
+                "start" to match.match.start.toString(),
+                "end" to match.match.end?.toString(),
+                // Add other fields you need to update
+            )
+            database.updateDocument(
+                DbConstants.DATABASE_NAME,
+                DbConstants.MATCHES_COLLECTION,
+                match.match.id,
+                updateData
+            )
+        } catch (e: Exception) {
+            Napier.e("Failed to update match", e, DbConstants.ERROR_TAG)
+        }
+    }
+
+    override suspend fun unsubscribeFromRealtime() {
         subscription?.close()
     }
 
-
-    private fun FieldDTO.toField(currentMatches: Map<String, Match>): Field {
-        return Field(
-            inUse = inUse,
-            fieldNumber = fieldNumber,
-            divisions = divisions,
-            matches = matches.mapNotNull { currentMatches[it] },
-            tournament = tournament,
-            id = id,
-        )
-    }
-
-    private fun MatchDTO.toMatch(
-        newMatches: MutableMap<String, Match>,
-        newTeams: Map<String, Team>,
-        matchesDTO: Map<String, MatchDTO>
-    ): Match {
-        val newMatch = Match(
-            id = id,
-            tournament = tournament,
-            team1 = newTeams[team1],
-            team2 = newTeams[team2],
-            matchId = matchId,
-            refId = newTeams[refId],
-            field = null,
-            start = Instant.parse(start),
-            end = end?.let { Instant.parse(it) },
-            division = division,
-            team1Points = team1Points,
-            team2Points = team2Points,
-            losersBracket = losersBracket,
-            winnerNextMatch = null,
-            loserNextMatch = null,
-            previousLeftMatch = null,
-            previousRightMatch = null,
-            setResults = setResults,
-        )
-
-        newMatches[id] = newMatch
-
-        newMatch.winnerNextMatch =
-            newMatches[winnerNextMatchId] ?: matchesDTO[winnerNextMatchId]?.toMatch(
-                newMatches,
-                newTeams,
-                matchesDTO
-            )
-        newMatch.loserNextMatch =
-            newMatches[loserNextMatchId] ?: matchesDTO[loserNextMatchId]?.toMatch(
-                newMatches,
-                newTeams,
-                matchesDTO
-            )
-        newMatch.previousLeftMatch =
-            newMatches[previousLeftId] ?: matchesDTO[previousLeftId]?.toMatch(
-                newMatches,
-                newTeams,
-                matchesDTO
-            )
-        newMatch.previousRightMatch =
-            newMatches[previousRightId] ?: matchesDTO[previousRightId]?.toMatch(
-                newMatches,
-                newTeams,
-                matchesDTO
-            )
-        return newMatch
-    }
-
-    private fun TeamDTO.toTeam(newPlayers: Map<String, UserData>): Team {
-        return Team(
-            id = id,
-            name = name,
-            players = players.mapNotNull { newPlayers[it] },
-            tournament = tournament,
-            seed = seed,
-            division = division,
-            wins = wins,
-            losses = losses,
-            matches = listOf(null)
-        )
-    }
-
-    private fun EventDTO.toEvent(): EventAbs {
-        return EventImp(
-            id = id,
-            location = location,
-            type = type,
-            start = Instant.parse(start),
-            end = Instant.parse(end),
-            price = price,
-            rating = rating,
-            imageUrl = imageUrl,
-            lat = lat,
-            long = long,
-            collectionId = collectionId,
-        )
-    }
-
-    private suspend fun TournamentDTO.toTournament(): Tournament {
-        val players = getPlayers(id)
-        val teams = getTeams(id, players)
-        val matches = mutableMapOf<String, Match>()
-        getMatches(id, teams, matches)
-        val fields = getFields(id, matches)
-
-        fields.forEach { field ->
-            field.value.matches.forEach { match ->
-                match.field = field.value
-            }
-        }
-
-        teams.forEach { team ->
-            team.value.matches =
-                matches.values.filter {
-                    it.team1 == team.value || it.team2 == team.value || it.refId == team.value
-                }
-        }
-
-        return Tournament(
-            name = name,
-            description = description,
-            doubleElimination = doubleElimination,
-            players = players,
-            teams = teams,
-            matches = matches,
-            fields = fields,
-            divisions = divisions,
-            winnerSetCount = winnerSetCount,
-            loserSetCount = loserSetCount,
-            winnerBracketPointsToVictory = winnerBracketPointsToVictory,
-            loserBracketPointsToVictory = loserBracketPointsToVictory,
-            winnerScoreLimitsPerSet = winnerScoreLimitsPerSet,
-            loserScoreLimitsPerSet = loserScoreLimitsPerSet,
-            id = id,
-            location = location,
-            type = type,
-            start = Instant.parse(start),
-            end = Instant.parse(end),
-            price = price,
-            rating = rating,
-            imageUrl = imageUrl,
-            lat = lat,
-            long = long,
-            collectionId = collectionId,
-        )
-    }
 
     fun cleanup() {
         scope.cancel()

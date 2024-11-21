@@ -30,13 +30,15 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.razumly.mvp.android.LocalUserSession
 import com.razumly.mvp.android.R
 import com.razumly.mvp.core.data.dataTypes.LoginState
+import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.presentation.MainViewModel
 
 
 @Composable
-fun LoginScreen(viewModel: MainViewModel, onNavigateToHome: () -> Unit) {
+fun LoginScreen(viewModel: MainViewModel, onNavigateToHome: (UserData) -> Unit) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var isPasswordVisible by remember { mutableStateOf(false) }
@@ -45,7 +47,7 @@ fun LoginScreen(viewModel: MainViewModel, onNavigateToHome: () -> Unit) {
 
     LaunchedEffect(loginState) {
         if (loginState is LoginState.Success) {
-            onNavigateToHome()
+            viewModel.currentUser.value?.let { onNavigateToHome(it) }
         }
     }
 

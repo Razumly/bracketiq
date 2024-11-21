@@ -1,9 +1,8 @@
 package com.razumly.mvp.core.data.dataTypes.dtos
 
 import com.razumly.mvp.core.data.dataTypes.Tournament
+import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.toLocalDateTime
 
 data class TournamentDTO(
     val name: String,
@@ -28,3 +27,30 @@ data class TournamentDTO(
     val long: Double,
     val collectionId: String,
 )
+
+fun TournamentDTO.toTournament(): Tournament {
+    return Tournament(
+        name = name,
+        description = description,
+        doubleElimination = doubleElimination,
+        divisions = divisions,
+        winnerSetCount = winnerSetCount,
+        loserSetCount = loserSetCount,
+        winnerBracketPointsToVictory = winnerBracketPointsToVictory,
+        loserBracketPointsToVictory = loserBracketPointsToVictory,
+        winnerScoreLimitsPerSet = winnerScoreLimitsPerSet,
+        loserScoreLimitsPerSet = loserScoreLimitsPerSet,
+        id = id,
+        location = location,
+        type = type,
+        start = Instant.parse(start),
+        end = Instant.parse(end),
+        price = price,
+        rating = rating,
+        imageUrl = imageUrl,
+        lat = lat,
+        long = long,
+        collectionId = collectionId,
+        lastUpdated = Clock.System.now()
+    )
+}

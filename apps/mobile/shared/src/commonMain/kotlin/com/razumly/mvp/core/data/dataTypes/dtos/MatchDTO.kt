@@ -1,5 +1,8 @@
 package com.razumly.mvp.core.data.dataTypes.dtos
 
+import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import kotlinx.datetime.Instant
+
 data class MatchDTO(
     val id: String,
     val matchId: Int,
@@ -19,4 +22,30 @@ data class MatchDTO(
     val previousLeftId: String?,
     val previousRightId: String?,
     val setResults: List<Int>,
+    val refereeCheckedIn: Boolean,
 )
+
+fun MatchDTO.toMatch(
+): MatchMVP {
+    return MatchMVP(
+        id = id,
+        tournamentId = tournament,
+        team1 = team1,
+        team2 = team2,
+        matchNumber = matchId,
+        refId = refId,
+        field = field,
+        start = Instant.parse(start),
+        end = end?.let { Instant.parse(it) },
+        division = division,
+        team1Points = team1Points,
+        team2Points = team2Points,
+        losersBracket = losersBracket,
+        setResults = setResults,
+        refCheckedIn = refereeCheckedIn,
+        winnerNextMatchId = winnerNextMatchId,
+        loserNextMatchId = loserNextMatchId,
+        previousLeftMatchId = previousLeftId,
+        previousRightMatchId = previousRightId,
+    )
+}

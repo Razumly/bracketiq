@@ -4,20 +4,22 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsBottomHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -31,6 +33,7 @@ import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.CardColors
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
@@ -39,7 +42,9 @@ import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -52,35 +57,41 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.razumly.mvp.android.eventContent.tournamentDetailComponents.MatchCard
-import com.razumly.mvp.core.ceilDiv
-import com.razumly.mvp.core.data.dataTypes.Match
+import com.razumly.mvp.android.eventContent.tournamentDetailScreen.tournamentDetailComponents.MatchCard
+import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.util.ceilDiv
+import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.eventContent.presentation.TournamentContentViewModel
+import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import org.koin.compose.viewmodel.koinNavViewModel
 import org.koin.core.annotation.KoinExperimentalAPI
+import org.koin.core.parameter.parametersOf
+
+val LocalTournament = compositionLocalOf<Tournament> { error("No tournament provided") }
 
 @OptIn(KoinExperimentalAPI::class)
 @Composable
 fun TournamentDetailScreen(
     tournamentId: String,
-    modifier: Modifier = Modifier,
-    onNavToListScreen: () -> Unit = {}
+    onNavToListScreen: () -> Unit = {},
+    onMatchClick: (MatchMVP) -> Unit = { },
 ) {
-    val viewModel = koinNavViewModel<TournamentContentViewModel>()
-    LaunchedEffect(Unit) {
-        viewModel.loadTournament(tournamentId)
-    }
+    val viewModel =
+        koinNavViewModel<TournamentContentViewModel>(parameters = {
+            parametersOf(tournamentId)
+        })
+
     val tournament by viewModel.selectedTournament.collectAsStateWithLifecycle()
     val selectedDivision by viewModel.selectedDivision.collectAsStateWithLifecycle()
     val isBracketView by viewModel.isBracketView.collectAsStateWithLifecycle()
-    val divisionMatches by viewModel.currentMatches.collectAsStateWithLifecycle()
+    val divisionMatches by viewModel.divisionMatches.collectAsStateWithLifecycle()
     val roundsList by viewModel.rounds.collectAsStateWithLifecycle()
     val losersBracket by viewModel.losersBracket.collectAsStateWithLifecycle()
 
-    Column(modifier = modifier.fillMaxSize()) {
+    Column(modifier = Modifier.fillMaxSize()) {
         // Tournament Header
         tournament?.let { TournamentHeader(it) }
 
@@ -144,13 +155,23 @@ fun TournamentDetailScreen(
 
         // Content
         if (selectedDivision != null && tournament != null) {
-            if (isBracketView) {
-                TournamentBracketView(roundsList, losersBracket)
-            } else {
-                TournamentListView(
-                    divisionMatches = divisionMatches,
-                    modifier = Modifier.weight(1f)
-                )
+            CompositionLocalProvider(LocalTournament provides tournament!!) {
+                if (isBracketView) {
+                    TournamentBracketView(roundsList, losersBracket) { match ->
+                        onMatchClick(
+                            match,
+                        )
+                    }
+                } else {
+                    TournamentListView(
+                        divisionMatches,
+                        Modifier.weight(1f),
+                    ) { match ->
+                        onMatchClick(
+                            match,
+                        )
+                    }
+                }
             }
         }
     }
@@ -206,8 +227,9 @@ private fun TournamentHeader(tournament: Tournament) {
 
 @Composable
 private fun TournamentListView(
-    divisionMatches: List<Match?>,
-    modifier: Modifier = Modifier
+    divisionMatches: List<MatchWithRelations?>,
+    modifier: Modifier = Modifier,
+    onMatchClick: (MatchMVP) -> Unit,
 ) {
     LazyColumn(
         modifier = modifier.fillMaxWidth(),
@@ -220,7 +242,7 @@ private fun TournamentListView(
             if (match != null) {
                 MatchCard(
                     match = match,
-                    onClick = { },
+                    onClick = { onMatchClick(match.match) },
                     cardColors = CardColors(
                         MaterialTheme.colorScheme.primaryContainer,
                         MaterialTheme.colorScheme.onPrimaryContainer,
@@ -234,7 +256,11 @@ private fun TournamentListView(
 }
 
 @Composable
-fun TournamentBracketView(roundsList: List<List<Match?>>, losersBracket: Boolean) {
+fun TournamentBracketView(
+    roundsList: List<List<MatchWithRelations?>>,
+    losersBracket: Boolean,
+    onMatchClick: (MatchMVP) -> Unit = {}
+) {
     val lazyRowState = rememberLazyListState()
     val columnScrollState = rememberScrollState()
     val maxHeightInRowDp = remember { mutableStateOf(Dp.Unspecified) }
@@ -281,21 +307,20 @@ fun TournamentBracketView(roundsList: List<List<Match?>>, losersBracket: Boolean
     // Track visible items to calculate max height
     Box(
         modifier = Modifier
-            .height(boxHeight.value)
+            .fillMaxSize()
             .verticalScroll(columnScrollState)
     ) {
         LazyRow(
             state = lazyRowState,
             modifier = Modifier
-                .fillMaxHeight(),
+                .height(boxHeight.value),
         ) {
             itemsIndexed(roundsList, key = { _, round ->
-                round.filterNotNull().joinToString { it.id }
+                round.filterNotNull().joinToString { it.match.id }
             }) { colIndex, round ->
                 Column(
                     modifier = Modifier
                         .padding(start = 16.dp)
-                        .fillMaxHeight()
                         .width(intrinsicSize = IntrinsicSize.Max)
                         .height(columnHeight),
                     verticalArrangement = Arrangement.SpaceBetween,
@@ -330,19 +355,18 @@ fun TournamentBracketView(roundsList: List<List<Match?>>, losersBracket: Boolean
                                 ) {
                                     matches.filterNotNull().forEach { match ->
                                         val matchCardColor =
-                                            if (match.losersBracket == losersBracket) {
+                                            if (match.match.losersBracket == losersBracket) {
                                                 MaterialTheme.colorScheme.tertiaryContainer
                                             } else {
                                                 MaterialTheme.colorScheme.surface
                                             }
                                         MatchCard(
                                             match = match,
-                                            onClick = { },
+                                            onClick = { onMatchClick(match.match) },
                                             modifier = Modifier
                                                 .height(cardHeight.dp)
-                                                .width(width.dp)
-                                                .background(matchCardColor),
-                                            cardColors = CardColors(
+                                                .width(width.dp),
+                                            cardColors = CardDefaults.cardColors(
                                                 matchCardColor,
                                                 MaterialTheme.colorScheme.onPrimaryContainer,
                                                 MaterialTheme.colorScheme.tertiaryContainer,
@@ -362,6 +386,164 @@ fun TournamentBracketView(roundsList: List<List<Match?>>, losersBracket: Boolean
 
 @Preview
 @Composable
-fun PreviewTournamentDetailScreenView() {
-    TournamentDetailScreen("", modifier = Modifier, onNavToListScreen = {})
+fun PreviewBracket() {
+    val matches = listOf(
+        listOf(
+            MatchWithRelations(
+                match = MatchMVP(
+                    matchNumber = 1,
+                    team1 = null,
+                    team2 = null,
+                    tournamentId = "id0sjf0",
+                    refId = null,
+                    field = null,
+                    start = Instant.DISTANT_PAST,
+                    end = null,
+                    division = "null",
+                    team1Points = listOf(0, 0, 0),
+                    team2Points = listOf(0, 0, 0),
+                    losersBracket = false,
+                    winnerNextMatchId = null,
+                    loserNextMatchId = null,
+                    previousLeftMatchId = null,
+                    previousRightMatchId = null,
+                    setResults = listOf(0, 0, 0),
+                    refCheckedIn = false,
+                    id = "sdofoe0h08"
+                ),
+                team1 = null,
+                team2 = null,
+                ref = null,
+                field = null,
+                winnerNextMatch = null,
+                loserNextMatch = null,
+                previousLeftMatch = null,
+                previousRightMatch = null
+            ), MatchWithRelations(
+                match = MatchMVP(
+                    matchNumber = 1,
+                    team1 = null,
+                    team2 = null,
+                    tournamentId = "id0sjf0",
+                    refId = null,
+                    field = null,
+                    start = Instant.DISTANT_PAST,
+                    end = null,
+                    division = "null",
+                    team1Points = listOf(0, 0, 0),
+                    team2Points = listOf(0, 0, 0),
+                    losersBracket = false,
+                    winnerNextMatchId = null,
+                    loserNextMatchId = null,
+                    previousLeftMatchId = null,
+                    previousRightMatchId = null,
+                    setResults = listOf(0, 0, 0),
+                    refCheckedIn = false,
+                    id = "sdofoe0h08"
+                ),
+                team1 = null,
+                team2 = null,
+                ref = null,
+                field = null,
+                winnerNextMatch = null,
+                loserNextMatch = null,
+                previousLeftMatch = null,
+                previousRightMatch = null
+            ), MatchWithRelations(
+                match = MatchMVP(
+                    matchNumber = 1,
+                    team1 = null,
+                    team2 = null,
+                    tournamentId = "id0sjf0",
+                    refId = null,
+                    field = null,
+                    start = Instant.DISTANT_PAST,
+                    end = null,
+                    division = "null",
+                    team1Points = listOf(0, 0, 0),
+                    team2Points = listOf(0, 0, 0),
+                    losersBracket = false,
+                    winnerNextMatchId = null,
+                    loserNextMatchId = null,
+                    previousLeftMatchId = null,
+                    previousRightMatchId = null,
+                    setResults = listOf(0, 0, 0),
+                    refCheckedIn = false,
+                    id = "sdofoe0h08"
+                ),
+                team1 = null,
+                team2 = null,
+                ref = null,
+                field = null,
+                winnerNextMatch = null,
+                loserNextMatch = null,
+                previousLeftMatch = null,
+                previousRightMatch = null
+            ), MatchWithRelations(
+                match = MatchMVP(
+                    matchNumber = 1,
+                    team1 = null,
+                    team2 = null,
+                    tournamentId = "id0sjf0",
+                    refId = null,
+                    field = null,
+                    start = Instant.DISTANT_PAST,
+                    end = null,
+                    division = "null",
+                    team1Points = listOf(0, 0, 0),
+                    team2Points = listOf(0, 0, 0),
+                    losersBracket = false,
+                    winnerNextMatchId = null,
+                    loserNextMatchId = null,
+                    previousLeftMatchId = null,
+                    previousRightMatchId = null,
+                    setResults = listOf(0, 0, 0),
+                    refCheckedIn = false,
+                    id = "sdofoe0h08"
+                ),
+                team1 = null,
+                team2 = null,
+                ref = null,
+                field = null,
+                winnerNextMatch = null,
+                loserNextMatch = null,
+                previousLeftMatch = null,
+                previousRightMatch = null
+            ), MatchWithRelations(
+                match = MatchMVP(
+                    matchNumber = 1,
+                    team1 = null,
+                    team2 = null,
+                    tournamentId = "id0sjf0",
+                    refId = null,
+                    field = null,
+                    start = Instant.DISTANT_PAST,
+                    end = null,
+                    division = "null",
+                    team1Points = listOf(0, 0, 0),
+                    team2Points = listOf(0, 0, 0),
+                    losersBracket = false,
+                    winnerNextMatchId = null,
+                    loserNextMatchId = null,
+                    previousLeftMatchId = null,
+                    previousRightMatchId = null,
+                    setResults = listOf(0, 0, 0),
+                    refCheckedIn = false,
+                    id = "sdofoe0h08"
+                ),
+                team1 = null,
+                team2 = null,
+                ref = null,
+                field = null,
+                winnerNextMatch = null,
+                loserNextMatch = null,
+                previousLeftMatch = null,
+                previousRightMatch = null
+            ),
+            null,
+            null
+        )
+    )
+
+    TournamentBracketView(matches, false)
 }

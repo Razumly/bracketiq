@@ -1,9 +1,12 @@
 package com.razumly.mvp.core.data.dataTypes
 
+import androidx.room.Entity
+import androidx.room.PrimaryKey
 import kotlinx.datetime.Instant
 
+@Entity
 data class EventImp(
-    override val id: String,
+    @PrimaryKey override val id: String,
     override val location: String,
     override val lat: Double,
     override val long: Double,
@@ -13,6 +16,7 @@ data class EventImp(
     override val price: String,
     override val rating: Float,
     override val imageUrl: String,
-    override val collectionId: String
+    override val collectionId: String,
+    override val lastUpdated: Instant,
 ) : EventAbs() {
 }

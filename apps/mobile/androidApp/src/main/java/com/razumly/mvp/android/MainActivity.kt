@@ -21,8 +21,11 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -35,11 +38,14 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navigation
 import androidx.navigation.toRoute
 import com.example.compose.MVPTheme
+import com.razumly.mvp.android.eventContent.matchDetailScreen.MatchDetailScreen
 import com.razumly.mvp.android.navTypes.CustomNavType
 import com.razumly.mvp.android.userAuth.loginScreen.LoginScreen
 import com.razumly.mvp.core.data.dataTypes.EventAbs
+import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.dataTypes.Tournament
+import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.presentation.MainViewModel
-import kotlinx.serialization.Serializable
 import org.koin.androidx.compose.KoinAndroidContext
 import org.koin.androidx.compose.navigation.koinNavViewModel
 import kotlin.reflect.typeOf
@@ -58,29 +64,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
-
-@Serializable
-data object HomeRoute
-
-@Serializable
-data object LoginRoute
-
-@Serializable
-data class TournamentDetailRoute(
-    val tournamentId: String
-)
-
-@Serializable
-data object EventListRoute
-
-@Serializable
-data object FollowingRoute
-
-@Serializable
-data object PlayRoute
-
-@Serializable
-data object ProfileRoute
 
 sealed class NavigationItem(var route: Any, val icon: ImageVector, var title: Int) {
     data object Search : NavigationItem(
@@ -108,6 +91,8 @@ sealed class NavigationItem(var route: Any, val icon: ImageVector, var title: In
     )
 }
 
+val LocalUserSession = compositionLocalOf<UserData?> { null }
+val LocalTournament = compositionLocalOf<Tournament?> { null }
 
 @Composable
 fun App(activity: ComponentActivity) {
@@ -117,6 +102,8 @@ fun App(activity: ComponentActivity) {
     // Track current route to determine bottom bar visibility
     val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
     val shouldShowBottomBar = currentRoute != LoginRoute.toString()
+    val currentUser = remember { mutableStateOf<UserData?>(null) }
+    val currentTournament = remember { mutableStateOf<Tournament?>(null) }
 
     val items = listOf(
         NavigationItem.Search,
@@ -185,44 +172,67 @@ fun App(activity: ComponentActivity) {
             }
         }
     ) { paddingValues ->
-        NavHost(
-            navController = navController,
-            startDestination = LoginRoute,
-            modifier = Modifier.padding(paddingValues)
-        ) {
-            composable<LoginRoute> {
-                LoginScreen(
-                    viewModel = sharedViewModel,
-                    onNavigateToHome = {
-                        navController.navigate(HomeRoute) {
-                            popUpTo(LoginRoute) { inclusive = true }
-                        }
-                    }
-                )
-            }
-
-            navigation<HomeRoute>(
-                startDestination = EventListRoute
+        CompositionLocalProvider(LocalUserSession provides currentUser.value) {
+            NavHost(
+                navController = navController,
+                startDestination = LoginRoute,
+                modifier = Modifier.padding(paddingValues)
             ) {
-                composable<EventListRoute> {
-                    EventListScreen(
-                        onTournamentSelected = {
-                            navController.navigate(TournamentDetailRoute(it))
+                composable<LoginRoute> {
+                    LoginScreen(
+                        viewModel = sharedViewModel,
+                        onNavigateToHome = { userData ->
+                            currentUser.value = userData
+                            navController.navigate(HomeRoute) {
+                                popUpTo(LoginRoute) { inclusive = true }
+                            }
                         }
                     )
                 }
-                composable<TournamentDetailRoute>(
-                    typeMap = mapOf(
-                        typeOf<EventAbs>() to CustomNavType.EventType
-                    )
+
+                navigation<HomeRoute>(
+                    startDestination = EventListRoute
                 ) {
-                    val arguments = it.toRoute<TournamentDetailRoute>()
-                    TournamentDetailScreen(
-                        arguments.tournamentId,
-                        onNavToListScreen = {
-                            navController.navigate(EventListRoute)
-                        }
-                    )
+                    composable<EventListRoute> {
+                        EventListScreen(
+                            onTournamentSelected = {
+                                navController.navigate(TournamentDetailRoute(it))
+                            }
+                        )
+                    }
+
+                    composable<TournamentDetailRoute>(
+                        typeMap = mapOf(
+                            typeOf<EventAbs>() to CustomNavType.EventType,
+                        )
+                    ) { backStackEntry ->
+                        val arguments = backStackEntry.toRoute<TournamentDetailRoute>()
+
+                        TournamentDetailScreen(
+                            tournamentId = arguments.tournamentId,
+                            onNavToListScreen = {
+                                navController.navigate(EventListRoute)
+                            },
+                            onMatchClick = { match ->
+                                navController.navigate(
+                                    MatchDetailRoute(
+                                        match,
+                                    )
+                                )
+                            },
+                        )
+                    }
+
+                    composable<MatchDetailRoute>(
+                        typeMap = mapOf(
+                            typeOf<MatchMVP>() to CustomNavType.MatchMVPType,
+                            typeOf<Tournament>() to CustomNavType.TournamentType,
+                        )
+                    ) { backStackEntry ->
+                        val arguments = backStackEntry.toRoute<MatchDetailRoute>()
+
+                        MatchDetailScreen(arguments.match)
+                    }
                 }
             }
         }

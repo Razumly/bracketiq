@@ -17,6 +17,7 @@ actual class KoinInitializer(
                 locationTrackerModule,
                 eventSearchViewModelModule,
                 tournamentContentViewModelModule,
+                matchContentViewModelModule,
             )
         }
 

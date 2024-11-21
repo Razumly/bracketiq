@@ -1,4 +1,4 @@
-package com.razumly.mvp.core
+package com.razumly.mvp.core.util
 
 import kotlin.math.absoluteValue
 import kotlin.math.sign
