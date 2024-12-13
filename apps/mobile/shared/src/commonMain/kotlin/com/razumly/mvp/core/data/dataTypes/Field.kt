@@ -7,7 +7,7 @@ import kotlinx.serialization.Serializable
 @Entity
 @Serializable
 data class Field(
-    val inUse: Boolean,
+    val inUse: Boolean?,
     val fieldNumber: Int,
     val divisions: List<String>,
     val matches: List<String>,

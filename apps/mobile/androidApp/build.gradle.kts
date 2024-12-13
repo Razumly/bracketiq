@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.androidApplication)
     alias(libs.plugins.kotlinAndroid)
@@ -9,6 +11,13 @@ android {
     namespace = "com.razumly.mvp.android"
     compileSdk = 35
     defaultConfig {
+
+        val googleMapsApiKey = project.loadLocalProperty(
+            path = "local.properties",
+            propertyName = "googleMapsApiKey",
+        )
+        buildConfigField("String", "googleMapsApiKey", googleMapsApiKey)
+
         applicationId = "com.razumly.mvp.android"
         minSdk = 27
         targetSdk = 34
@@ -17,6 +26,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     composeOptions {
         kotlinCompilerExtensionVersion = libs.versions.kotlin.get()
@@ -31,6 +41,7 @@ android {
             isMinifyEnabled = false
         }
     }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
@@ -52,4 +63,23 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
     debugImplementation(libs.compose.ui.tooling)
+    implementation(libs.maps.compose)
+    implementation(libs.play.services.maps)
+    implementation(libs.play.services.location)
+    implementation(libs.places)
+}
+
+fun Project.loadLocalProperty(
+    path: String,
+    propertyName: String,
+): String {
+    val localProperties = Properties()
+    val localPropertiesFile = project.rootProject.file(path)
+    if (localPropertiesFile.exists()) {
+        localProperties.load(localPropertiesFile.inputStream())
+        return localProperties.getProperty(propertyName)
+    } else {
+        throw GradleException("can not find property : $propertyName")
+    }
+
 }

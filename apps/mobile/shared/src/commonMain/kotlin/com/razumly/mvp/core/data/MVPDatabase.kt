@@ -5,13 +5,10 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.razumly.mvp.core.data.dataTypes.Field
-import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.MatchFieldCrossRef
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
-import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamPlayerCrossRef
-import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.daos.EventImpDao
@@ -33,10 +30,10 @@ import com.razumly.mvp.core.util.Converters
         MatchFieldCrossRef::class,
         TeamPlayerCrossRef::class,
     ],
-    version = 3
+    version = 7
 )
 @TypeConverters(Converters::class)
-abstract class TournamentDatabase : RoomDatabase() {
+abstract class MVPDatabase : RoomDatabase() {
     abstract fun getTournamentDao(): TournamentDao
     abstract fun getMatchDao(): MatchDao
     abstract fun getTeamDao(): TeamDao

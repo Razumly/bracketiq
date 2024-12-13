@@ -12,5 +12,6 @@ object DbConstants {
     const val LAT_ATTRIBUTE = "lat"
     const val LONG_ATTRIBUTE = "long"
     const val ERROR_TAG = "Database"
-    const val CHANNEL = "databases.%s.collections.%s.documents"
+    const val MATCHES_CHANNEL = "databases.$DATABASE_NAME.collections.$MATCHES_COLLECTION.documents"
+
 }

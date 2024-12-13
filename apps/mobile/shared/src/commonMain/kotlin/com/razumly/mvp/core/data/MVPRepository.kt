@@ -1,10 +1,8 @@
 package com.razumly.mvp.core.data
 
-import android.content.Context
 import com.razumly.mvp.core.data.dataTypes.Bounds
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.Field
-import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
@@ -17,6 +15,7 @@ import com.razumly.mvp.core.data.dataTypes.dtos.toEvent
 import com.razumly.mvp.core.data.dataTypes.dtos.toMatch
 import com.razumly.mvp.core.data.dataTypes.dtos.toTournament
 import com.razumly.mvp.core.util.DbConstants
+import com.razumly.mvp.core.util.DbConstants.MATCHES_CHANNEL
 import io.appwrite.Client
 import io.appwrite.Query
 import io.appwrite.extensions.toJson
@@ -30,6 +29,7 @@ import io.appwrite.services.Realtime
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.IO
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
@@ -37,20 +37,12 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.format
-import kotlinx.datetime.toLocalDateTime
-import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
 
-actual class AppwriteRepositoryImplementation(context: Context) : IAppwriteRepository {
-    private val client: Client = Client(context)
-        .setEndpoint("https://cloud.appwrite.io/v1") // Your API Endpoint
-        .setProject("6656a4d60016b753f942") // Your project ID
-        .setSelfSigned(true)
-
-    private val tournamentDB = getTournamentDatabase(context)
-
+class MVPRepository(
+    private val client: Client,
+    private val tournamentDB: MVPDatabase
+) : IMVPRepository {
     private val account = Account(client)
 
     private val database = Databases(client)
@@ -66,12 +58,11 @@ actual class AppwriteRepositoryImplementation(context: Context) : IAppwriteRepos
     override suspend fun login(email: String, password: String): UserData? {
         try {
             account.createEmailPasswordSession(email, password)
-            val currentUser = database.getDocument(
+            val currentUser = database.getDocument<UserData>(
                 DbConstants.DATABASE_NAME,
                 DbConstants.USER_DATA_COLLECTION,
                 account.get().id,
-                null,
-                UserData::class.java
+                null
             ).data.copy(id = account.get().id)
             tournamentDB.getUserDataDao().upsertUserData(currentUser)
             return currentUser
@@ -100,8 +91,8 @@ actual class AppwriteRepositoryImplementation(context: Context) : IAppwriteRepos
                 DbConstants.DATABASE_NAME,
                 DbConstants.TOURNAMENT_COLLECTION,
                 tournamentId,
+                TournamentDTO::class,
                 queries = null,
-                TournamentDTO::class.java
             )
         } catch (e: Exception) {
             Napier.e("Failed to get tournament", e, DbConstants.ERROR_TAG)
@@ -133,12 +124,11 @@ actual class AppwriteRepositoryImplementation(context: Context) : IAppwriteRepos
             }
         }
         try {
-            currentUserData = database.getDocument(
+            currentUserData = database.getDocument<UserData>(
                 DbConstants.DATABASE_NAME,
                 DbConstants.USER_DATA_COLLECTION,
                 currentAccount.id,
                 null,
-                UserData::class.java
             ).data.copy(id = currentAccount.id)
             tournamentDB.getUserDataDao().upsertUserData(currentUserData)
             return currentUserData
@@ -169,7 +159,7 @@ actual class AppwriteRepositoryImplementation(context: Context) : IAppwriteRepos
                     Query.equal(DbConstants.TOURNAMENT_ATTRIBUTE, tournamentId),
                     Query.limit(200)
                 ),
-                Team::class.java
+                Team::class,
             ).documents.map {
                 it.data.copy(id = it.id)
             }.associateBy { it.id }
@@ -204,9 +194,9 @@ actual class AppwriteRepositoryImplementation(context: Context) : IAppwriteRepos
                     Query.equal(DbConstants.TOURNAMENT_ATTRIBUTE, tournamentId),
                     Query.limit(200)
                 ),
-                MatchDTO::class.java
+                MatchDTO::class
             ).documents.map {
-                it.data.copy(id = it.id).toMatch()
+                it.data.toMatch(it.id)
             }.associateBy { it.id }
             tournamentDB.getMatchDao().upsertMatches(matches.values.toList())
             matchesWithTeams = tournamentDB.getMatchDao().getMatchesByTournamentId(tournamentId)
@@ -226,14 +216,13 @@ actual class AppwriteRepositoryImplementation(context: Context) : IAppwriteRepos
             }
         }
         try {
-            val response = database.getDocument(
+            val response = database.getDocument<MatchDTO>(
                 DbConstants.DATABASE_NAME,
                 DbConstants.MATCHES_COLLECTION,
                 matchId,
                 null,
-                MatchDTO::class.java
             )
-            val match = response.data.toMatch()
+            val match = response.data.let { it.toMatch(it.id) }
             tournamentDB.getMatchDao().upsertMatch(match)
             return tournamentDB.getMatchDao().getMatchById(matchId)
         } catch (e: Exception) {
@@ -263,7 +252,7 @@ actual class AppwriteRepositoryImplementation(context: Context) : IAppwriteRepos
                     Query.equal(DbConstants.TOURNAMENT_ATTRIBUTE, tournamentId),
                     Query.limit(100)
                 ),
-                Field::class.java
+                Field::class,
             ).documents.map { it.data.copy(id = it.id) }
                 .associateBy { it.id }
             tournamentDB.getFieldDao().upsertFields(fields.values.toList())
@@ -295,7 +284,7 @@ actual class AppwriteRepositoryImplementation(context: Context) : IAppwriteRepos
                     Query.contains(DbConstants.TOURNAMENTS_ATTRIBUTE, tournamentId),
                     Query.limit(500)
                 ),
-                UserData::class.java
+                UserData::class
             ).documents.map { it.data.copy(id = it.id) }.associateBy { it.id }
 
             tournamentDB.getUserDataDao().upsertUsersData(players.values.toList())
@@ -320,7 +309,7 @@ actual class AppwriteRepositoryImplementation(context: Context) : IAppwriteRepos
                     Query.greaterThan(DbConstants.LONG_ATTRIBUTE, bounds.west),
                     Query.lessThan(DbConstants.LONG_ATTRIBUTE, bounds.east),
                 ),
-                EventDTO::class.java
+                EventDTO::class
             )
         } catch (e: Exception) {
             Napier.e("Failed to get events", e, DbConstants.ERROR_TAG)
@@ -334,28 +323,25 @@ actual class AppwriteRepositoryImplementation(context: Context) : IAppwriteRepos
 
     override suspend fun subscribeToMatches() {
         subscription?.close()
-        val channel = String.format(
-            DbConstants.CHANNEL,
-            DbConstants.DATABASE_NAME,
-            DbConstants.MATCHES_COLLECTION
-        )
+        val channels = listOf(MATCHES_CHANNEL)
         subscription = realtime.subscribe(
-            channel,
-            payloadType = MatchDTO::class.java
+            channels,
+            payloadType = MatchDTO::class
         ) { response ->
-            scope.launch {
+            val matchUpdates = response.payload.data
+            scope.launch(Dispatchers.IO) {
                 val id = response.channels.last().split(".").last()
                 val dbMatch = tournamentDB.getMatchDao().getMatchById(id)
                 dbMatch?.let { match ->
                     val updatedMatch = match.copy(
                         match = match.match.copy(
-                            team1Points = response.payload.team1Points,
-                            team2Points = response.payload.team2Points,
-                            field = response.payload.field,
-                            refId = response.payload.refId,
-                            team1 = response.payload.team1,
-                            team2 = response.payload.team2,
-                            refCheckedIn = response.payload.refereeCheckedIn,
+                            team1Points = matchUpdates.team1Points,
+                            team2Points = matchUpdates.team2Points,
+                            field = matchUpdates.field,
+                            refId = matchUpdates.refId,
+                            team1 = matchUpdates.team1,
+                            team2 = matchUpdates.team2,
+                            refCheckedIn = matchUpdates.refereeCheckedIn,
                         )
                     )
                     tournamentDB.getMatchDao().upsertMatch(updatedMatch.match)
@@ -389,6 +375,19 @@ actual class AppwriteRepositoryImplementation(context: Context) : IAppwriteRepos
         }
     }
 
+    override suspend fun createTournament(newTournament: Tournament) {
+        try {
+            database.createDocument(
+                DbConstants.DATABASE_NAME,
+                DbConstants.TOURNAMENT_COLLECTION,
+                newTournament.id,
+                newTournament.toJson()
+            )
+        } catch (e: Exception) {
+            Napier.e("Failed to create tournament", e, DbConstants.ERROR_TAG)
+        }
+    }
+
     override suspend fun unsubscribeFromRealtime() {
         subscription?.close()
     }
@@ -397,4 +396,31 @@ actual class AppwriteRepositoryImplementation(context: Context) : IAppwriteRepos
     fun cleanup() {
         scope.cancel()
     }
+}
+
+interface IMVPRepository {
+    val matchUpdates: Flow<MatchWithRelations>
+    suspend fun getTournament(tournamentId: String): Tournament?
+    suspend fun getTeams(
+        tournamentId: String, update: Boolean = false
+    ): Map<String, TeamWithPlayers>
+
+    suspend fun getMatches(
+        tournamentId: String,
+        update: Boolean = false
+    ): Map<String, MatchWithRelations>
+
+    suspend fun getMatch(matchId: String, update: Boolean = false): MatchWithRelations?
+
+    suspend fun getFields(tournamentId: String, update: Boolean = false): Map<String, Field>
+
+    suspend fun getPlayers(tournamentId: String, update: Boolean = false): Map<String, UserData>
+    suspend fun getEvents(bounds: Bounds): List<EventAbs>
+    suspend fun getCurrentUser(update: Boolean = false): UserData?
+    suspend fun login(email: String, password: String): UserData?
+    suspend fun logout()
+    suspend fun subscribeToMatches()
+    suspend fun unsubscribeFromRealtime()
+    suspend fun updateMatch(match: MatchWithRelations)
+    suspend fun createTournament(newTournament: Tournament)
 }

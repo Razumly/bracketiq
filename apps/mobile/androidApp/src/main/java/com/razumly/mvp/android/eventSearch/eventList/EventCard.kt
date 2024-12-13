@@ -117,7 +117,7 @@ fun EventCard(
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Text(
-                    text = event.price,
+                    text = event.price.toString(),
                     style = MaterialTheme.typography.bodyMedium
                 )
             }

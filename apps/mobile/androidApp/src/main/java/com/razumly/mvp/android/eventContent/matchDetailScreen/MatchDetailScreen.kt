@@ -15,8 +15,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -30,8 +28,6 @@ import com.razumly.mvp.android.R
 import com.razumly.mvp.android.instantToDateTimeString
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.eventContent.presentation.MatchContentViewModel
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.toLocalDateTime
 import org.koin.compose.viewmodel.koinNavViewModel
 import org.koin.core.annotation.KoinExperimentalAPI
 import org.koin.core.parameter.parametersOf
@@ -61,7 +57,7 @@ fun MatchDetailScreen(
     val currentSet by viewModel.currentSet.collectAsStateWithLifecycle()
     val matchFinished by viewModel.matchFinished.collectAsStateWithLifecycle()
 
-    val canIncrement = !matchFinished && refCheckedIn && isRef
+    val canIncrement = !matchFinished && refCheckedIn == true && isRef
 
     if (showRefCheckInDialog) {
         val message = if (isRef) {

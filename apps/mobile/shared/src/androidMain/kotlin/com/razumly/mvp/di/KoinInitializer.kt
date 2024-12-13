@@ -12,12 +12,15 @@ actual class KoinInitializer(
             androidContext(context)
             modules(
                 mainViewModelModule,
-                AppwriteRepositoryImplementationModule,
+                MVPRepositoryModule,
                 permissionsControllerModule,
                 locationTrackerModule,
                 eventSearchViewModelModule,
                 tournamentContentViewModelModule,
                 matchContentViewModelModule,
+                createEventViewModelModule,
+                clientModule,
+                roomDBModule
             )
         }
 

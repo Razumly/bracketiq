@@ -25,6 +25,6 @@ data class MatchMVP(
     val previousLeftMatchId: String?,
     val previousRightMatchId: String?,
     val setResults: List<Int>,
-    val refCheckedIn: Boolean,
+    val refCheckedIn: Boolean?,
     @PrimaryKey override val id: String,
 ) : Document()

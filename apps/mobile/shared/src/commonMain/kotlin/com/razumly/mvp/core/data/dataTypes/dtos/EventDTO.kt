@@ -4,14 +4,16 @@ import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.EventImp
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
+import kotlinx.serialization.Serializable
 
+@Serializable
 data class EventDTO(
     val id: String,
     val location: String,
     val type: String,
     val start: String,  // ISO-8601 format string
     val end: String,    // ISO-8601 format string
-    val price: String,
+    val price: Double,
     val rating: Float,
     val imageUrl: String,
     val lat: Double,

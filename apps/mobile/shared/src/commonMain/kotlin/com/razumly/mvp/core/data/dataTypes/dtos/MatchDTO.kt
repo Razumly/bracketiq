@@ -2,7 +2,9 @@ package com.razumly.mvp.core.data.dataTypes.dtos
 
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import kotlinx.datetime.Instant
+import kotlinx.serialization.Serializable
 
+@Serializable
 data class MatchDTO(
     val id: String,
     val matchId: Int,
@@ -22,10 +24,11 @@ data class MatchDTO(
     val previousLeftId: String?,
     val previousRightId: String?,
     val setResults: List<Int>,
-    val refereeCheckedIn: Boolean,
+    val refereeCheckedIn: Boolean?,
 )
 
 fun MatchDTO.toMatch(
+    id: String
 ): MatchMVP {
     return MatchMVP(
         id = id,

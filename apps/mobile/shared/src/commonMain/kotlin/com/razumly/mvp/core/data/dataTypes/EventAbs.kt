@@ -11,7 +11,7 @@ abstract class EventAbs : Document() {
     abstract val type: String
     abstract val start: Instant
     abstract val end: Instant
-    abstract val price: String
+    abstract val price: Double
     abstract val rating: Float
     abstract val imageUrl: String
     abstract val collectionId: String

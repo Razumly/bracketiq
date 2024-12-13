@@ -1,14 +1,14 @@
 package com.razumly.mvp.eventSearch.presentation
 
-import com.razumly.mvp.core.data.IAppwriteRepository
+import com.razumly.mvp.core.data.IMVPRepository
 import com.razumly.mvp.core.data.dataTypes.Bounds
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.rickclephas.kmp.observableviewmodel.ViewModel
+import com.rickclephas.kmp.observableviewmodel.MutableStateFlow
 import com.rickclephas.kmp.observableviewmodel.launch
 import com.rickclephas.kmp.observableviewmodel.stateIn
 import dev.icerock.moko.geo.LatLng
 import dev.icerock.moko.geo.LocationTracker
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -18,21 +18,21 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 class EventSearchViewModel(
-    private val appwriteRepository: IAppwriteRepository,
+    private val appwriteRepository: IMVPRepository,
     locationTracker: LocationTracker
 ) : ViewModel() {
-    private val _events = MutableStateFlow<List<EventAbs>>(emptyList())
+    private val _events = MutableStateFlow<List<EventAbs>>(viewModelScope, emptyList())
     val events: StateFlow<List<EventAbs>> = _events.asStateFlow()
 
-    private val _currentRadius = MutableStateFlow(50)
+    private val _currentRadius = MutableStateFlow(viewModelScope, 50)
     val currentRadius: StateFlow<Int> = _currentRadius.asStateFlow()
 
     private val _locationStateFlow = locationTracker.getLocationsFlow()
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-    private val _currentLocation = MutableStateFlow<LatLng?>(null)
+    private val _currentLocation = MutableStateFlow<LatLng?>(viewModelScope, null)
 
-    private val _selectedEvent = MutableStateFlow<EventAbs?>(null)
+    private val _selectedEvent = MutableStateFlow<EventAbs?>(viewModelScope, null)
     val selectedEvent: StateFlow<EventAbs?> = _selectedEvent.asStateFlow()
 
 

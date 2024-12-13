@@ -1,7 +1,6 @@
 package com.razumly.mvp.android
 
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
-import com.razumly.mvp.core.data.dataTypes.Tournament
 import kotlinx.serialization.Serializable
 
 
@@ -23,7 +22,7 @@ data object EventListRoute
 data object FollowingRoute
 
 @Serializable
-data object PlayRoute
+data object CreateRoute
 
 @Serializable
 data object ProfileRoute

@@ -31,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.navigation.NavController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -38,6 +39,8 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navigation
 import androidx.navigation.toRoute
 import com.example.compose.MVPTheme
+import com.google.android.libraries.places.api.Places
+import com.razumly.mvp.android.createEvent.CreateEventScreen
 import com.razumly.mvp.android.eventContent.matchDetailScreen.MatchDetailScreen
 import com.razumly.mvp.android.navTypes.CustomNavType
 import com.razumly.mvp.android.userAuth.loginScreen.LoginScreen
@@ -65,34 +68,8 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-sealed class NavigationItem(var route: Any, val icon: ImageVector, var title: Int) {
-    data object Search : NavigationItem(
-        EventListRoute,
-        Icons.Default.Search,
-        R.string.navMenuSearch
-    )
-
-    data object Following : NavigationItem(
-        FollowingRoute,
-        Icons.Default.Favorite,
-        R.string.navMenuPlay
-    )
-
-    data object Play : NavigationItem(
-        PlayRoute,
-        Icons.Default.PlayArrow,
-        R.string.navMenuPlay
-    )
-
-    data object Profile : NavigationItem(
-        ProfileRoute,
-        Icons.Default.Person,
-        R.string.navMenuProfile
-    )
-}
-
 val LocalUserSession = compositionLocalOf<UserData?> { null }
-val LocalTournament = compositionLocalOf<Tournament?> { null }
+val LocalNavController = compositionLocalOf<NavController> { error("No NavController provided") }
 
 @Composable
 fun App(activity: ComponentActivity) {
@@ -103,22 +80,7 @@ fun App(activity: ComponentActivity) {
     val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
     val shouldShowBottomBar = currentRoute != LoginRoute.toString()
     val currentUser = remember { mutableStateOf<UserData?>(null) }
-    val currentTournament = remember { mutableStateOf<Tournament?>(null) }
-
-    val items = listOf(
-        NavigationItem.Search,
-        NavigationItem.Following,
-        NavigationItem.Play,
-        NavigationItem.Profile
-    )
-
-    val selectedItem = remember { mutableIntStateOf(0) }
-
-    items.forEachIndexed { index, navigationItem ->
-        if (navigationItem.route.toString() == currentRoute) {
-            selectedItem.intValue = index
-        }
-    }
+    Places.initialize(activity, BuildConfig.googleMapsApiKey)
 
     LaunchedEffect(Unit) {
         with(sharedViewModel) {
@@ -127,111 +89,73 @@ fun App(activity: ComponentActivity) {
             onStartTracking()
         }
     }
-
-    Scaffold(
-        bottomBar = {
-            if (shouldShowBottomBar) {
-                Box(
-                    modifier = Modifier.background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Color.Transparent,
-                                MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
-                                MaterialTheme.colorScheme.surface
-                            ),
-                            startY = 0f,
-                            endY = 150f
-                        )
-                    )
+    CompositionLocalProvider(LocalNavController provides navController) {
+        MVPBottomNavBar(shouldShowBottomBar) { paddingValues ->
+            CompositionLocalProvider(LocalUserSession provides currentUser.value) {
+                NavHost(
+                    navController = navController,
+                    startDestination = LoginRoute,
+                    modifier = Modifier.padding(paddingValues)
                 ) {
-                    NavigationBar(
-                        modifier = Modifier.background(Color.Transparent),
-                        containerColor = Color.Transparent
+                    composable<LoginRoute> {
+                        LoginScreen(
+                            viewModel = sharedViewModel,
+                            onNavigateToHome = { userData ->
+                                currentUser.value = userData
+                                navController.navigate(HomeRoute) {
+                                    popUpTo(LoginRoute) { inclusive = true }
+                                }
+                            }
+                        )
+                    }
+
+                    navigation<HomeRoute>(
+                        startDestination = EventListRoute
                     ) {
-                        items.forEachIndexed { index, item ->
-                            NavigationBarItem(
-                                icon = { Icon(item.icon, activity.getString(item.title)) },
-                                label = { Text(activity.getString(item.title)) },
-                                selected = selectedItem.intValue == index,
-                                onClick = { },
-                                colors = NavigationBarItemDefaults.colors(
-                                    indicatorColor = MaterialTheme.colorScheme.secondaryContainer.copy(
-                                        alpha = 0.5f
-                                    ),
-                                    unselectedIconColor = MaterialTheme.colorScheme.onSurface.copy(
-                                        alpha = 0.6f
-                                    ),
-                                    unselectedTextColor = MaterialTheme.colorScheme.onSurface.copy(
-                                        alpha = 0.6f
-                                    )
-                                )
+                        composable<EventListRoute> {
+                            EventListScreen(
+                                onTournamentSelected = {
+                                    navController.navigate(TournamentDetailRoute(it))
+                                }
                             )
                         }
-                    }
-                }
-            }
-        }
-    ) { paddingValues ->
-        CompositionLocalProvider(LocalUserSession provides currentUser.value) {
-            NavHost(
-                navController = navController,
-                startDestination = LoginRoute,
-                modifier = Modifier.padding(paddingValues)
-            ) {
-                composable<LoginRoute> {
-                    LoginScreen(
-                        viewModel = sharedViewModel,
-                        onNavigateToHome = { userData ->
-                            currentUser.value = userData
-                            navController.navigate(HomeRoute) {
-                                popUpTo(LoginRoute) { inclusive = true }
-                            }
-                        }
-                    )
-                }
 
-                navigation<HomeRoute>(
-                    startDestination = EventListRoute
-                ) {
-                    composable<EventListRoute> {
-                        EventListScreen(
-                            onTournamentSelected = {
-                                navController.navigate(TournamentDetailRoute(it))
-                            }
-                        )
-                    }
+                        composable<TournamentDetailRoute>(
+                            typeMap = mapOf(
+                                typeOf<EventAbs>() to CustomNavType.EventType,
+                            )
+                        ) { backStackEntry ->
+                            val arguments = backStackEntry.toRoute<TournamentDetailRoute>()
 
-                    composable<TournamentDetailRoute>(
-                        typeMap = mapOf(
-                            typeOf<EventAbs>() to CustomNavType.EventType,
-                        )
-                    ) { backStackEntry ->
-                        val arguments = backStackEntry.toRoute<TournamentDetailRoute>()
-
-                        TournamentDetailScreen(
-                            tournamentId = arguments.tournamentId,
-                            onNavToListScreen = {
-                                navController.navigate(EventListRoute)
-                            },
-                            onMatchClick = { match ->
-                                navController.navigate(
-                                    MatchDetailRoute(
-                                        match,
+                            TournamentDetailScreen(
+                                tournamentId = arguments.tournamentId,
+                                onNavToListScreen = {
+                                    navController.navigate(EventListRoute)
+                                },
+                                onMatchClick = { match ->
+                                    navController.navigate(
+                                        MatchDetailRoute(
+                                            match,
+                                        )
                                     )
-                                )
-                            },
-                        )
-                    }
+                                },
+                            )
+                        }
 
-                    composable<MatchDetailRoute>(
-                        typeMap = mapOf(
-                            typeOf<MatchMVP>() to CustomNavType.MatchMVPType,
-                            typeOf<Tournament>() to CustomNavType.TournamentType,
-                        )
-                    ) { backStackEntry ->
-                        val arguments = backStackEntry.toRoute<MatchDetailRoute>()
+                        composable<MatchDetailRoute>(
+                            typeMap = mapOf(
+                                typeOf<MatchMVP>() to CustomNavType.MatchMVPType,
+                                typeOf<Tournament>() to CustomNavType.TournamentType,
+                            )
+                        ) { backStackEntry ->
+                            val arguments = backStackEntry.toRoute<MatchDetailRoute>()
 
-                        MatchDetailScreen(arguments.match)
+                            MatchDetailScreen(arguments.match)
+                        }
+
+                        composable<CreateRoute> {
+                            CreateEventScreen()
+                        }
                     }
                 }
             }

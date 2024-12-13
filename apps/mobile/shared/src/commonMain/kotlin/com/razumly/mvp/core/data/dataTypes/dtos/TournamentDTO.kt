@@ -3,7 +3,9 @@ package com.razumly.mvp.core.data.dataTypes.dtos
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
+import kotlinx.serialization.Serializable
 
+@Serializable
 data class TournamentDTO(
     val name: String,
     val description: String,
@@ -20,7 +22,7 @@ data class TournamentDTO(
     val type: String,
     val start: String,  // ISO-8601 format string
     val end: String,    // ISO-8601 format string
-    val price: String,
+    val price: Double,
     val rating: Float,
     val imageUrl: String,
     val lat: Double,

@@ -45,10 +45,10 @@ kotlin {
             api(libs.kotlinx.serialization.json)
             implementation(libs.androidx.room.runtime)
             implementation(libs.androidx.sqlite.bundled)
+            implementation("io.appwrite:sdk-for-kmp:0.2.0")
         }
         androidMain.dependencies {
             implementation(libs.kotlinx.coroutines.android)
-            implementation(libs.sdkForAndroid)
             implementation(libs.koin.android)
             implementation(libs.koin.androidx.compose)
             implementation(libs.navigation.compose)

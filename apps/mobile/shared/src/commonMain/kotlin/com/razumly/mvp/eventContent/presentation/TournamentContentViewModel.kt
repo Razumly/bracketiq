@@ -1,42 +1,45 @@
 package com.razumly.mvp.eventContent.presentation
 
-import com.razumly.mvp.core.data.IAppwriteRepository
-import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.IMVPRepository
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.rickclephas.kmp.observableviewmodel.ViewModel
+import com.rickclephas.kmp.observableviewmodel.MutableStateFlow
 import com.rickclephas.kmp.observableviewmodel.launch
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.buffer
 
 class TournamentContentViewModel(
-    private val appwriteRepository: IAppwriteRepository,
+    private val appwriteRepository: IMVPRepository,
     tournamentId: String
 ) : ViewModel() {
-    private val _selectedTournament = MutableStateFlow<Tournament?>(null)
+    private val _selectedTournament = MutableStateFlow<Tournament?>(viewModelScope, null)
     val selectedTournament = _selectedTournament.asStateFlow()
 
-    private val _divisionMatches = MutableStateFlow<List<MatchWithRelations>>(emptyList())
+    private val _divisionMatches =
+        MutableStateFlow<List<MatchWithRelations>>(viewModelScope, emptyList())
     val divisionMatches = _divisionMatches.asStateFlow()
 
-    private val _currentMatches = MutableStateFlow<Map<String, MatchWithRelations>>(emptyMap())
+    private val _currentMatches =
+        MutableStateFlow<Map<String, MatchWithRelations>>(viewModelScope, emptyMap())
     val currentMatches = _currentMatches.asStateFlow()
 
-    private val _currentTeams = MutableStateFlow<Map<String, TeamWithPlayers>>(emptyMap())
+    private val _currentTeams =
+        MutableStateFlow<Map<String, TeamWithPlayers>>(viewModelScope, emptyMap())
     val currentTeams = _currentTeams.asStateFlow()
 
-    private val _selectedDivision = MutableStateFlow<String?>(null)
+    private val _selectedDivision = MutableStateFlow<String?>(viewModelScope, null)
     val selectedDivision = _selectedDivision.asStateFlow()
 
-    private val _isBracketView = MutableStateFlow(false)
+    private val _isBracketView = MutableStateFlow(viewModelScope, false)
     val isBracketView = _isBracketView.asStateFlow()
 
-    private val _rounds = MutableStateFlow<List<List<MatchWithRelations?>>>(emptyList())
+    private val _rounds =
+        MutableStateFlow<List<List<MatchWithRelations?>>>(viewModelScope, emptyList())
     val rounds = _rounds.asStateFlow()
 
-    private val _losersBracket = MutableStateFlow(false)
+    private val _losersBracket = MutableStateFlow(viewModelScope, false)
     val losersBracket = _losersBracket.asStateFlow()
 
     init {
@@ -47,7 +50,14 @@ class TournamentContentViewModel(
             appwriteRepository.matchUpdates
                 .buffer() // Buffer updates to prevent backpressure
                 .collect { updatedMatch ->
-                    _currentMatches.value[updatedMatch.match.id]
+                    _currentMatches.value = _currentMatches.value.toMutableMap().apply {
+                        put(updatedMatch.match.id, updatedMatch)
+                    }
+
+                    if (updatedMatch.match.division == _selectedDivision.value) {
+                        _divisionMatches.value = _currentMatches.value.values
+                            .filter { it.match.division == _selectedDivision.value }
+                    }
                 }
         }
         viewModelScope.launch {

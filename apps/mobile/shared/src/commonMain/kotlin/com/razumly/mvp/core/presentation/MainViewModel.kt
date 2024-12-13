@@ -1,29 +1,29 @@
 package com.razumly.mvp.core.presentation
 
-import com.razumly.mvp.core.data.IAppwriteRepository
+import com.razumly.mvp.core.data.IMVPRepository
 import com.razumly.mvp.core.data.dataTypes.LoginState
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.rickclephas.kmp.observableviewmodel.ViewModel
+import com.rickclephas.kmp.observableviewmodel.MutableStateFlow
 import com.rickclephas.kmp.observableviewmodel.launch
 import dev.icerock.moko.geo.LocationTracker
 import dev.icerock.moko.permissions.DeniedAlwaysException
 import dev.icerock.moko.permissions.DeniedException
 import dev.icerock.moko.permissions.Permission
 import dev.icerock.moko.permissions.PermissionsController
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 class MainViewModel(
-    private val appwriteRepository: IAppwriteRepository,
+    private val appwriteRepository: IMVPRepository,
     val permissionsController: PermissionsController,
     val locationTracker: LocationTracker
 ) : ViewModel() {
 
-    private val _loginState = MutableStateFlow<LoginState>(LoginState.Initial)
+    private val _loginState = MutableStateFlow<LoginState>(viewModelScope, LoginState.Initial)
     val loginState: StateFlow<LoginState> = _loginState.asStateFlow()
 
-    private val _currentUser = MutableStateFlow<UserData?>(null)
+    private val _currentUser = MutableStateFlow<UserData?>(viewModelScope, null)
     val currentUser: StateFlow<UserData?> = _currentUser.asStateFlow()
 
     init {

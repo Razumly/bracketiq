@@ -1,48 +1,47 @@
 package com.razumly.mvp.eventContent.presentation
 
-import com.razumly.mvp.core.data.IAppwriteRepository
+import com.razumly.mvp.core.data.IMVPRepository
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.rickclephas.kmp.observableviewmodel.ViewModel
+import com.rickclephas.kmp.observableviewmodel.MutableStateFlow
 import com.rickclephas.kmp.observableviewmodel.launch
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collect
-import kotlin.math.abs
 
 class MatchContentViewModel(
-    private val appwriteRepository: IAppwriteRepository,
+    private val appwriteRepository: IMVPRepository,
     selectedMatch: MatchMVP,
     private val currentUserId: String
 ) :
     ViewModel() {
-    private val _match = MutableStateFlow<MatchWithRelations?>(null)
+    private val _match = MutableStateFlow<MatchWithRelations?>(viewModelScope, null)
     val match = _match.asStateFlow()
 
-    private val _tournament = MutableStateFlow<Tournament?>(null)
+    private val _tournament = MutableStateFlow<Tournament?>(viewModelScope, null)
     val tournament = _tournament.asStateFlow()
 
-    private val _currentTeams = MutableStateFlow<Map<String, TeamWithPlayers>>(emptyMap())
+    private val _currentTeams =
+        MutableStateFlow<Map<String, TeamWithPlayers>>(viewModelScope, emptyMap())
     val currentTeams = _currentTeams.asStateFlow()
 
-    private val _matchFinished = MutableStateFlow(false)
+    private val _matchFinished = MutableStateFlow(viewModelScope, false)
     val matchFinished = _matchFinished.asStateFlow()
 
-    private val _refCheckedIn = MutableStateFlow(selectedMatch.refCheckedIn)
+    private val _refCheckedIn = MutableStateFlow(viewModelScope, selectedMatch.refCheckedIn)
     val refCheckedIn = _refCheckedIn.asStateFlow()
 
-    private val _currentSet = MutableStateFlow(0)
+    private val _currentSet = MutableStateFlow(viewModelScope, 0)
     val currentSet = _currentSet.asStateFlow()
 
-    private val _isRef = MutableStateFlow(false)
+    private val _isRef = MutableStateFlow(viewModelScope, false)
     val isRef = _isRef.asStateFlow()
 
-    private val _showRefCheckInDialog = MutableStateFlow(false)
+    private val _showRefCheckInDialog = MutableStateFlow(viewModelScope, false)
     val showRefCheckInDialog = _showRefCheckInDialog.asStateFlow()
 
-    private val _showSetConfirmDialog = MutableStateFlow(false)
+    private val _showSetConfirmDialog = MutableStateFlow(viewModelScope, false)
     val showSetConfirmDialog = _showSetConfirmDialog.asStateFlow()
 
     init {
@@ -72,7 +71,7 @@ class MatchContentViewModel(
     fun checkRefStatus() {
         val ref = currentTeams.value[match.value?.match?.refId]
         _isRef.value = ref?.players?.any { it.id == currentUserId } == true
-        _showRefCheckInDialog.value = !refCheckedIn.value
+        _showRefCheckInDialog.value = refCheckedIn.value == true
     }
 
     fun confirmRefCheckIn() {
@@ -92,7 +91,7 @@ class MatchContentViewModel(
     }
 
     fun updateScore(isTeam1: Boolean, increment: Boolean) {
-        if (!refCheckedIn.value) return
+        if (refCheckedIn.value == true) return
         if (match.value == null) return
 
         viewModelScope.launch {
