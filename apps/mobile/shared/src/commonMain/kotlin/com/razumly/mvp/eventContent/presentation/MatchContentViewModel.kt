@@ -11,7 +11,7 @@ import com.rickclephas.kmp.observableviewmodel.launch
 import kotlinx.coroutines.flow.asStateFlow
 
 class MatchContentViewModel(
-    private val appwriteRepository: IMVPRepository,
+    private val mvpRepository: IMVPRepository,
     selectedMatch: MatchMVP,
     private val currentUserId: String
 ) :
@@ -46,17 +46,17 @@ class MatchContentViewModel(
 
     init {
         viewModelScope.launch {
-            _currentTeams.value = appwriteRepository.getTeams(selectedMatch.tournamentId)
-            _tournament.value = appwriteRepository.getTournament(selectedMatch.tournamentId)
-            _match.value = appwriteRepository.getMatch(selectedMatch.id)
+            _currentTeams.value = mvpRepository.getTeams(selectedMatch.tournamentId)
+            _tournament.value = mvpRepository.getTournament(selectedMatch.tournamentId)
+            _match.value = mvpRepository.getMatch(selectedMatch.id)
         }
 
         viewModelScope.launch {
-            appwriteRepository.matchUpdates.collect {
+            mvpRepository.matchUpdates.collect {
                 _match.value = it
                 _refCheckedIn.value = it.match.refCheckedIn
+                checkRefStatus()
             }
-            checkRefStatus()
         }
     }
 
@@ -71,7 +71,7 @@ class MatchContentViewModel(
     fun checkRefStatus() {
         val ref = currentTeams.value[match.value?.match?.refId]
         _isRef.value = ref?.players?.any { it.id == currentUserId } == true
-        _showRefCheckInDialog.value = refCheckedIn.value == true
+        _showRefCheckInDialog.value = refCheckedIn.value != true
     }
 
     fun confirmRefCheckIn() {
@@ -85,7 +85,7 @@ class MatchContentViewModel(
                 )
             _refCheckedIn.value = true
             if (updatedMatch != null) {
-                appwriteRepository.updateMatch(updatedMatch)
+                mvpRepository.updateMatch(updatedMatch.match)
             }
         }
     }
@@ -121,7 +121,7 @@ class MatchContentViewModel(
 
             checkSetCompletion(updatedMatch)
             _match.value = updatedMatch
-            appwriteRepository.updateMatch(updatedMatch)
+            mvpRepository.updateMatch(updatedMatch.match)
         }
     }
 
@@ -172,7 +172,7 @@ class MatchContentViewModel(
             val updatedMatch =
                 match.value!!.copy(match = match.value!!.match.copy(setResults = setResults))
             _match.value = updatedMatch
-            appwriteRepository.updateMatch(updatedMatch)
+            mvpRepository.updateMatch(updatedMatch.match)
 
             val setsNeeded = if (match.value!!.match.losersBracket) {
                 tournament.value?.loserSetCount

@@ -3,6 +3,7 @@ package com.razumly.mvp.core.data
 import com.razumly.mvp.core.data.dataTypes.Bounds
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.Field
+import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
@@ -14,6 +15,7 @@ import com.razumly.mvp.core.data.dataTypes.dtos.TournamentDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.toEvent
 import com.razumly.mvp.core.data.dataTypes.dtos.toMatch
 import com.razumly.mvp.core.data.dataTypes.dtos.toTournament
+import com.razumly.mvp.core.data.dataTypes.toMatchDTO
 import com.razumly.mvp.core.util.DbConstants
 import com.razumly.mvp.core.util.DbConstants.MATCHES_CHANNEL
 import io.appwrite.Client
@@ -37,6 +39,8 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import kotlin.time.Duration.Companion.minutes
 
 class MVPRepository(
@@ -351,24 +355,14 @@ class MVPRepository(
         }
     }
 
-    override suspend fun updateMatch(match: MatchWithRelations) {
-        tournamentDB.getMatchDao().upsertMatch(match.match)
+    override suspend fun updateMatch(match: MatchMVP) {
         try {
-            val updateData = mapOf(
-                "setResults" to match.match.setResults,
-                "refereeCheckedIn" to match.match.refCheckedIn,
-                "refId" to match.match.refId,
-                "team1Points" to match.match.team1Points,
-                "team2Points" to match.match.team2Points,
-                "start" to match.match.start.toString(),
-                "end" to match.match.end?.toString(),
-                // Add other fields you need to update
-            )
             database.updateDocument(
                 DbConstants.DATABASE_NAME,
                 DbConstants.MATCHES_COLLECTION,
-                match.match.id,
-                updateData
+                match.id,
+                match.toMatchDTO(),
+                nestedType = MatchDTO::class
             )
         } catch (e: Exception) {
             Napier.e("Failed to update match", e, DbConstants.ERROR_TAG)
@@ -381,7 +375,8 @@ class MVPRepository(
                 DbConstants.DATABASE_NAME,
                 DbConstants.TOURNAMENT_COLLECTION,
                 newTournament.id,
-                newTournament.toJson()
+                newTournament,
+                nestedType = Tournament::class
             )
         } catch (e: Exception) {
             Napier.e("Failed to create tournament", e, DbConstants.ERROR_TAG)
@@ -421,6 +416,6 @@ interface IMVPRepository {
     suspend fun logout()
     suspend fun subscribeToMatches()
     suspend fun unsubscribeFromRealtime()
-    suspend fun updateMatch(match: MatchWithRelations)
+    suspend fun updateMatch(match: MatchMVP)
     suspend fun createTournament(newTournament: Tournament)
 }

@@ -2,7 +2,9 @@ package com.razumly.mvp.core.data.dataTypes
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import com.razumly.mvp.core.data.dataTypes.dtos.MatchDTO
 import kotlinx.datetime.Instant
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Entity
@@ -28,3 +30,27 @@ data class MatchMVP(
     val refCheckedIn: Boolean?,
     @PrimaryKey override val id: String,
 ) : Document()
+
+fun MatchMVP.toMatchDTO(): MatchDTO {
+    return MatchDTO(
+        id = id,
+        matchId = matchNumber,
+        team1 = team1,
+        team2 = team2,
+        tournament = tournamentId,
+        refId = refId,
+        field = field,
+        start = start.toString(),
+        end = end?.toString(),
+        division = division,
+        team1Points = team1Points,
+        team2Points = team2Points,
+        losersBracket = losersBracket,
+        winnerNextMatchId = winnerNextMatchId,
+        loserNextMatchId = loserNextMatchId,
+        previousLeftId = previousLeftMatchId,
+        previousRightId = previousRightMatchId,
+        setResults = setResults,
+        refereeCheckedIn = refCheckedIn,
+    )
+}

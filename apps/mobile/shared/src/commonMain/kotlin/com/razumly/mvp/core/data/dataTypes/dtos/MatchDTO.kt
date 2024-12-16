@@ -3,10 +3,12 @@ package com.razumly.mvp.core.data.dataTypes.dtos
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import kotlinx.datetime.Instant
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 
 @Serializable
 data class MatchDTO(
-    val id: String,
+    @Transient
+    val id: String = "",
     val matchId: Int,
     val team1: String?,
     val team2: String?,
