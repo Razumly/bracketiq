@@ -1,5 +1,13 @@
 package com.razumly.mvp.di
 
-import org.koin.core.module.Module
+import com.razumly.mvp.eventContent.presentation.TournamentContentViewModel
+import org.koin.dsl.module
 
-expect val tournamentContentViewModelModule: Module
+val tournamentContentViewModelModule = module {
+    single { (tournamentId: String) ->
+        TournamentContentViewModel(
+            appwriteRepository = get(),
+            tournamentId = tournamentId
+        )
+    }
+}

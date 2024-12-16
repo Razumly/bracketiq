@@ -32,20 +32,23 @@ kotlin {
     }
 
     sourceSets {
-        commonMain.dependencies {
-            implementation(libs.kotlinx.coroutines.core)
-            api(libs.kmp.observableviewmodel.core)
-            api(libs.kotlinx.datetime)
-            api(libs.kotlinx.datetime.ext)
-            api(libs.koin.core)
-            runtimeOnly(libs.androidx.lifecycle.runtime.compose)
-            api(libs.napier)
-            api(libs.permissions)
-            api(libs.geo)
-            api(libs.kotlinx.serialization.json)
-            implementation(libs.androidx.room.runtime)
-            implementation(libs.androidx.sqlite.bundled)
-            implementation("io.appwrite:sdk-for-kmp:0.2.0")
+        commonMain {
+            dependencies {
+                implementation(libs.kotlinx.coroutines.core)
+                api(libs.kmp.observableviewmodel.core)
+                api(libs.kotlinx.datetime)
+                api(libs.kotlinx.datetime.ext)
+                api(libs.koin.core)
+                runtimeOnly(libs.androidx.lifecycle.runtime.compose)
+                api(libs.napier)
+                api(libs.permissions)
+                api(libs.geo)
+                api(libs.kotlinx.serialization.json)
+                implementation(libs.androidx.room.runtime)
+                implementation(libs.androidx.sqlite.bundled)
+                api("io.appwrite:sdk-for-kmp:0.2.0")
+
+            }
         }
         androidMain.dependencies {
             implementation(libs.kotlinx.coroutines.android)
@@ -63,6 +66,7 @@ kotlin {
             languageSettings.optIn("kotlinx.cinterop.ExperimentalForeignApi")
         }
     }
+    sourceSets.removeAll { it.name.endsWith("Test") }
 }
 
 android {

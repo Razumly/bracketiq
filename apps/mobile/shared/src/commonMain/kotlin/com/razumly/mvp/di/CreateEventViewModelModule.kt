@@ -1,5 +1,14 @@
 package com.razumly.mvp.di
 
-import org.koin.core.module.Module
+import com.razumly.mvp.eventCreate.presentation.CreateEventViewModel
+import org.koin.dsl.module
 
-expect val createEventViewModelModule: Module
+val createEventViewModelModule= module {
+    single {
+        CreateEventViewModel(
+            appwriteRepository = get(),
+            permissionsController = get(),
+            locationTracker = get()
+        )
+    }
+}

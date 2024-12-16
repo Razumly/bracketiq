@@ -1,5 +1,10 @@
 package com.razumly.mvp.di
 
-import org.koin.core.module.Module
+import com.razumly.mvp.eventSearch.presentation.EventSearchViewModel
+import org.koin.dsl.module
 
-expect val eventSearchViewModelModule: Module
+val eventSearchViewModelModule = module {
+    single {
+        EventSearchViewModel(get(), get())
+    }
+}

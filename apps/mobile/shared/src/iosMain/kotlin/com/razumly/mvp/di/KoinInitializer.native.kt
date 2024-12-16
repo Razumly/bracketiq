@@ -2,12 +2,19 @@ package com.razumly.mvp.di
 
 import org.koin.core.context.startKoin
 
-
-class KoinInitializer {
+actual class KoinInitializer {
     actual fun init() {
         startKoin {
-            modules(mainViewModelModule )
+            modules(
+                mainViewModelModule,
+                MVPRepositoryModule,
+                eventSearchViewModelModule,
+                tournamentContentViewModelModule,
+                matchContentViewModelModule,
+                createEventViewModelModule,
+                clientModule
+            )
         }
-
     }
 }
+

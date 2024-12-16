@@ -1,22 +1,32 @@
 [
   {
     "moduleId": "com.rickclephas.kmp:kmp-observableviewmodel-core:1.0.0-BETA-7",
-    "file": "C:\\Users\\camka\\AndroidStudioProjects\\MVP\\.kotlin\\metadata\\kotlinTransformedCInteropMetadataLibraries\\com.rickclephas.kmp-kmp-observableviewmodel-core-1.0.0-BETA-7-iosMain-cinterop\\com.rickclephas.kmp_kmp-observableviewmodel-core-cinterop-KMPObservableViewModelCoreObjC-GA4_5A.klib",
+    "file": "/Users/elesesy/StudioProjects/mvp-app/.kotlin/metadata/kotlinTransformedCInteropMetadataLibraries/com.rickclephas.kmp-kmp-observableviewmodel-core-1.0.0-BETA-7-iosMain-cinterop/com.rickclephas.kmp_kmp-observableviewmodel-core-cinterop-KMPObservableViewModelCoreObjC-GA4_5A.klib",
     "sourceSetName": "iosMain"
   },
   {
     "moduleId": "androidx.sqlite:sqlite-bundled:2.5.0-alpha11",
-    "file": "C:\\Users\\camka\\AndroidStudioProjects\\MVP\\.kotlin\\metadata\\kotlinTransformedCInteropMetadataLibraries\\androidx.sqlite-sqlite-bundled-2.5.0-alpha11-nativeMain-cinterop\\androidx.sqlite_sqlite-bundled-cinterop-androidXBundledSqlite-9SUhcQ.klib",
+    "file": "/Users/elesesy/StudioProjects/mvp-app/.kotlin/metadata/kotlinTransformedCInteropMetadataLibraries/androidx.sqlite-sqlite-bundled-2.5.0-alpha11-nativeMain-cinterop/androidx.sqlite_sqlite-bundled-cinterop-androidXBundledSqlite-9SUhcQ.klib",
     "sourceSetName": "nativeMain"
   },
   {
     "moduleId": "org.jetbrains.kotlinx:atomicfu:0.23.2",
-    "file": "C:\\Users\\camka\\AndroidStudioProjects\\MVP\\.kotlin\\metadata\\kotlinTransformedCInteropMetadataLibraries\\org.jetbrains.kotlinx-atomicfu-0.23.2-nativeMain-cinterop\\org.jetbrains.kotlinx_atomicfu-cinterop-interop-yBS35w.klib",
+    "file": "/Users/elesesy/StudioProjects/mvp-app/.kotlin/metadata/kotlinTransformedCInteropMetadataLibraries/org.jetbrains.kotlinx-atomicfu-0.23.2-nativeMain-cinterop/org.jetbrains.kotlinx_atomicfu-cinterop-interop-yBS35w.klib",
     "sourceSetName": "nativeMain"
   },
   {
     "moduleId": "androidx.sqlite:sqlite-framework:2.5.0-alpha11",
-    "file": "C:\\Users\\camka\\AndroidStudioProjects\\MVP\\.kotlin\\metadata\\kotlinTransformedCInteropMetadataLibraries\\androidx.sqlite-sqlite-framework-2.5.0-alpha11-nativeMain-cinterop\\androidx.sqlite_sqlite-framework-cinterop-sqlite3-eHMSng.klib",
+    "file": "/Users/elesesy/StudioProjects/mvp-app/.kotlin/metadata/kotlinTransformedCInteropMetadataLibraries/androidx.sqlite-sqlite-framework-2.5.0-alpha11-nativeMain-cinterop/androidx.sqlite_sqlite-framework-cinterop-sqlite3-eHMSng.klib",
     "sourceSetName": "nativeMain"
+  },
+  {
+    "moduleId": "io.ktor:ktor-utils:3.0.1",
+    "file": "/Users/elesesy/StudioProjects/mvp-app/.kotlin/metadata/kotlinTransformedCInteropMetadataLibraries/io.ktor-ktor-utils-3.0.1-iosMain-cinterop/io.ktor_ktor-utils-cinterop-threadUtils-kGNXpQ.klib",
+    "sourceSetName": "iosMain"
+  },
+  {
+    "moduleId": "io.ktor:ktor-io:3.0.1",
+    "file": "/Users/elesesy/StudioProjects/mvp-app/.kotlin/metadata/kotlinTransformedCInteropMetadataLibraries/io.ktor-ktor-io-3.0.1-iosMain-cinterop/io.ktor_ktor-io-cinterop-mutex-G8iuZg.klib",
+    "sourceSetName": "iosMain"
   }
 ]

@@ -1,5 +1,12 @@
 package com.razumly.mvp.di
 
-import org.koin.core.module.Module
+import com.razumly.mvp.core.presentation.MainViewModel
+import org.koin.dsl.module
 
-expect val mainViewModelModule: Module
+val mainViewModelModule = module {
+    single { MainViewModel(
+        appwriteRepository = get(),
+        permissionsController = get(),
+        locationTracker = get()
+    ) }
+}

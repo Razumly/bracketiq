@@ -1,5 +1,15 @@
 package com.razumly.mvp.di
 
-import org.koin.core.module.Module
+import com.razumly.mvp.core.data.IMVPRepository
+import com.razumly.mvp.core.data.MVPRepository
+import org.koin.dsl.bind
+import org.koin.dsl.module
 
-expect val MVPRepositoryModule: Module
+val MVPRepositoryModule = module {
+    single {
+        MVPRepository(
+            client = get(),
+            tournamentDB = get()
+        )
+    } bind IMVPRepository::class
+}
