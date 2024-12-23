@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="navMenuSearch">Search</string>
+    <string name="navMenuFollowing">Following</string>
+    <string name="navMenuCreate">Create</string>
+    <string name="navMenuProfile">Profile</string>
+    <string name="not_referee_check_in_message">You are not the referee for this match. Would you like to replace the referee and start this match?</string>
+    <string name="referee_checkin_message">Would you like to check in and start this match?</string>
+    <string name="referee_check_in_title">Referee Check-In</string>
+    <string name="confirm_set_result_title">Confirm Set Result</string>
+    <string name="confirm_set_result_message">Do you want to confirm the results for Set %1$s?</string>
+    <string name="set_number">Set %1$s</string>
+    <string name="create_new_tournament">Create a New Pickup Tournament</string>"
+    <string name="step_progress">Step %1$: %2$</string>"
+    <string name="previous">Previous</string>
+    <string name="next">Next</string>
+    <string name="create_tournament">Create Tournament</string>
+    <string name="tournament_name">Tournament Name</string>
+    <string name="tournament_description">Tournament Description</string>
+    <string name="tournament_type">Tournament Type</string>
+    <string name="location_name">Location Name</string>
+    <string name="latitude">Latitude</string>
+    <string name="longitude">Longitude</string>
+    <string name="select_on_map">Select On Map</string>
+    <string name="entry_fee">Entry Fee</string>
+    <string name="invalid_price">Please enter a valid price</string>
+    <string name="free_entry_hint">Set to 0 for free entry</string>
+    <string name="start_date_time">Start Date &amp; Time</string>
+    <string name="end_date_time">End Date &amp; Time</string>
+    <string name="select_start_date">Select Start Date</string>
+    <string name="select_start_time">Select Start Time</string>
+    <string name="select_end_date">Select End Date</string>
+    <string name="select_end_time">Select End Time</string>
+    <string name="ok">OK</string>
+    <string name="cancel">Cancel</string>
+</resources>
