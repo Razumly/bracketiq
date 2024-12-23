@@ -30,7 +30,7 @@ import com.razumly.mvp.core.util.Converters
         MatchFieldCrossRef::class,
         TeamPlayerCrossRef::class,
     ],
-    version = 7
+    version = 9
 )
 @TypeConverters(Converters::class)
 abstract class MVPDatabase : RoomDatabase() {

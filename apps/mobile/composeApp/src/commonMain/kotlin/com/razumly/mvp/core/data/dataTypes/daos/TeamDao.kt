@@ -30,8 +30,13 @@ interface TeamDao {
 
     // Add player to team
     @Transaction
-    suspend fun addPlayerToTeam(teamId: String, userId: String) {
-        upsertTeamPlayerCrossRef(TeamPlayerCrossRef(teamId, userId))
+    suspend fun upsertTeamsWithPlayers(teams: List<Team>) {
+        upsertTeams(teams)
+        teams.forEach { team ->
+            team.players.forEach { id ->
+                upsertTeamPlayerCrossRef(TeamPlayerCrossRef(team.id, id))
+            }
+        }
     }
 
     // Remove player from team

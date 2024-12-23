@@ -167,7 +167,7 @@ class MVPRepository(
             ).documents.map {
                 it.data.copy(id = it.id)
             }.associateBy { it.id }
-            tournamentDB.getTeamDao().upsertTeams(teams.values.toList())
+            tournamentDB.getTeamDao().upsertTeamsWithPlayers(teams.values.toList())
             teamsWithPlayers = tournamentDB.getTeamDao().getTeamsWithPlayers(tournamentId)
                 .associateBy { it.team.id }
             return teamsWithPlayers
