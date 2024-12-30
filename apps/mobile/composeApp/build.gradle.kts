@@ -1,4 +1,7 @@
+import org.jetbrains.compose.ExperimentalComposeLibrary
+import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.plugin.KotlinSourceSetTree
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
@@ -9,6 +12,7 @@ plugins {
     alias(libs.plugins.ksp)
     alias(libs.plugins.room)
     alias(libs.plugins.compose.vectorize)
+    id("kotlin-parcelize")
 }
 
 kotlin {
@@ -41,8 +45,6 @@ kotlin {
             implementation(libs.play.services.maps)
             implementation(libs.play.services.location)
             implementation(libs.places)
-            implementation(libs.decompose.decompose)
-            implementation(libs.decompose.extensionsComposeJetbrains)
         }
         commonMain.dependencies {
             implementation(compose.runtime)
@@ -53,13 +55,14 @@ kotlin {
             implementation(compose.components.uiToolingPreview)
             implementation(libs.androidx.lifecycle.runtime.compose)
             implementation(libs.kotlinx.coroutines.core)
-            implementation(libs.decompose.decompose)
-            implementation(libs.decompose.extensionsComposeJetbrains)
             implementation(libs.coil.compose)
             implementation(libs.androidx.room.runtime)
             implementation(libs.androidx.sqlite.bundled)
             implementation(libs.compose.vectorize.core)
             implementation(libs.permissions.compose)
+            api(libs.decompose.decompose)
+            api(libs.decompose.extensionsComposeJetbrains)
+            api(libs.kotlinx.serialization.core)
             api(libs.geo.compose)
             api(libs.navigation.compose)
             api(libs.kotlinx.datetime)
@@ -71,6 +74,21 @@ kotlin {
             api(libs.kotlinx.serialization.json)
             api("io.appwrite:sdk-for-kmp:0.2.0")
             runtimeOnly(libs.androidx.lifecycle.runtime.compose)
+        }
+
+        commonTest.dependencies {
+            @OptIn(ExperimentalComposeLibrary::class)
+            implementation(compose.uiTest)
+            implementation(libs.kotlin.test)
+            implementation(libs.assertk)
+            implementation(libs.compose.ui.test.manifest)
+            implementation(libs.koin.test)
+            implementation(libs.androidx.sqlite.bundled)
+            implementation(kotlin("test-annotations-common"))
+            implementation(libs.kotlinx.coroutines.test)
+            implementation(libs.core.ktx)
+            implementation(libs.junit)
+            implementation(libs.robolectric)
         }
     }
 }
@@ -103,6 +121,11 @@ android {
     bundle {
         language {
             enableSplit = false
+        }
+    }
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
         }
     }
 }

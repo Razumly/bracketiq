@@ -9,6 +9,7 @@ import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.UserTournamentCrossRef
 import com.razumly.mvp.core.data.dataTypes.dtos.EventDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.MatchDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.TournamentDTO
@@ -20,7 +21,6 @@ import com.razumly.mvp.core.util.DbConstants
 import com.razumly.mvp.core.util.DbConstants.MATCHES_CHANNEL
 import io.appwrite.Client
 import io.appwrite.Query
-import io.appwrite.extensions.toJson
 import io.appwrite.models.Document
 import io.appwrite.models.DocumentList
 import io.appwrite.models.RealtimeSubscription
@@ -39,8 +39,6 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 import kotlin.time.Duration.Companion.minutes
 
 class MVPRepository(
@@ -69,7 +67,9 @@ class MVPRepository(
                 null
             ).data.copy(id = account.get().id)
             tournamentDB.getUserDataDao().upsertUserData(currentUser)
-            return currentUser
+            val currentUserRelations = tournamentDB.getUserDataDao().getUserDataById(account.get().id)
+
+            return currentUserRelations
         } catch (e: Exception) {
             Napier.e("Failed to login", e, DbConstants.ERROR_TAG)
             return null
@@ -135,6 +135,7 @@ class MVPRepository(
                 null,
             ).data.copy(id = currentAccount.id)
             tournamentDB.getUserDataDao().upsertUserData(currentUserData)
+
             return currentUserData
         } catch (e: Exception) {
             Napier.e("Failed to get current user", e, DbConstants.ERROR_TAG)
@@ -167,7 +168,7 @@ class MVPRepository(
             ).documents.map {
                 it.data.copy(id = it.id)
             }.associateBy { it.id }
-            tournamentDB.getTeamDao().upsertTeamsWithPlayers(teams.values.toList())
+            tournamentDB.getTeamDao().upsertTeamWithPlayers(teams.values.toList())
             teamsWithPlayers = tournamentDB.getTeamDao().getTeamsWithPlayers(tournamentId)
                 .associateBy { it.team.id }
             return teamsWithPlayers
@@ -274,8 +275,12 @@ class MVPRepository(
         var players: Map<String, UserData>
         if (!update) {
             players =
-                tournamentDB.getUserDataDao().getUserDataByTournamentId(tournamentId)
-                    .associateBy { it.id }
+                tournamentDB.getTournamentDao()
+                    .getUsersOfTournament(tournamentId)
+                    .players
+                    .associateBy {
+                    it.id
+                }
             if (players.isNotEmpty()) {
                 return players
             }
@@ -292,6 +297,12 @@ class MVPRepository(
             ).documents.map { it.data.copy(id = it.id) }.associateBy { it.id }
 
             tournamentDB.getUserDataDao().upsertUsersData(players.values.toList())
+            tournamentDB.getUserDataDao().upsertUserTournamentCrossRefs(players.values.map { user ->
+                UserTournamentCrossRef(user.id, tournamentId)
+            })
+            players = tournamentDB.getTournamentDao()
+                .getUsersOfTournament(tournamentId).players.associateBy {it.id}
+
             return players
         } catch (e: Exception) {
             Napier.e("Failed to get players", e, DbConstants.ERROR_TAG)
@@ -327,13 +338,13 @@ class MVPRepository(
 
     override suspend fun getEvents(): List<EventAbs> {
         val docs: DocumentList<EventDTO>
-        val currentUserTournament = getCurrentUser()?.tournamentId ?: return emptyList()
+        val currentUserTournamentIds = getCurrentUser(true)?.tournaments ?: return emptyList()
         try {
             docs = database.listDocuments(
                 DbConstants.DATABASE_NAME,
                 DbConstants.TOURNAMENT_COLLECTION,
                 queries = listOf(
-                    Query.equal("id", currentUserTournament),
+                    Query.equal("\$id", currentUserTournamentIds),
                 ),
                 EventDTO::class
             )

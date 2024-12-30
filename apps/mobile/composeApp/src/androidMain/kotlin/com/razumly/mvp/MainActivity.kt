@@ -6,6 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import com.arkivanov.decompose.DefaultComponentContext
+import com.arkivanov.decompose.retainedComponent
 import com.razumly.mvp.core.presentation.App
 import com.razumly.mvp.core.presentation.MVPTheme
 import com.razumly.mvp.core.presentation.RootComponent
@@ -25,9 +26,7 @@ class MainActivity : ComponentActivity() {
                 darkTheme = true
             ) {
                 KoinAndroidContext {
-                    val rootComponent = getKoin().get<RootComponent>{
-                        parametersOf(DefaultComponentContext(lifecycle))
-                    }
+                    val rootComponent = retainedComponent { getKoin().get<RootComponent>{ parametersOf(it) } }
                     App(rootComponent)
                 }
             }

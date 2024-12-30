@@ -2,12 +2,12 @@ package com.razumly.mvp.core.presentation
 
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.Composable
-import com.razumly.mvp.core.presentation.Tab
+import com.razumly.mvp.core.presentation.HomeComponent.*
 
 @Composable
 actual fun MVPBottomNavBar(
-    selectedTab: Any,
-    onTabSelected: (Tab) -> Unit,
+    selectedPage: Any,
+    onPageSelected: (Page) -> Unit,
     content: @Composable (PaddingValues) -> Unit
 ) {
 }

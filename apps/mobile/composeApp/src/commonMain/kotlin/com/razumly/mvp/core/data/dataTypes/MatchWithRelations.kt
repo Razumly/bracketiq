@@ -1,7 +1,6 @@
 package com.razumly.mvp.core.data.dataTypes
 
 import androidx.room.Embedded
-import androidx.room.Junction
 import androidx.room.Relation
 
 data class MatchWithRelations(
@@ -27,7 +26,7 @@ data class MatchWithRelations(
         entity = UserData::class,  // Changed from Team to UserData
         entityColumn = "id"
     )
-    val ref: UserWithTeams?,  // Changed from TeamWithPlayers
+    val ref: UserWithRelations?,  // Changed from TeamWithPlayers
 
     @Relation(
         parentColumn = "field",

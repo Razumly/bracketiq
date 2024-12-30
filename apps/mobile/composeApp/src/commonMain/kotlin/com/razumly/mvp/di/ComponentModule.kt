@@ -50,12 +50,12 @@ val componentModule = module {
             tournamentId: String,
             onMatchSelected: (MatchMVP) -> Unit
         ) ->
-        DefaultTournamentContentComponent(
-            componentContext = componentContext,
-            appwriteRepository = get(),
-            tournamentId = tournamentId,
-            onMatchSelected = onMatchSelected
-        )
+            DefaultTournamentContentComponent(
+                componentContext = componentContext,
+                appwriteRepository = get(),
+                tournamentId = tournamentId,
+                onMatchSelected = onMatchSelected,
+            )
     }
 
     factory { (componentContext: ComponentContext) ->
@@ -67,13 +67,17 @@ val componentModule = module {
         )
     }
 
-    factory { (componentContext: ComponentContext, onTournamentSelected: (String) -> Unit) ->
-        SearchEventListComponent(
-            componentContext = componentContext,
-            appwriteRepository = get(),
-            locationTracker = get(),
-            onTournamentSelected = onTournamentSelected
-        )
+    factory {
+        (
+            componentContext: ComponentContext,
+            onTournamentSelected: (String) -> Unit,
+        ) ->
+            SearchEventListComponent(
+                componentContext = componentContext,
+                appwriteRepository = get(),
+                locationTracker = get(),
+                onTournamentSelected = onTournamentSelected,
+            )
     }
 
     factory { (componentContext: ComponentContext, onTournamentSelected: (EventAbs) -> Unit) ->

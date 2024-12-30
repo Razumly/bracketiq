@@ -1,6 +1,7 @@
 package com.razumly.mvp.eventContent.presentation
 
 import com.arkivanov.decompose.ComponentContext
+import com.arkivanov.essenty.backhandler.BackCallback
 import com.razumly.mvp.core.data.IMVPRepository
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
@@ -15,7 +16,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.launch
 
-interface TournamentContentComponent {
+interface TournamentContentComponent : ComponentContext {
     val selectedTournament: StateFlow<Tournament?>
     val divisionMatches: StateFlow<List<MatchWithRelations>>
     val currentMatches: StateFlow<Map<String, MatchWithRelations>>
@@ -35,9 +36,8 @@ class DefaultTournamentContentComponent(
     componentContext: ComponentContext,
     private val appwriteRepository: IMVPRepository,
     private val tournamentId: String,
-    private val onMatchSelected: (MatchMVP) -> Unit
+    private val onMatchSelected: (MatchMVP) -> Unit,
 ) : TournamentContentComponent, ComponentContext by componentContext {
-
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     private val _selectedTournament = MutableStateFlow<Tournament?>(null)
@@ -86,6 +86,7 @@ class DefaultTournamentContentComponent(
             _divisionMatches.collect { generateRounds() }
         }
     }
+
 
     override fun matchSelected(selectedMatch: MatchMVP) {
         onMatchSelected(selectedMatch)

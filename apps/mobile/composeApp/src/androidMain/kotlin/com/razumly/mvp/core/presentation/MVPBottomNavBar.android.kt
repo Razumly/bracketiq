@@ -15,31 +15,32 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import com.razumly.mvp.core.presentation.HomeComponent.*
 
 @Composable
 actual fun MVPBottomNavBar(
-    selectedTab: Any,
-    onTabSelected: (Tab) -> Unit,
+    selectedPage: Any,
+    onPageSelected: (Page) -> Unit,
     content: @Composable (PaddingValues) -> Unit
 ) {
     val items = listOf(
         NavigationItem(
-            Tab.EventList,
+            Page.EventList,
             "search",
             "Search"
         ),
         NavigationItem(
-            Tab.Following,
+            Page.Following,
             "favorite",
             "Following"
         ),
         NavigationItem(
-            Tab.Create,
+            Page.Create,
             "add",
             "Create"
         ),
         NavigationItem(
-            Tab.Profile,
+            Page.Profile,
             "person",
             "Profile"
         )
@@ -62,8 +63,8 @@ actual fun MVPBottomNavBar(
                             }
                         },
                         label = { Text(item.titleResId) },
-                        selected = selectedTab == item.tab,
-                        onClick = { onTabSelected(item.tab) },
+                        selected = selectedPage == item.page,
+                        onClick = { onPageSelected(item.page) },
                         colors = NavigationBarItemDefaults.colors(
                             indicatorColor = MaterialTheme.colorScheme.secondaryContainer
                         )

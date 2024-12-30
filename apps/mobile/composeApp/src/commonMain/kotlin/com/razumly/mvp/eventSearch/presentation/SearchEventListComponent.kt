@@ -1,6 +1,7 @@
 package com.razumly.mvp.eventSearch.presentation
 
 import com.arkivanov.decompose.ComponentContext
+import com.arkivanov.essenty.backhandler.BackCallback
 import com.razumly.mvp.core.data.IMVPRepository
 import com.razumly.mvp.core.data.dataTypes.Bounds
 import com.razumly.mvp.core.data.dataTypes.EventAbs
@@ -26,7 +27,7 @@ class SearchEventListComponent(
     componentContext: ComponentContext,
     private val appwriteRepository: IMVPRepository,
     val locationTracker: LocationTracker,
-    private val onTournamentSelected: (String) -> Unit
+    private val onTournamentSelected: (String) -> Unit,
 ) : EventListComponent, ComponentContext by componentContext {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 

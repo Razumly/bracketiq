@@ -13,8 +13,7 @@ actual val roomDBModule = module {
         Room.databaseBuilder<MVPDatabase>(
             context.applicationContext,
             dbFile.absolutePath
-        )
-            .setDriver(BundledSQLiteDriver())
+        ).setDriver(BundledSQLiteDriver())
             .fallbackToDestructiveMigration(false)
             .build()
     }

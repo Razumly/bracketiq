@@ -7,6 +7,8 @@ import androidx.room.Transaction
 import androidx.room.Upsert
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
+import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.TeamPlayerCrossRef
 
 @Dao
 interface MatchDao {
@@ -26,5 +28,4 @@ interface MatchDao {
     @Transaction
     @Query("SELECT * FROM MatchMVP WHERE tournamentId = :tournamentId")
     suspend fun getMatchesByTournamentId(tournamentId: String): List<MatchWithRelations>
-
 }

@@ -15,21 +15,23 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
 import org.koin.core.parameter.parametersOf
 import org.koin.mp.KoinPlatform.getKoin
+import com.razumly.mvp.core.presentation.HomeComponent.*
 
 class RootComponent(
     componentContext: ComponentContext,
     val permissionsController: PermissionsController,
     val locationTracker: LocationTracker
 ) : ComponentContext by componentContext {
-    private val navigation = StackNavigation<ConfigRoot>()
+    private val navigation = StackNavigation<Config>()
     private val _koin = getKoin()
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     // Create onLogin reference before childStack
     private val onLoginCallback = {
-        navigation.replaceCurrent(ConfigRoot.Home())
+        navigation.replaceCurrent(Config.Home())
     }
 
     init {
@@ -47,23 +49,23 @@ class RootComponent(
 
     val childStack = childStack(
         source = navigation,
-        initialConfiguration = ConfigRoot.Login,
-        serializer = ConfigRoot.serializer(),
+        initialConfiguration = Config.Login,
+        serializer = Config.serializer(),
         handleBackButton = true,
         childFactory = ::createChild
     )
 
     private fun createChild(
-        configRoot: ConfigRoot,
+        config: Config,
         componentContext: ComponentContext
-    ): Child = when (configRoot) {
-        is ConfigRoot.Login -> Child.Login(
+    ): Child = when (config) {
+        is Config.Login -> Child.Login(
             _koin.inject<DefaultLoginComponent> {
                 parametersOf(componentContext, onLoginCallback)
             }.value
         )
 
-        is ConfigRoot.Home -> Child.Home(
+        is Config.Home -> Child.Home(
             _koin.inject<DefaultHomeComponent> {
                 parametersOf(componentContext)
             }.value
@@ -74,4 +76,14 @@ class RootComponent(
         data class Login(val component: LoginComponent) : Child()
         data class Home(val component: HomeComponent) : Child()
     }
+
+    @Serializable
+    sealed class Config{
+        @Serializable
+        data object Login : Config()
+
+        @Serializable
+        data class Home(val selectedPage: Page = Page.EventList) : Config()
+    }
+
 }

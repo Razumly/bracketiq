@@ -1,6 +1,5 @@
 package com.razumly.mvp.core.presentation
 
-import TournamentDetailScreen
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
@@ -17,6 +16,7 @@ import com.arkivanov.decompose.extensions.compose.stack.animation.stackAnimation
 import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import com.razumly.mvp.eventCreate.presentation.CreateEventScreen
 import com.razumly.mvp.eventContent.presentation.matchDetailScreen.MatchDetailScreen
+import com.razumly.mvp.eventContent.presentation.tournamentDetailScreen.TournamentDetailScreen
 import com.razumly.mvp.eventFollowing.presentation.EventFollowingScreen
 import com.razumly.mvp.eventSearch.presentation.EventSearchScreen
 import com.razumly.mvp.profile.presentation.ProfileScreen
@@ -54,8 +54,8 @@ fun HomeScreen(component: HomeComponent) {
     val childStack by component.childStack.subscribeAsState()
 
     MVPBottomNavBar(
-        selectedTab = childStack.active.configuration,
-        onTabSelected = component::onTabSelected,
+        selectedPage = childStack.active.configuration,
+        onPageSelected = component::onTabSelected,
     ) { paddingValues ->
         Box(modifier = Modifier.padding(paddingValues)) {
             Children(

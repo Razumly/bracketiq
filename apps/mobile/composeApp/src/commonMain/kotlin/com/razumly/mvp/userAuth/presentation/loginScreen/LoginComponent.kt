@@ -4,6 +4,7 @@ import com.arkivanov.decompose.ComponentContext
 import com.razumly.mvp.core.data.IMVPRepository
 import com.razumly.mvp.core.data.dataTypes.LoginState
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.UserWithRelations
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob

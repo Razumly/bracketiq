@@ -30,7 +30,7 @@ interface TeamDao {
 
     // Add player to team
     @Transaction
-    suspend fun upsertTeamsWithPlayers(teams: List<Team>) {
+    suspend fun upsertTeamWithPlayers(teams: List<Team>) {
         upsertTeams(teams)
         teams.forEach { team ->
             team.players.forEach { id ->

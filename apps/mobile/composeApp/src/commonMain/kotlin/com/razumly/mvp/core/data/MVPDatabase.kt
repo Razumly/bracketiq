@@ -5,12 +5,12 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.razumly.mvp.core.data.dataTypes.Field
-import com.razumly.mvp.core.data.dataTypes.MatchFieldCrossRef
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamPlayerCrossRef
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.UserTournamentCrossRef
 import com.razumly.mvp.core.data.dataTypes.daos.EventImpDao
 import com.razumly.mvp.core.data.dataTypes.daos.FieldDao
 import com.razumly.mvp.core.data.dataTypes.daos.MatchDao
@@ -18,6 +18,10 @@ import com.razumly.mvp.core.data.dataTypes.daos.TeamDao
 import com.razumly.mvp.core.data.dataTypes.daos.TournamentDao
 import com.razumly.mvp.core.data.dataTypes.daos.UserDataDao
 import com.razumly.mvp.core.util.Converters
+import io.ktor.utils.io.locks.synchronized
+import kotlinx.coroutines.InternalCoroutinesApi
+import kotlinx.coroutines.internal.synchronized
+import kotlin.concurrent.Volatile
 
 @Database(
     entities = [
@@ -27,10 +31,10 @@ import com.razumly.mvp.core.util.Converters
         Field::class,
         Team::class,
         EventImp::class,
-        MatchFieldCrossRef::class,
         TeamPlayerCrossRef::class,
+        UserTournamentCrossRef::class,
     ],
-    version = 9
+    version = 11
 )
 @TypeConverters(Converters::class)
 abstract class MVPDatabase : RoomDatabase() {

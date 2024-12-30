@@ -1,3 +1,5 @@
+package com.razumly.mvp.eventContent.presentation.tournamentDetailScreen
+
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.expandVertically

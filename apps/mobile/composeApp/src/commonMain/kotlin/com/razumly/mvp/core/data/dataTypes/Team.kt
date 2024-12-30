@@ -9,17 +9,11 @@ import kotlinx.serialization.Serializable
 @Entity
 @Serializable
 data class Team(
-    @ColumnInfo(name = "name")
     var name: String? = null,
-    @ColumnInfo(name = "tournament")
     var tournament: String = "",
-    @ColumnInfo(name = "seed")
     var seed: Int = 0,
-    @ColumnInfo(name = "division")
     var division: String = "",
-    @ColumnInfo(name = "wins")
     var wins: Int = 0,
-    @ColumnInfo(name = "losses")
     var losses: Int = 0,
     @Ignore
     var players: List<String> = emptyList(),
