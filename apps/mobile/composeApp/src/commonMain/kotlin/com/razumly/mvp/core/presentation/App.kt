@@ -29,7 +29,8 @@ fun App(root: RootComponent) {
     val childStack by root.childStack.subscribeAsState()
 
     setSingletonImageLoaderFactory { context ->
-        ImageLoader.Builder(context)
+        ImageLoader
+            .Builder(context)
             .crossfade(true)
             .build()
     }

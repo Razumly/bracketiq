@@ -18,10 +18,6 @@ import com.razumly.mvp.core.data.dataTypes.daos.TeamDao
 import com.razumly.mvp.core.data.dataTypes.daos.TournamentDao
 import com.razumly.mvp.core.data.dataTypes.daos.UserDataDao
 import com.razumly.mvp.core.util.Converters
-import io.ktor.utils.io.locks.synchronized
-import kotlinx.coroutines.InternalCoroutinesApi
-import kotlinx.coroutines.internal.synchronized
-import kotlin.concurrent.Volatile
 
 @Database(
     entities = [
