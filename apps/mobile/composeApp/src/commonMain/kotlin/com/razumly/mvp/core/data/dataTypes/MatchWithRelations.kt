@@ -2,7 +2,9 @@ package com.razumly.mvp.core.data.dataTypes
 
 import androidx.room.Embedded
 import androidx.room.Relation
+import kotlinx.serialization.Serializable
 
+@Serializable
 data class MatchWithRelations(
     @Embedded
     val match: MatchMVP,
@@ -12,21 +14,21 @@ data class MatchWithRelations(
         entity = Team::class,
         entityColumn = "id"
     )
-    val team1: TeamWithPlayers?,
+    val team1: Team?,
 
     @Relation(
         parentColumn = "team2",
         entity = Team::class,
         entityColumn = "id"
     )
-    val team2: TeamWithPlayers?,
+    val team2: Team?,
 
     @Relation(
         parentColumn = "refId",
-        entity = UserData::class,  // Changed from Team to UserData
+        entity = UserData::class,
         entityColumn = "id"
     )
-    val ref: UserWithRelations?,  // Changed from TeamWithPlayers
+    val ref: UserData?,
 
     @Relation(
         parentColumn = "field",

@@ -120,27 +120,17 @@ class TournamentSimulator : BaseTest(), KoinComponent {
             match.match.team2Points.toMutableList()
         }
 
-        var newSet = currentSet
+        currentPoints[currentSet]++
 
-        val pointLimit = if (match.match.losersBracket) {
-            currentTournament.loserScoreLimitsPerSet[currentSet]
+        if (isTeam1) {
+            match.match.team1Points = currentPoints
         } else {
-            currentTournament.winnerScoreLimitsPerSet[currentSet]
+            match.match.team2Points = currentPoints
         }
 
-        if (currentPoints[currentSet] < pointLimit) {
-            currentPoints[currentSet]++
+        val newSet = checkSetCompletion(match.match, currentSet)
 
-            if (isTeam1) {
-                match.match.team1Points = currentPoints
-            } else {
-                match.match.team2Points = currentPoints
-            }
-
-            newSet = checkSetCompletion(match.match, currentSet)
-
-            repository.updateMatch(match.match)
-        }
+        repository.updateMatch(match.match)
 
         return newSet
     }

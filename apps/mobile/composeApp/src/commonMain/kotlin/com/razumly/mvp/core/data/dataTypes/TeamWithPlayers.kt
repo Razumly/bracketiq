@@ -3,7 +3,9 @@ package com.razumly.mvp.core.data.dataTypes
 import androidx.room.Embedded
 import androidx.room.Junction
 import androidx.room.Relation
+import kotlinx.serialization.Serializable
 
+@Serializable
 data class TeamWithPlayers(
     @Embedded val team: Team,
     @Relation(

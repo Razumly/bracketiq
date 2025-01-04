@@ -1,5 +1,5 @@
 package com.razumly.mvp.core.data.dataTypes
 
-abstract class Document {
+abstract class MVPDocument {
     abstract val id: String
 }

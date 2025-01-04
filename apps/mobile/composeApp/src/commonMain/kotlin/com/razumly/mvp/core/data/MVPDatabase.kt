@@ -32,15 +32,15 @@ import com.razumly.mvp.core.util.Converters
         TeamPlayerCrossRef::class,
         UserTournamentCrossRef::class,
     ],
-    version = 11
+    version = 17
 )
 @TypeConverters(Converters::class)
 @ConstructedBy(MVPDatabaseCtor::class)
 abstract class MVPDatabase : RoomDatabase() {
-    abstract fun getTournamentDao(): TournamentDao
-    abstract fun getMatchDao(): MatchDao
-    abstract fun getTeamDao(): TeamDao
-    abstract fun getFieldDao(): FieldDao
-    abstract fun getUserDataDao(): UserDataDao
-    abstract fun getEventImpDao(): EventImpDao
+    abstract val getTournamentDao: TournamentDao
+    abstract val getMatchDao: MatchDao
+    abstract val getTeamDao: TeamDao
+    abstract val getFieldDao: FieldDao
+    abstract val getUserDataDao: UserDataDao
+    abstract val getEventImpDao: EventImpDao
 }

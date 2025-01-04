@@ -29,9 +29,7 @@ data class MatchDTO(
     val refereeCheckedIn: Boolean?,
 )
 
-fun MatchDTO.toMatch(
-    id: String
-): MatchMVP {
+fun MatchDTO.toMatch(id: String): MatchMVP {
     return MatchMVP(
         id = id,
         tournamentId = tournament,

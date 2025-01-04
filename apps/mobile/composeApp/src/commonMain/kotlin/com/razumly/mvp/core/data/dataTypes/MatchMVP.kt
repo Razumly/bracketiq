@@ -4,7 +4,6 @@ import androidx.room.Entity
 import androidx.room.PrimaryKey
 import com.razumly.mvp.core.data.dataTypes.dtos.MatchDTO
 import kotlinx.datetime.Instant
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Entity
@@ -29,7 +28,7 @@ data class MatchMVP(
     val setResults: List<Int>,
     val refCheckedIn: Boolean?,
     @PrimaryKey override val id: String,
-) : Document()
+) : MVPDocument()
 
 fun MatchMVP.toMatchDTO(): MatchDTO {
     return MatchDTO(

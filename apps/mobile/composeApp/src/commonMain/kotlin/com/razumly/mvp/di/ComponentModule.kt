@@ -3,6 +3,7 @@ package com.razumly.mvp.di
 import com.arkivanov.decompose.ComponentContext
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.presentation.DefaultHomeComponent
 import com.razumly.mvp.core.presentation.RootComponent
@@ -36,7 +37,7 @@ val componentModule = module {
         DefaultHomeComponent(componentContext = componentContext)
     }
 
-    factory { (componentContext: ComponentContext, selectedMatch: MatchMVP) ->
+    factory { (componentContext: ComponentContext, selectedMatch: MatchWithRelations) ->
         DefaultMatchContentComponent(
             componentContext = componentContext,
             mvpRepository = get(),
@@ -48,7 +49,7 @@ val componentModule = module {
         (
             componentContext: ComponentContext,
             tournamentId: String,
-            onMatchSelected: (MatchMVP) -> Unit
+            onMatchSelected: (MatchWithRelations) -> Unit
         ) ->
             DefaultTournamentContentComponent(
                 componentContext = componentContext,

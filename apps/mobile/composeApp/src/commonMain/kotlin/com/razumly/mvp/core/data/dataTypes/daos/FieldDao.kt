@@ -5,6 +5,8 @@ import androidx.room.Delete
 import androidx.room.Query
 import androidx.room.Upsert
 import com.razumly.mvp.core.data.dataTypes.Field
+import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
+import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface FieldDao {
@@ -14,12 +16,18 @@ interface FieldDao {
     @Upsert
     suspend fun upsertFields(fields: List<Field>)
 
+    @Query("SELECT * FROM Field WHERE tournament = :tournamentId")
+    suspend fun getFields(tournamentId: String): List<Field>
+
+    @Query("DELETE FROM Field WHERE id IN (:ids)")
+    suspend fun deleteFieldsById(ids: List<String>)
+
     @Delete
     suspend fun deleteField(field: Field)
 
     @Query("SELECT * FROM Field WHERE id = :id")
-    suspend fun getFieldById(id: String): Field?
+    fun getFieldById(id: String): Flow<FieldWithMatches?>
 
     @Query("SELECT * FROM Field WHERE tournament = :tournament")
-    suspend fun getFieldsByTournamentId(tournament: String): List<Field>
+    fun getFieldsByTournamentId(tournament: String): Flow<List<FieldWithMatches>>
 }

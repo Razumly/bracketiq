@@ -37,17 +37,23 @@ import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.presentation.composables.HorizontalDivider
 import com.razumly.mvp.core.presentation.composables.VerticalDivider
 import androidx.compose.runtime.getValue
+import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.eventContent.presentation.MatchContentComponent
+import com.razumly.mvp.eventContent.presentation.TournamentContentComponent
 
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MatchCard(
+    component: TournamentContentComponent,
     match: MatchWithRelations,
     onMatchSelected: (MatchMVP) -> Unit,
     modifier: Modifier = Modifier,
     cardColors: CardColors = CardDefaults.cardColors(),
     interactionSource: MutableInteractionSource = remember { MutableInteractionSource() }
 ) {
+    val textModifier = Modifier.width(70.dp)
+    val team1 = component.currentTeams.value[match.match.team1]
+    val team2 = component.currentTeams.value[match.match.team2]
     val teamTextStyle = MaterialTheme.typography.bodyMedium.copy(
         textAlign = TextAlign.Start,
         lineHeight = 20.sp,
@@ -89,6 +95,8 @@ fun MatchCard(
 
             MatchTeamsSection(
                 match = match,
+                team1 = team1,
+                team2 = team2,
                 teamTextStyle = teamTextStyle
             )
         }
@@ -124,6 +132,8 @@ private fun MatchInfoSection(
 @Composable
 private fun MatchTeamsSection(
     match: MatchWithRelations,
+    team1: TeamWithPlayers?,
+    team2: TeamWithPlayers?,
     teamTextStyle: TextStyle,
     modifier: Modifier = Modifier
 ) {
@@ -137,7 +147,7 @@ private fun MatchTeamsSection(
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             TeamDisplay(
-                team = match.team1,
+                team = team1,
                 points = match.match.team1Points,
                 previousMatch = match.previousLeftMatch,
                 isLosersBracket = match.match.losersBracket,
@@ -147,7 +157,7 @@ private fun MatchTeamsSection(
             HorizontalDivider()
 
             TeamDisplay(
-                team = match.team2,
+                team = team2,
                 points = match.match.team2Points,
                 previousMatch = match.previousRightMatch,
                 isLosersBracket = match.match.losersBracket,
@@ -219,4 +229,3 @@ private fun TeamDisplay(
         }
     }
 }
-

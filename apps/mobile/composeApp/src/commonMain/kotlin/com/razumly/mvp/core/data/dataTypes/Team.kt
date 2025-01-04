@@ -1,6 +1,5 @@
 package com.razumly.mvp.core.data.dataTypes
 
-import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Ignore
 import androidx.room.PrimaryKey
@@ -19,7 +18,7 @@ data class Team(
     var players: List<String> = emptyList(),
     @PrimaryKey
     override var id: String = ""
-) : Document() {
+) : MVPDocument() {
     constructor() : this(
         name = null,
         tournament = "",

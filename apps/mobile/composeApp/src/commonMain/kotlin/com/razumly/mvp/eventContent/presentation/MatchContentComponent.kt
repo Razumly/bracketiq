@@ -7,13 +7,14 @@ import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.UserData
-import com.razumly.mvp.core.data.dataTypes.UserWithRelations
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 interface MatchContentComponent {
@@ -38,24 +39,27 @@ interface MatchContentComponent {
 class DefaultMatchContentComponent(
     componentContext: ComponentContext,
     private val mvpRepository: IMVPRepository,
-    private val selectedMatch: MatchMVP,
+    private val selectedMatch: MatchWithRelations,
 ) : MatchContentComponent, ComponentContext by componentContext {
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-    private val _match = MutableStateFlow<MatchWithRelations?>(null)
-    override val match = _match.asStateFlow()
+    override val match = mvpRepository
+        .getMatchFlow(selectedMatch.match.id)
+        .stateIn(scope, SharingStarted.Eagerly, selectedMatch)
 
-    private val _tournament = MutableStateFlow<Tournament?>(null)
-    override val tournament = _tournament.asStateFlow()
+    override val tournament = mvpRepository
+        .getTournamentFlow(selectedMatch.match.tournamentId)
+        .stateIn(scope, SharingStarted.Eagerly, null)
 
-    private val _currentTeams = MutableStateFlow<Map<String, TeamWithPlayers>>(emptyMap())
-    override val currentTeams = _currentTeams.asStateFlow()
+    override val currentTeams = mvpRepository
+        .getTeamsWithPlayersFlow(selectedMatch.match.tournamentId)
+        .stateIn(scope, SharingStarted.Eagerly, mapOf())
 
     private val _matchFinished = MutableStateFlow(false)
     override val matchFinished = _matchFinished.asStateFlow()
 
-    private val _refCheckedIn = MutableStateFlow(selectedMatch.refCheckedIn ?: false)
+    private val _refCheckedIn = MutableStateFlow(selectedMatch.match.refCheckedIn ?: false)
     override val refCheckedIn: StateFlow<Boolean> = _refCheckedIn.asStateFlow()
 
     private val _currentSet = MutableStateFlow(0)
@@ -74,19 +78,7 @@ class DefaultMatchContentComponent(
 
     init {
         scope.launch {
-            _currentTeams.value = mvpRepository.getTeams(selectedMatch.tournamentId)
-            _tournament.value = mvpRepository.getTournament(selectedMatch.tournamentId)
-            _match.value = mvpRepository.getMatch(selectedMatch.id)
-        }
-
-        scope.launch {
-            mvpRepository.matchUpdates.collect {
-                _match.value = it
-                _refCheckedIn.value = it.match.refCheckedIn == true
-                checkRefStatus()
-            }
-        }
-        scope.launch {
+            mvpRepository.getTournament(selectedMatch.match.tournamentId)
             _currentUser = mvpRepository.getCurrentUser()!!
         }
     }
@@ -100,8 +92,7 @@ class DefaultMatchContentComponent(
     }
 
     override fun checkRefStatus() {
-        val ref = currentTeams.value[match.value?.match?.refId]
-        _isRef.value = ref?.players?.any { it.id == _currentUser.id } == true
+        _isRef.value = match.value?.ref?.id == _currentUser.id
         _showRefCheckInDialog.value = refCheckedIn.value != true
     }
 
@@ -150,7 +141,6 @@ class DefaultMatchContentComponent(
             }
 
             checkSetCompletion(updatedMatch)
-            _match.value = updatedMatch
             mvpRepository.updateMatch(updatedMatch.match)
         }
     }
@@ -167,7 +157,6 @@ class DefaultMatchContentComponent(
             val updatedMatch = match.value!!.copy(
                 match = match.value!!.match.copy(setResults = setResults)
             )
-            _match.value = updatedMatch
             mvpRepository.updateMatch(updatedMatch.match)
 
             val setsNeeded = if (match.value!!.match.losersBracket) {

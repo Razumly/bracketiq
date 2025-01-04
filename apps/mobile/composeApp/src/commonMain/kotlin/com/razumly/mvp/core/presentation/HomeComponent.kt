@@ -4,6 +4,7 @@ import com.arkivanov.decompose.router.stack.ChildStack
 import com.arkivanov.decompose.value.Value
 import com.arkivanov.essenty.backhandler.BackHandler
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.eventContent.presentation.MatchContentComponent
 import com.razumly.mvp.eventContent.presentation.TournamentContentComponent
 import com.razumly.mvp.eventCreate.presentation.CreateEventComponent
@@ -39,7 +40,7 @@ interface HomeComponent {
 
         @Serializable
         data class MatchDetail(
-            val match: MatchMVP
+            val match: MatchWithRelations
         ) : Config()
 
         @Serializable

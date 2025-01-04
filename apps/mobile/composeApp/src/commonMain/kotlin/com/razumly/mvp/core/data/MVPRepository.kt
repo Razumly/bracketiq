@@ -3,11 +3,14 @@ package com.razumly.mvp.core.data
 import com.razumly.mvp.core.data.dataTypes.Bounds
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.Field
+import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
+import com.razumly.mvp.core.data.dataTypes.MVPDocument
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.Tournament
+import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.UserTournamentCrossRef
 import com.razumly.mvp.core.data.dataTypes.dtos.EventDTO
@@ -19,6 +22,7 @@ import com.razumly.mvp.core.data.dataTypes.dtos.toTournament
 import com.razumly.mvp.core.data.dataTypes.toMatchDTO
 import com.razumly.mvp.core.util.DbConstants
 import com.razumly.mvp.core.util.DbConstants.MATCHES_CHANNEL
+import com.razumly.mvp.core.util.convert
 import io.appwrite.Client
 import io.appwrite.Query
 import io.appwrite.models.Document
@@ -29,21 +33,22 @@ import io.appwrite.services.Account
 import io.appwrite.services.Databases
 import io.appwrite.services.Realtime
 import io.github.aakira.napier.Napier
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import kotlinx.datetime.Clock
-import kotlin.time.Duration.Companion.minutes
+import kotlinx.coroutines.withContext
 
 class MVPRepository(
     client: Client,
-    private val tournamentDB: MVPDatabase
+    private val tournamentDB: MVPDatabase,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 ) : IMVPRepository {
     private val account = Account(client)
 
@@ -51,8 +56,6 @@ class MVPRepository(
 
     private val realtime = Realtime(client)
 
-    private val _matchUpdates = MutableSharedFlow<MatchWithRelations>()
-    override val matchUpdates: Flow<MatchWithRelations> = _matchUpdates.asSharedFlow()
     private var subscription: RealtimeSubscription? = null
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -66,8 +69,8 @@ class MVPRepository(
                 account.get().id,
                 null
             ).data.copy(id = account.get().id)
-            tournamentDB.getUserDataDao().upsertUserData(currentUser)
-            val currentUserRelations = tournamentDB.getUserDataDao().getUserDataById(account.get().id)
+            tournamentDB.getUserDataDao.upsertUserData(currentUser)
+            val currentUserRelations = tournamentDB.getUserDataDao.getUserDataById(account.get().id)
 
             return currentUserRelations
         } catch (e: Exception) {
@@ -80,36 +83,36 @@ class MVPRepository(
         account.deleteSession("current")
     }
 
-    override suspend fun getTournament(tournamentId: String): Tournament? {
-        var tournament = tournamentDB.getTournamentDao().getTournamentById(tournamentId)
-        val update = true
-        if (tournament != null) {
-            if (Clock.System.now() - tournament.lastUpdated < 5.minutes) {
-                return tournament
-            }
-        }
+    override fun getTournamentFlow(
+        tournamentId: String
+    ) = tournamentDB.getTournamentDao.getTournamentById(tournamentId)
 
-        val response: Document<TournamentDTO>?
-        try {
-            response = database.getDocument(
-                DbConstants.DATABASE_NAME,
-                DbConstants.TOURNAMENT_COLLECTION,
-                tournamentId,
-                TournamentDTO::class,
-                queries = null,
-            )
-        } catch (e: Exception) {
-            Napier.e("Failed to get tournament", e, DbConstants.ERROR_TAG)
-            return null
-        }
-        getMatches(tournamentId, update)
-        getPlayers(tournamentId, update)
-        getTeams(tournamentId, update)
-        getFields(tournamentId, update)
-        tournament = response.data.copy(id = response.id, collectionId = response.collectionId)
-            .toTournament()
-        tournamentDB.getTournamentDao().upsertTournament(tournament)
-        return tournament
+    override suspend fun getTournament(tournamentId: String) {
+        val tournamentFlow = getData(
+            networkCall = {
+                database.getDocument(
+                    DbConstants.DATABASE_NAME,
+                    DbConstants.TOURNAMENT_COLLECTION,
+                    tournamentId,
+                    TournamentDTO::class,
+                    queries = null
+                )
+                    .data.toTournament()
+            },
+            saveCall = { tournament ->
+                tournamentDB.getTournamentDao.upsertTournament(tournament)
+            }
+        )
+        val players = getPlayersOfTournament(tournamentId)
+        val fields = getFields(tournamentId)
+        val teams = getTeams(tournamentId)
+        val matches = getMatches(tournamentId)
+        pushTeamPlayerCrossRef(teams)
+        return tournamentFlow
+    }
+
+    private suspend fun pushTeamPlayerCrossRef(teams: List<Team>) {
+        tournamentDB.getTeamDao.upsertTeamsWithPlayers(teams)
     }
 
     override suspend fun getCurrentUser(update: Boolean): UserData? {
@@ -122,7 +125,7 @@ class MVPRepository(
         }
         var currentUserData: UserData?
         if (!update) {
-            currentUserData = tournamentDB.getUserDataDao().getUserDataById(currentAccount.id)
+            currentUserData = tournamentDB.getUserDataDao.getUserDataById(currentAccount.id)
             if (currentUserData != null) {
                 return currentUserData
             }
@@ -134,7 +137,7 @@ class MVPRepository(
                 currentAccount.id,
                 null,
             ).data.copy(id = currentAccount.id)
-            tournamentDB.getUserDataDao().upsertUserData(currentUserData)
+            tournamentDB.getUserDataDao.upsertUserData(currentUserData)
 
             return currentUserData
         } catch (e: Exception) {
@@ -143,21 +146,17 @@ class MVPRepository(
         }
     }
 
-    override suspend fun getTeams(
+    override fun getTeamsWithPlayersFlow(
+        tournamentId: String
+    ) = tournamentDB.getTeamDao.getTeamsWithPlayers(tournamentId)
+        .map { teams -> teams.associateBy { it.team.id } }
+        .flowOn(ioDispatcher)
+
+    private suspend fun getTeams(
         tournamentId: String,
-        update: Boolean,
-    ): Map<String, TeamWithPlayers> {
-        var teamsWithPlayers: Map<String, TeamWithPlayers>
-        if (!update) {
-            teamsWithPlayers =
-                tournamentDB.getTeamDao().getTeamsWithPlayers(tournamentId)
-                    .associateBy { it.team.id }
-            if (teamsWithPlayers.isNotEmpty()) {
-                return teamsWithPlayers
-            }
-        }
-        try {
-            val teams = database.listDocuments(
+    ) = getDataList(
+        networkCall = {
+            database.listDocuments(
                 DbConstants.DATABASE_NAME,
                 DbConstants.VOLLEYBALL_TEAMS_COLLECTION,
                 queries = listOf(
@@ -165,92 +164,72 @@ class MVPRepository(
                     Query.limit(200)
                 ),
                 Team::class,
-            ).documents.map {
-                it.data.copy(id = it.id)
-            }.associateBy { it.id }
-            tournamentDB.getTeamDao().upsertTeamWithPlayers(teams.values.toList())
-            teamsWithPlayers = tournamentDB.getTeamDao().getTeamsWithPlayers(tournamentId)
-                .associateBy { it.team.id }
-            return teamsWithPlayers
-        } catch (e: Exception) {
-            Napier.e("Failed to get teams", e, DbConstants.ERROR_TAG)
-            return emptyMap()
-        }
-    }
+            ).documents
+        },
+        getLocalIds = { tournamentDB.getTeamDao.getTeams(tournamentId).toSet() },
+        deleteStaleData = { tournamentDB.getTeamDao.deleteTeamsByIds(it) },
+        saveData = { teams -> tournamentDB.getTeamDao.upsertTeams(teams) }
+    )
 
-    override suspend fun getMatches(
-        tournamentId: String,
-        update: Boolean
-    ): Map<String, MatchWithRelations> {
-        var matchesWithTeams: Map<String, MatchWithRelations>
-        if (!update) {
-            matchesWithTeams =
-                tournamentDB.getMatchDao().getMatchesByTournamentId(tournamentId)
-                    .associateBy { it.match.id }
-            if (matchesWithTeams.isNotEmpty()) {
-                return matchesWithTeams
-            }
-        }
-        try {
-            val matches = database.listDocuments(
-                DbConstants.DATABASE_NAME,
-                DbConstants.MATCHES_COLLECTION,
-                listOf(
-                    Query.equal(DbConstants.TOURNAMENT_ATTRIBUTE, tournamentId),
-                    Query.limit(200)
-                ),
-                MatchDTO::class
-            ).documents.map {
-                it.data.toMatch(it.id)
-            }.associateBy { it.id }
-            tournamentDB.getMatchDao().upsertMatches(matches.values.toList())
-            matchesWithTeams = tournamentDB.getMatchDao().getMatchesByTournamentId(tournamentId)
-                .associateBy { it.match.id }
-            return matchesWithTeams
-        } catch (e: Exception) {
-            Napier.e("Failed to get matches", e, DbConstants.ERROR_TAG)
-            return emptyMap()
-        }
-    }
+    override fun getMatchesFlow(
+        tournamentId: String
+    ) = tournamentDB.getMatchDao.getMatchesByTournamentId(tournamentId)
+        .map { matches -> matches.associateBy { it.match.id } }
+        .flowOn(ioDispatcher)
 
-    override suspend fun getMatch(matchId: String, update: Boolean): MatchWithRelations? {
-        if (!update) {
-            val matchWithRel = tournamentDB.getMatchDao().getMatchById(matchId)
-            if (matchWithRel != null) {
-                return matchWithRel
+    private suspend fun getMatches(tournamentId: String): List<MatchMVP> =
+        getDataList(
+            networkCall = {
+                val remoteMatches = database.listDocuments(
+                    DbConstants.DATABASE_NAME,
+                    DbConstants.MATCHES_COLLECTION,
+                    listOf(
+                        Query.equal(DbConstants.TOURNAMENT_ATTRIBUTE, tournamentId),
+                        Query.limit(200)
+                    ),
+                    MatchDTO::class
+                ).documents
+                remoteMatches.map { it.convert { matchDTO -> matchDTO.toMatch(it.id) } }
+            },
+            getLocalIds = {
+                val localMatches = tournamentDB.getMatchDao.getMatches(tournamentId)
+                localMatches.toSet()
+            },
+            deleteStaleData = { ids ->
+                tournamentDB.getMatchDao.deleteMatchesById(ids)
+            },
+            saveData = { matches ->
+                tournamentDB.getMatchDao.upsertMatches(matches)
             }
-        }
-        try {
-            val response = database.getDocument<MatchDTO>(
+        )
+
+    override fun getMatchFlow(
+        matchId: String
+    ) = tournamentDB.getMatchDao.getMatchFlowById(matchId)
+
+    override suspend fun getMatch(matchId: String) = getData(
+        networkCall = {
+            database.getDocument<MatchDTO>(
                 DbConstants.DATABASE_NAME,
                 DbConstants.MATCHES_COLLECTION,
                 matchId,
                 null,
-            )
-            val match = response.data.let { it.toMatch(it.id) }
-            tournamentDB.getMatchDao().upsertMatch(match)
-            return tournamentDB.getMatchDao().getMatchById(matchId)
-        } catch (e: Exception) {
-            Napier.e("Failed to get match", e, DbConstants.ERROR_TAG)
-            return null
+            ).data.toMatch(matchId)
+        },
+        saveCall = { match ->
+            tournamentDB.getMatchDao.upsertMatch(match)
         }
-    }
+    )
 
-    override suspend fun getFields(
-        tournamentId: String,
-        update: Boolean
-    ): Map<String, Field> {
-        var fields: Map<String, Field>
-        if (!update) {
-            fields =
-                tournamentDB.getFieldDao().getFieldsByTournamentId(tournamentId)
-                    .associateBy { it.id }
-            if (fields.isNotEmpty()) {
-                return fields
-            }
-        }
-        try {
-            fields = database.listDocuments(
+    override fun getFieldsFlow(
+        tournamentId: String
+    ) = tournamentDB.getFieldDao.getFieldsByTournamentId(tournamentId)
+
+    private suspend fun getFields(
+        tournamentId: String
+    ) = getDataList(
+        networkCall = {
+            database.listDocuments(
                 DbConstants.DATABASE_NAME,
                 DbConstants.FIELDS_COLLECTION,
                 queries = listOf(
@@ -258,35 +237,22 @@ class MVPRepository(
                     Query.limit(100)
                 ),
                 Field::class,
-            ).documents.map { it.data.copy(id = it.id) }
-                .associateBy { it.id }
-            tournamentDB.getFieldDao().upsertFields(fields.values.toList())
-            return fields
-        } catch (e: Exception) {
-            Napier.e("Failed to get fields", e, DbConstants.ERROR_TAG)
-            return emptyMap()
-        }
-    }
+            ).documents
+        },
+        getLocalIds = { tournamentDB.getFieldDao.getFields(tournamentId).toSet() },
+        deleteStaleData = { tournamentDB.getFieldDao.deleteFieldsById(it) },
+        saveData = { fields -> tournamentDB.getFieldDao.upsertFields(fields) }
+    )
 
-    override suspend fun getPlayers(
+    override fun getPlayersOfTournamentFlow(
+        tournamentId: String
+    ) = tournamentDB.getTournamentDao.getUsersOfTournament(tournamentId)
+
+    private suspend fun getPlayersOfTournament(
         tournamentId: String,
-        update: Boolean
-    ): Map<String, UserData> {
-        var players: Map<String, UserData>
-        if (!update) {
-            players =
-                tournamentDB.getTournamentDao()
-                    .getUsersOfTournament(tournamentId)
-                    .players
-                    .associateBy {
-                    it.id
-                }
-            if (players.isNotEmpty()) {
-                return players
-            }
-        }
-        try {
-            players = database.listDocuments(
+    ) = getDataList(
+        networkCall = {
+            database.listDocuments(
                 DbConstants.DATABASE_NAME,
                 DbConstants.USER_DATA_COLLECTION,
                 listOf(
@@ -294,21 +260,16 @@ class MVPRepository(
                     Query.limit(500)
                 ),
                 UserData::class
-            ).documents.map { it.data.copy(id = it.id) }.associateBy { it.id }
-
-            tournamentDB.getUserDataDao().upsertUsersData(players.values.toList())
-            tournamentDB.getUserDataDao().upsertUserTournamentCrossRefs(players.values.map { user ->
+            ).documents
+        },
+        getLocalIds = { tournamentDB.getUserDataDao.getUsers(tournamentId).toSet() },
+        deleteStaleData = { tournamentDB.getUserDataDao.deleteUsersById(it) },
+        saveData = { players ->
+            tournamentDB.getUserDataDao.upsertUsersData(players)
+            tournamentDB.getUserDataDao.upsertUserTournamentCrossRefs(players.map { user ->
                 UserTournamentCrossRef(user.id, tournamentId)
-            })
-            players = tournamentDB.getTournamentDao()
-                .getUsersOfTournament(tournamentId).players.associateBy {it.id}
-
-            return players
-        } catch (e: Exception) {
-            Napier.e("Failed to get players", e, DbConstants.ERROR_TAG)
-            return emptyMap()
-        }
-    }
+            }) }
+    )
 
     override suspend fun getEvents(
         bounds: Bounds
@@ -368,7 +329,7 @@ class MVPRepository(
             val matchUpdates = response.payload.data
             scope.launch(Dispatchers.IO) {
                 val id = response.channels.last().split(".").last()
-                val dbMatch = tournamentDB.getMatchDao().getMatchById(id)
+                val dbMatch = tournamentDB.getMatchDao.getMatchById(id)
                 dbMatch?.let { match ->
                     val updatedMatch = match.copy(
                         match = match.match.copy(
@@ -381,8 +342,7 @@ class MVPRepository(
                             refCheckedIn = matchUpdates.refereeCheckedIn,
                         )
                     )
-                    tournamentDB.getMatchDao().upsertMatch(updatedMatch.match)
-                    _matchUpdates.emit(updatedMatch)
+                    tournamentDB.getMatchDao.upsertMatch(updatedMatch.match)
                 }
             }
         }
@@ -390,13 +350,15 @@ class MVPRepository(
 
     override suspend fun updateMatch(match: MatchMVP) {
         try {
-            database.updateDocument(
+            val updatedDoc = database.updateDocument(
                 DbConstants.DATABASE_NAME,
                 DbConstants.MATCHES_COLLECTION,
                 match.id,
                 match.toMatchDTO(),
                 nestedType = MatchDTO::class
             )
+
+            tournamentDB.getMatchDao.upsertMatch(updatedDoc.data.toMatch(updatedDoc.id))
         } catch (e: Exception) {
             Napier.e("Failed to update match", e, DbConstants.ERROR_TAG)
         }
@@ -420,6 +382,49 @@ class MVPRepository(
         subscription?.close()
     }
 
+    private suspend fun <T> getDataList(
+        networkCall: suspend () -> List<Document<T>>,
+        getLocalIds: suspend () -> Set<MVPDocument>,
+        saveData: suspend (List<T>) -> Unit,
+        deleteStaleData: suspend (List<String>) -> Unit
+    ): List<T> {
+        var dataToSave: List<T> = listOf()
+        try {
+            // Get remote data
+            val remoteData = networkCall()
+
+            // Get current local IDs
+            val localIds = getLocalIds().map { it.id }
+
+            // Find stale items
+            val staleIds = localIds - remoteData.map { it.id }.toSet()
+
+            // Delete stale items
+            deleteStaleData(staleIds.toList())
+
+            // Save new/updated items
+            dataToSave = remoteData.map { it.data }.toList()
+            saveData(dataToSave)
+        } catch (e: Exception) {
+            Napier.e("Failed to sync data", e)
+        }
+        return dataToSave
+    }
+
+    private suspend fun <T> getData(
+        networkCall: suspend () -> T,
+        saveCall: suspend (T) -> Unit
+    ) {
+        try {
+            // Fetch fresh data from network
+            val networkResult = networkCall()
+            saveCall(networkResult)
+
+            // Updated data will be automatically emitted through the original Flow
+        } catch (e: Exception) {
+            Napier.e("Failed to update data", e, DbConstants.ERROR_TAG)
+        }
+    }
 
     fun cleanup() {
         scope.cancel()
@@ -427,22 +432,24 @@ class MVPRepository(
 }
 
 interface IMVPRepository {
-    val matchUpdates: Flow<MatchWithRelations>
-    suspend fun getTournament(tournamentId: String): Tournament?
-    suspend fun getTeams(
-        tournamentId: String, update: Boolean = false
-    ): Map<String, TeamWithPlayers>
+    fun getTournamentFlow(tournamentId: String): Flow<Tournament?>
+    suspend fun getTournament(tournamentId: String)
+    fun getTeamsWithPlayersFlow(
+        tournamentId: String
+    ): Flow<Map<String, TeamWithPlayers>>
 
-    suspend fun getMatches(
-        tournamentId: String,
-        update: Boolean = false
-    ): Map<String, MatchWithRelations>
+    fun getMatchFlow(
+        matchId: String
+    ): Flow<MatchWithRelations?>
+    suspend fun getMatch(matchId: String)
 
-    suspend fun getMatch(matchId: String, update: Boolean = false): MatchWithRelations?
+    fun getMatchesFlow(
+        tournamentId: String
+    ): Flow<Map<String, MatchWithRelations>>
 
-    suspend fun getFields(tournamentId: String, update: Boolean = false): Map<String, Field>
+    fun getFieldsFlow(tournamentId: String): Flow<List<FieldWithMatches>>
 
-    suspend fun getPlayers(tournamentId: String, update: Boolean = false): Map<String, UserData>
+    fun getPlayersOfTournamentFlow(tournamentId: String): Flow<TournamentWithRelations>
     suspend fun getEvents(bounds: Bounds): List<EventAbs>
     suspend fun getEvents(): List<EventAbs>
     suspend fun getCurrentUser(update: Boolean = false): UserData?

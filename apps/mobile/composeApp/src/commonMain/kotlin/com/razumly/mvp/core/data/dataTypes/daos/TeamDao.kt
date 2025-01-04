@@ -8,6 +8,8 @@ import androidx.room.Upsert
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamPlayerCrossRef
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
+import io.github.aakira.napier.Napier
+import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface TeamDao {
@@ -16,6 +18,12 @@ interface TeamDao {
 
     @Upsert
     suspend fun upsertTeams(teams: List<Team>)
+
+    @Query("SELECT * FROM Team WHERE tournament = :tournamentId")
+    suspend fun getTeams(tournamentId: String): List<Team>
+
+    @Query("DELETE FROM Team WHERE id IN (:ids)")
+    suspend fun deleteTeamsByIds(ids: List<String>)
 
     @Upsert
     suspend fun upsertTeamPlayerCrossRef(crossRef: TeamPlayerCrossRef)
@@ -26,15 +34,19 @@ interface TeamDao {
 
     @Transaction
     @Query("SELECT * FROM Team WHERE tournament = :tournamentId")
-    suspend fun getTeamsWithPlayers(tournamentId: String): List<TeamWithPlayers>
+    fun getTeamsWithPlayers(tournamentId: String): Flow<List<TeamWithPlayers>>
 
     // Add player to team
     @Transaction
-    suspend fun upsertTeamWithPlayers(teams: List<Team>) {
+    suspend fun upsertTeamsWithPlayers(teams: List<Team>) {
         upsertTeams(teams)
         teams.forEach { team ->
-            team.players.forEach { id ->
-                upsertTeamPlayerCrossRef(TeamPlayerCrossRef(team.id, id))
+            team.players.forEach { playerId ->
+                try {
+                    upsertTeamPlayerCrossRef(TeamPlayerCrossRef(team.id, playerId))
+                } catch (e: Exception) {
+                    Napier.e("Failed to create cross reference for team ${team.id} and player $playerId")
+                }
             }
         }
     }

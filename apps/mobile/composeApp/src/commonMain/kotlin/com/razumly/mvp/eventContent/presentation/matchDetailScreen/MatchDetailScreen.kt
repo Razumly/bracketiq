@@ -103,8 +103,8 @@ fun MatchDetailScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceEvenly
     ) {
-        val team1 = match?.team1
-        val team2 = match?.team2
+        val team1 = currentTeams[match?.team1?.id]
+        val team2 = currentTeams[match?.team2?.id]
         val team1Text = if (team1?.team?.name != null) {
             team1.team.name.toString()
         } else {

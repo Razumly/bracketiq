@@ -1,9 +1,7 @@
 package com.razumly.mvp.eventContent.presentation
 
 import com.arkivanov.decompose.ComponentContext
-import com.arkivanov.essenty.backhandler.BackCallback
 import com.razumly.mvp.core.data.IMVPRepository
-import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.Tournament
@@ -11,9 +9,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.buffer
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 interface TournamentContentComponent : ComponentContext {
@@ -26,7 +27,7 @@ interface TournamentContentComponent : ComponentContext {
     val rounds: StateFlow<List<List<MatchWithRelations?>>>
     val losersBracket: StateFlow<Boolean>
 
-    fun matchSelected (selectedMatch: MatchMVP)
+    fun matchSelected (selectedMatch: MatchWithRelations)
     fun selectDivision(division: String)
     fun toggleBracketView()
     fun toggleLosersBracket()
@@ -35,22 +36,29 @@ interface TournamentContentComponent : ComponentContext {
 class DefaultTournamentContentComponent(
     componentContext: ComponentContext,
     private val appwriteRepository: IMVPRepository,
-    private val tournamentId: String,
-    private val onMatchSelected: (MatchMVP) -> Unit,
+    tournamentId: String,
+    private val onMatchSelected: (MatchWithRelations) -> Unit,
 ) : TournamentContentComponent, ComponentContext by componentContext {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-    private val _selectedTournament = MutableStateFlow<Tournament?>(null)
-    override val selectedTournament = _selectedTournament.asStateFlow()
+    override val selectedTournament = appwriteRepository
+        .getTournamentFlow(tournamentId)
+        .stateIn(scope, SharingStarted.Eagerly, null)
 
     private val _divisionMatches = MutableStateFlow<List<MatchWithRelations>>(emptyList())
     override val divisionMatches = _divisionMatches.asStateFlow()
 
-    private val _currentMatches = MutableStateFlow<Map<String, MatchWithRelations>>(emptyMap())
-    override val currentMatches = _currentMatches.asStateFlow()
+    override val currentMatches = appwriteRepository
+        .getMatchesFlow(tournamentId)
+        .stateIn(
+            scope = scope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyMap()
+        )
 
-    private val _currentTeams = MutableStateFlow<Map<String, TeamWithPlayers>>(emptyMap())
-    override val currentTeams = _currentTeams.asStateFlow()
+    override val currentTeams = appwriteRepository
+        .getTeamsWithPlayersFlow(tournamentId)
+        .stateIn(scope, SharingStarted.Eagerly, mapOf())
 
     private val _selectedDivision = MutableStateFlow<String?>(null)
     override val selectedDivision = _selectedDivision.asStateFlow()
@@ -66,21 +74,20 @@ class DefaultTournamentContentComponent(
 
     init {
         scope.launch {
-            loadTournament(tournamentId)
+            appwriteRepository.getTournament(tournamentId)
+            selectedTournament
+                .distinctUntilChanged { old, new -> old == new }
+                .filterNotNull()
+                .collect { tournament ->
+                    appwriteRepository.subscribeToMatches()
+                    tournament.divisions.firstOrNull()?.let { selectDivision(it) }
+                }
         }
         scope.launch {
-            appwriteRepository.matchUpdates
-                .buffer()
-                .collect { updatedMatch ->
-                    _currentMatches.value = _currentMatches.value.toMutableMap().apply {
-                        put(updatedMatch.match.id, updatedMatch)
-                    }
-
-                    if (updatedMatch.match.division == _selectedDivision.value) {
-                        _divisionMatches.value = _currentMatches.value.values
-                            .filter { it.match.division == _selectedDivision.value }
-                    }
-                }
+            currentMatches
+            .collect { _ ->
+                _selectedDivision.value?.let { selectDivision(it) }
+            }
         }
         scope.launch {
             _divisionMatches.collect { generateRounds() }
@@ -88,13 +95,13 @@ class DefaultTournamentContentComponent(
     }
 
 
-    override fun matchSelected(selectedMatch: MatchMVP) {
+    override fun matchSelected(selectedMatch: MatchWithRelations) {
         onMatchSelected(selectedMatch)
     }
 
     override fun selectDivision(division: String) {
         _selectedDivision.value = division
-        _divisionMatches.value = _currentMatches.value.values
+        _divisionMatches.value = currentMatches.value.values
             .filter { it.match.division == division }
     }
 
@@ -105,16 +112,6 @@ class DefaultTournamentContentComponent(
     override fun toggleLosersBracket() {
         _losersBracket.value = !_losersBracket.value
         generateRounds()
-    }
-
-    private suspend fun loadTournament(id: String) {
-        _selectedTournament.value = appwriteRepository.getTournament(id)
-        _currentMatches.value = appwriteRepository.getMatches(id)
-        _currentTeams.value = appwriteRepository.getTeams(id)
-        _selectedTournament.value?.let { tournament ->
-            appwriteRepository.subscribeToMatches()
-        }
-        selectedTournament.value?.divisions?.firstOrNull()?.let { selectDivision(it) }
     }
 
     private fun generateRounds() {

@@ -7,8 +7,7 @@ import androidx.room.Transaction
 import androidx.room.Upsert
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
-import com.razumly.mvp.core.data.dataTypes.Team
-import com.razumly.mvp.core.data.dataTypes.TeamPlayerCrossRef
+import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface MatchDao {
@@ -21,11 +20,24 @@ interface MatchDao {
     @Delete
     suspend fun deleteMatch(match: MatchMVP)
 
+    @Query("SELECT COUNT(*) FROM MatchMVP")
+    suspend fun getTotalMatchCount(): Int
+
+    @Query("SELECT * FROM MatchMVP WHERE tournamentId = :tournamentId")
+    suspend fun getMatches(tournamentId: String): List<MatchMVP>
+
+    @Query("DELETE FROM MatchMVP WHERE id IN (:ids)")
+    suspend fun deleteMatchesById(ids: List<String>)
+
+    @Transaction
+    @Query("SELECT * FROM MatchMVP WHERE id = :id")
+    fun getMatchFlowById(id: String): Flow<MatchWithRelations?>
+
     @Transaction
     @Query("SELECT * FROM MatchMVP WHERE id = :id")
     suspend fun getMatchById(id: String): MatchWithRelations?
 
     @Transaction
     @Query("SELECT * FROM MatchMVP WHERE tournamentId = :tournamentId")
-    suspend fun getMatchesByTournamentId(tournamentId: String): List<MatchWithRelations>
+    fun getMatchesByTournamentId(tournamentId: String): Flow<List<MatchWithRelations>>
 }

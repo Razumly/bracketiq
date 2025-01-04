@@ -6,7 +6,7 @@ import com.arkivanov.decompose.router.stack.StackNavigation
 import com.arkivanov.decompose.router.stack.pop
 import com.arkivanov.decompose.router.stack.pushNew
 import com.arkivanov.decompose.router.stack.replaceAll
-import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.eventContent.presentation.DefaultTournamentContentComponent
 import com.razumly.mvp.eventCreate.presentation.DefaultCreateEventComponent
 import com.razumly.mvp.eventFollowing.presentation.FollowingEventListComponent
@@ -99,8 +99,8 @@ class DefaultHomeComponent(
         navigation.pushNew(Config.TournamentDetail(tournamentId))
     }
 
-    private fun onMatchSelected(match: MatchMVP) {
-        println("iOS Home: Match selected: ${match.id}")
+    private fun onMatchSelected(match: MatchWithRelations) {
+        println("iOS Home: Match selected: ${match.match.id}")
         navigation.pushNew(Config.MatchDetail(match))
     }
 
@@ -115,4 +115,3 @@ class DefaultHomeComponent(
         }
     }
 }
-

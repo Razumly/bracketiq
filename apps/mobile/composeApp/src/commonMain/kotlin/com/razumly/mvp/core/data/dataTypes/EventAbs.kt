@@ -4,7 +4,7 @@ import kotlinx.datetime.Instant
 import kotlinx.serialization.Serializable
 
 @Serializable
-abstract class EventAbs : Document() {
+abstract class EventAbs : MVPDocument() {
     abstract val location: String
     abstract val lat: Double
     abstract val long: Double

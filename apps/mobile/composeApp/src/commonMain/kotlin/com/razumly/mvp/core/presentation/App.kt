@@ -26,6 +26,7 @@ import com.razumly.mvp.profile.presentation.ProfileScreen
 import com.razumly.mvp.userAuth.presentation.loginScreen.LoginScreen
 import dev.icerock.moko.geo.compose.BindLocationTrackerEffect
 import dev.icerock.moko.permissions.compose.BindEffect
+import io.github.aakira.napier.DebugAntilog
 import io.github.aakira.napier.Napier
 import kotlinx.datetime.Clock
 
@@ -33,6 +34,7 @@ import kotlinx.datetime.Clock
 @Composable
 fun App(root: RootComponent) {
     val childStack by root.childStack.subscribeAsState()
+    Napier.base(DebugAntilog())
     Napier.d(tag = "Navigation") { "Current child: ${childStack.active.instance}" }
 
     setSingletonImageLoaderFactory { context ->
@@ -59,6 +61,7 @@ fun App(root: RootComponent) {
     }
 
     LogCompositions("iOS Nav", "App childStack")
+    
     setSingletonImageLoaderFactory { context ->
         ImageLoader
             .Builder(context)
@@ -96,7 +99,6 @@ fun App(root: RootComponent) {
         }
     }
 }
-
 
 @Composable
 fun HomeScreen(component: HomeComponent) {
