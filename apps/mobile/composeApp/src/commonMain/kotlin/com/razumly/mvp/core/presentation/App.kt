@@ -61,7 +61,7 @@ fun App(root: RootComponent) {
     }
 
     LogCompositions("iOS Nav", "App childStack")
-    
+
     setSingletonImageLoaderFactory { context ->
         ImageLoader
             .Builder(context)
