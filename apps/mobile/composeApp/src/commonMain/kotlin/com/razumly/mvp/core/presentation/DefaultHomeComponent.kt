@@ -7,6 +7,9 @@ import com.arkivanov.decompose.router.stack.pop
 import com.arkivanov.decompose.router.stack.pushNew
 import com.arkivanov.decompose.router.stack.replaceAll
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
+import com.arkivanov.decompose.router.stack.replaceCurrent
+import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.eventContent.presentation.DefaultMatchContentComponent
 import com.razumly.mvp.eventContent.presentation.DefaultTournamentContentComponent
 import com.razumly.mvp.eventCreate.presentation.DefaultCreateEventComponent
 import com.razumly.mvp.eventFollowing.presentation.FollowingEventListComponent
