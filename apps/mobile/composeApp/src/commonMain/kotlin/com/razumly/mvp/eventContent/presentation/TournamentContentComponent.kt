@@ -52,7 +52,7 @@ class DefaultTournamentContentComponent(
         .getMatchesFlow(tournamentId)
         .stateIn(
             scope = scope,
-            started = SharingStarted.WhileSubscribed(5000),
+            started = SharingStarted.Eagerly,
             initialValue = emptyMap()
         )
 
@@ -80,7 +80,9 @@ class DefaultTournamentContentComponent(
                 .filterNotNull()
                 .collect { tournament ->
                     appwriteRepository.subscribeToMatches()
-                    tournament.divisions.firstOrNull()?.let { selectDivision(it) }
+                    if (selectedDivision.value == null) {
+                        tournament.divisions.firstOrNull()?.let { selectDivision(it) }
+                    }
                 }
         }
         scope.launch {

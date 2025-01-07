@@ -88,7 +88,7 @@ class MVPRepository(
     ) = tournamentDB.getTournamentDao.getTournamentById(tournamentId)
 
     override suspend fun getTournament(tournamentId: String) {
-        val tournamentFlow = getData(
+        getData(
             networkCall = {
                 database.getDocument(
                     DbConstants.DATABASE_NAME,
@@ -103,12 +103,11 @@ class MVPRepository(
                 tournamentDB.getTournamentDao.upsertTournament(tournament)
             }
         )
-        val players = getPlayersOfTournament(tournamentId)
-        val fields = getFields(tournamentId)
+        getPlayersOfTournament(tournamentId)
+        getFields(tournamentId)
         val teams = getTeams(tournamentId)
-        val matches = getMatches(tournamentId)
+        getMatches(tournamentId)
         pushTeamPlayerCrossRef(teams)
-        return tournamentFlow
     }
 
     private suspend fun pushTeamPlayerCrossRef(teams: List<Team>) {

@@ -7,6 +7,7 @@ import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.UserData
+import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -14,6 +15,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -80,6 +82,12 @@ class DefaultMatchContentComponent(
         scope.launch {
             mvpRepository.getTournament(selectedMatch.match.tournamentId)
             _currentUser = mvpRepository.getCurrentUser()!!
+            checkRefStatus()
+        }
+        scope.launch {
+            currentTeams.collect{ teams ->
+                Napier.d("update teams $teams")
+            }
         }
     }
 

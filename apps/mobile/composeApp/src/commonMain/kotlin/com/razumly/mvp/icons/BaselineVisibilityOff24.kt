@@ -6,13 +6,13 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.unit.dp
 
-val MVPIcons.BaselineVisibilityOff: ImageVector
+val MVPIcons.BaselineVisibilityOff24: ImageVector
     get() {
-        if (_BaselineVisibilityOff != null) {
-            return _BaselineVisibilityOff!!
+        if (_BaselineVisibilityOff24 != null) {
+            return _BaselineVisibilityOff24!!
         }
-        _BaselineVisibilityOff = ImageVector.Builder(
-            name = "BaselineVisibilityOff",
+        _BaselineVisibilityOff24 = ImageVector.Builder(
+            name = "BaselineVisibilityOff24",
             defaultWidth = 24.dp,
             defaultHeight = 24.dp,
             viewportWidth = 24f,
@@ -60,8 +60,8 @@ val MVPIcons.BaselineVisibilityOff: ImageVector
             }
         }.build()
 
-        return _BaselineVisibilityOff!!
+        return _BaselineVisibilityOff24!!
     }
 
 @Suppress("ObjectPropertyName")
-private var _BaselineVisibilityOff: ImageVector? = null
+private var _BaselineVisibilityOff24: ImageVector? = null

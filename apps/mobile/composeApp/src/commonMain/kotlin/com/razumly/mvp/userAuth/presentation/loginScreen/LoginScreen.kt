@@ -26,8 +26,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.LoginState
-import com.razumly.mvp.icons.BaselineVisibility
-import com.razumly.mvp.icons.BaselineVisibilityOff
+import com.razumly.mvp.icons.BaselineVisibility24
+import com.razumly.mvp.icons.BaselineVisibilityOff24
 import com.razumly.mvp.icons.MVPIcons
 
 @Composable
@@ -80,9 +80,9 @@ fun LoginScreen(component: LoginComponent) {
                 ) {
                     Icon(
                         if (isPasswordVisible)
-                            MVPIcons.BaselineVisibilityOff
+                            MVPIcons.BaselineVisibilityOff24
                         else
-                            MVPIcons.BaselineVisibility
+                            MVPIcons.BaselineVisibility24
                         , contentDescription = null
                     )
                 }
