@@ -72,28 +72,30 @@ class DefaultHomeComponent(
                     }.value
                 )
             }
-            // ... other cases with similar logging
-            else -> {
-                println("iOS Home: Creating child for config: $config")
-                when (config) {
-                    is Config.Following -> Child.Following(
-                        _koin.inject<FollowingEventListComponent> {
-                            parametersOf(componentContext, ::onTournamentSelected)
-                        }.value
-                    )
-                    is Config.Create -> Child.Create(
-                        _koin.inject<DefaultCreateEventComponent> {
-                            parametersOf(componentContext)
-                        }.value
-                    )
-                    is Config.Profile -> Child.Profile(
-                        _koin.inject<DefaultProfileComponent> {
-                            parametersOf(componentContext)
-                        }.value
-                    )
-                    else -> throw IllegalArgumentException("Unknown config: $config")
-                }
+            is Config.MatchDetail -> {
+                println("iOS Home: Creating Tournament detail child for id: ${config.match.match.id}")
+                Child.MatchContent(
+                    _koin.inject<DefaultMatchContentComponent> {
+                        parametersOf(componentContext, config.match)
+                    }.value
+                )
             }
+            is Config.Following -> Child.Following(
+                _koin.inject<FollowingEventListComponent> {
+                    parametersOf(componentContext, ::onTournamentSelected)
+                }.value
+            )
+            is Config.Create -> Child.Create(
+                _koin.inject<DefaultCreateEventComponent> {
+                    parametersOf(componentContext)
+                }.value
+            )
+            is Config.Profile -> Child.Profile(
+                _koin.inject<DefaultProfileComponent> {
+                    parametersOf(componentContext)
+                }.value
+            )
+            else -> throw IllegalArgumentException("Unknown config: $config")
         }
     }
 
