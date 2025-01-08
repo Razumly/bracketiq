@@ -8,7 +8,9 @@ androidx-lifecycle = "2.8.4"
 assertk = "0.28.1"
 coil3 = "3.0.4"
 compose-multiplatform = "1.7.0"
+concurrentFuturesKtx = "1.2.0"
 decompose = "3.3.0-alpha02"
+foundationLayout = "1.8.0-alpha07"
 junit = "4.13.2"
 kotlin = "2.1.0"
 geo = "0.7.0"
@@ -20,25 +22,33 @@ kotlinx_datetime_ext = "1.3.1"
 kotlinxDatetime = "0.6.1"
 kotlinxSerializationJson = "1.7.3"
 mapsCompose = "6.2.1"
+material = "1.8.0-alpha07"
 napier = "2.7.1"
 permissions = "0.18.1"
 places = "4.1.0"
 playServicesLocation = "21.3.0"
 playServicesMaps = "19.0.0"
 robolectric = "4.14.1"
-room = "2.7.0-alpha11"
-sqlite = "2.5.0-alpha11"
+room = "2.7.0-alpha12"
+sqlite = "2.5.0-alpha12"
 navigation-compose = "2.8.5"
 activityKtx = "1.9.3"
 navigationCommonKtx = "2.8.5"
 materialAndroid = "1.7.6"
 material3Android = "1.3.1"
 composeTest = "1.7.6"
+ui = "1.8.0-alpha07"
 vectorize = "1.0.2"
 coreKtx = "1.6.1"
-ktor = "3.0.3"
+ktor = "3.0.1"
+lifecycleRuntimeComposeAndroid = "2.8.7"
+
 
 [libraries]
+androidx-concurrent-futures-ktx = { module = "androidx.concurrent:concurrent-futures-ktx", version.ref = "concurrentFuturesKtx" }
+androidx-foundation-layout = { module = "androidx.compose.foundation:foundation-layout", version.ref = "foundationLayout" }
+androidx-material = { module = "androidx.compose.material:material", version.ref = "material" }
+androidx-ui = { module = "androidx.compose.ui:ui", version.ref = "ui" }
 compose-ui-test-manifest = { module = "androidx.compose.ui:ui-test-manifest", version.ref = "composeTest" }
 core-ktx = { group = "androidx.test", name = "core-ktx", version.ref = "coreKtx" }
 assertk = { module = "com.willowtreeapps.assertk:assertk", version.ref = "assertk" }
@@ -83,6 +93,7 @@ androidx-navigation-common-ktx = { group = "androidx.navigation", name = "naviga
 androidx-material-android = { group = "androidx.compose.material", name = "material-android", version.ref = "materialAndroid" }
 androidx-material3-android = { group = "androidx.compose.material3", name = "material3-android", version.ref = "material3Android" }
 robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
+androidx-lifecycle-runtime-compose-android = { group = "androidx.lifecycle", name = "lifecycle-runtime-compose-android", version.ref = "lifecycleRuntimeComposeAndroid" }
 
 [plugins]
 androidApplication = { id = "com.android.application", version.ref = "agp" }

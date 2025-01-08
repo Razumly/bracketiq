@@ -1,7 +1,6 @@
 import org.jetbrains.compose.ExperimentalComposeLibrary
-import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-import org.jetbrains.kotlin.gradle.plugin.KotlinSourceSetTree
+
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
@@ -30,57 +29,71 @@ kotlin {
         iosTarget.binaries.framework {
             baseName = "ComposeApp"
             isStatic = true
+            linkerOpts.add("-lsqlite3")
         }
     }
 
     sourceSets {
-        androidMain.dependencies {
-            implementation(compose.preview)
-            implementation(libs.androidx.activity.compose)
-            implementation(libs.koin.android)
-            implementation(libs.koin.androidx.compose)
-            implementation(libs.koin.compose)
-            implementation(libs.koin.androidx.compose)
-            implementation(libs.maps.compose)
-            implementation(libs.play.services.maps)
-            implementation(libs.play.services.location)
-            implementation(libs.places)
-        }
-        commonMain.dependencies {
-            implementation(compose.runtime)
-            implementation(compose.foundation)
-            implementation(compose.material3)
-            implementation(compose.ui)
-            implementation(compose.components.resources)
-            implementation(compose.components.uiToolingPreview)
-            implementation(libs.androidx.lifecycle.runtime.compose)
-            implementation(libs.kotlinx.coroutines.core)
-            implementation(libs.ktor.client.core)
-            implementation(libs.coil.compose.core)
-            implementation(libs.coil.compose)
-            implementation(libs.coil.mp)
-            implementation(libs.coil.network.ktor)
-            implementation(libs.androidx.room.runtime)
-            implementation(libs.androidx.sqlite.bundled)
-            implementation(libs.compose.vectorize.core)
-            implementation(libs.permissions.compose)
-            api(libs.decompose.decompose)
-            api(libs.decompose.extensionsComposeJetbrains)
-            api(libs.kotlinx.serialization.core)
-            api(libs.geo.compose)
-            api(libs.navigation.compose)
-            api(libs.kotlinx.datetime)
-            api(libs.kotlinx.datetime.ext)
-            api(libs.koin.core)
-            api(libs.napier)
-            api(libs.permissions)
-            api(libs.geo)
-            api(libs.kotlinx.serialization.json)
-            api("io.appwrite:sdk-for-kmp:0.2.0")
-            runtimeOnly(libs.androidx.lifecycle.runtime.compose)
+        commonMain {
+            kotlin.srcDir("build/generated/ksp/metadata/commonMain/kotlin")
+            dependencies {
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
+                implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+                implementation("org.jetbrains.compose.runtime:runtime-saveable:1.7.0")
+                implementation(compose.runtime)
+                implementation(compose.foundation)
+                implementation(compose.material3)
+                implementation(compose.ui)
+                implementation(compose.components.resources)
+                implementation(compose.components.uiToolingPreview)
+                implementation(libs.coil.compose)
+                implementation(libs.androidx.room.runtime)
+                implementation(libs.androidx.sqlite.bundled)
+                implementation(libs.compose.vectorize.core)
+                implementation(libs.permissions.compose)
+                implementation(libs.ktor.client.core)
+                implementation(libs.coil.compose.core)
+                implementation(libs.coil.compose)
+                implementation(libs.coil.mp)
+                implementation(libs.coil.network.ktor)
+                api(libs.decompose.decompose)
+                api(libs.decompose.extensionsComposeJetbrains)
+                api(libs.kotlinx.serialization.core)
+                api(libs.geo.compose)
+                api(libs.kotlinx.datetime)
+                api(libs.kotlinx.datetime.ext)
+                api(libs.koin.core)
+                api(libs.napier)
+                api(libs.permissions)
+                api(libs.geo)
+                api("io.appwrite:sdk-for-kmp:0.2.0")
+            }
         }
 
-        commonTest.dependencies {
+        androidMain {
+            kotlin.srcDir("build/generated/ksp/android/androidMain/kotlin")
+            dependencies {
+                implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
+                implementation(compose.preview)
+                implementation(libs.androidx.activity.compose)
+                implementation(libs.koin.android)
+                implementation(libs.koin.androidx.compose)
+                implementation(libs.koin.compose)
+                implementation(libs.maps.compose)
+                implementation(libs.play.services.maps)
+                implementation(libs.play.services.location)
+                implementation(libs.places)
+                implementation(libs.androidx.concurrent.futures.ktx)
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+                implementation(libs.androidx.material.android)
+                implementation(libs.androidx.material3.android)
+                implementation(libs.androidx.navigation.common.ktx)
+                implementation(libs.androidx.activity.ktx)
+            }
+        }
+
+
+    commonTest.dependencies {
             @OptIn(ExperimentalComposeLibrary::class)
             implementation(compose.uiTest)
             implementation(libs.kotlin.test)
@@ -136,15 +149,19 @@ android {
 
 room {
     schemaDirectory("$projectDir/schemas")
+    generateKotlin = true
 }
 
 dependencies {
-    implementation(libs.places)
-    implementation(libs.androidx.navigation.common.ktx)
-    implementation(libs.androidx.activity.ktx)
-    implementation(libs.androidx.material.android)
-    implementation(libs.androidx.material3.android)
+    implementation(libs.androidx.lifecycle.runtime.compose.android)
     debugImplementation(compose.uiTooling)
+    add("kspCommonMainMetadata", libs.androidx.room.compiler)
     add("kspAndroid", libs.androidx.room.compiler)
-}
+    add("kspIosX64", libs.androidx.room.compiler)
+    add("kspIosArm64", libs.androidx.room.compiler)
+    add("kspIosSimulatorArm64", libs.androidx.room.compiler)
+    implementation(libs.androidx.foundation.layout)
+    implementation(libs.androidx.ui)
+    implementation(libs.androidx.material)
 
+}

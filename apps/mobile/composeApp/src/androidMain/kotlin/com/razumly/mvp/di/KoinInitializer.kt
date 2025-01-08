@@ -19,6 +19,5 @@ actual class KoinInitializer(
                 componentModule
             )
         }
-
     }
 }

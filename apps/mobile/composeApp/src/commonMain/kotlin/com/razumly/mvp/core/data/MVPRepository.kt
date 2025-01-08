@@ -72,7 +72,7 @@ class MVPRepository(
             return currentUserRelations
         } catch (e: Exception) {
             Napier.e("Failed to login", e, DbConstants.ERROR_TAG)
-            return null
+            throw e
         }
     }
 

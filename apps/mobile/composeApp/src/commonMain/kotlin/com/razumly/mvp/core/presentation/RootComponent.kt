@@ -1,9 +1,12 @@
 package com.razumly.mvp.core.presentation
 
 import com.arkivanov.decompose.ComponentContext
+import com.arkivanov.decompose.extensions.compose.stack.animation.StackAnimation
 import com.arkivanov.decompose.router.stack.StackNavigation
 import com.arkivanov.decompose.router.stack.childStack
 import com.arkivanov.decompose.router.stack.replaceCurrent
+import com.arkivanov.decompose.router.stack.pop
+import com.arkivanov.essenty.backhandler.BackHandler
 import com.razumly.mvp.userAuth.presentation.loginScreen.DefaultLoginComponent
 import com.razumly.mvp.userAuth.presentation.loginScreen.LoginComponent
 import dev.icerock.moko.geo.LocationTracker
@@ -15,35 +18,28 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import kotlinx.serialization.Serializable
 import org.koin.core.parameter.parametersOf
 import org.koin.mp.KoinPlatform.getKoin
 import com.razumly.mvp.core.presentation.HomeComponent.*
+import kotlinx.serialization.Serializable
 
 class RootComponent(
     componentContext: ComponentContext,
     val permissionsController: PermissionsController,
     val locationTracker: LocationTracker
 ) : ComponentContext by componentContext {
+
     private val navigation = StackNavigation<Config>()
     private val _koin = getKoin()
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-    // Create onLogin reference before childStack
-    private val onLoginCallback = {
-        navigation.replaceCurrent(Config.Home())
-    }
+    override val backHandler: BackHandler = componentContext.backHandler
 
-    init {
-        scope.launch {
-            try {
-                permissionsController.providePermission(Permission.LOCATION)
-                locationTracker.startTracking()
-            } catch (deniedAlways: DeniedAlwaysException) {
-                // Permission is always denied.
-            } catch (denied: DeniedException) {
-                // Permission was denied.
-            }
+    /** Called by your UI when user swipes back or taps the back button. */
+    fun onBackClicked() {
+        val stack = childStack.value
+        if (stack.backStack.isNotEmpty()) {
+            navigation.pop()
         }
     }
 
@@ -51,9 +47,26 @@ class RootComponent(
         source = navigation,
         initialConfiguration = Config.Login,
         serializer = Config.serializer(),
-        handleBackButton = true,
+        handleBackButton = true, // Enable built-in back handling logic
         childFactory = ::createChild
     )
+
+    init {
+        scope.launch {
+            try {
+                permissionsController.providePermission(Permission.LOCATION)
+                locationTracker.startTracking()
+            } catch (deniedAlways: DeniedAlwaysException) {
+                // Permission is always denied
+            } catch (denied: DeniedException) {
+                // Permission was denied
+            }
+
+            childStack.subscribe {
+                println("ios nav: stack changed to $it")
+            }
+        }
+    }
 
     private fun createChild(
         config: Config,
@@ -61,10 +74,12 @@ class RootComponent(
     ): Child = when (config) {
         is Config.Login -> Child.Login(
             _koin.inject<DefaultLoginComponent> {
-                parametersOf(componentContext, onLoginCallback)
+                parametersOf(
+                    componentContext,
+                    { navigation.replaceCurrent(Config.Home()) }
+                )
             }.value
         )
-
         is Config.Home -> Child.Home(
             _koin.inject<DefaultHomeComponent> {
                 parametersOf(componentContext)
@@ -78,12 +93,16 @@ class RootComponent(
     }
 
     @Serializable
-    sealed class Config{
+    sealed class Config {
         @Serializable
-        data object Login : Config()
+        object Login : Config()
 
         @Serializable
         data class Home(val selectedPage: Page = Page.EventList) : Config()
     }
-
 }
+
+expect fun <C : Any, T : Any> backAnimation(
+    backHandler: BackHandler,
+    onBack: () -> Unit,
+): StackAnimation<C, T>

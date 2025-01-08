@@ -1,5 +1,7 @@
 package com.razumly.mvp.core.data
 
+
+import androidx.room.ConstructedBy
 import androidx.room.Database
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
@@ -33,6 +35,7 @@ import com.razumly.mvp.core.util.Converters
     version = 11
 )
 @TypeConverters(Converters::class)
+@ConstructedBy(MVPDatabaseCtor::class)
 abstract class MVPDatabase : RoomDatabase() {
     abstract fun getTournamentDao(): TournamentDao
     abstract fun getMatchDao(): MatchDao

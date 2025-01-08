@@ -24,11 +24,11 @@ val componentModule = module {
         )
     }
 
-    factory { (componentContext: ComponentContext, onNavigateToHome: () -> Unit) ->
+    factory { (componentContext: ComponentContext, onNavigateToHome: (() -> Unit)?) ->
         DefaultLoginComponent(
             componentContext = componentContext,
             appwriteRepository = get(),
-            onNavigateToHome = onNavigateToHome
+            onNavigateToHome = onNavigateToHome ?: {}
         )
     }
 

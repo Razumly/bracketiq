@@ -2,6 +2,7 @@ package com.razumly.mvp.core.presentation
 
 import com.arkivanov.decompose.router.stack.ChildStack
 import com.arkivanov.decompose.value.Value
+import com.arkivanov.essenty.backhandler.BackHandler
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.eventContent.presentation.MatchContentComponent
 import com.razumly.mvp.eventContent.presentation.TournamentContentComponent
@@ -17,6 +18,8 @@ interface HomeComponent {
     val childStack: Value<ChildStack<*, Child>>
     val selectedPage: StateFlow<Page>
     fun onTabSelected(page: Page)
+
+    fun onBack()
 
     sealed class Child {
         data class Search(val component: SearchEventListComponent) : Child()
