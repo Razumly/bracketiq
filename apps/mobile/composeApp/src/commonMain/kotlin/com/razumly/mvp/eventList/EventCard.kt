@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material3.Card
@@ -35,6 +36,12 @@ import coil3.compose.AsyncImagePainter
 import coil3.compose.rememberAsyncImagePainter
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.format
+import kotlinx.datetime.format.MonthNames
+import kotlinx.datetime.format.char
+import kotlinx.datetime.toLocalDateTime
 
 @Composable
 fun EventCard(
@@ -44,12 +51,33 @@ fun EventCard(
 ) {
     var imageStateText by remember { mutableStateOf("initial") }
 
+    val dateRangeText = remember(event.start, event.end) {
+        val dateFormat = LocalDate.Format {
+            dayOfMonth()
+            char(' ')
+            monthName(MonthNames.ENGLISH_ABBREVIATED)
+        }
+
+        val startDate = event.start.toLocalDateTime(TimeZone.currentSystemDefault()).date
+        val endDate = event.end?.toLocalDateTime(TimeZone.currentSystemDefault())?.date
+
+        val startStr = startDate.format(dateFormat)
+
+        if (endDate != null && startDate != endDate) {
+            val endStr = endDate.format(dateFormat)
+            "$startStr - $endStr"
+        } else {
+            startStr
+        }
+    }
+
     Card(
         modifier = modifier
             .padding(horizontal = 16.dp, vertical = 8.dp)
             .fillMaxWidth()
             .background(Color.Transparent),
-        elevation = CardDefaults.cardElevation(4.dp)
+        elevation = CardDefaults.cardElevation(4.dp),
+        shape = RoundedCornerShape(12.dp)
     ) {
         Column {
             Box(
@@ -67,29 +95,22 @@ fun EventCard(
                             is AsyncImagePainter.State.Loading -> {
                                 imageStateText = "Loading"
                             }
-
                             is AsyncImagePainter.State.Error -> {
-                                val error =
-                                    state.result.throwable
+                                val error = state.result.throwable
                                 imageStateText = "Error loading image: $error"
-                                println(imageStateText)
                             }
-
                             is AsyncImagePainter.State.Success -> {
                                 imageStateText = "success"
                             }
-
                             is AsyncImagePainter.State.Empty -> {
                                 imageStateText = "Image is Empty"
                             }
                         }
                     }
                 )
-
                 if (imageStateText != "success") {
-                    Text(imageStateText)
+                    Text(imageStateText, color = Color.White)
                 }
-
                 IconButton(
                     onClick = onFavoriteClick,
                     modifier = Modifier
@@ -105,8 +126,7 @@ fun EventCard(
             }
 
             Column(
-                modifier = Modifier
-                    .padding(16.dp)
+                modifier = Modifier.padding(16.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -121,6 +141,7 @@ fun EventCard(
                         style = MaterialTheme.typography.titleMedium
                     )
                 }
+                // Could be city + state
                 Text(
                     text = event.location,
                     style = MaterialTheme.typography.bodyMedium,
@@ -131,11 +152,11 @@ fun EventCard(
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Text(
-                    text = event.start.toString(),
+                    text = dateRangeText,
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Text(
-                    text = event.price.toString(),
+                    text = "$${event.price}",
                     style = MaterialTheme.typography.bodyMedium
                 )
             }
