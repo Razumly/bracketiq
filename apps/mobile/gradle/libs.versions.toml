@@ -6,7 +6,6 @@ android-targetSdk = "35"
 androidx-activityCompose = "1.9.3"
 androidx-lifecycle = "2.8.4"
 assertk = "0.28.1"
-atomicfu = "0.26.1"
 coil3 = "3.0.4"
 compose-multiplatform = "1.7.0"
 concurrentFuturesKtx = "1.2.0"
@@ -42,6 +41,7 @@ vectorize = "1.0.2"
 coreKtx = "1.6.1"
 ktor = "3.0.1"
 lifecycleRuntimeComposeAndroid = "2.8.7"
+material = "1.8.0-alpha07"
 
 
 [libraries]

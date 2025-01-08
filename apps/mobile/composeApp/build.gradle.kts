@@ -3,7 +3,6 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 
 plugins {
-    alias(libs.plugins.kotlinx.atomicfu)
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.androidApplication)
     alias(libs.plugins.composeMultiplatform)
@@ -103,7 +102,6 @@ kotlin {
             implementation(libs.koin.test)
             implementation(libs.androidx.sqlite.bundled)
             implementation(kotlin("test-annotations-common"))
-            implementation(libs.kotlinx.coroutines.test)
             implementation(libs.core.ktx)
             implementation(libs.junit)
             implementation(libs.robolectric)
