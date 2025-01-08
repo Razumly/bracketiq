@@ -1,6 +1,7 @@
 package com.razumly.mvp
 
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Alignment
@@ -29,7 +30,7 @@ import com.arkivanov.essenty.backhandler.BackDispatcher
 fun MainViewController() = ComposeUIViewController {
     Napier.d(tag = "Lifecycle") { "Creating MainViewController" }
 
-    MVPTheme(darkTheme = true) {
+    MVPTheme(darkTheme = isSystemInDarkTheme()) {
         val lifecycle = remember { LifecycleRegistry() }
         val backDispatcher = remember { BackDispatcher() }
 
