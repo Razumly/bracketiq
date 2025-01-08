@@ -40,9 +40,7 @@ class DefaultHomeComponent(
         serializer = Config.serializer(),
         handleBackButton = true,
         childFactory = ::createChild
-    ).also {
-        println("iOS Home: Child stack initialized with Search configuration")
-    }
+    )
 
     override fun onBack() {
         if (childStack.value.backStack.isNotEmpty()) {
@@ -54,18 +52,18 @@ class DefaultHomeComponent(
         config: Config,
         componentContext: ComponentContext
     ): Child {
-        println("iOS Home: Creating child for config: $config")
+
         return when (config) {
             is Config.Search -> {
-                println("iOS Home: Creating Search child")
+
                 Child.Search(
                     _koin.inject<SearchEventListComponent> {
                         parametersOf(componentContext, ::onTournamentSelected)
                     }.value
-                ).also { println("iOS Home: Search child created") }
+                )
             }
             is Config.TournamentDetail -> {
-                println("iOS Home: Creating Tournament detail child for id: ${config.tournamentId}")
+
                 Child.TournamentContent(
                     _koin.inject<DefaultTournamentContentComponent> {
                         parametersOf(componentContext, config.tournamentId, ::onMatchSelected)
@@ -73,7 +71,6 @@ class DefaultHomeComponent(
                 )
             }
             is Config.MatchDetail -> {
-                println("iOS Home: Creating Tournament detail child for id: ${config.match.match.id}")
                 Child.MatchContent(
                     _koin.inject<DefaultMatchContentComponent> {
                         parametersOf(componentContext, config.match)
@@ -100,17 +97,14 @@ class DefaultHomeComponent(
     }
 
     private fun onTournamentSelected(tournamentId: String) {
-        println("iOS Home: Tournament selected: $tournamentId")
         navigation.pushNew(Config.TournamentDetail(tournamentId))
     }
 
     private fun onMatchSelected(match: MatchWithRelations) {
-        println("iOS Home: Match selected: ${match.match.id}")
         navigation.pushNew(Config.MatchDetail(match))
     }
 
     override fun onTabSelected(page: Page) {
-        println("iOS Home: Tab selected: $page")
         _selectedPage.value = page
         when (page) {
             Page.EventList -> navigation.replaceAll(Config.Search)

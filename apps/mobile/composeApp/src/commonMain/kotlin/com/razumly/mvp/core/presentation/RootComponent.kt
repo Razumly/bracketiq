@@ -62,9 +62,7 @@ class RootComponent(
                 // Permission was denied
             }
 
-            childStack.subscribe {
-                println("ios nav: stack changed to $it")
-            }
+            childStack.subscribe{}
         }
     }
 

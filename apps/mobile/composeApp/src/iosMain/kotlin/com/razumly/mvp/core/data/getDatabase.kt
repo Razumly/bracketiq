@@ -21,6 +21,8 @@ fun getDatabase() : RoomDatabase.Builder<MVPDatabase> {
         )
             .setDriver(BundledSQLiteDriver())
             .setQueryCoroutineContext(Dispatchers.Default)
+            .fallbackToDestructiveMigration(dropAllTables = true)
+
             .also { Napier.d(tag = "Database") { "Database builder created successfully" } }
     } catch (e: Exception) {
         Napier.e(tag = "Database", throwable = e) { "Failed to create database builder" }

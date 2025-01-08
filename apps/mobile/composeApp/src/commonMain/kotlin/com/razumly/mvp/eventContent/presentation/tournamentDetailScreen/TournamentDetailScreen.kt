@@ -4,6 +4,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -76,7 +77,11 @@ fun TournamentDetailScreen(
     val roundsList by component.rounds.collectAsState()
     val losersBracket by component.losersBracket.collectAsState()
 
-    Column(modifier = Modifier.fillMaxSize()) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
         tournament?.let { TournamentHeader(it) }
 
         tournament?.divisions?.indexOf(selectedDivision)?.let {
@@ -225,12 +230,19 @@ private fun TournamentListView(
                     component = component,
                     match = match,
                     onClick = { onMatchClick(match) },
-                    cardColors = CardColors(
-                        MaterialTheme.colorScheme.primaryContainer,
-                        MaterialTheme.colorScheme.onPrimaryContainer,
-                        MaterialTheme.colorScheme.tertiaryContainer,
-                        MaterialTheme.colorScheme.onTertiaryContainer
+                    cardColors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        disabledContainerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                        disabledContentColor = MaterialTheme.colorScheme.onTertiaryContainer
                     )
+
+//                    cardColors = CardColors(
+//                        MaterialTheme.colorScheme.primaryContainer,
+//                        MaterialTheme.colorScheme.onPrimaryContainer,
+//                        MaterialTheme.colorScheme.tertiaryContainer,
+//                        MaterialTheme.colorScheme.onTertiaryContainer
+//                    )
                 )
             }
         }
@@ -290,6 +302,7 @@ fun TournamentBracketView(
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
             .verticalScroll(columnScrollState)
     ) {
         LazyRow(
@@ -330,7 +343,7 @@ fun TournamentBracketView(
                             )
                         ) {
                             Box(
-                                modifier = Modifier,
+                                modifier = Modifier.background(MaterialTheme.colorScheme.background),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Column(
