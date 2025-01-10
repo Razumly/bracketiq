@@ -10,7 +10,6 @@ import kotlinx.serialization.Transient
 @Entity
 @Serializable
 data class Tournament(
-    val name: String = "",
     val description: String = "",
     val doubleElimination: Boolean = false,
     val divisions: List<String> = listOf(),
@@ -21,6 +20,7 @@ data class Tournament(
     val winnerScoreLimitsPerSet: List<Int> = listOf(),
     val loserScoreLimitsPerSet: List<Int> = listOf(),
     @Transient @PrimaryKey override var id: String = ID.unique(),
+    override val name: String = "",
     override val location: String = "",
     override val type: String = "",
     override val start: Instant = Instant.DISTANT_PAST,
