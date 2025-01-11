@@ -48,14 +48,12 @@ val componentModule = module {
             componentContext: ComponentContext,
             tournamentId: String,
             onMatchSelected: (MatchWithRelations) -> Unit,
-            name: String,
         ) ->
             DefaultTournamentContentComponent(
                 componentContext = componentContext,
                 appwriteRepository = get(),
                 tournamentId = tournamentId,
                 onMatchSelected = onMatchSelected,
-                name = name,
             )
     }
 
@@ -71,7 +69,7 @@ val componentModule = module {
     factory {
         (
             componentContext: ComponentContext,
-            onTournamentSelected: (tournamentId: String, name: String) -> Unit,
+            onTournamentSelected: (tournamentId: String) -> Unit,
         ) ->
             SearchEventListComponent(
                 componentContext = componentContext,

@@ -7,7 +7,6 @@ import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.UserData
-import com.razumly.mvp.core.presentation.ComponentWithTitle
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -20,7 +19,7 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-interface MatchContentComponent : ComponentWithTitle {
+interface MatchContentComponent {
     val match: StateFlow<MatchWithRelations?>
     val tournament: StateFlow<Tournament?>
     val currentTeams: StateFlow<Map<String, TeamWithPlayers>>
@@ -46,7 +45,6 @@ class DefaultMatchContentComponent(
 ) : MatchContentComponent, ComponentContext by componentContext{
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    override val name = selectedMatch.match.matchNumber.toString()
     override val match = mvpRepository
         .getMatchFlow(selectedMatch.match.id)
         .stateIn(scope, SharingStarted.Eagerly, selectedMatch)

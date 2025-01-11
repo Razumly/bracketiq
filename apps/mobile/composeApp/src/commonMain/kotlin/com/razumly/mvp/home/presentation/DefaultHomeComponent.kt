@@ -61,7 +61,7 @@ class DefaultHomeComponent(
             is Config.TournamentDetail -> {
                 Child.TournamentContent(
                     _koin.inject<DefaultTournamentContentComponent> {
-                        parametersOf(componentContext, config.tournamentId, ::onMatchSelected, config.name)
+                        parametersOf(componentContext, config.tournamentId, ::onMatchSelected)
                     }.value
                 )
             }
@@ -90,8 +90,8 @@ class DefaultHomeComponent(
         }
     }
 
-    private fun onTournamentSelected(tournamentId: String, name: String) {
-        navigation.pushNew(Config.TournamentDetail(tournamentId, name))
+    private fun onTournamentSelected(tournamentId: String) {
+        navigation.pushNew(Config.TournamentDetail(tournamentId))
     }
 
     private fun onMatchSelected(match: MatchWithRelations) {

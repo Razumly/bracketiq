@@ -34,7 +34,6 @@ interface HomeComponent {
         @Serializable
         data class TournamentDetail(
             val tournamentId: String,
-            val name: String,
         ) : Config()
 
         @Serializable
