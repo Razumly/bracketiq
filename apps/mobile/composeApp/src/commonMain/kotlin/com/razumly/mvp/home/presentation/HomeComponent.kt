@@ -1,9 +1,7 @@
-package com.razumly.mvp.core.presentation
+package com.razumly.mvp.home.presentation
 
 import com.arkivanov.decompose.router.stack.ChildStack
 import com.arkivanov.decompose.value.Value
-import com.arkivanov.essenty.backhandler.BackHandler
-import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.eventContent.presentation.MatchContentComponent
 import com.razumly.mvp.eventContent.presentation.TournamentContentComponent
@@ -35,12 +33,13 @@ interface HomeComponent {
     sealed class Config{
         @Serializable
         data class TournamentDetail(
-            val tournamentId: String
+            val tournamentId: String,
+            val name: String,
         ) : Config()
 
         @Serializable
         data class MatchDetail(
-            val match: MatchWithRelations
+            val match: MatchWithRelations,
         ) : Config()
 
         @Serializable

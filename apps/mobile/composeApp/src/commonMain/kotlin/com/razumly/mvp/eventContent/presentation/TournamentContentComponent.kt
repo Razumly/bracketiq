@@ -5,6 +5,7 @@ import com.razumly.mvp.core.data.IMVPRepository
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.Tournament
+import com.razumly.mvp.core.presentation.ComponentWithTitle
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -38,7 +39,8 @@ class DefaultTournamentContentComponent(
     private val appwriteRepository: IMVPRepository,
     tournamentId: String,
     private val onMatchSelected: (MatchWithRelations) -> Unit,
-) : TournamentContentComponent, ComponentContext by componentContext {
+    override val name: String,
+) : TournamentContentComponent, ComponentContext by componentContext, ComponentWithTitle {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     override val selectedTournament = appwriteRepository

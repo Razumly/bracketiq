@@ -2,10 +2,8 @@ package com.razumly.mvp.di
 
 import com.arkivanov.decompose.ComponentContext
 import com.razumly.mvp.core.data.dataTypes.EventAbs
-import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
-import com.razumly.mvp.core.data.dataTypes.UserData
-import com.razumly.mvp.core.presentation.DefaultHomeComponent
+import com.razumly.mvp.home.presentation.DefaultHomeComponent
 import com.razumly.mvp.core.presentation.RootComponent
 import com.razumly.mvp.eventContent.presentation.DefaultMatchContentComponent
 import com.razumly.mvp.eventContent.presentation.DefaultTournamentContentComponent
@@ -49,13 +47,15 @@ val componentModule = module {
         (
             componentContext: ComponentContext,
             tournamentId: String,
-            onMatchSelected: (MatchWithRelations) -> Unit
+            onMatchSelected: (MatchWithRelations) -> Unit,
+            name: String,
         ) ->
             DefaultTournamentContentComponent(
                 componentContext = componentContext,
                 appwriteRepository = get(),
                 tournamentId = tournamentId,
                 onMatchSelected = onMatchSelected,
+                name = name,
             )
     }
 
@@ -71,7 +71,7 @@ val componentModule = module {
     factory {
         (
             componentContext: ComponentContext,
-            onTournamentSelected: (String) -> Unit,
+            onTournamentSelected: (tournamentId: String, name: String) -> Unit,
         ) ->
             SearchEventListComponent(
                 componentContext = componentContext,

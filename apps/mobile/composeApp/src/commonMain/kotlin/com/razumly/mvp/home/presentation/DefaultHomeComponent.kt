@@ -1,4 +1,4 @@
-package com.razumly.mvp.core.presentation
+package com.razumly.mvp.home.presentation
 
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.decompose.router.stack.childStack
@@ -7,8 +7,6 @@ import com.arkivanov.decompose.router.stack.pop
 import com.arkivanov.decompose.router.stack.pushNew
 import com.arkivanov.decompose.router.stack.replaceAll
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
-import com.arkivanov.decompose.router.stack.replaceCurrent
-import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.eventContent.presentation.DefaultMatchContentComponent
 import com.razumly.mvp.eventContent.presentation.DefaultTournamentContentComponent
 import com.razumly.mvp.eventCreate.presentation.DefaultCreateEventComponent
@@ -19,7 +17,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.koin.core.parameter.parametersOf
 import org.koin.mp.KoinPlatform.getKoin
-import com.razumly.mvp.core.presentation.HomeComponent.*
+import com.razumly.mvp.home.presentation.HomeComponent.*
 
 class DefaultHomeComponent(
     componentContext: ComponentContext,
@@ -52,10 +50,8 @@ class DefaultHomeComponent(
         config: Config,
         componentContext: ComponentContext
     ): Child {
-
         return when (config) {
             is Config.Search -> {
-
                 Child.Search(
                     _koin.inject<SearchEventListComponent> {
                         parametersOf(componentContext, ::onTournamentSelected)
@@ -63,10 +59,9 @@ class DefaultHomeComponent(
                 )
             }
             is Config.TournamentDetail -> {
-
                 Child.TournamentContent(
                     _koin.inject<DefaultTournamentContentComponent> {
-                        parametersOf(componentContext, config.tournamentId, ::onMatchSelected)
+                        parametersOf(componentContext, config.tournamentId, ::onMatchSelected, config.name)
                     }.value
                 )
             }
@@ -92,12 +87,11 @@ class DefaultHomeComponent(
                     parametersOf(componentContext)
                 }.value
             )
-            else -> throw IllegalArgumentException("Unknown config: $config")
         }
     }
 
-    private fun onTournamentSelected(tournamentId: String) {
-        navigation.pushNew(Config.TournamentDetail(tournamentId))
+    private fun onTournamentSelected(tournamentId: String, name: String) {
+        navigation.pushNew(Config.TournamentDetail(tournamentId, name))
     }
 
     private fun onMatchSelected(match: MatchWithRelations) {

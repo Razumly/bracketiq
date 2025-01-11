@@ -129,7 +129,7 @@ fun EventList(
                     edgePadding = 0.dp,
                     indicator = { tabPositions ->
                         // Default indicator is easier to see
-                        TabRowDefaults.Indicator(
+                        SecondaryIndicator(
                             modifier = Modifier.tabIndicatorOffset(tabPositions[selectedTabIndex]),
                             color = MaterialTheme.colorScheme.primary
                         )

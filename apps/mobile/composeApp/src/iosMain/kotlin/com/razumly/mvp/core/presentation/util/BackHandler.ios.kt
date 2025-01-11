@@ -1,11 +1,9 @@
-package com.razumly.mvp.core.presentation
+package com.razumly.mvp.core.presentation.util
 
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
 import com.arkivanov.decompose.ExperimentalDecomposeApi

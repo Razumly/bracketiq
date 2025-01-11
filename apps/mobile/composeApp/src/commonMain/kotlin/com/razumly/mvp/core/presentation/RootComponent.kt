@@ -20,7 +20,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import org.koin.core.parameter.parametersOf
 import org.koin.mp.KoinPlatform.getKoin
-import com.razumly.mvp.core.presentation.HomeComponent.*
+import com.razumly.mvp.home.presentation.HomeComponent.*
+import com.razumly.mvp.home.presentation.DefaultHomeComponent
+import com.razumly.mvp.home.presentation.HomeComponent
 import kotlinx.serialization.Serializable
 
 class RootComponent(
@@ -99,8 +101,3 @@ class RootComponent(
         data class Home(val selectedPage: Page = Page.EventList) : Config()
     }
 }
-
-expect fun <C : Any, T : Any> backAnimation(
-    backHandler: BackHandler,
-    onBack: () -> Unit,
-): StackAnimation<C, T>

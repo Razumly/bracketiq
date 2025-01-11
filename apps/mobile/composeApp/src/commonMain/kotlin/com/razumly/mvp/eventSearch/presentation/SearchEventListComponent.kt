@@ -27,7 +27,7 @@ class SearchEventListComponent(
     componentContext: ComponentContext,
     private val appwriteRepository: IMVPRepository,
     val locationTracker: LocationTracker,
-    private val onTournamentSelected: (String) -> Unit,
+    private val onTournamentSelected: (tournamentId: String, name: String) -> Unit,
 ) : EventListComponent, ComponentContext by componentContext {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
@@ -92,7 +92,7 @@ class SearchEventListComponent(
         try {
             if (event == null) return
             if (event.collectionId == "tournaments") {
-                onTournamentSelected(event.id)
+                onTournamentSelected(event.id, event.name)
             }
         } catch (e: Exception) {
             _error.value = "Failed to select event: ${e.message}"

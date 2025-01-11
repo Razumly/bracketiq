@@ -1,8 +1,8 @@
-package com.razumly.mvp.core.presentation
+package com.razumly.mvp.core.presentation.composables
 
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.Composable
-import com.razumly.mvp.core.presentation.HomeComponent.*
+import com.razumly.mvp.home.presentation.HomeComponent.*
 
 data class NavigationItem(
     val page: Page,

@@ -1,4 +1,4 @@
-package com.razumly.mvp.core.presentation
+package com.razumly.mvp.core.presentation.composables
 
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material.icons.Icons
@@ -14,8 +14,9 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
-import com.razumly.mvp.core.presentation.HomeComponent.*
+import com.razumly.mvp.home.presentation.HomeComponent.*
+
+
 
 @Composable
 actual fun MVPBottomNavBar(
@@ -24,34 +25,15 @@ actual fun MVPBottomNavBar(
     content: @Composable (PaddingValues) -> Unit
 ) {
     val items = listOf(
-        NavigationItem(
-            Page.EventList,
-            "search",
-            "Search"
-        ),
-        NavigationItem(
-            Page.Following,
-            "favorite",
-            "Following"
-        ),
-        NavigationItem(
-            Page.Create,
-            "add",
-            "Create"
-        ),
-        NavigationItem(
-            Page.Profile,
-            "person",
-            "Profile"
-        )
+        NavigationItem(Page.EventList, "search", "Search"),
+        NavigationItem(Page.Following, "favorite", "Following"),
+        NavigationItem(Page.Create, "add", "Create"),
+        NavigationItem(Page.Profile, "person", "Profile")
     )
 
     Scaffold(
         bottomBar = {
-            NavigationBar(
-                modifier = Modifier,
-                containerColor = MaterialTheme.colorScheme.surface
-            ) {
+            NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                 items.forEach { item ->
                     NavigationBarItem(
                         icon = {
@@ -63,7 +45,7 @@ actual fun MVPBottomNavBar(
                             }
                         },
                         label = { Text(item.titleResId) },
-                        selected = selectedPage == item.page,
+                        selected = (selectedPage == item.page),
                         onClick = { onPageSelected(item.page) },
                         colors = NavigationBarItemDefaults.colors(
                             indicatorColor = MaterialTheme.colorScheme.secondaryContainer
