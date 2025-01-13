@@ -297,23 +297,35 @@ class MVPRepository(
     }
 
     override suspend fun getEvents(): List<EventAbs> {
-        val docs: DocumentList<EventDTO>
         val currentUserTournamentIds = getCurrentUser(true)?.tournaments ?: return emptyList()
+        val allDocs = mutableListOf<Document<EventDTO>>()
+
         try {
-            docs = database.listDocuments(
-                DbConstants.DATABASE_NAME,
-                DbConstants.TOURNAMENT_COLLECTION,
-                queries = listOf(
-                    Query.equal("\$id", currentUserTournamentIds),
-                ),
-                EventDTO::class
-            )
+            var offset = 0
+            var hasMore = true
+
+            while (hasMore) {
+                val docs = database.listDocuments(
+                    DbConstants.DATABASE_NAME,
+                    DbConstants.TOURNAMENT_COLLECTION,
+                    queries = listOf(
+                        Query.equal("\$id", currentUserTournamentIds),
+                        Query.limit(100),
+                        Query.offset(offset)
+                    ),
+                    EventDTO::class
+                )
+
+                allDocs.addAll(docs.documents)
+                hasMore = docs.documents.size >= 100
+                offset += docs.documents.size
+            }
         } catch (e: Exception) {
             Napier.e("Failed to get events", e, DbConstants.ERROR_TAG)
             return emptyList()
         }
 
-        return docs.documents.map {
+        return allDocs.map {
             it.data.copy(id = it.id, collectionId = it.collectionId).toEvent()
         }
     }
