@@ -8,5 +8,8 @@ import com.razumly.mvp.eventList.EventList
 fun EventFollowingScreen(component: FollowingEventListComponent){
     val events = component.events.collectAsState()
 
-    EventList(events = events.value, onEventSelected = component::selectEvent)
+    EventList(
+        component,
+        events.value,
+    )
 }

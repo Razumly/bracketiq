@@ -25,10 +25,10 @@ data class MatchWithRelations(
 
     @Relation(
         parentColumn = "refId",
-        entity = UserData::class,
+        entity = Team::class,
         entityColumn = "id"
     )
-    val ref: UserData?,
+    val ref: Team?,
 
     @Relation(
         parentColumn = "field",

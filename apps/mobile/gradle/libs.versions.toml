@@ -1,83 +1,93 @@
 [versions]
+activityKtx = "1.10.0"
 agp = "8.5.0"
 android-compileSdk = "35"
 android-minSdk = "26"
 android-targetSdk = "35"
-androidx-activityCompose = "1.9.3"
+androidx-activityCompose = "1.10.0"
 androidx-lifecycle = "2.8.4"
 assertk = "0.28.1"
 coil3 = "3.0.4"
-compose-multiplatform = "1.7.0"
+compose-multiplatform = "1.7.3"
+composeTest = "1.7.6"
 concurrentFuturesKtx = "1.2.0"
+coreKtx = "1.6.1"
+coroutines = "1.10.1"
 decompose = "3.3.0-alpha02"
-foundationLayout = "1.8.0-alpha07"
-junit = "4.13.2"
-kotlin = "2.1.0"
+foundationLayout = "1.8.0-alpha08"
 geo = "0.7.0"
-coroutines = "1.9.0"
+junit = "4.13.2"
+koin = "4.0.1"
+kotlin = "2.1.0"
 kotlinTest = "2.1.0"
-ksp = "2.1.0-1.0.29"
-koin = "4.0.0"
-kotlinx_datetime_ext = "1.3.1"
 kotlinxDatetime = "0.6.1"
+kotlinx_datetime_ext = "1.3.1"
 kotlinxSerializationJson = "1.7.3"
+ksp = "2.1.0-1.0.29"
+ktor = "3.0.3"
+lifecycleRuntimeComposeAndroid = "2.8.7"
 mapsCompose = "6.2.1"
+material = "1.8.0-alpha08"
+material3Android = "1.3.1"
+materialAndroid = "1.7.6"
 napier = "2.7.1"
+navigation-compose = "2.8.5"
+navigationCommonKtx = "2.8.5"
 permissions = "0.18.1"
 places = "4.1.0"
 playServicesLocation = "21.3.0"
 playServicesMaps = "19.0.0"
 robolectric = "4.14.1"
 room = "2.7.0-alpha12"
+runtimeSaveable = "1.7.3"
+secrets = "2.0.1"
 sqlite = "2.5.0-alpha12"
-navigation-compose = "2.8.5"
-activityKtx = "1.9.3"
-navigationCommonKtx = "2.8.5"
-materialAndroid = "1.7.6"
-material3Android = "1.3.1"
-composeTest = "1.7.6"
-ui = "1.8.0-alpha07"
+ui = "1.8.0-alpha08"
 vectorize = "1.0.2"
-coreKtx = "1.6.1"
-ktor = "3.0.1"
-lifecycleRuntimeComposeAndroid = "2.8.7"
-material = "1.8.0-alpha07"
+
 
 
 [libraries]
+androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activityCompose" }
+androidx-activity-ktx = { group = "androidx.activity", name = "activity-ktx", version.ref = "activityKtx" }
 androidx-concurrent-futures-ktx = { module = "androidx.concurrent:concurrent-futures-ktx", version.ref = "concurrentFuturesKtx" }
 androidx-foundation-layout = { module = "androidx.compose.foundation:foundation-layout", version.ref = "foundationLayout" }
-androidx-material = { module = "androidx.compose.material:material", version.ref = "material" }
-androidx-ui = { module = "androidx.compose.ui:ui", version.ref = "ui" }
-compose-ui-test-manifest = { module = "androidx.compose.ui:ui-test-manifest", version.ref = "composeTest" }
-core-ktx = { group = "androidx.test", name = "core-ktx", version.ref = "coreKtx" }
-assertk = { module = "com.willowtreeapps.assertk:assertk", version.ref = "assertk" }
-coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil3" }
-coil-compose-core = { module = "io.coil-kt.coil3:coil-compose-core", version.ref = "coil3" }
-coil-network-ktor = { module = "io.coil-kt.coil3:coil-network-ktor3", version.ref = "coil3" }
-coil-mp = { module = "io.coil-kt.coil3:coil", version.ref = "coil3" }
-ktor-client-core = { group = "io.ktor", name = "ktor-client-core", version.ref = "ktor" }
-decompose-decompose = { group = "com.arkivanov.decompose", name = "decompose", version.ref = "decompose" }
-decompose-extensionsComposeJetbrains = { group = "com.arkivanov.decompose", name = "extensions-compose", version.ref = "decompose" }
-androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activityCompose" }
 androidx-lifecycle-runtime-compose = { group = "org.jetbrains.androidx.lifecycle", name = "lifecycle-runtime-compose", version.ref = "androidx-lifecycle" }
-geo-compose = { module = "dev.icerock.moko:geo-compose", version.ref = "geo" }
-junit = { module = "junit:junit", version.ref = "junit" }
-kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlinTest" }
-kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
+androidx-lifecycle-runtime-compose-android = { group = "androidx.lifecycle", name = "lifecycle-runtime-compose-android", version.ref = "lifecycleRuntimeComposeAndroid" }
+androidx-material = { module = "androidx.compose.material:material", version.ref = "material" }
+androidx-material-android = { group = "androidx.compose.material", name = "material-android", version.ref = "materialAndroid" }
+androidx-material3-android = { group = "androidx.compose.material3", name = "material3-android", version.ref = "material3Android" }
+androidx-navigation-common-ktx = { group = "androidx.navigation", name = "navigation-common-ktx", version.ref = "navigationCommonKtx" }
 androidx-room-compiler = { module = "androidx.room:room-compiler", version.ref = "room" }
 androidx-room-runtime = { module = "androidx.room:room-runtime", version.ref = "room" }
 androidx-sqlite-bundled = { module = "androidx.sqlite:sqlite-bundled", version.ref = "sqlite" }
+androidx-ui = { module = "androidx.compose.ui:ui", version.ref = "ui" }
+assertk = { module = "com.willowtreeapps.assertk:assertk", version.ref = "assertk" }
+coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil3" }
+coil-compose-core = { module = "io.coil-kt.coil3:coil-compose-core", version.ref = "coil3" }
+coil-mp = { module = "io.coil-kt.coil3:coil", version.ref = "coil3" }
+coil-network-ktor = { module = "io.coil-kt.coil3:coil-network-ktor3", version.ref = "coil3" }
+compose-ui-test-manifest = { module = "androidx.compose.ui:ui-test-manifest", version.ref = "composeTest" }
+compose-vectorize-core = { module = "dev.sergiobelda.compose.vectorize:compose-vectorize-core", version.ref = "vectorize"}
+core-ktx = { group = "androidx.test", name = "core-ktx", version.ref = "coreKtx" }
+decompose-decompose = { group = "com.arkivanov.decompose", name = "decompose", version.ref = "decompose" }
+decompose-extensionsComposeJetbrains = { group = "com.arkivanov.decompose", name = "extensions-compose", version.ref = "decompose" }
 geo = { module = "dev.icerock.moko:geo", version.ref = "geo" }
-koin-core = { module = "io.insert-koin:koin-core", version.ref = "koin" }
-koin-test = { module = "io.insert-koin:koin-test", version.ref = "koin" }
+geo-compose = { module = "dev.icerock.moko:geo-compose", version.ref = "geo" }
+junit = { module = "junit:junit", version.ref = "junit" }
 koin-android = { module = "io.insert-koin:koin-android", version.ref = "koin" }
 koin-androidx-compose = { module = "io.insert-koin:koin-androidx-compose-navigation", version.ref = "koin" }
 koin-compose = { module = "io.insert-koin:koin-compose-viewmodel-navigation", version.ref = "koin" }
+koin-core = { module = "io.insert-koin:koin-core", version.ref = "koin" }
+koin-test = { module = "io.insert-koin:koin-test", version.ref = "koin" }
+kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlinTest" }
+kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
+kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
 kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "kotlinxDatetime" }
 kotlinx-serialization-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-core", version.ref = "kotlinxSerializationJson" }
-kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerializationJson" }
+kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerializationJson" }
 kotlinx_datetime_ext = { module = "com.raedghazal:kotlinx_datetime_ext", version.ref = "kotlinx_datetime_ext" }
+ktor-client-core = { group = "io.ktor", name = "ktor-client-core", version.ref = "ktor" }
 maps-compose = { module = "com.google.maps.android:maps-compose", version.ref = "mapsCompose" }
 napier = { module = "io.github.aakira:napier", version.ref = "napier" }
 permissions = { module = "dev.icerock.moko:permissions", version.ref = "permissions" }
@@ -85,22 +95,19 @@ permissions-compose = { module = "dev.icerock.moko:permissions-compose", version
 places = { module = "com.google.android.libraries.places:places", version.ref = "places" }
 play-services-location = { module = "com.google.android.gms:play-services-location", version.ref = "playServicesLocation" }
 play-services-maps = { module = "com.google.android.gms:play-services-maps", version.ref = "playServicesMaps" }
-navigation-compose = { module = "androidx.navigation:navigation-compose", version.ref = "navigation-compose" }
-compose-vectorize-core = { module = "dev.sergiobelda.compose.vectorize:compose-vectorize-core", version.ref = "vectorize"}
-androidx-activity-ktx = { group = "androidx.activity", name = "activity-ktx", version.ref = "activityKtx" }
-androidx-navigation-common-ktx = { group = "androidx.navigation", name = "navigation-common-ktx", version.ref = "navigationCommonKtx" }
-androidx-material-android = { group = "androidx.compose.material", name = "material-android", version.ref = "materialAndroid" }
-androidx-material3-android = { group = "androidx.compose.material3", name = "material3-android", version.ref = "material3Android" }
 robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
-androidx-lifecycle-runtime-compose-android = { group = "androidx.lifecycle", name = "lifecycle-runtime-compose-android", version.ref = "lifecycleRuntimeComposeAndroid" }
+runtime-saveable = { module = "org.jetbrains.compose.runtime:runtime-saveable", version.ref = "runtimeSaveable" }
+
 
 [plugins]
 androidApplication = { id = "com.android.application", version.ref = "agp" }
 androidLibrary = { id = "com.android.library", version.ref = "agp" }
-composeMultiplatform = { id = "org.jetbrains.compose", version.ref = "compose-multiplatform" }
 composeCompiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+composeMultiplatform = { id = "org.jetbrains.compose", version.ref = "compose-multiplatform" }
+compose-vectorize = { id = "dev.sergiobelda.compose.vectorize", version.ref = "vectorize"}
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 room = { id = "androidx.room", version.ref = "room" }
-kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
-compose-vectorize = { id = "dev.sergiobelda.compose.vectorize", version.ref = "vectorize"}
+secrets = { id = "com.google.android.libraries.mapsplatform.secrets-gradle-plugin", version.ref = "secrets"}
+

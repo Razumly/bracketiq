@@ -16,17 +16,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.FabPosition
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TabRowDefaults.SecondaryIndicator
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
@@ -37,7 +31,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.razumly.mvp.core.data.dataTypes.EventAbs
@@ -50,8 +43,8 @@ import com.razumly.mvp.icons.Tournament
 
 @Composable
 fun EventList(
+    component: EventListComponent,
     events: List<EventAbs>,
-    onEventSelected: (EventAbs) -> Unit
 ) {
     val backgroundColor = MaterialTheme.colorScheme.background
     val searchBoxColor = MaterialTheme.colorScheme.surface
@@ -95,97 +88,79 @@ fun EventList(
                 }
             }
         }
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = 0.dp, bottom = 0.dp)
+        ) {
+            // Tab row with default indicator & bigger vertical space
+            val tabs = listOf("Tournaments", "Beach", "Indoor", "Grass", "Groups")
 
-        Scaffold(
-            floatingActionButton = {
-                Button(
-                    onClick = { /* map action */ },
-                    modifier = Modifier.padding(16.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color.Black,
-                        contentColor = Color.White
-                    )
-                ) {
-                    Text("Map")
-                    Icon(Icons.Default.Place, contentDescription = "Map")
-                }
-            },
-            floatingActionButtonPosition = FabPosition.Center
-        ) { paddingValues ->
-            Column(
+            ScrollableTabRow(
+                selectedTabIndex = selectedTabIndex,
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(top = 0.dp, bottom = paddingValues.calculateBottomPadding())
+                    .fillMaxWidth()
+                    // If you want more space, do .height(56.dp) or add .padding(vertical = X.dp)
+                    .height(56.dp),
+                edgePadding = 0.dp,
+                indicator = { tabPositions ->
+                    // Default indicator is easier to see
+                    SecondaryIndicator(
+                        modifier = Modifier.tabIndicatorOffset(tabPositions[selectedTabIndex]),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                },
+                // Typically, contentColor sets the default color for icons/text
+                contentColor = MaterialTheme.colorScheme.onSurface
             ) {
-                // Tab row with default indicator & bigger vertical space
-                val tabs = listOf("Tournaments", "Beach", "Indoor", "Grass", "Groups")
+                tabs.forEachIndexed { index, title ->
+                    val isSelected = (index == selectedTabIndex)
 
-                ScrollableTabRow(
-                    selectedTabIndex = selectedTabIndex,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        // If you want more space, do .height(56.dp) or add .padding(vertical = X.dp)
-                        .height(56.dp),
-                    edgePadding = 0.dp,
-                    indicator = { tabPositions ->
-                        // Default indicator is easier to see
-                        SecondaryIndicator(
-                            modifier = Modifier.tabIndicatorOffset(tabPositions[selectedTabIndex]),
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    },
-                    // Typically, contentColor sets the default color for icons/text
-                    contentColor = MaterialTheme.colorScheme.onSurface
-                ) {
-                    tabs.forEachIndexed { index, title ->
-                        val isSelected = (index == selectedTabIndex)
-
-                        Tab(
-                            selected = isSelected,
-                            onClick = { selectedTabIndex = index },
-                            modifier = Modifier.padding(vertical = 4.dp), // extra vertical space
-                            text = {
-                                Text(
-                                    text = title,
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
-                                    color = if (isSelected) {
-                                        MaterialTheme.colorScheme.primary
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    }
-                                )
-                            },
-                            icon = {
-                                Icon(
-                                    when (title) {
-                                        "Tournaments" -> MVPIcons.Tournament
-                                        "Beach" -> MVPIcons.Beach
-                                        "Indoor" -> MVPIcons.Indoor
-                                        "Grass" -> MVPIcons.Grass
-                                        else -> MVPIcons.Groups
-                                    },
-                                    contentDescription = title,
-                                    tint = if (isSelected) {
-                                        MaterialTheme.colorScheme.primary
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    }
-                                )
-                            }
-                        )
-                    }
+                    Tab(
+                        selected = isSelected,
+                        onClick = { selectedTabIndex = index },
+                        modifier = Modifier.padding(vertical = 4.dp), // extra vertical space
+                        text = {
+                            Text(
+                                text = title,
+                                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                                color = if (isSelected) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
+                        },
+                        icon = {
+                            Icon(
+                                when (title) {
+                                    "Tournaments" -> MVPIcons.Tournament
+                                    "Beach" -> MVPIcons.Beach
+                                    "Indoor" -> MVPIcons.Indoor
+                                    "Grass" -> MVPIcons.Grass
+                                    else -> MVPIcons.Groups
+                                },
+                                contentDescription = title,
+                                tint = if (isSelected) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
+                        }
+                    )
                 }
+            }
 
-                LazyColumn(
-                    modifier = Modifier.weight(1f)
-                ) {
-                    items(items = events, key = { it.id }) { event ->
-                        EventCard(
-                            event = event,
-                            onFavoriteClick = {},
-                            modifier = Modifier.clickable { onEventSelected(event) }
-                        )
-                    }
+            LazyColumn(
+                modifier = Modifier.weight(1f)
+            ) {
+                items(items = events, key = { it.id }) { event ->
+                    EventCard(
+                        event = event,
+                        onFavoriteClick = {},
+                        modifier = Modifier.clickable { component.selectEvent(event) }
+                    )
                 }
             }
         }

@@ -83,6 +83,9 @@ class DefaultTournamentContentComponent(
                         tournament.divisions.firstOrNull()?.let { selectDivision(it) }
                     }
                 }
+
+        }
+        scope.launch {
             appwriteRepository.getTournament(tournamentId)
         }
         scope.launch {

@@ -3,13 +3,13 @@ package com.razumly.mvp.di
 import com.arkivanov.decompose.ComponentContext
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
-import com.razumly.mvp.home.presentation.DefaultHomeComponent
 import com.razumly.mvp.core.presentation.RootComponent
 import com.razumly.mvp.eventContent.presentation.DefaultMatchContentComponent
 import com.razumly.mvp.eventContent.presentation.DefaultTournamentContentComponent
 import com.razumly.mvp.eventCreate.presentation.DefaultCreateEventComponent
 import com.razumly.mvp.eventFollowing.presentation.FollowingEventListComponent
 import com.razumly.mvp.eventSearch.presentation.SearchEventListComponent
+import com.razumly.mvp.home.presentation.DefaultHomeComponent
 import com.razumly.mvp.profile.presentation.DefaultProfileComponent
 import com.razumly.mvp.userAuth.presentation.loginScreen.DefaultLoginComponent
 import org.koin.dsl.module
@@ -75,7 +75,7 @@ val componentModule = module {
                 componentContext = componentContext,
                 appwriteRepository = get(),
                 locationTracker = get(),
-                onTournamentSelected = onTournamentSelected,
+                onTournamentSelected = onTournamentSelected
             )
     }
 
@@ -92,5 +92,4 @@ val componentModule = module {
             componentContext = componentContext
         )
     }
-
 }

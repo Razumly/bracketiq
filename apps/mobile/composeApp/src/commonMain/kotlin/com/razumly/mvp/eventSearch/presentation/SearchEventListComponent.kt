@@ -1,11 +1,9 @@
 package com.razumly.mvp.eventSearch.presentation
 
 import com.arkivanov.decompose.ComponentContext
-import com.arkivanov.essenty.backhandler.BackCallback
 import com.razumly.mvp.core.data.IMVPRepository
 import com.razumly.mvp.core.data.dataTypes.Bounds
 import com.razumly.mvp.core.data.dataTypes.EventAbs
-import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.eventList.EventListComponent
 import dev.icerock.moko.geo.LatLng
 import dev.icerock.moko.geo.LocationTracker
@@ -47,9 +45,13 @@ class SearchEventListComponent(
         .stateIn(scope, SharingStarted.Eagerly, null)
 
     private val _currentLocation = MutableStateFlow<LatLng?>(null)
+    val currentLocation = _currentLocation.asStateFlow()
 
     private val _selectedEvent = MutableStateFlow<EventAbs?>(null)
     override val selectedEvent: StateFlow<EventAbs?> = _selectedEvent.asStateFlow()
+
+    private val _showMapCard = MutableStateFlow(false)
+    val showMapCard: StateFlow<Boolean> = _showMapCard.asStateFlow()
 
     init {
         scope.launch {
@@ -86,6 +88,10 @@ class SearchEventListComponent(
                 _error.value = "Failed to update events: ${e.message}"
             }
         }
+    }
+
+    fun onMapClick() {
+        _showMapCard.value = true
     }
 
     override fun selectEvent(event: EventAbs?) {

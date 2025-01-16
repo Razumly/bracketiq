@@ -11,13 +11,14 @@ plugins {
     alias(libs.plugins.ksp)
     alias(libs.plugins.room)
     alias(libs.plugins.compose.vectorize)
+    alias(libs.plugins.secrets)
     id("kotlin-parcelize")
 }
 
 kotlin {
     androidTarget {
         compilerOptions {
-            jvmTarget.set(JvmTarget.JVM_11)
+            jvmTarget.set(JvmTarget.JVM_17)
         }
     }
 
@@ -37,15 +38,15 @@ kotlin {
         commonMain {
             kotlin.srcDir("build/generated/ksp/metadata/commonMain/kotlin")
             dependencies {
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
-                implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
-                implementation("org.jetbrains.compose.runtime:runtime-saveable:1.7.0")
                 implementation(compose.runtime)
                 implementation(compose.foundation)
                 implementation(compose.material3)
                 implementation(compose.ui)
                 implementation(compose.components.resources)
                 implementation(compose.components.uiToolingPreview)
+                implementation(libs.kotlinx.coroutines.core)
+                implementation(libs.kotlinx.serialization.json)
+                implementation(libs.runtime.saveable)
                 implementation(libs.coil.compose)
                 implementation(libs.androidx.room.runtime)
                 implementation(libs.androidx.sqlite.bundled)
@@ -73,7 +74,7 @@ kotlin {
         androidMain {
             kotlin.srcDir("build/generated/ksp/android/androidMain/kotlin")
             dependencies {
-                implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
+                implementation(libs.androidx.lifecycle.runtime.compose)
                 implementation(compose.preview)
                 implementation(libs.androidx.activity.compose)
                 implementation(libs.koin.android)
@@ -84,7 +85,7 @@ kotlin {
                 implementation(libs.play.services.location)
                 implementation(libs.places)
                 implementation(libs.androidx.concurrent.futures.ktx)
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+                implementation(libs.kotlinx.coroutines.android)
                 implementation(libs.androidx.material.android)
                 implementation(libs.androidx.material3.android)
                 implementation(libs.androidx.navigation.common.ktx)
@@ -131,8 +132,8 @@ android {
         }
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
     bundle {
         language {
@@ -151,6 +152,12 @@ room {
     generateKotlin = true
 }
 
+secrets {
+    propertiesFileName = "secrets.properties"
+    defaultPropertiesFileName = "local.defaults.properties"
+    ignoreList.add("sdk.*")
+}
+
 dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose.android)
     debugImplementation(compose.uiTooling)
@@ -162,5 +169,4 @@ dependencies {
     implementation(libs.androidx.foundation.layout)
     implementation(libs.androidx.ui)
     implementation(libs.androidx.material)
-
 }

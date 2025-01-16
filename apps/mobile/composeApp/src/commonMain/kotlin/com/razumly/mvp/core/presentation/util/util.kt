@@ -1,12 +1,10 @@
 package com.razumly.mvp.core.presentation.util
 
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.unit.Dp
-import com.arkivanov.decompose.extensions.compose.stack.animation.StackAnimation
-import com.arkivanov.essenty.backhandler.BackHandler
 import kotlinx.datetime.Instant
-import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.LocalTime
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.format.char
 import kotlinx.datetime.toLocalDateTime
 
 fun instantToDateTimeString(instant: Instant): String {
@@ -15,3 +13,13 @@ fun instantToDateTimeString(instant: Instant): String {
 
 @Composable
 expect fun getScreenWidth(): Int
+
+val timeFormat = LocalTime.Format {
+    amPmHour()
+    char(':')
+    minute()
+    char(':')
+    second()
+    char(' ')
+    amPmMarker("AM", "PM")
+}

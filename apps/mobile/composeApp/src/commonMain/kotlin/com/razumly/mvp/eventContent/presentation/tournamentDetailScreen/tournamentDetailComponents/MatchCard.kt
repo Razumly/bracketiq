@@ -6,22 +6,25 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Card
-import androidx.compose.material3.CardColors
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
-import com.razumly.mvp.core.presentation.composables.HorizontalDivider
-import com.razumly.mvp.core.presentation.composables.VerticalDivider
-import com.razumly.mvp.eventContent.presentation.MatchContentComponent
+import com.razumly.mvp.core.presentation.util.timeFormat
 import com.razumly.mvp.eventContent.presentation.TournamentContentComponent
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 
 
 @Composable
@@ -29,12 +32,25 @@ fun MatchCard(
     component: TournamentContentComponent,
     match: MatchWithRelations,
     onClick: () -> Unit,
-    cardColors: CardColors,
+    losersBracket: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val textModifier = Modifier.width(70.dp)
     val team1 = component.currentTeams.value[match.match.team1]
     val team2 = component.currentTeams.value[match.match.team2]
+    val ref = component.currentTeams.value[match.match.refId]
+    val matchCardColor =
+        if (match.match.losersBracket == losersBracket) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.tertiaryContainer
+        }
+    val cardColors = CardDefaults.cardColors(
+        matchCardColor,
+        MaterialTheme.colorScheme.onPrimaryContainer,
+        MaterialTheme.colorScheme.primaryContainer,
+        MaterialTheme.colorScheme.onPrimaryContainer
+    )
     Card(
         modifier = modifier
             .fillMaxWidth()
@@ -42,7 +58,29 @@ fun MatchCard(
         elevation = CardDefaults.cardElevation(4.dp),
         colors = cardColors
     ) {
-        Row {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(IntrinsicSize.Min),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            Text("Start: ${timeFormat.format(match.match.start.toLocalDateTime(TimeZone.currentSystemDefault()).time)}")
+            VerticalDivider()
+            Text("Ref: ")
+            ref?.players?.forEach { player ->
+                Text(
+                    "${player.firstName}.${player.lastName?.first()}",
+                    textModifier,
+                    overflow = TextOverflow.Ellipsis,
+                    maxLines = 1
+                )
+            }
+        }
+        HorizontalDivider()
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Column(
                 modifier = Modifier
                     .padding(8.dp)
@@ -50,10 +88,10 @@ fun MatchCard(
                 verticalArrangement = Arrangement.SpaceEvenly
             ) {
                 Text("M: ${match.match.matchNumber}")
-                androidx.compose.material3.HorizontalDivider()
+                HorizontalDivider()
                 Text("F: ${match.field?.fieldNumber}")
             }
-            androidx.compose.material3.VerticalDivider()
+            VerticalDivider()
             Column(
                 modifier = Modifier
                     .padding(8.dp)
@@ -71,14 +109,16 @@ fun MatchCard(
                             Text(
                                 team.team.name.toString(),
                                 textModifier,
-                                overflow = TextOverflow.Ellipsis
+                                overflow = TextOverflow.Ellipsis,
+                                maxLines = 1
                             )
                         } else {
                             team.players.forEach { player ->
                                 Text(
                                     "${player.firstName}.${player.lastName?.first()}",
                                     textModifier,
-                                    overflow = TextOverflow.Ellipsis
+                                    overflow = TextOverflow.Ellipsis,
+                                    maxLines = 1
                                 )
                             }
                         }
@@ -108,14 +148,16 @@ fun MatchCard(
                             Text(
                                 team.team.name.toString(),
                                 textModifier,
-                                overflow = TextOverflow.Ellipsis
+                                overflow = TextOverflow.Ellipsis,
+                                maxLines = 1
                             )
                         } else {
                             team.players.forEach { player ->
                                 Text(
                                     "${player.firstName}.${player.lastName?.first()}",
                                     textModifier,
-                                    overflow = TextOverflow.Ellipsis
+                                    overflow = TextOverflow.Ellipsis,
+                                    maxLines = 1
                                 )
                             }
                         }

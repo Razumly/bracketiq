@@ -16,7 +16,8 @@ import kotlinx.coroutines.launch
 class FollowingEventListComponent(
     private val componentContext: ComponentContext,
     private val mvpRepository: MVPRepository,
-    private val onTournamentSelected: (EventAbs) -> Unit
+    private val onTournamentSelected: (EventAbs) -> Unit,
+
 ) : EventListComponent, ComponentContext by componentContext {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private val _events = MutableStateFlow<List<EventAbs>>(emptyList())

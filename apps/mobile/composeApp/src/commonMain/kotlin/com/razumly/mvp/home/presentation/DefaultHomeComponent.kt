@@ -1,8 +1,8 @@
 package com.razumly.mvp.home.presentation
 
 import com.arkivanov.decompose.ComponentContext
-import com.arkivanov.decompose.router.stack.childStack
 import com.arkivanov.decompose.router.stack.StackNavigation
+import com.arkivanov.decompose.router.stack.childStack
 import com.arkivanov.decompose.router.stack.pop
 import com.arkivanov.decompose.router.stack.pushNew
 import com.arkivanov.decompose.router.stack.replaceAll
@@ -12,12 +12,14 @@ import com.razumly.mvp.eventContent.presentation.DefaultTournamentContentCompone
 import com.razumly.mvp.eventCreate.presentation.DefaultCreateEventComponent
 import com.razumly.mvp.eventFollowing.presentation.FollowingEventListComponent
 import com.razumly.mvp.eventSearch.presentation.SearchEventListComponent
+import com.razumly.mvp.home.presentation.HomeComponent.Child
+import com.razumly.mvp.home.presentation.HomeComponent.Config
+import com.razumly.mvp.home.presentation.HomeComponent.Page
 import com.razumly.mvp.profile.presentation.DefaultProfileComponent
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.koin.core.parameter.parametersOf
 import org.koin.mp.KoinPlatform.getKoin
-import com.razumly.mvp.home.presentation.HomeComponent.*
 
 class DefaultHomeComponent(
     componentContext: ComponentContext,

@@ -30,8 +30,6 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material3.CardColors
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ScrollableTabRow
@@ -54,7 +52,6 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.presentation.util.getScreenWidth
@@ -230,12 +227,7 @@ private fun TournamentListView(
                     component = component,
                     match = match,
                     onClick = { onMatchClick(match) },
-                    cardColors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                        disabledContainerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                        disabledContentColor = MaterialTheme.colorScheme.onTertiaryContainer
-                    )
+                    losersBracket = false
 
 //                    cardColors = CardColors(
 //                        MaterialTheme.colorScheme.primaryContainer,
@@ -264,7 +256,7 @@ fun TournamentBracketView(
         targetValue = maxHeightInRowDp.value,
         label = "Column Height"
     )
-    val cardHeight = 60
+    val cardHeight = 120
     val cardPadding = 20
     val cardContainerHeight = cardHeight + cardPadding
     val boxHeight = remember { mutableStateOf(Dp.Unspecified) }
@@ -352,12 +344,6 @@ fun TournamentBracketView(
                                     verticalArrangement = Arrangement.SpaceAround
                                 ) {
                                     matches.filterNotNull().forEach { match ->
-                                        val matchCardColor =
-                                            if (match.match.losersBracket == losersBracket) {
-                                                MaterialTheme.colorScheme.tertiaryContainer
-                                            } else {
-                                                MaterialTheme.colorScheme.surface
-                                            }
                                         MatchCard(
                                             component,
                                             match = match,
@@ -365,12 +351,7 @@ fun TournamentBracketView(
                                             modifier = Modifier
                                                 .height(cardHeight.dp)
                                                 .width(width.dp),
-                                            cardColors = CardDefaults.cardColors(
-                                                matchCardColor,
-                                                MaterialTheme.colorScheme.onPrimaryContainer,
-                                                MaterialTheme.colorScheme.tertiaryContainer,
-                                                MaterialTheme.colorScheme.onTertiaryContainer
-                                            )
+                                            losersBracket = losersBracket
                                         )
                                     }
                                 }
