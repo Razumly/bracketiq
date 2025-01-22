@@ -11,6 +11,7 @@ data class EventImp(
     override val location: String,
     override val name: String,
     override val description: String,
+    override val divisions: List<String>,
     override val lat: Double,
     override val long: Double,
     override val type: String,

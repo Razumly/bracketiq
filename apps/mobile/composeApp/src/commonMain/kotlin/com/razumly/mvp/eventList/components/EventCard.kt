@@ -35,6 +35,7 @@ import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.presentation.disabledCardColor
+import com.razumly.mvp.eventList.TextPatterns
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.format
@@ -49,6 +50,8 @@ fun EventCard(
     modifier: Modifier = Modifier,
 ) {
     var imageStateText by remember { mutableStateOf("initial") }
+    val patterns = TextPatterns(event.name)
+
     val dateRangeText = remember(event.start, event.end) {
         val dateFormat = LocalDate.Format {
             dayOfMonth()
@@ -57,11 +60,11 @@ fun EventCard(
         }
 
         val startDate = event.start.toLocalDateTime(TimeZone.currentSystemDefault()).date
-        val endDate = event.end?.toLocalDateTime(TimeZone.currentSystemDefault())?.date
+        val endDate = event.end.toLocalDateTime(TimeZone.currentSystemDefault()).date
 
         val startStr = startDate.format(dateFormat)
 
-        if (endDate != null && startDate != endDate) {
+        if (startDate != endDate) {
             val endStr = endDate.format(dateFormat)
             "$startStr - $endStr"
         } else {
@@ -163,8 +166,7 @@ fun EventCard(
                     text = "${event.type} Tournament",
                     style = MaterialTheme.typography.bodyMedium
                 )
-                Text(text = event.description,
-                    style = MaterialTheme.typography.bodyMedium)
+                StylizedText(event.description, patterns)
 
                 HorizontalDivider(thickness = 2.dp)
 

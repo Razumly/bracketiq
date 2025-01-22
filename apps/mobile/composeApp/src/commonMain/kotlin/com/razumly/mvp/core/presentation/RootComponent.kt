@@ -6,11 +6,10 @@ import com.arkivanov.decompose.router.stack.childStack
 import com.arkivanov.decompose.router.stack.pop
 import com.arkivanov.decompose.router.stack.replaceCurrent
 import com.arkivanov.essenty.backhandler.BackHandler
-import com.razumly.mvp.home.presentation.DefaultHomeComponent
-import com.razumly.mvp.home.presentation.HomeComponent
-import com.razumly.mvp.home.presentation.HomeComponent.*
-import com.razumly.mvp.userAuth.presentation.loginScreen.DefaultLoginComponent
-import com.razumly.mvp.userAuth.presentation.loginScreen.LoginComponent
+import com.razumly.mvp.home.DefaultHomeComponent
+import com.razumly.mvp.home.HomeComponent
+import com.razumly.mvp.userAuth.loginScreen.DefaultLoginComponent
+import com.razumly.mvp.userAuth.loginScreen.LoginComponent
 import dev.icerock.moko.geo.LocationTracker
 import dev.icerock.moko.permissions.DeniedAlwaysException
 import dev.icerock.moko.permissions.DeniedException

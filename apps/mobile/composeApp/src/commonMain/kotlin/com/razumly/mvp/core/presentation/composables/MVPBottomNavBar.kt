@@ -29,7 +29,7 @@ import androidx.compose.ui.zIndex
 import com.razumly.mvp.core.presentation.MVPTransparency
 import com.razumly.mvp.core.presentation.navBarGradientStart
 import com.razumly.mvp.core.presentation.selectedNavBar
-import com.razumly.mvp.home.presentation.HomeComponent.Page
+import com.razumly.mvp.home.HomeComponent.Page
 
 data class NavigationItem(
     val page: Page,

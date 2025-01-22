@@ -12,7 +12,6 @@ import kotlinx.serialization.Transient
 data class Tournament(
 
     val doubleElimination: Boolean = false,
-    val divisions: List<String> = listOf(),
     val winnerSetCount: Int = 0,
     val loserSetCount: Int = 0,
     val winnerBracketPointsToVictory: List<Int> = listOf(),
@@ -22,6 +21,7 @@ data class Tournament(
     @Transient @PrimaryKey override var id: String = ID.unique(),
     override val name: String = "",
     override val description: String = "",
+    override val divisions: List<String> = listOf(),
     override val location: String = "",
     override val type: String = "",
     override val start: Instant = Instant.DISTANT_PAST,

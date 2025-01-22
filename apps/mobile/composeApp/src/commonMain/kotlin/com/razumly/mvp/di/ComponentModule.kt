@@ -4,14 +4,14 @@ import com.arkivanov.decompose.ComponentContext
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.presentation.RootComponent
-import com.razumly.mvp.eventContent.presentation.DefaultMatchContentComponent
-import com.razumly.mvp.eventContent.presentation.DefaultTournamentContentComponent
-import com.razumly.mvp.eventCreate.presentation.DefaultCreateEventComponent
-import com.razumly.mvp.eventFollowing.presentation.FollowingEventListComponent
-import com.razumly.mvp.eventSearch.presentation.SearchEventListComponent
-import com.razumly.mvp.home.presentation.DefaultHomeComponent
-import com.razumly.mvp.profile.presentation.DefaultProfileComponent
-import com.razumly.mvp.userAuth.presentation.loginScreen.DefaultLoginComponent
+import com.razumly.mvp.matchDetailScreen.DefaultMatchContentComponent
+import com.razumly.mvp.tournamentDetailScreen.DefaultTournamentContentComponent
+import com.razumly.mvp.eventCreate.DefaultCreateEventComponent
+import com.razumly.mvp.eventFollowing.FollowingEventListComponent
+import com.razumly.mvp.eventSearch.SearchEventListComponent
+import com.razumly.mvp.home.DefaultHomeComponent
+import com.razumly.mvp.profile.DefaultProfileComponent
+import com.razumly.mvp.userAuth.loginScreen.DefaultLoginComponent
 import org.koin.dsl.module
 
 val componentModule = module {
