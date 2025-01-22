@@ -7,6 +7,7 @@ import kotlinx.serialization.Serializable
 abstract class EventAbs : MVPDocument() {
     abstract val location: String
     abstract val name: String
+    abstract val description: String
     abstract val lat: Double
     abstract val long: Double
     abstract val type: String

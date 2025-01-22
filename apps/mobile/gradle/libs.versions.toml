@@ -16,6 +16,7 @@ coroutines = "1.10.1"
 decompose = "3.3.0-alpha02"
 foundationLayout = "1.8.0-alpha08"
 geo = "0.7.0"
+hazeMaterials = "1.2.2"
 junit = "4.13.2"
 koin = "4.0.1"
 kotlin = "2.1.0"
@@ -62,6 +63,7 @@ androidx-room-compiler = { module = "androidx.room:room-compiler", version.ref =
 androidx-room-runtime = { module = "androidx.room:room-runtime", version.ref = "room" }
 androidx-sqlite-bundled = { module = "androidx.sqlite:sqlite-bundled", version.ref = "sqlite" }
 androidx-ui = { module = "androidx.compose.ui:ui", version.ref = "ui" }
+androidx-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview", version.ref = "composeTest" }
 assertk = { module = "com.willowtreeapps.assertk:assertk", version.ref = "assertk" }
 coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil3" }
 coil-compose-core = { module = "io.coil-kt.coil3:coil-compose-core", version.ref = "coil3" }
@@ -74,6 +76,9 @@ decompose-decompose = { group = "com.arkivanov.decompose", name = "decompose", v
 decompose-extensionsComposeJetbrains = { group = "com.arkivanov.decompose", name = "extensions-compose", version.ref = "decompose" }
 geo = { module = "dev.icerock.moko:geo", version.ref = "geo" }
 geo-compose = { module = "dev.icerock.moko:geo-compose", version.ref = "geo" }
+haze = { module = "dev.chrisbanes.haze:haze", version.ref = "hazeMaterials" }
+haze-materials = { module = "dev.chrisbanes.haze:haze-materials", version.ref = "hazeMaterials" }
+
 junit = { module = "junit:junit", version.ref = "junit" }
 koin-android = { module = "io.insert-koin:koin-android", version.ref = "koin" }
 koin-androidx-compose = { module = "io.insert-koin:koin-androidx-compose-navigation", version.ref = "koin" }

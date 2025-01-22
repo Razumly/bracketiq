@@ -2,7 +2,6 @@ package com.razumly.mvp.home.presentation
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -25,16 +24,17 @@ import io.github.aakira.napier.Napier
 @Composable
 fun HomeScreen(component: HomeComponent) {
     val childStack by component.childStack.subscribeAsState()
+    val selectedPage = component.selectedPage.value
     Napier.d(tag = "HomeScreen") { "Current tab: ${childStack.active.configuration}" }
 
     MVPBottomNavBar(
-        selectedPage = childStack.active.configuration,
+        selectedPage = selectedPage,
         onPageSelected = {
             Napier.i(tag = "Navigation") { "Tab selected: $it" }
             component.onTabSelected(it)
         },
     ) { paddingValues ->
-        Box(modifier = Modifier.padding(paddingValues)) {
+        Box {
             Children(
                 stack = childStack,
                 animation = backAnimation(
@@ -55,7 +55,7 @@ fun HomeScreen(component: HomeComponent) {
                     when (val instance = child.instance) {
                         is HomeComponent.Child.Search -> {
                             Napier.d(tag = "Navigation") { "Navigating to Search Screen" }
-                            EventSearchScreen(instance.component)
+                            EventSearchScreen(instance.component, paddingValues)
                         }
                         is HomeComponent.Child.TournamentContent -> {
                             Napier.d(tag = "Navigation") { "Navigating to Tournament Detail Screen" }

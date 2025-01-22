@@ -11,6 +11,7 @@ data class EventDTO(
     val id: String,
     val location: String,
     val name: String,
+    val description: String,
     val type: String,
     val start: String,  // ISO-8601 format string
     val end: String,    // ISO-8601 format string
@@ -27,6 +28,7 @@ fun EventDTO.toEvent(): EventAbs {
         id = id,
         location = location,
         name = name,
+        description = description,
         type = type,
         start = Instant.parse(start),
         end = Instant.parse(end),

@@ -2,7 +2,14 @@ package com.razumly.mvp.core.presentation
 
 import androidx.compose.ui.graphics.Color
 
-val primaryLight = Color(0xFF8A5022)
+val backGroundGradient1 = Color(0x9e89d9fa)
+val backGroundGradient2 = Color(0x93c0abff)
+val MVPTransparency = Color(0x00FFFFFF)
+val disabledCardColor = Color(0x34ffffff)
+val navBarGradientStart = Color(0xff262626)
+val selectedNavBar = Color(0x696b6b6b)
+
+val primaryLight = Color(0xfffd8a31)
 val onPrimaryLight = Color(0xFFFFFFFF)
 val primaryContainerLight = Color(0xFFFFDCC6)
 val onPrimaryContainerLight = Color(0xFF301400)
@@ -25,7 +32,7 @@ val onSurfaceLight = Color(0xFF221A15)
 val surfaceVariantLight = Color(0xFFF3DED3)
 val onSurfaceVariantLight = Color(0xFF52443B)
 val outlineLight = Color(0xFF84746A)
-val outlineVariantLight = Color(0xFFD7C3B7)
+val outlineVariantLight = Color(0xff8a8a8a)
 val scrimLight = Color(0xFF000000)
 val inverseSurfaceLight = Color(0xFF382E29)
 val inverseOnSurfaceLight = Color(0xFFFEEDE4)

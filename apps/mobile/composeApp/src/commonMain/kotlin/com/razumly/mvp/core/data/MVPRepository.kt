@@ -43,7 +43,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class MVPRepository(
     client: Client,
@@ -96,8 +95,7 @@ class MVPRepository(
                     tournamentId,
                     TournamentDTO::class,
                     queries = null
-                )
-                    .data.toTournament()
+                ).data.toTournament()
             },
             saveCall = { tournament ->
                 tournamentDB.getTournamentDao.upsertTournament(tournament)
@@ -267,7 +265,8 @@ class MVPRepository(
             tournamentDB.getUserDataDao.upsertUsersData(players)
             tournamentDB.getUserDataDao.upsertUserTournamentCrossRefs(players.map { user ->
                 UserTournamentCrossRef(user.id, tournamentId)
-            }) }
+            })
+        }
     )
 
     override suspend fun getEvents(
@@ -452,6 +451,7 @@ interface IMVPRepository {
     fun getMatchFlow(
         matchId: String
     ): Flow<MatchWithRelations?>
+
     suspend fun getMatch(matchId: String)
 
     fun getMatchesFlow(

@@ -1,12 +1,14 @@
 package com.razumly.mvp.core.presentation
 
 import com.arkivanov.decompose.ComponentContext
-import com.arkivanov.decompose.extensions.compose.stack.animation.StackAnimation
 import com.arkivanov.decompose.router.stack.StackNavigation
 import com.arkivanov.decompose.router.stack.childStack
-import com.arkivanov.decompose.router.stack.replaceCurrent
 import com.arkivanov.decompose.router.stack.pop
+import com.arkivanov.decompose.router.stack.replaceCurrent
 import com.arkivanov.essenty.backhandler.BackHandler
+import com.razumly.mvp.home.presentation.DefaultHomeComponent
+import com.razumly.mvp.home.presentation.HomeComponent
+import com.razumly.mvp.home.presentation.HomeComponent.*
 import com.razumly.mvp.userAuth.presentation.loginScreen.DefaultLoginComponent
 import com.razumly.mvp.userAuth.presentation.loginScreen.LoginComponent
 import dev.icerock.moko.geo.LocationTracker
@@ -18,12 +20,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
 import org.koin.core.parameter.parametersOf
 import org.koin.mp.KoinPlatform.getKoin
-import com.razumly.mvp.home.presentation.HomeComponent.*
-import com.razumly.mvp.home.presentation.DefaultHomeComponent
-import com.razumly.mvp.home.presentation.HomeComponent
-import kotlinx.serialization.Serializable
 
 class RootComponent(
     componentContext: ComponentContext,
@@ -76,7 +75,7 @@ class RootComponent(
             _koin.inject<DefaultLoginComponent> {
                 parametersOf(
                     componentContext,
-                    { navigation.replaceCurrent(Config.Home()) }
+                    { navigation.replaceCurrent(Config.Home) }
                 )
             }.value
         )
@@ -95,9 +94,9 @@ class RootComponent(
     @Serializable
     sealed class Config {
         @Serializable
-        object Login : Config()
+        data object Login : Config()
 
         @Serializable
-        data class Home(val selectedPage: Page = Page.EventList) : Config()
+        data object Home : Config()
     }
 }

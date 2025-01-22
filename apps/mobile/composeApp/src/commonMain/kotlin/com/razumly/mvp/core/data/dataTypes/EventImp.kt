@@ -10,6 +10,7 @@ data class EventImp(
     @PrimaryKey override val id: String,
     override val location: String,
     override val name: String,
+    override val description: String,
     override val lat: Double,
     override val long: Double,
     override val type: String,

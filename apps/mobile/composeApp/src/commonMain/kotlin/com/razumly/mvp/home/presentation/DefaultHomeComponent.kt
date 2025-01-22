@@ -31,7 +31,7 @@ class DefaultHomeComponent(
 
     private val navigation = StackNavigation<Config>()
     private val _koin = getKoin()
-    private val _selectedPage = MutableStateFlow(Page.EventList)
+    private val _selectedPage = MutableStateFlow(Page.Search)
     override val selectedPage = _selectedPage.asStateFlow()
 
     override val childStack = childStack(
@@ -103,7 +103,7 @@ class DefaultHomeComponent(
     override fun onTabSelected(page: Page) {
         _selectedPage.value = page
         when (page) {
-            Page.EventList -> navigation.replaceAll(Config.Search)
+            Page.Search -> navigation.replaceAll(Config.Search)
             Page.Following -> navigation.replaceAll(Config.Following)
             Page.Create -> navigation.replaceAll(Config.Create)
             Page.Profile -> navigation.replaceAll(Config.Profile)

@@ -55,6 +55,6 @@ interface HomeComponent {
     }
 
     enum class Page {
-        EventList, Following, Create, Profile
+        Search, Following, Create, Profile
     }
 }

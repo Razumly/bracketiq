@@ -57,6 +57,8 @@ kotlin {
                 implementation(libs.coil.compose)
                 implementation(libs.coil.mp)
                 implementation(libs.coil.network.ktor)
+                implementation(libs.haze.materials)
+                implementation(libs.haze)
                 api(libs.decompose.decompose)
                 api(libs.decompose.extensionsComposeJetbrains)
                 api(libs.kotlinx.serialization.core)
@@ -67,7 +69,7 @@ kotlin {
                 api(libs.napier)
                 api(libs.permissions)
                 api(libs.geo)
-                api("io.appwrite:sdk-for-kmp:0.2.0")
+                api("io.appwrite:sdk-for-kmp:0.3.0")
             }
         }
 
@@ -75,7 +77,6 @@ kotlin {
             kotlin.srcDir("build/generated/ksp/android/androidMain/kotlin")
             dependencies {
                 implementation(libs.androidx.lifecycle.runtime.compose)
-                implementation(compose.preview)
                 implementation(libs.androidx.activity.compose)
                 implementation(libs.koin.android)
                 implementation(libs.koin.androidx.compose)
