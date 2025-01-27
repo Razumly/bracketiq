@@ -3,6 +3,7 @@ package com.razumly.mvp.eventList.components
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ScrollableTabRow
@@ -19,16 +20,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.razumly.mvp.icons.Beach
-import com.razumly.mvp.icons.Grass
 import com.razumly.mvp.icons.Groups
-import com.razumly.mvp.icons.Indoor
 import com.razumly.mvp.icons.MVPIcons
-import com.razumly.mvp.icons.Tournament
+import com.razumly.mvp.icons.TournamentBracket
+import com.razumly.mvp.icons.Trophy
+import com.razumly.mvp.icons.Volleyball
+import com.razumly.mvp.icons.VolleyballPlayer
 
 @Composable
 fun FilterBar(modifier: Modifier = Modifier) {
-    val tabs = listOf("Tournaments", "Beach", "Indoor", "Grass", "Groups")
+    val tabs = listOf("Tournaments", "Pickup Games", "Clinics", "Leagues")
     var selectedTabIndex by remember { mutableStateOf(0) }
 
     ScrollableTabRow(
@@ -70,10 +71,10 @@ fun FilterBar(modifier: Modifier = Modifier) {
                 icon = {
                     Icon(
                         when (title) {
-                            "Tournaments" -> MVPIcons.Tournament
-                            "Beach" -> MVPIcons.Beach
-                            "Indoor" -> MVPIcons.Indoor
-                            "Grass" -> MVPIcons.Grass
+                            "Tournaments" -> MVPIcons.TournamentBracket
+                            "Pickup Games" -> MVPIcons.Volleyball
+                            "Clinics" -> MVPIcons.VolleyballPlayer
+                            "Leagues" -> MVPIcons.Trophy
                             else -> MVPIcons.Groups
                         },
                         contentDescription = title,

@@ -1,4 +1,4 @@
-package com.razumly.mvp.tournamentDetailScreen.tournamentDetailComponents
+package com.razumly.mvp.tournamentDetailScreen.composables
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -21,11 +21,15 @@ import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
+import com.razumly.mvp.core.presentation.matchCard
+import com.razumly.mvp.core.presentation.matchCardBottom
+import com.razumly.mvp.core.presentation.matchCardTop
 import com.razumly.mvp.core.presentation.util.timeFormat
 import com.razumly.mvp.tournamentDetailScreen.LocalTournamentComponent
 import kotlinx.datetime.TimeZone
@@ -33,7 +37,7 @@ import kotlinx.datetime.toLocalDateTime
 
 @Composable
 fun MatchCard(
-    match: MatchWithRelations,
+    match: MatchWithRelations?,
     onClick: () -> Unit,
     losersBracket: Boolean,
     modifier: Modifier = Modifier
@@ -42,73 +46,77 @@ fun MatchCard(
     val textModifier = Modifier.width(70.dp)
     val teams = component.currentTeams.value
     val matches = component.currentMatches.value
-    val matchCardColor = if (match.match.losersBracket == losersBracket) {
-        MaterialTheme.colorScheme.primaryContainer
+    val matchCardColor = if (match != null && match.match.losersBracket == losersBracket) {
+        matchCard
     } else {
         MaterialTheme.colorScheme.tertiaryContainer
     }
     Box(
-        modifier = modifier.fillMaxWidth()
+        modifier = modifier
     ) {
-        // Time Box - Positioned half above the card
-        FloatingBox(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .offset(y = (-20).dp)
-                .zIndex(1f)
-        )  {
-            Text(
-                text = timeFormat.format(
-                    match.match.start.toLocalDateTime(TimeZone.currentSystemDefault()).time
-                ),
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                style = MaterialTheme.typography.labelLarge
-            )
-        }
-        Card(
-            modifier = modifier
-                .fillMaxWidth()
-                .clickable(onClick = onClick),
-            elevation = CardDefaults.cardElevation(4.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = matchCardColor,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-            )
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                MatchInfoSection(match)
-                VerticalDivider()
-                TeamsSection(
-                    team1 = teams[match.match.team1],
-                    team2 = teams[match.match.team2],
-                    match = match,
-                    textModifier = textModifier,
-                    matches = matches,
-                )
-            }
-        }
-        FloatingBox(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .offset(y = 20.dp)
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
+        match?.let {
+            FloatingBox(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .offset(y = (-20).dp)
+                    .zIndex(1f),
+                color = matchCardTop
             ) {
                 Text(
-                    "Ref: ",
+                    text = timeFormat.format(
+                        match.match.start.toLocalDateTime(TimeZone.currentSystemDefault()).time
+                    ),
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                     style = MaterialTheme.typography.labelLarge
                 )
-                teams[match.match.refId]?.players?.forEach { player ->
-                    Text(
-                        "${player.firstName}.${player.lastName?.first()}",
-                        modifier = Modifier.padding(start = 4.dp),
-                        style = MaterialTheme.typography.labelLarge,
-                        overflow = TextOverflow.Ellipsis,
-                        maxLines = 1
+            }
+            Card(
+                modifier = modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onClick),
+                elevation = CardDefaults.cardElevation(4.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = matchCardColor,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    MatchInfoSection(match)
+                    VerticalDivider()
+                    TeamsSection(
+                        team1 = teams[match.match.team1],
+                        team2 = teams[match.match.team2],
+                        match = match,
+                        textModifier = textModifier,
+                        matches = matches,
                     )
+                }
+            }
+            FloatingBox(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .offset(y = 20.dp),
+                color = matchCardBottom
+            ) {
+                Row(
+                    modifier = Modifier
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        "Ref: ",
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                    teams[match.match.refId]?.players?.forEach { player ->
+                        Text(
+                            "${player.firstName}.${player.lastName?.first()}",
+                            modifier = Modifier.padding(start = 4.dp),
+                            style = MaterialTheme.typography.labelLarge,
+                            overflow = TextOverflow.Ellipsis,
+                            maxLines = 1
+                        )
+                    }
                 }
             }
         }
@@ -116,11 +124,11 @@ fun MatchCard(
 }
 
 @Composable
-private fun FloatingBox(modifier: Modifier, content: @Composable () -> Unit) {
+private fun FloatingBox(modifier: Modifier, color: Color, content: @Composable () -> Unit) {
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.secondaryContainer,
+        color = color,
         shadowElevation = 5.dp
     ) {
         content()

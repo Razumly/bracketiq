@@ -1,4 +1,4 @@
-package com.razumly.mvp.eventList
+package com.razumly.mvp.eventList.util
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Person

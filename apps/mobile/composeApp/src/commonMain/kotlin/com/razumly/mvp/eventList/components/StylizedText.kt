@@ -11,8 +11,8 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.sp
-import com.razumly.mvp.eventList.TextPattern
-import com.razumly.mvp.eventList.TextPatterns
+import com.razumly.mvp.eventList.util.TextPattern
+import com.razumly.mvp.eventList.util.TextPatterns
 
 @Composable
 fun StylizedText(text: String, patterns: TextPatterns) {

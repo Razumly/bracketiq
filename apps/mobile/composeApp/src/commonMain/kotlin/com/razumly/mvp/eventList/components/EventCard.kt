@@ -35,7 +35,7 @@ import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.presentation.disabledCardColor
-import com.razumly.mvp.eventList.TextPatterns
+import com.razumly.mvp.eventList.util.TextPatterns
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.format

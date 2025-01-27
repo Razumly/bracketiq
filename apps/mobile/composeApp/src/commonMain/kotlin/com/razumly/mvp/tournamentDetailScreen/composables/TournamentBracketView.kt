@@ -1,9 +1,7 @@
-package com.razumly.mvp.tournamentDetailScreen.tournamentDetailComponents
+package com.razumly.mvp.tournamentDetailScreen.composables
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -30,19 +28,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.presentation.util.getScreenWidth
 import com.razumly.mvp.core.util.ceilDiv
+import com.razumly.mvp.home.LocalNavBarPadding
 import com.razumly.mvp.tournamentDetailScreen.LocalTournamentComponent
 
 @Composable
 fun TournamentBracketView(
     losersBracket: Boolean,
-    nestedScrollConnection: NestedScrollConnection,
     onMatchClick: (MatchWithRelations) -> Unit = {},
 ) {
     val component = LocalTournamentComponent.current
@@ -61,7 +57,17 @@ fun TournamentBracketView(
     val boxHeight = remember { mutableStateOf(Dp.Unspecified) }
     val width = getScreenWidth() / 1.5
     val maxHeightIndex = remember { mutableIntStateOf(0) }
+    val navBarPadding = LocalNavBarPadding.current.calculateBottomPadding()
 
+    LaunchedEffect(columnScrollState) {
+        snapshotFlow { columnScrollState.value }.collect { value ->
+            if (value == 0 && !component.showHeader.value) {
+                component.setHeaderState(true)
+            } else if (component.showHeader.value) {
+                component.setHeaderState(false)
+            }
+        }
+    }
 
     LaunchedEffect(lazyRowState, roundsList, losersBracket) {
         snapshotFlow { lazyRowState.firstVisibleItemIndex }.collect { index ->
@@ -85,7 +91,7 @@ fun TournamentBracketView(
             }
             maxHeightInRowDp.value = maxSize.dp * cardContainerHeight
             if (boxHeight.value == Dp.Unspecified || maxHeightInRowDp.value > boxHeight.value) {
-                boxHeight.value = maxHeightInRowDp.value
+                boxHeight.value = maxHeightInRowDp.value + navBarPadding + 16.dp
             }
         }
     }
@@ -95,7 +101,6 @@ fun TournamentBracketView(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
             .verticalScroll(columnScrollState)
-            .nestedScroll(nestedScrollConnection)
     ) {
         LazyRow(
             state = lazyRowState,
@@ -113,46 +118,52 @@ fun TournamentBracketView(
                     verticalArrangement = Arrangement.SpaceBetween,
                 ) {
                     round.chunked(2).forEachIndexed { chunkIndex, matches ->
+                        val filteredMatches = if (colIndex == 0) {
+                            matches.filterNotNull()
+                        } else {
+                            matches
+                        }
                         val visible = remember(colIndex, chunkIndex, matches) {
                             mutableStateOf(
                                 true
                             )
                         }
+
+                        val pairWeight = animateFloatAsState(
+                            targetValue = if (visible.value) 1.0f else 0.01f,
+                            label = "Card Visibility",
+                        )
                         LaunchedEffect(maxHeightIndex) {
                             snapshotFlow { lazyRowState.firstVisibleItemIndex }.collect {
-                                visible.value = matches.filterNotNull().isNotEmpty() ||
-                                        maxHeightIndex.intValue == colIndex
+                                visible.value = (matches.filterNotNull().isNotEmpty() ||
+                                        maxHeightIndex.intValue == colIndex)
                             }
                         }
-                        AnimatedVisibility(
-                            visible = visible.value,
-                            modifier = Modifier.weight(1f),
-                            enter = expandVertically(
-                                expandFrom = Alignment.Top
-                            ),
-                            exit = shrinkVertically(
-                                shrinkTowards = Alignment.Top
-                            )
+                        Box(
+                            modifier = Modifier
+                                .weight(pairWeight.value)
+                                .background(MaterialTheme.colorScheme.background),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Box(
-                                modifier = Modifier.background(MaterialTheme.colorScheme.background),
-                                contentAlignment = Alignment.Center
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxHeight(),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.SpaceAround
                             ) {
-                                Column(
-                                    modifier = Modifier.fillMaxHeight(),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.SpaceAround
-                                ) {
-                                    matches.filterNotNull().forEach { match ->
-                                        MatchCard(
-                                            match = match,
-                                            onClick = { onMatchClick(match) },
-                                            modifier = Modifier
-                                                .height(cardHeight.dp)
-                                                .width(width.dp),
-                                            losersBracket = losersBracket
-                                        )
-                                    }
+                                filteredMatches.forEach { match ->
+                                    MatchCard(
+                                        match = match,
+                                        onClick = {
+                                            if (match != null) {
+                                                onMatchClick(match)
+                                            }
+                                        },
+                                        modifier = Modifier
+                                            .height(cardHeight.dp)
+                                            .width(width.dp),
+                                        losersBracket = losersBracket
+                                    )
                                 }
                             }
                         }

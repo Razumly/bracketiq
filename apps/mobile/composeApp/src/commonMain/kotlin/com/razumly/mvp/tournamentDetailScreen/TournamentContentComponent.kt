@@ -26,11 +26,13 @@ interface TournamentContentComponent : ComponentContext {
     val isBracketView: StateFlow<Boolean>
     val rounds: StateFlow<List<List<MatchWithRelations?>>>
     val losersBracket: StateFlow<Boolean>
+    val showHeader: StateFlow<Boolean>
 
     fun matchSelected (selectedMatch: MatchWithRelations)
     fun selectDivision(division: String)
     fun toggleBracketView()
     fun toggleLosersBracket()
+    fun setHeaderState(state: Boolean)
 }
 
 class DefaultTournamentContentComponent(
@@ -72,6 +74,9 @@ class DefaultTournamentContentComponent(
     private val _losersBracket = MutableStateFlow(false)
     override val losersBracket = _losersBracket.asStateFlow()
 
+    private val _showHeader = MutableStateFlow(false)
+    override val showHeader = _showHeader.asStateFlow()
+
     init {
         scope.launch {
             selectedTournament
@@ -99,6 +104,9 @@ class DefaultTournamentContentComponent(
         }
     }
 
+    override fun setHeaderState(state: Boolean) {
+        _showHeader.value = state
+    }
 
     override fun matchSelected(selectedMatch: MatchWithRelations) {
         onMatchSelected(selectedMatch)

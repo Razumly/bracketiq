@@ -6,7 +6,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Favorite
@@ -54,7 +54,7 @@ fun MVPBottomNavBar(
         0.25f to navBarGradientStart,
         1f to navBarGradientStart
     )
-    val navigationBarHeight = WindowInsets.navigationBars.getBottom(LocalDensity.current).dp
+    val navigationBarHeight = WindowInsets.navigationBars.getBottom(LocalDensity.current).dp + 16.dp
 
     Box(modifier = Modifier.fillMaxSize()) {
         // Main content
@@ -64,12 +64,13 @@ fun MVPBottomNavBar(
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .background(Brush.verticalGradient(colorStops = colorStops))
-                .navigationBarsPadding()
+                .background(Brush.verticalGradient(colorStops = colorStops)),
         ) {
             NavigationBar(
                 containerColor = Color.Transparent,
-                modifier = Modifier.zIndex(1f)
+                modifier = Modifier
+                    .zIndex(1f)
+                    .padding(top = 16.dp),
             ) {
                 items.forEach { item ->
                     NavigationBarItem(

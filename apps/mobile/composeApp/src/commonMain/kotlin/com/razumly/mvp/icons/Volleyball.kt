@@ -6,13 +6,13 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.unit.dp
 
-val MVPIcons.Tournament: ImageVector
+val MVPIcons.Volleyball: ImageVector
     get() {
-        if (_Tournament != null) {
-            return _Tournament!!
+        if (_Volleyball != null) {
+            return _Volleyball!!
         }
-        _Tournament = ImageVector.Builder(
-            name = "Tournament",
+        _Volleyball = ImageVector.Builder(
+            name = "Volleyball",
             defaultWidth = 24.dp,
             defaultHeight = 24.dp,
             viewportWidth = 24f,
@@ -67,8 +67,8 @@ val MVPIcons.Tournament: ImageVector
             }
         }.build()
 
-        return _Tournament!!
+        return _Volleyball!!
     }
 
 @Suppress("ObjectPropertyName")
-private var _Tournament: ImageVector? = null
+private var _Volleyball: ImageVector? = null
