@@ -31,7 +31,7 @@ interface MatchDao {
 
     @Transaction
     @Query("SELECT * FROM MatchMVP WHERE id = :id")
-    fun getMatchFlowById(id: String): Flow<MatchWithRelations?>
+    fun getMatchFlowById(id: String): Flow<MatchWithRelations>
 
     @Transaction
     @Query("SELECT * FROM MatchMVP WHERE id = :id")

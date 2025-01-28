@@ -6,6 +6,7 @@ import androidx.room.Query
 import androidx.room.Upsert
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.UserTournamentCrossRef
+import com.razumly.mvp.core.data.dataTypes.UserWithRelations
 
 @Dao
 interface UserDataDao {
@@ -32,4 +33,7 @@ interface UserDataDao {
 
     @Query("SELECT * FROM UserData WHERE id = :id")
     suspend fun getUserDataById(id: String): UserData?
+
+    @Query("SELECT * FROM UserData WHERE id = :id")
+    suspend fun getUserWithRelationsById(id: String): UserWithRelations?
 }

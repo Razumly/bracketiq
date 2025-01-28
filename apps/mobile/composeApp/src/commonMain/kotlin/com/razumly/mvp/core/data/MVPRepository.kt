@@ -13,6 +13,7 @@ import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.UserTournamentCrossRef
+import com.razumly.mvp.core.data.dataTypes.UserWithRelations
 import com.razumly.mvp.core.data.dataTypes.dtos.EventDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.MatchDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.TournamentDTO
@@ -25,12 +26,14 @@ import com.razumly.mvp.core.util.DbConstants.MATCHES_CHANNEL
 import com.razumly.mvp.core.util.convert
 import io.appwrite.Client
 import io.appwrite.Query
+import io.appwrite.enums.ExecutionMethod
 import io.appwrite.models.Document
 import io.appwrite.models.DocumentList
 import io.appwrite.models.RealtimeSubscription
 import io.appwrite.models.User
 import io.appwrite.services.Account
 import io.appwrite.services.Databases
+import io.appwrite.services.Functions
 import io.appwrite.services.Realtime
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CoroutineDispatcher
@@ -43,6 +46,10 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.datetime.Instant
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 class MVPRepository(
     client: Client,
@@ -55,11 +62,15 @@ class MVPRepository(
 
     private val realtime = Realtime(client)
 
+    private val functions = Functions(client)
+
     private var subscription: RealtimeSubscription? = null
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    override suspend fun login(email: String, password: String): UserData? {
+    private var _ignoreMatch: MatchMVP? = null
+
+    override suspend fun login(email: String, password: String): UserWithRelations? {
         try {
             account.createEmailPasswordSession(email, password)
             val currentUser = database.getDocument<UserData>(
@@ -69,7 +80,7 @@ class MVPRepository(
                 null
             ).data.copy(id = account.get().id)
             tournamentDB.getUserDataDao.upsertUserData(currentUser)
-            val currentUserRelations = tournamentDB.getUserDataDao.getUserDataById(account.get().id)
+            val currentUserRelations = tournamentDB.getUserDataDao.getUserWithRelationsById(account.get().id)
 
             return currentUserRelations
         } catch (e: Exception) {
@@ -112,7 +123,7 @@ class MVPRepository(
         tournamentDB.getTeamDao.upsertTeamsWithPlayers(teams)
     }
 
-    override suspend fun getCurrentUser(update: Boolean): UserData? {
+    override suspend fun getCurrentUser(update: Boolean): UserWithRelations? {
         val currentAccount: User<Map<String, Any>>
         try {
             currentAccount = account.get()
@@ -120,23 +131,24 @@ class MVPRepository(
             Napier.e("Failed to get current user", e, DbConstants.ERROR_TAG)
             return null
         }
-        var currentUserData: UserData?
+        var currentUserWithRelations: UserWithRelations?
         if (!update) {
-            currentUserData = tournamentDB.getUserDataDao.getUserDataById(currentAccount.id)
-            if (currentUserData != null) {
-                return currentUserData
+            currentUserWithRelations = tournamentDB.getUserDataDao.getUserWithRelationsById(currentAccount.id)
+            if (currentUserWithRelations != null) {
+                return currentUserWithRelations
             }
         }
+
         try {
-            currentUserData = database.getDocument<UserData>(
+            val currentUserData = database.getDocument<UserData>(
                 DbConstants.DATABASE_NAME,
                 DbConstants.USER_DATA_COLLECTION,
                 currentAccount.id,
                 null,
             ).data.copy(id = currentAccount.id)
             tournamentDB.getUserDataDao.upsertUserData(currentUserData)
-
-            return currentUserData
+            currentUserWithRelations = tournamentDB.getUserDataDao.getUserWithRelationsById(currentAccount.id)
+            return currentUserWithRelations
         } catch (e: Exception) {
             Napier.e("Failed to get current user", e, DbConstants.ERROR_TAG)
             return null
@@ -340,6 +352,9 @@ class MVPRepository(
             scope.launch(Dispatchers.IO) {
                 val id = response.channels.last().split(".").last()
                 val dbMatch = tournamentDB.getMatchDao.getMatchById(id)
+                if (dbMatch?.match?.id == _ignoreMatch?.id){
+                    return@launch
+                }
                 dbMatch?.let { match ->
                     val updatedMatch = match.copy(
                         match = match.match.copy(
@@ -358,7 +373,23 @@ class MVPRepository(
         }
     }
 
-    override suspend fun updateMatch(match: MatchMVP) {
+    override suspend fun updateMatchUnsafe(match: MatchMVP) {
+        try {
+            tournamentDB.getMatchDao.upsertMatch(match)
+
+            database.updateDocument(
+                DbConstants.DATABASE_NAME,
+                DbConstants.MATCHES_COLLECTION,
+                match.id,
+                match.toMatchDTO(),
+                nestedType = MatchDTO::class
+            )
+        } catch (e: Exception) {
+            Napier.e("Failed to update match", e, DbConstants.ERROR_TAG)
+        }
+    }
+
+    override suspend fun updateMatchSafe(match: MatchMVP) {
         try {
             val updatedDoc = database.updateDocument(
                 DbConstants.DATABASE_NAME,
@@ -372,6 +403,17 @@ class MVPRepository(
         } catch (e: Exception) {
             Napier.e("Failed to update match", e, DbConstants.ERROR_TAG)
         }
+    }
+
+    override suspend fun updateMatchFinished(match: MatchMVP, time: Instant) {
+        val args = UpdateMatchArgs(match.id, time.toString(), match.tournamentId)
+        val jsonArgs = Json.encodeToString(args)
+        functions.createExecution(
+            "updateMatch",
+            jsonArgs,
+            false,
+            method = ExecutionMethod.POST
+        )
     }
 
     override suspend fun createTournament(newTournament: Tournament) {
@@ -436,10 +478,21 @@ class MVPRepository(
         }
     }
 
+    override fun setIgnoreMatch(match: MatchMVP?) {
+        _ignoreMatch = match
+    }
+
     fun cleanup() {
         scope.cancel()
     }
 }
+
+@Serializable
+data class UpdateMatchArgs(
+    val matchId: String,
+    val time: String,
+    val tournament: String,
+)
 
 interface IMVPRepository {
     fun getTournamentFlow(tournamentId: String): Flow<Tournament?>
@@ -450,7 +503,7 @@ interface IMVPRepository {
 
     fun getMatchFlow(
         matchId: String
-    ): Flow<MatchWithRelations?>
+    ): Flow<MatchWithRelations>
 
     suspend fun getMatch(matchId: String)
 
@@ -463,11 +516,14 @@ interface IMVPRepository {
     fun getPlayersOfTournamentFlow(tournamentId: String): Flow<TournamentWithRelations>
     suspend fun getEvents(bounds: Bounds): List<EventAbs>
     suspend fun getEvents(): List<EventAbs>
-    suspend fun getCurrentUser(update: Boolean = false): UserData?
-    suspend fun login(email: String, password: String): UserData?
+    suspend fun getCurrentUser(update: Boolean = false): UserWithRelations?
+    suspend fun login(email: String, password: String): UserWithRelations?
     suspend fun logout()
     suspend fun subscribeToMatches()
     suspend fun unsubscribeFromRealtime()
-    suspend fun updateMatch(match: MatchMVP)
+    suspend fun updateMatchUnsafe(match: MatchMVP)
+    suspend fun updateMatchSafe(match: MatchMVP)
+    suspend fun updateMatchFinished(match: MatchMVP, time: Instant)
     suspend fun createTournament(newTournament: Tournament)
+    fun setIgnoreMatch(match: MatchMVP?)
 }

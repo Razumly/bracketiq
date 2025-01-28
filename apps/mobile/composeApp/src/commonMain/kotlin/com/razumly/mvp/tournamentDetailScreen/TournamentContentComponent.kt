@@ -37,20 +37,20 @@ interface TournamentContentComponent : ComponentContext {
 
 class DefaultTournamentContentComponent(
     componentContext: ComponentContext,
-    private val appwriteRepository: IMVPRepository,
+    private val mvpRepository: IMVPRepository,
     tournamentId: String,
     private val onMatchSelected: (MatchWithRelations) -> Unit
 ) : TournamentContentComponent, ComponentContext by componentContext {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-    override val selectedTournament = appwriteRepository
+    override val selectedTournament = mvpRepository
         .getTournamentFlow(tournamentId)
         .stateIn(scope, SharingStarted.Eagerly, null)
 
     private val _divisionMatches = MutableStateFlow<List<MatchWithRelations>>(emptyList())
     override val divisionMatches = _divisionMatches.asStateFlow()
 
-    override val currentMatches = appwriteRepository
+    override val currentMatches = mvpRepository
         .getMatchesFlow(tournamentId)
         .stateIn(
             scope = scope,
@@ -58,7 +58,7 @@ class DefaultTournamentContentComponent(
             initialValue = emptyMap()
         )
 
-    override val currentTeams = appwriteRepository
+    override val currentTeams = mvpRepository
         .getTeamsWithPlayersFlow(tournamentId)
         .stateIn(scope, SharingStarted.Eagerly, mapOf())
 
@@ -79,11 +79,12 @@ class DefaultTournamentContentComponent(
 
     init {
         scope.launch {
+            mvpRepository.setIgnoreMatch(null)
             selectedTournament
                 .distinctUntilChanged { old, new -> old == new }
                 .filterNotNull()
                 .collect { tournament ->
-                    appwriteRepository.subscribeToMatches()
+                    mvpRepository.subscribeToMatches()
                     if (selectedDivision.value == null) {
                         tournament.divisions.firstOrNull()?.let { selectDivision(it) }
                     }
@@ -91,7 +92,7 @@ class DefaultTournamentContentComponent(
 
         }
         scope.launch {
-            appwriteRepository.getTournament(tournamentId)
+            mvpRepository.getTournament(tournamentId)
         }
         scope.launch {
             currentMatches

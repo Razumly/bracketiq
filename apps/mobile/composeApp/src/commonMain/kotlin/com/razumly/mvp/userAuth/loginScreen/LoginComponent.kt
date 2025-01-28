@@ -3,7 +3,6 @@ package com.razumly.mvp.userAuth.loginScreen
 import com.arkivanov.decompose.ComponentContext
 import com.razumly.mvp.core.data.IMVPRepository
 import com.razumly.mvp.core.data.dataTypes.LoginState
-import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.UserWithRelations
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -11,12 +10,11 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 
 interface LoginComponent {
     val loginState: StateFlow<LoginState>
-    val currentUser: StateFlow<UserData?>
+    val currentUser: StateFlow<UserWithRelations?>
 
     fun onLogin(email: String, password: String)
     fun onLogout()
@@ -33,8 +31,8 @@ class DefaultLoginComponent(
     private val _loginState = MutableStateFlow<LoginState>(LoginState.Initial)
     override val loginState: StateFlow<LoginState> = _loginState.asStateFlow()
 
-    private val _currentUser = MutableStateFlow<UserData?>(null)
-    override val currentUser: StateFlow<UserData?> = _currentUser.asStateFlow()
+    private val _currentUser = MutableStateFlow<UserWithRelations?>(null)
+    override val currentUser: StateFlow<UserWithRelations?> = _currentUser.asStateFlow()
 
     init {
         scope.launch {

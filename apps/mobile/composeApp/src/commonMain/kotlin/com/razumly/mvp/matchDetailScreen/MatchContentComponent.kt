@@ -5,7 +5,7 @@ import com.razumly.mvp.core.data.IMVPRepository
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.Tournament
-import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.UserWithRelations
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -16,9 +16,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlin.math.ceil
 
 interface MatchContentComponent {
-    val match: StateFlow<MatchWithRelations?>
+    val match: StateFlow<MatchWithRelations>
     val tournament: StateFlow<Tournament?>
     val currentTeams: StateFlow<Map<String, TeamWithPlayers>>
     val matchFinished: StateFlow<Boolean>
@@ -39,10 +40,11 @@ interface MatchContentComponent {
 class DefaultMatchContentComponent(
     componentContext: ComponentContext,
     private val mvpRepository: IMVPRepository,
-    private val selectedMatch: MatchWithRelations,
-) : MatchContentComponent, ComponentContext by componentContext{
+    selectedMatch: MatchWithRelations,
+) : MatchContentComponent, ComponentContext by componentContext {
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+
     override val match = mvpRepository
         .getMatchFlow(selectedMatch.match.id)
         .stateIn(scope, SharingStarted.Eagerly, selectedMatch)
@@ -73,16 +75,32 @@ class DefaultMatchContentComponent(
     private val _showSetConfirmDialog = MutableStateFlow(false)
     override val showSetConfirmDialog = _showSetConfirmDialog.asStateFlow()
 
-    private lateinit var _currentUser: UserData
+    private lateinit var _currentUser: UserWithRelations
+
+    private var maxSets = 0
+
+    private var setsNeeded = 0
 
     init {
         scope.launch {
-            mvpRepository.getTournament(selectedMatch.match.tournamentId)
+            tournament.collect { tournament ->
+                tournament?.let { t ->
+                    maxSets = if (match.value.match.losersBracket) {
+                        t.loserSetCount
+                    } else {
+                        t.winnerSetCount
+                    }
+                    setsNeeded = ceil((maxSets.toDouble()) / 2).toInt()
+                }
+            }
+        }
+        scope.launch {
+            mvpRepository.setIgnoreMatch(selectedMatch.match)
             _currentUser = mvpRepository.getCurrentUser()!!
             checkRefStatus()
         }
         scope.launch {
-            currentTeams.collect{ teams ->
+            currentTeams.collect { teams ->
                 Napier.d("update teams $teams")
             }
         }
@@ -97,37 +115,36 @@ class DefaultMatchContentComponent(
     }
 
     override fun checkRefStatus() {
-        _isRef.value = match.value?.ref?.id == _currentUser.id
+        _isRef.value = match.value.ref?.id == _currentUser.teams.first().id
         _showRefCheckInDialog.value = refCheckedIn.value != true
     }
 
     override fun confirmRefCheckIn() {
         scope.launch {
-            val updatedMatch = match.value?.copy(
-                match = match.value!!.match.copy(
+            val updatedMatch = match.value.copy(
+                match = match.value.match.copy(
                     refCheckedIn = true,
-                    refId = _currentUser.id
+                    refId = _currentUser.teams.first().id
                 ),
             )
             _refCheckedIn.value = true
-            if (updatedMatch != null) {
-                mvpRepository.updateMatch(updatedMatch.match)
-            }
+            _isRef.value = true
+            dismissRefDialog()
+            mvpRepository.updateMatchSafe(updatedMatch.match)
         }
     }
 
     override fun updateScore(isTeam1: Boolean, increment: Boolean) {
-        if (refCheckedIn.value) return
-        if (match.value == null) return
+        if (!refCheckedIn.value) return
 
         scope.launch {
             val currentPoints = if (isTeam1) {
-                match.value!!.match.team1Points.toMutableList()
+                match.value.match.team1Points.toMutableList()
             } else {
-                match.value!!.match.team2Points.toMutableList()
+                match.value.match.team2Points.toMutableList()
             }
 
-            val pointLimit = if (match.value!!.match.losersBracket) {
+            val pointLimit = if (match.value.match.losersBracket) {
                 tournament.value?.loserScoreLimitsPerSet?.get(currentSet.value)
             } else {
                 tournament.value?.winnerScoreLimitsPerSet?.get(currentSet.value)
@@ -140,42 +157,49 @@ class DefaultMatchContentComponent(
             }
 
             val updatedMatch = if (isTeam1) {
-                match.value!!.copy(match = match.value!!.match.copy(team1Points = currentPoints))
+                match.value.copy(match = match.value.match.copy(team1Points = currentPoints))
             } else {
-                match.value!!.copy(match = match.value!!.match.copy(team2Points = currentPoints))
+                match.value.copy(match = match.value.match.copy(team2Points = currentPoints))
             }
 
             checkSetCompletion(updatedMatch)
-            mvpRepository.updateMatch(updatedMatch.match)
+            mvpRepository.updateMatchUnsafe(updatedMatch.match)
         }
     }
 
     override fun confirmSet() {
-        if (match.value == null) return
+        _showSetConfirmDialog.value = false
 
         scope.launch {
-            val setResults = match.value!!.match.setResults.toMutableList()
-            val team1Won = match.value!!.match.team1Points[currentSet.value] >
-                    match.value!!.match.team2Points[currentSet.value]
+            val setResults = match.value.match.setResults.toMutableList()
+            val team1Won = match.value.match.team1Points[currentSet.value] >
+                    match.value.match.team2Points[currentSet.value]
             setResults[currentSet.value] = if (team1Won) 1 else 2
 
-            val updatedMatch = match.value!!.copy(
-                match = match.value!!.match.copy(setResults = setResults)
+            val updatedMatch = match.value.copy(
+                match = match.value.match.copy(setResults = setResults)
             )
-            mvpRepository.updateMatch(updatedMatch.match)
 
-            val setsNeeded = if (match.value!!.match.losersBracket) {
-                tournament.value?.loserSetCount
-            } else {
-                tournament.value?.winnerSetCount
-            }
-
-            if (currentSet.value + 1 < setsNeeded!!) {
-                _currentSet.value++
-            } else {
+            if (isMatchOver(updatedMatch)) {
                 _matchFinished.value = true
+                updatedMatch.match.end?.let {
+                    mvpRepository.updateMatchFinished(updatedMatch.match,
+                        it
+                    )
+                }
             }
+
+            if (currentSet.value + 1 < maxSets) {
+                _currentSet.value++
+            }
+            mvpRepository.updateMatchSafe(updatedMatch.match)
         }
+    }
+
+    private fun isMatchOver(match: MatchWithRelations): Boolean {
+        val team1Wins = match.match.setResults.count { it == 1 }
+        val team2Wins = match.match.setResults.count { it == 2 }
+        return team1Wins >= setsNeeded || team2Wins >= setsNeeded
     }
 
     private fun checkSetCompletion(match: MatchWithRelations) {

@@ -3,12 +3,14 @@ package com.razumly.mvp.matchDetailScreen
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -52,15 +54,18 @@ fun MatchDetailScreen(
     val showSetConfirmDialog by component.showSetConfirmDialog.collectAsState()
     val currentSet by component.currentSet.collectAsState()
     val matchFinished by component.matchFinished.collectAsState()
-    val team1 by remember(match?.team1?.id, currentTeams) {
+
+    val canIncrement = !matchFinished && refCheckedIn && isRef
+
+    val team1 by remember(match.team1?.id, currentTeams) {
         derivedStateOf {
-            currentTeams[match?.team1?.id]
+            currentTeams[match.team1?.id]
         }
     }
 
-    val team2 by remember(match?.team2?.id, currentTeams) {
+    val team2 by remember(match.team2?.id, currentTeams) {
         derivedStateOf {
-            currentTeams[match?.team2?.id]
+            currentTeams[match.team2?.id]
         }
     }
     val team1Text = remember(team1) {
@@ -70,6 +75,7 @@ fun MatchDetailScreen(
                 team1?.players != null -> team1?.players?.joinToString(" & ") {
                     "${it.firstName}.${it.lastName?.first()}"
                 }
+
                 else -> "Team 1"
             }
         }
@@ -82,12 +88,11 @@ fun MatchDetailScreen(
                 team2?.players != null -> team2?.players?.joinToString(" & ") {
                     "${it.firstName}.${it.lastName?.first()}"
                 }
+
                 else -> "Team 2"
             }
         }
     }.value
-
-    val canIncrement = !matchFinished && refCheckedIn && isRef
 
     if (showRefCheckInDialog) {
         val message = if (isRef) {
@@ -144,16 +149,16 @@ fun MatchDetailScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceEvenly
     ) {
-        match?.match?.team1Points?.get(currentSet)?.let {
+        match.match.team1Points[currentSet].let {
             if (team1Text != null) {
                 ScoreCard(
                     title = team1Text,
                     score = it.toString(),
                     increase = {
-                        component.updateScore(isTeam1 = false, increment = true)
+                        component.updateScore(isTeam1 = true, increment = true)
                     },
                     decrease = {
-                        component.updateScore(isTeam1 = false, increment = false)
+                        component.updateScore(isTeam1 = true, increment = false)
                     },
                     enabled = canIncrement,
                     modifier = Modifier.weight(1f)
@@ -169,7 +174,7 @@ fun MatchDetailScreen(
                 )
                 .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
-            match?.match?.start?.let {
+            match.match.start.let {
                 Text(
                     text = instantToDateTimeString(it),
                     color = Color.White,
@@ -182,13 +187,13 @@ fun MatchDetailScreen(
                 style = MaterialTheme.typography.titleLarge
             )
             Text(
-                text = stringResource(Res.string.set_number, currentSet),
+                text = stringResource(Res.string.set_number, currentSet + 1),
                 color = Color.White,
                 style = MaterialTheme.typography.titleLarge
             )
         }
 
-        match?.match?.team2Points?.get(currentSet)?.let {
+        match.match.team2Points[currentSet].let {
             if (team2Text != null) {
                 ScoreCard(
                     title = team2Text,
@@ -224,14 +229,22 @@ fun ScoreCard(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            imageVector = MVPIcons.Remove24Px,
-            contentDescription = "Decrease score",
+        Box(
             modifier = Modifier
-                .size(48.dp)
-                .clickable(enabled = enabled, onClick = decrease),
-            tint = Color.White
-        )
+            .wrapContentSize()
+            .clickable(
+                enabled = enabled,
+                onClick = decrease,
+            )
+        ) {
+            Icon(
+                imageVector = MVPIcons.Remove24Px,
+                contentDescription = "Decrease score",
+                modifier = Modifier
+                    .size(48.dp),
+                tint = Color.White,
+            )
+        }
 
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -251,14 +264,19 @@ fun ScoreCard(
             )
         }
 
-        Icon(
-            imageVector = Icons.Default.Add,
-            contentDescription = "Increase score",
+        Box(
             modifier = Modifier
-                .size(48.dp)
-                .clickable(enabled = enabled, onClick = increase),
-            tint = Color.White
-        )
+            .wrapContentSize()
+            .clickable(enabled = enabled, onClick = increase)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Add,
+                contentDescription = "Increase score",
+                modifier = Modifier
+                    .size(48.dp),
+                tint = Color.White
+            )
+        }
     }
 }
 

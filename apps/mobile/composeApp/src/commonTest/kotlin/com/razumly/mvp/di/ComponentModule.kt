@@ -59,7 +59,7 @@ val componentModule = module {
         ) ->
         DefaultTournamentContentComponent(
             componentContext = componentContext,
-            appwriteRepository = get(),
+            mvpRepository = get(),
             tournamentId = tournamentId,
             onMatchSelected = onMatchSelected,
             name = name
