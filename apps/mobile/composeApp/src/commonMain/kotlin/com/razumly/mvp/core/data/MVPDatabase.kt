@@ -31,7 +31,7 @@ import com.razumly.mvp.core.util.Converters
         TeamPlayerCrossRef::class,
         UserTournamentCrossRef::class,
     ],
-    version = 22
+    version = 23
 )
 @TypeConverters(Converters::class)
 //@ConstructedBy(MVPDatabaseCtor::class)

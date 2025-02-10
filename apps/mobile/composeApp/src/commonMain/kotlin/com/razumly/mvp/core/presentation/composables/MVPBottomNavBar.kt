@@ -54,7 +54,7 @@ fun MVPBottomNavBar(
         0.25f to navBarGradientStart,
         1f to navBarGradientStart
     )
-    val navigationBarHeight = WindowInsets.navigationBars.getBottom(LocalDensity.current).dp + 16.dp
+    val navigationBarHeight = WindowInsets.navigationBars.getBottom(LocalDensity.current).dp + 32.dp
 
     Box(modifier = Modifier.fillMaxSize()) {
         // Main content

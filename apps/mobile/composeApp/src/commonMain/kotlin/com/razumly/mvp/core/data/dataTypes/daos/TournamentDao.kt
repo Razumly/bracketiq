@@ -21,9 +21,12 @@ interface TournamentDao {
     suspend fun deleteTournamentById(id: String)
 
     @Query("SELECT * FROM Tournament WHERE id = :id")
-    fun getTournamentById(id: String): Flow<Tournament?>
+    fun getTournamentFlowById(id: String): Flow<Tournament?>
+
+    @Query("SELECT * FROM Tournament WHERE id = :id")
+    fun getTournamentById(id: String): Tournament?
 
     @Transaction
     @Query("SELECT * FROM Tournament WHERE id = :id")
-    fun getUsersOfTournament(id: String): Flow<TournamentWithRelations>
+    fun getUsersOfTournament(id: String): Flow<TournamentWithRelations?>
 }

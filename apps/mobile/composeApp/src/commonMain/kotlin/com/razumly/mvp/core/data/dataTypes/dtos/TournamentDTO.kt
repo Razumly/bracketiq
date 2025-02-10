@@ -4,6 +4,7 @@ import com.razumly.mvp.core.data.dataTypes.Tournament
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 
 @Serializable
 data class TournamentDTO(
@@ -17,7 +18,8 @@ data class TournamentDTO(
     val loserBracketPointsToVictory: List<Int>,
     val winnerScoreLimitsPerSet: List<Int>,
     val loserScoreLimitsPerSet: List<Int>,
-    val id: String,
+    @Transient
+    val id: String = "",
     val location: String,
     val type: String,
     val start: String,  // ISO-8601 format string
@@ -30,7 +32,7 @@ data class TournamentDTO(
     val collectionId: String,
 )
 
-fun TournamentDTO.toTournament(): Tournament {
+fun TournamentDTO.toTournament(id: String): Tournament {
     return Tournament(
         name = name,
         description = description,

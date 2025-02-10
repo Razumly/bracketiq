@@ -11,20 +11,22 @@ import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
-import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.UserTournamentCrossRef
 import com.razumly.mvp.core.data.dataTypes.UserWithRelations
 import com.razumly.mvp.core.data.dataTypes.dtos.EventDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.MatchDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.TournamentDTO
+import com.razumly.mvp.core.data.dataTypes.dtos.UserDataDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.toEvent
 import com.razumly.mvp.core.data.dataTypes.dtos.toMatch
 import com.razumly.mvp.core.data.dataTypes.dtos.toTournament
+import com.razumly.mvp.core.data.dataTypes.dtos.toUserData
 import com.razumly.mvp.core.data.dataTypes.toMatchDTO
 import com.razumly.mvp.core.util.DbConstants
 import com.razumly.mvp.core.util.DbConstants.MATCHES_CHANNEL
 import com.razumly.mvp.core.util.convert
 import io.appwrite.Client
+import io.appwrite.ID
 import io.appwrite.Query
 import io.appwrite.enums.ExecutionMethod
 import io.appwrite.models.Document
@@ -36,6 +38,7 @@ import io.appwrite.services.Databases
 import io.appwrite.services.Functions
 import io.appwrite.services.Realtime
 import io.github.aakira.napier.Napier
+import io.ktor.client.network.sockets.SocketTimeoutException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -73,14 +76,16 @@ class MVPRepository(
     override suspend fun login(email: String, password: String): UserWithRelations? {
         try {
             account.createEmailPasswordSession(email, password)
-            val currentUser = database.getDocument<UserData>(
+            val id = account.get().id
+            val currentUser = database.getDocument(
                 DbConstants.DATABASE_NAME,
                 DbConstants.USER_DATA_COLLECTION,
-                account.get().id,
-                null
-            ).data.copy(id = account.get().id)
-            tournamentDB.getUserDataDao.upsertUserData(currentUser)
-            val currentUserRelations = tournamentDB.getUserDataDao.getUserWithRelationsById(account.get().id)
+                id,
+                UserDataDTO::class
+            ).data.copy(id = id)
+            tournamentDB.getUserDataDao.upsertUserData(currentUser.toUserData(id))
+            val currentUserRelations =
+                tournamentDB.getUserDataDao.getUserWithRelationsById(account.get().id)
 
             return currentUserRelations
         } catch (e: Exception) {
@@ -95,7 +100,7 @@ class MVPRepository(
 
     override fun getTournamentFlow(
         tournamentId: String
-    ) = tournamentDB.getTournamentDao.getTournamentById(tournamentId)
+    ) = tournamentDB.getTournamentDao.getTournamentFlowById(tournamentId)
 
     override suspend fun getTournament(tournamentId: String) {
         getData(
@@ -106,20 +111,23 @@ class MVPRepository(
                     tournamentId,
                     TournamentDTO::class,
                     queries = null
-                ).data.toTournament()
+                )
             },
             saveCall = { tournament ->
-                tournamentDB.getTournamentDao.upsertTournament(tournament)
+                tournamentDB.getTournamentDao.upsertTournament(
+                    tournament.data.toTournament(
+                        tournament.id
+                    )
+                )
+            },
+            localData = { id ->
+                tournamentDB.getTournamentDao.getTournamentById(id)
             }
         )
         getPlayersOfTournament(tournamentId)
         getFields(tournamentId)
         val teams = getTeams(tournamentId)
         getMatches(tournamentId)
-        pushTeamPlayerCrossRef(teams)
-    }
-
-    private suspend fun pushTeamPlayerCrossRef(teams: List<Team>) {
         tournamentDB.getTeamDao.upsertTeamsWithPlayers(teams)
     }
 
@@ -133,21 +141,23 @@ class MVPRepository(
         }
         var currentUserWithRelations: UserWithRelations?
         if (!update) {
-            currentUserWithRelations = tournamentDB.getUserDataDao.getUserWithRelationsById(currentAccount.id)
+            currentUserWithRelations =
+                tournamentDB.getUserDataDao.getUserWithRelationsById(currentAccount.id)
             if (currentUserWithRelations != null) {
                 return currentUserWithRelations
             }
         }
 
         try {
-            val currentUserData = database.getDocument<UserData>(
+            val currentUserData = database.getDocument(
                 DbConstants.DATABASE_NAME,
                 DbConstants.USER_DATA_COLLECTION,
                 currentAccount.id,
-                null,
+                UserDataDTO::class,
             ).data.copy(id = currentAccount.id)
-            tournamentDB.getUserDataDao.upsertUserData(currentUserData)
-            currentUserWithRelations = tournamentDB.getUserDataDao.getUserWithRelationsById(currentAccount.id)
+            tournamentDB.getUserDataDao.upsertUserData(currentUserData.toUserData(currentAccount.id))
+            currentUserWithRelations =
+                tournamentDB.getUserDataDao.getUserWithRelationsById(currentAccount.id)
             return currentUserWithRelations
         } catch (e: Exception) {
             Napier.e("Failed to get current user", e, DbConstants.ERROR_TAG)
@@ -218,15 +228,18 @@ class MVPRepository(
 
     override suspend fun getMatch(matchId: String) = getData(
         networkCall = {
-            database.getDocument<MatchDTO>(
+            database.getDocument(
                 DbConstants.DATABASE_NAME,
                 DbConstants.MATCHES_COLLECTION,
                 matchId,
-                null,
-            ).data.toMatch(matchId)
+                MatchDTO::class,
+            )
         },
         saveCall = { match ->
-            tournamentDB.getMatchDao.upsertMatch(match)
+            tournamentDB.getMatchDao.upsertMatch(match.data.toMatch(matchId))
+        },
+        localData = { id ->
+            tournamentDB.getMatchDao.getMatchById(id)?.match
         }
     )
 
@@ -261,18 +274,24 @@ class MVPRepository(
         tournamentId: String,
     ) = getDataList(
         networkCall = {
-            database.listDocuments(
-                DbConstants.DATABASE_NAME,
-                DbConstants.USER_DATA_COLLECTION,
-                listOf(
-                    Query.contains(DbConstants.TOURNAMENTS_ATTRIBUTE, tournamentId),
-                    Query.limit(500)
-                ),
-                UserData::class
-            ).documents
+            val remotePlayers =
+                database.listDocuments(
+                    DbConstants.DATABASE_NAME,
+                    DbConstants.USER_DATA_COLLECTION,
+                    listOf(
+                        Query.contains(DbConstants.TOURNAMENTS_ATTRIBUTE, tournamentId),
+                        Query.limit(500)
+                    ),
+                    UserDataDTO::class
+                ).documents
+            remotePlayers.map { it.convert { userData -> userData.toUserData(it.id) } }
         },
         getLocalIds = { tournamentDB.getUserDataDao.getUsers(tournamentId).toSet() },
-        deleteStaleData = { tournamentDB.getUserDataDao.deleteUsersById(it) },
+        deleteStaleData = {
+            tournamentDB.getUserDataDao.deleteTournamentCrossRefById(it)
+            tournamentDB.getUserDataDao.deleteTeamCrossRefById(it)
+            tournamentDB.getUserDataDao.deleteUsersById(it)
+        },
         saveData = { players ->
             tournamentDB.getUserDataDao.upsertUsersData(players)
             tournamentDB.getUserDataDao.upsertUserTournamentCrossRefs(players.map { user ->
@@ -352,7 +371,7 @@ class MVPRepository(
             scope.launch(Dispatchers.IO) {
                 val id = response.channels.last().split(".").last()
                 val dbMatch = tournamentDB.getMatchDao.getMatchById(id)
-                if (dbMatch?.match?.id == _ignoreMatch?.id){
+                if (dbMatch?.match?.id == _ignoreMatch?.id) {
                     return@launch
                 }
                 dbMatch?.let { match ->
@@ -408,12 +427,19 @@ class MVPRepository(
     override suspend fun updateMatchFinished(match: MatchMVP, time: Instant) {
         val args = UpdateMatchArgs(match.id, time.toString(), match.tournamentId)
         val jsonArgs = Json.encodeToString(args)
-        functions.createExecution(
-            "updateMatch",
-            jsonArgs,
-            false,
-            method = ExecutionMethod.POST
-        )
+        try {
+            functions.createExecution(
+                "updateMatch",
+                jsonArgs,
+                false,
+                method = ExecutionMethod.POST
+            )
+        } catch (e: SocketTimeoutException) {
+            Napier.e("Connection timeout, retrying...", e, DbConstants.ERROR_TAG)
+            updateMatchFinished(match, time) // Simple retry
+        } catch (e: Exception) {
+            Napier.e("Failed to update finished match", e, DbConstants.ERROR_TAG)
+        }
     }
 
     override suspend fun createTournament(newTournament: Tournament) {
@@ -427,6 +453,31 @@ class MVPRepository(
             )
         } catch (e: Exception) {
             Napier.e("Failed to create tournament", e, DbConstants.ERROR_TAG)
+        }
+    }
+
+    override suspend fun createNewUser(
+        email: String,
+        password: String,
+        firstName: String,
+        lastName: String
+    ) {
+        try {
+            val userId = ID.unique()
+            account.create(
+                userId = userId,
+                email = email,
+                password = password,
+            )
+            database.createDocument(
+                databaseId = DbConstants.DATABASE_NAME,
+                collectionId = DbConstants.USER_DATA_COLLECTION,
+                documentId = userId,
+                nestedType = UserDataDTO::class,
+                data = UserDataDTO(firstName, lastName, listOf(), userId),
+            )
+        } catch (e: Exception) {
+            Napier.e("Failed to create a user", e, DbConstants.ERROR_TAG)
         }
     }
 
@@ -457,6 +508,10 @@ class MVPRepository(
             // Save new/updated items
             dataToSave = remoteData.map { it.data }.toList()
             saveData(dataToSave)
+            val newIds = getLocalIds().map { it.id }
+            if (newIds.size != remoteData.size) {
+                throw Exception("Local ids don't match the length of remote data: local ${newIds.size} vs. remote ${remoteData.size}")
+            }
         } catch (e: Exception) {
             Napier.e("Failed to sync data", e)
         }
@@ -464,15 +519,17 @@ class MVPRepository(
     }
 
     private suspend fun <T> getData(
-        networkCall: suspend () -> T,
-        saveCall: suspend (T) -> Unit
+        networkCall: suspend () -> Document<T>,
+        localData: suspend (id: String) -> MVPDocument?,
+        saveCall: suspend (Document<T>) -> Unit
     ) {
         try {
             // Fetch fresh data from network
             val networkResult = networkCall()
             saveCall(networkResult)
-
-            // Updated data will be automatically emitted through the original Flow
+            if (localData(networkResult.id) == null) {
+                throw Exception("Local data was not updated")
+            }
         } catch (e: Exception) {
             Napier.e("Failed to update data", e, DbConstants.ERROR_TAG)
         }
@@ -513,7 +570,7 @@ interface IMVPRepository {
 
     fun getFieldsFlow(tournamentId: String): Flow<List<FieldWithMatches>>
 
-    fun getPlayersOfTournamentFlow(tournamentId: String): Flow<TournamentWithRelations>
+    fun getPlayersOfTournamentFlow(tournamentId: String): Flow<TournamentWithRelations?>
     suspend fun getEvents(bounds: Bounds): List<EventAbs>
     suspend fun getEvents(): List<EventAbs>
     suspend fun getCurrentUser(update: Boolean = false): UserWithRelations?
@@ -525,5 +582,6 @@ interface IMVPRepository {
     suspend fun updateMatchSafe(match: MatchMVP)
     suspend fun updateMatchFinished(match: MatchMVP, time: Instant)
     suspend fun createTournament(newTournament: Tournament)
+    suspend fun createNewUser(email: String, password: String, firstName: String, lastName: String)
     fun setIgnoreMatch(match: MatchMVP?)
 }

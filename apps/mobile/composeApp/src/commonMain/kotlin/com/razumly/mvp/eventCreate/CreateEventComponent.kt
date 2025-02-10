@@ -16,7 +16,7 @@ import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
 
 interface CreateEventComponent {
-    val newTournament: StateFlow<Tournament>
+    val newTournament: StateFlow<Tournament?>
 
     fun updateTournamentTextFields(name: String, description: String, type: String)
     fun updateTournamentParameters(
@@ -43,16 +43,16 @@ class DefaultCreateEventComponent(
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-    private val _newTournament = MutableStateFlow(Tournament())
-    override val newTournament: StateFlow<Tournament> = _newTournament.asStateFlow()
+    private val _newTournament = MutableStateFlow<Tournament?>(null)
+    override val newTournament: StateFlow<Tournament?> = _newTournament.asStateFlow()
 
     private fun updateTournamentField(update: Tournament.() -> Tournament) {
-        _newTournament.update { it.update() }
+        _newTournament.update { it?.update() }
     }
 
     override fun createTournament() {
         scope.launch {
-            appwriteRepository.createTournament(_newTournament.value)
+            _newTournament.value?.let { appwriteRepository.createTournament(it) }
         }
     }
 

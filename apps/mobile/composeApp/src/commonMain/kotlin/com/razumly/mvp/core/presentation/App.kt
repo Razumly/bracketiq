@@ -13,7 +13,7 @@ import com.arkivanov.decompose.extensions.compose.stack.Children
 import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import com.razumly.mvp.core.presentation.util.backAnimation
 import com.razumly.mvp.home.HomeScreen
-import com.razumly.mvp.userAuth.loginScreen.LoginScreen
+import com.razumly.mvp.userAuth.loginScreen.AuthScreen
 import dev.icerock.moko.geo.compose.BindLocationTrackerEffect
 import dev.icerock.moko.permissions.compose.BindEffect
 import io.github.aakira.napier.DebugAntilog
@@ -80,7 +80,7 @@ fun App(root: RootComponent) {
         when (val instance = child.instance) {
             is RootComponent.Child.Login -> {
                 Napier.d(tag = "Navigation") { "Navigating to Login Screen" }
-                LoginScreen(component = instance.component)
+                AuthScreen(component = instance.component)
             }
             is RootComponent.Child.Home -> {
                 Napier.d(tag = "Navigation") { "Navigating to Home Screen" }

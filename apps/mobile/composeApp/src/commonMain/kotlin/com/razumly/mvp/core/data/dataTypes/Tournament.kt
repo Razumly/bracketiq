@@ -2,7 +2,6 @@ package com.razumly.mvp.core.data.dataTypes
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
-import io.appwrite.ID
 import kotlinx.datetime.Instant
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
@@ -10,7 +9,6 @@ import kotlinx.serialization.Transient
 @Entity
 @Serializable
 data class Tournament(
-
     val doubleElimination: Boolean = false,
     val winnerSetCount: Int = 0,
     val loserSetCount: Int = 0,
@@ -18,7 +16,7 @@ data class Tournament(
     val loserBracketPointsToVictory: List<Int> = listOf(),
     val winnerScoreLimitsPerSet: List<Int> = listOf(),
     val loserScoreLimitsPerSet: List<Int> = listOf(),
-    @Transient @PrimaryKey override var id: String = ID.unique(),
+    @PrimaryKey override var id: String,
     override val name: String = "",
     override val description: String = "",
     override val divisions: List<String> = listOf(),

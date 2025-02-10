@@ -11,7 +11,7 @@ import com.razumly.mvp.eventFollowing.FollowingEventListComponent
 import com.razumly.mvp.eventSearch.SearchEventListComponent
 import com.razumly.mvp.home.DefaultHomeComponent
 import com.razumly.mvp.profile.DefaultProfileComponent
-import com.razumly.mvp.userAuth.loginScreen.DefaultLoginComponent
+import com.razumly.mvp.userAuth.loginScreen.DefaultAuthComponent
 import org.koin.dsl.module
 
 val componentModule = module {
@@ -24,9 +24,9 @@ val componentModule = module {
     }
 
     factory { (componentContext: ComponentContext, onNavigateToHome: (() -> Unit)?) ->
-        DefaultLoginComponent(
+        DefaultAuthComponent(
             componentContext = componentContext,
-            appwriteRepository = get(),
+            mvpRepository = get(),
             onNavigateToHome = onNavigateToHome ?: {}
         )
     }

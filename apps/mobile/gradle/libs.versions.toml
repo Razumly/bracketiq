@@ -45,6 +45,7 @@ secrets = "2.0.1"
 sqlite = "2.5.0-alpha12"
 ui = "1.8.0-alpha08"
 vectorize = "1.0.2"
+animationAndroid = "1.7.7"
 
 
 
@@ -73,7 +74,8 @@ compose-ui-test-manifest = { module = "androidx.compose.ui:ui-test-manifest", ve
 compose-vectorize-core = { module = "dev.sergiobelda.compose.vectorize:compose-vectorize-core", version.ref = "vectorize"}
 core-ktx = { group = "androidx.test", name = "core-ktx", version.ref = "coreKtx" }
 decompose-decompose = { group = "com.arkivanov.decompose", name = "decompose", version.ref = "decompose" }
-decompose-extensionsComposeJetbrains = { group = "com.arkivanov.decompose", name = "extensions-compose", version.ref = "decompose" }
+decompose-extensions = { group = "com.arkivanov.decompose", name = "extensions-compose", version.ref = "decompose" }
+decompose-extentions-experimental = { group = "com.arkivanov.decompose", name = "extensions-compose-experimental", version.ref = "decompose" }
 geo = { module = "dev.icerock.moko:geo", version.ref = "geo" }
 geo-compose = { module = "dev.icerock.moko:geo-compose", version.ref = "geo" }
 haze = { module = "dev.chrisbanes.haze:haze", version.ref = "hazeMaterials" }
@@ -102,6 +104,7 @@ play-services-location = { module = "com.google.android.gms:play-services-locati
 play-services-maps = { module = "com.google.android.gms:play-services-maps", version.ref = "playServicesMaps" }
 robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
 runtime-saveable = { module = "org.jetbrains.compose.runtime:runtime-saveable", version.ref = "runtimeSaveable" }
+androidx-animation-android = { group = "androidx.compose.animation", name = "animation-android", version.ref = "animationAndroid" }
 
 
 [plugins]

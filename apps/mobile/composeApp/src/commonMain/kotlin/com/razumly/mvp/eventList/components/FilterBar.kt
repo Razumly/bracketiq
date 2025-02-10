@@ -3,11 +3,10 @@ package com.razumly.mvp.eventList.components
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.TabRowDefaults.SecondaryIndicator
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
@@ -32,13 +31,12 @@ fun FilterBar(modifier: Modifier = Modifier) {
     val tabs = listOf("Tournaments", "Pickup Games", "Clinics", "Leagues")
     var selectedTabIndex by remember { mutableStateOf(0) }
 
-    ScrollableTabRow(
+    TabRow(
         selectedTabIndex = selectedTabIndex,
         modifier = modifier
             .fillMaxWidth()
             // If you want more space, do .height(56.dp) or add .padding(vertical = X.dp)
             .height(56.dp),
-        edgePadding = 0.dp,
         containerColor = Color.Transparent,
         indicator = { tabPositions ->
             // Default indicator is easier to see
@@ -48,7 +46,7 @@ fun FilterBar(modifier: Modifier = Modifier) {
             )
         },
         // Typically, contentColor sets the default color for icons/text
-        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
     ) {
         tabs.forEachIndexed { index, title ->
             val isSelected = (index == selectedTabIndex)

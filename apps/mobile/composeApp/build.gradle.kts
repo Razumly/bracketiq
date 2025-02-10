@@ -60,7 +60,8 @@ kotlin {
                 implementation(libs.haze.materials)
                 implementation(libs.haze)
                 api(libs.decompose.decompose)
-                api(libs.decompose.extensionsComposeJetbrains)
+                api(libs.decompose.extensions)
+                api(libs.decompose.extentions.experimental)
                 api(libs.kotlinx.serialization.core)
                 api(libs.geo.compose)
                 api(libs.kotlinx.datetime)
@@ -161,6 +162,7 @@ secrets {
 
 dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose.android)
+    implementation(libs.androidx.animation.android)
     debugImplementation(compose.uiTooling)
     add("kspCommonMainMetadata", libs.androidx.room.compiler)
     add("kspAndroid", libs.androidx.room.compiler)

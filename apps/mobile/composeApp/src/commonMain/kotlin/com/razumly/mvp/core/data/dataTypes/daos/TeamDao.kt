@@ -41,10 +41,11 @@ interface TeamDao {
     suspend fun upsertTeamsWithPlayers(teams: List<Team>) {
         teams.forEach { team ->
             team.players.forEach { playerId ->
+
                 try {
                     upsertTeamPlayerCrossRef(TeamPlayerCrossRef(team.id, playerId))
                 } catch (e: Exception) {
-                    Napier.e("Failed to create cross reference for team ${team.id} and player $playerId")
+                    Napier.e("Failed to create cross reference for team ${team.id} and player $playerId: $e")
                 }
             }
         }
