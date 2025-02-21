@@ -27,7 +27,6 @@ import com.razumly.mvp.icons.MVPIcons
 import com.razumly.mvp.icons.TournamentBracket
 import com.razumly.mvp.tournamentDetailScreen.TournamentContentComponent
 
-
 @Composable
 fun CollapsableHeader(
     component: TournamentContentComponent
@@ -41,7 +40,8 @@ fun CollapsableHeader(
         tournament?.tournament?.divisions?.indexOf(selectedDivision)?.let {
             ScrollableTabRow(
                 selectedTabIndex = it.coerceAtLeast(0),
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth(),
                 edgePadding = 0.dp
             ) {
                 tournament!!.tournament.divisions.forEach { division ->

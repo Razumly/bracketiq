@@ -28,5 +28,16 @@ data class UserWithRelations(
             entityColumn = "tournamentId"
         )
     )
-    val tournaments: List<Tournament>
+    val tournaments: List<Tournament>,
+
+    @Relation(
+        parentColumn = "id",
+        entityColumn = "id",
+        associateBy = Junction(
+            value = UserPickupGameCrossRef::class,
+            parentColumn = "userId",
+            entityColumn = "pickupGameId"
+        )
+    )
+    val pickupGames: List<PickupGame>
 )

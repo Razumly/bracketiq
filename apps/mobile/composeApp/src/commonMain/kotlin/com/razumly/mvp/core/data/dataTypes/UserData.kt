@@ -10,10 +10,11 @@ import kotlinx.serialization.Serializable
 data class UserData(
     val firstName: String? = null,
     val lastName: String? = null,
-    val tournaments: List<String>,
+    val tournamentIds: List<String>,
+    val pickupGameIds: List<String>,
     @PrimaryKey override val id: String,
 ) : MVPDocument()
 
 fun UserData.toUserDataDTO(): UserDataDTO {
-    return UserDataDTO(firstName, lastName, tournaments, id)
+    return UserDataDTO(firstName, lastName, tournamentIds, pickupGameIds, id)
 }

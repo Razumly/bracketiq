@@ -5,6 +5,7 @@ import androidx.room.Delete
 import androidx.room.Query
 import androidx.room.Upsert
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.UserPickupGameCrossRef
 import com.razumly.mvp.core.data.dataTypes.UserTournamentCrossRef
 import com.razumly.mvp.core.data.dataTypes.UserWithRelations
 
@@ -16,7 +17,7 @@ interface UserDataDao {
     @Upsert
     suspend fun upsertUsersData(usersData: List<UserData>)
 
-    @Query("SELECT * FROM UserData WHERE tournaments LIKE '%' || :tournamentId || '%'")
+    @Query("SELECT * FROM UserData WHERE tournamentIds LIKE '%' || :tournamentId || '%'")
     suspend fun getUsers(tournamentId: String): List<UserData>
 
     @Query("DELETE FROM UserData WHERE id IN (:ids)")
@@ -27,6 +28,12 @@ interface UserDataDao {
 
     @Upsert
     suspend fun upsertUserTournamentCrossRefs(crossRefs: List<UserTournamentCrossRef>)
+
+    @Upsert
+    suspend fun upsertUserPickupGamesCrossRef(crossRef: UserPickupGameCrossRef)
+
+    @Upsert
+    suspend fun upsertUserPickupGamesCrossRefs(crossRefs: List<UserPickupGameCrossRef>)
 
     @Delete
     suspend fun deleteUserData(userData: UserData)

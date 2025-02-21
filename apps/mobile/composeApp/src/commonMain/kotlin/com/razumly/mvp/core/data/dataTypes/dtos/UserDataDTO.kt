@@ -8,16 +8,18 @@ import kotlinx.serialization.Transient
 data class UserDataDTO(
     val firstName: String? = null,
     val lastName: String? = null,
-    val tournaments: List<String>,
+    val tournamentIds: List<String>,
+    val pickupGameIds: List<String>,
     @Transient
     val id: String = "",
 )
 
 fun UserDataDTO.toUserData(id: String): UserData {
     return UserData(
-        firstName = firstName,
-        lastName = lastName,
-        tournaments = tournaments,
-        id = id
+        firstName,
+        lastName,
+        tournamentIds,
+        pickupGameIds,
+        id
     )
 }

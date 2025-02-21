@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -90,15 +92,19 @@ fun SharedTransitionScope.TournamentBracketView(
     }
 
     Column(
-        Modifier.verticalScroll(columnScrollState).background(MaterialTheme.colorScheme.background)
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(columnScrollState)
+            .background(MaterialTheme.colorScheme.background)
     ) {
         Header(component)
-        Column {
-            CollapsableHeader(component)
+        CollapsableHeader(component)
+        Column(Modifier.fillMaxWidth()) {
             LazyRow(
                 state = lazyRowState,
                 modifier = Modifier
-                    .height(boxHeight.value),
+                    .height(boxHeight.value)
+                    .fillMaxWidth(),
             ) {
                 itemsIndexed(roundsList, key = { _, round ->
                     round.filterNotNull().joinToString { it.match.id }

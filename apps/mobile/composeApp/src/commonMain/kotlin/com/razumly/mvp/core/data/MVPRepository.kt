@@ -15,10 +15,12 @@ import com.razumly.mvp.core.data.dataTypes.UserTournamentCrossRef
 import com.razumly.mvp.core.data.dataTypes.UserWithRelations
 import com.razumly.mvp.core.data.dataTypes.dtos.EventDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.MatchDTO
+import com.razumly.mvp.core.data.dataTypes.dtos.PickupGameDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.TournamentDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.UserDataDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.toEvent
 import com.razumly.mvp.core.data.dataTypes.dtos.toMatch
+import com.razumly.mvp.core.data.dataTypes.dtos.toPickupGame
 import com.razumly.mvp.core.data.dataTypes.dtos.toTournament
 import com.razumly.mvp.core.data.dataTypes.dtos.toUserData
 import com.razumly.mvp.core.data.dataTypes.toMatchDTO
@@ -30,7 +32,6 @@ import io.appwrite.ID
 import io.appwrite.Query
 import io.appwrite.enums.ExecutionMethod
 import io.appwrite.models.Document
-import io.appwrite.models.DocumentList
 import io.appwrite.models.RealtimeSubscription
 import io.appwrite.models.User
 import io.appwrite.services.Account
@@ -81,7 +82,7 @@ class MVPRepository(
                 DbConstants.DATABASE_NAME,
                 DbConstants.USER_DATA_COLLECTION,
                 id,
-                UserDataDTO::class
+                nestedType =  UserDataDTO::class
             ).data.copy(id = id)
             tournamentDB.getUserDataDao.upsertUserData(currentUser.toUserData(id))
             val currentUserRelations =
@@ -109,7 +110,7 @@ class MVPRepository(
                     DbConstants.DATABASE_NAME,
                     DbConstants.TOURNAMENT_COLLECTION,
                     tournamentId,
-                    TournamentDTO::class,
+                    nestedType = TournamentDTO::class,
                     queries = null
                 )
             },
@@ -153,7 +154,7 @@ class MVPRepository(
                 DbConstants.DATABASE_NAME,
                 DbConstants.USER_DATA_COLLECTION,
                 currentAccount.id,
-                UserDataDTO::class,
+                nestedType = UserDataDTO::class,
             ).data.copy(id = currentAccount.id)
             tournamentDB.getUserDataDao.upsertUserData(currentUserData.toUserData(currentAccount.id))
             currentUserWithRelations =
@@ -232,7 +233,7 @@ class MVPRepository(
                 DbConstants.DATABASE_NAME,
                 DbConstants.MATCHES_COLLECTION,
                 matchId,
-                MatchDTO::class,
+                nestedType = MatchDTO::class,
             )
         },
         saveCall = { match ->
@@ -303,27 +304,63 @@ class MVPRepository(
     override suspend fun getEvents(
         bounds: Bounds
     ): List<EventAbs> {
-        val docs: DocumentList<EventDTO>
+        val docs: List<EventAbs>
         try {
-            docs = database.listDocuments(
-                DbConstants.DATABASE_NAME,
-                DbConstants.TOURNAMENT_COLLECTION,
-                queries = listOf(
-                    Query.greaterThan(DbConstants.LAT_ATTRIBUTE, bounds.south),
-                    Query.lessThan(DbConstants.LAT_ATTRIBUTE, bounds.north),
-                    Query.greaterThan(DbConstants.LONG_ATTRIBUTE, bounds.west),
-                    Query.lessThan(DbConstants.LONG_ATTRIBUTE, bounds.east),
-                ),
-                EventDTO::class
+            val tournaments = getDataList(
+                networkCall = {
+                    database.listDocuments(
+                        DbConstants.DATABASE_NAME,
+                        DbConstants.TOURNAMENT_COLLECTION,
+                        queries = listOf(
+                            Query.greaterThan(DbConstants.LAT_ATTRIBUTE, bounds.south),
+                            Query.lessThan(DbConstants.LAT_ATTRIBUTE, bounds.north),
+                            Query.greaterThan(DbConstants.LONG_ATTRIBUTE, bounds.west),
+                            Query.lessThan(DbConstants.LONG_ATTRIBUTE, bounds.east),
+                        ),
+                        TournamentDTO::class
+                    ).documents.map { dtoDoc -> dtoDoc.convert { it.toTournament(it.id) } }
+                },
+                getLocalIds = {
+                    tournamentDB.getTournamentDao.getAllCachedTournaments().toSet()
+                },
+                saveData = { tournaments ->
+                    tournamentDB.getTournamentDao.upsertTournaments(tournaments)
+                },
+                deleteStaleData = {
+                    tournamentDB.getTournamentDao.deleteTournamentsById(it)
+                }
             )
+            val pickupGames = getDataList(
+                networkCall = {
+                    database.listDocuments(
+                        DbConstants.DATABASE_NAME,
+                        DbConstants.PICKUP_GAME_COLLECTION,
+                        queries = listOf(
+                            Query.greaterThan(DbConstants.LAT_ATTRIBUTE, bounds.south),
+                            Query.lessThan(DbConstants.LAT_ATTRIBUTE, bounds.north),
+                            Query.greaterThan(DbConstants.LONG_ATTRIBUTE, bounds.west),
+                            Query.lessThan(DbConstants.LONG_ATTRIBUTE, bounds.east),
+                        ),
+                        PickupGameDTO::class
+                    ).documents.map { dtoDoc -> dtoDoc.convert { it.toPickupGame(it.id) } }
+                },
+                getLocalIds = {
+                    tournamentDB.getPickupGameDao.getAllCachedPickupGames().toSet()
+                },
+                saveData = { pickupGames ->
+                    tournamentDB.getPickupGameDao.upsertPickupGames(pickupGames)
+                },
+                deleteStaleData = {
+                    tournamentDB.getPickupGameDao.deletePickupGamesById(it)
+                }
+            )
+            docs = pickupGames as List<EventAbs> + tournaments as List<EventAbs>
         } catch (e: Exception) {
             Napier.e("Failed to get events", e, DbConstants.ERROR_TAG)
             return emptyList()
         }
 
-        return docs.documents.map {
-            it.data.copy(id = it.id, collectionId = it.collectionId).toEvent()
-        }
+        return docs
     }
 
     override suspend fun getEvents(): List<EventAbs> {
@@ -384,6 +421,8 @@ class MVPRepository(
                             team1 = matchUpdates.team1,
                             team2 = matchUpdates.team2,
                             refCheckedIn = matchUpdates.refereeCheckedIn,
+                            start = Instant.parse(matchUpdates.start),
+                            end = matchUpdates.end?.let { Instant.parse(it) }
                         )
                     )
                     tournamentDB.getMatchDao.upsertMatch(updatedMatch.match)
@@ -474,7 +513,7 @@ class MVPRepository(
                 collectionId = DbConstants.USER_DATA_COLLECTION,
                 documentId = userId,
                 nestedType = UserDataDTO::class,
-                data = UserDataDTO(firstName, lastName, listOf(), userId),
+                data = UserDataDTO(firstName, lastName, listOf(), listOf(), userId),
             )
         } catch (e: Exception) {
             Napier.e("Failed to create a user", e, DbConstants.ERROR_TAG)
@@ -508,10 +547,6 @@ class MVPRepository(
             // Save new/updated items
             dataToSave = remoteData.map { it.data }.toList()
             saveData(dataToSave)
-            val newIds = getLocalIds().map { it.id }
-            if (newIds.size != remoteData.size) {
-                throw Exception("Local ids don't match the length of remote data: local ${newIds.size} vs. remote ${remoteData.size}")
-            }
         } catch (e: Exception) {
             Napier.e("Failed to sync data", e)
         }

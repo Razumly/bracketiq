@@ -1,6 +1,7 @@
 package com.razumly.mvp.eventSearch
 
 import com.arkivanov.decompose.ComponentContext
+import com.arkivanov.essenty.backhandler.BackCallback
 import com.razumly.mvp.core.data.IMVPRepository
 import com.razumly.mvp.core.data.dataTypes.Bounds
 import com.razumly.mvp.core.data.dataTypes.EventAbs
@@ -53,7 +54,19 @@ class SearchEventListComponent(
     private val _showMapCard = MutableStateFlow(false)
     val showMapCard: StateFlow<Boolean> = _showMapCard.asStateFlow()
 
+    private val backCallback = BackCallback(false) {
+        _showMapCard.value = false
+    }
+
     init {
+        backHandler.register(backCallback)
+
+        scope.launch {
+            _showMapCard.collect {
+                backCallback.isEnabled = it
+            }
+        }
+
         scope.launch {
             try {
                 _locationStateFlow.collect {

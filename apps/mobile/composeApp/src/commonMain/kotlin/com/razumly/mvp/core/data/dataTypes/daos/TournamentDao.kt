@@ -14,17 +14,26 @@ interface TournamentDao {
     @Upsert
     suspend fun upsertTournament(tournament: Tournament)
 
+    @Upsert
+    suspend fun upsertTournaments(tournaments: List<Tournament>)
+
     @Delete
     suspend fun deleteTournament(tournament: Tournament)
 
     @Query("DELETE FROM Tournament WHERE id = :id")
     suspend fun deleteTournamentById(id: String)
 
+    @Query("DELETE FROM Tournament WHERE id IN (:ids)")
+    suspend fun deleteTournamentsById(ids: List<String>)
+
     @Query("SELECT * FROM Tournament WHERE id = :id")
     fun getTournamentFlowById(id: String): Flow<Tournament?>
 
     @Query("SELECT * FROM Tournament WHERE id = :id")
     fun getTournamentById(id: String): Tournament?
+
+    @Query("SELECT * FROM Tournament")
+    fun getAllCachedTournaments(): List<Tournament>
 
     @Transaction
     @Query("SELECT * FROM Tournament WHERE id = :id")
