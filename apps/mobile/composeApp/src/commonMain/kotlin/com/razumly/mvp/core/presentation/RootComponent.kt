@@ -8,7 +8,6 @@ import com.arkivanov.decompose.router.stack.replaceCurrent
 import com.arkivanov.essenty.backhandler.BackHandler
 import com.razumly.mvp.home.DefaultHomeComponent
 import com.razumly.mvp.home.HomeComponent
-import com.razumly.mvp.userAuth.loginScreen.DefaultAuthComponent
 import com.razumly.mvp.userAuth.loginScreen.AuthComponent
 import dev.icerock.moko.geo.LocationTracker
 import dev.icerock.moko.permissions.DeniedAlwaysException
@@ -71,7 +70,7 @@ class RootComponent(
         componentContext: ComponentContext
     ): Child = when (config) {
         is Config.Login -> Child.Login(
-            _koin.inject<DefaultAuthComponent> {
+            _koin.inject<AuthComponent> {
                 parametersOf(
                     componentContext,
                     { navigation.replaceCurrent(Config.Home) }
@@ -80,7 +79,10 @@ class RootComponent(
         )
         is Config.Home -> Child.Home(
             _koin.inject<DefaultHomeComponent> {
-                parametersOf(componentContext)
+                parametersOf(
+                    componentContext,
+                    { navigation.replaceCurrent(Config.Login)}
+                )
             }.value
         )
     }

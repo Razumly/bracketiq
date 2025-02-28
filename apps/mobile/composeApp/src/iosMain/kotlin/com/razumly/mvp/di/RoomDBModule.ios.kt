@@ -10,7 +10,7 @@ actual val roomDBModule: Module = module {
     single {
         Napier.d(tag = "Database") { "Initializing Room database module" }
         try {
-            getDatabase().build().also { db ->
+            getDatabase().build().also {
                 Napier.d(tag = "Database") { "Room database successfully initialized" }
             }
         } catch (e: Exception) {

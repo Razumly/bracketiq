@@ -4,13 +4,13 @@
 <dict>
 
 	<key>NSLocationWhenInUseUsageDescription</key>
-<string>This app needs access to location when open to show your current location on the map.</string>
+    <string>This app needs access to location when open to show your current location on the map.</string>
 
-<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-<string>This app needs access to location when in the background to track your position.</string>
+    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+    <string>This app needs access to location when in the background to track your position.</string>
 
-<key>NSLocationAlwaysUsageDescription</key>
-<string>This app needs access to location when in the background for continuous location updates.</string>
+    <key>NSLocationAlwaysUsageDescription</key>
+    <string>This app needs access to location when in the background for continuous location updates.</string>
 
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
@@ -56,5 +56,18 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+    <key>CFBundleURLTypes</key>
+    <array>
+    <dict>
+        <key>CFBundleTypeRole</key>
+        <string>Editor</string>
+        <key>CFBundleURLName</key>
+        <string>io.appwrite</string>
+        <key>CFBundleURLSchemes</key>
+        <array>
+            <string>appwrite-callback-6656a4d60016b753f942</string>
+        </array>
+    </dict>
+    </array>
 </dict>
 </plist>

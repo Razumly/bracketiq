@@ -23,6 +23,7 @@ import org.koin.mp.KoinPlatform.getKoin
 
 class DefaultHomeComponent(
     componentContext: ComponentContext,
+    private val onNavigateToLogin: () -> Unit,
 ) : HomeComponent, ComponentContext by componentContext {
 
     init {
@@ -86,7 +87,10 @@ class DefaultHomeComponent(
             )
             is Config.Profile -> Child.Profile(
                 _koin.inject<DefaultProfileComponent> {
-                    parametersOf(componentContext)
+                    parametersOf(
+                        componentContext,
+                        onNavigateToLogin
+                        )
                 }.value
             )
         }

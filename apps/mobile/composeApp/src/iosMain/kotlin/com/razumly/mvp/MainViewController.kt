@@ -23,6 +23,7 @@ import io.github.aakira.napier.Napier
 import com.arkivanov.decompose.ExperimentalDecomposeApi
 import com.arkivanov.decompose.extensions.compose.stack.animation.predictiveback.PredictiveBackGestureOverlay
 import com.arkivanov.essenty.backhandler.BackDispatcher
+import io.appwrite.WebAuthComponent
 
 
 @ObjCName("MainViewController")

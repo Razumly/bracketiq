@@ -27,12 +27,13 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.LoginState
+import com.razumly.mvp.core.data.dataTypes.UserWithRelations
 import com.razumly.mvp.icons.BaselineVisibility24
 import com.razumly.mvp.icons.BaselineVisibilityOff24
 import com.razumly.mvp.icons.MVPIcons
 
 @Composable
-fun AuthScreen(component: AuthComponent) {
+fun AuthScreenBase(component: AuthComponent, onOauth2: () -> Unit?) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
@@ -199,5 +200,11 @@ fun AuthScreen(component: AuthComponent) {
                     "Don't have an account? Sign Up"
             )
         }
+        TextButton(onClick = { onOauth2() }) {
+            Text("Sign in with Google")
+        }
     }
 }
+
+@Composable
+expect fun AuthScreen(component: AuthComponent)

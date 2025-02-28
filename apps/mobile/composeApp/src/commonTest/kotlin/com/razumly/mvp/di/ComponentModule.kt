@@ -62,7 +62,6 @@ val componentModule = module {
             mvpRepository = get(),
             tournamentId = tournamentId,
             onMatchSelected = onMatchSelected,
-            name = name
         )
     } bind TournamentContentComponent::class
 
@@ -75,7 +74,7 @@ val componentModule = module {
         )
     } bind CreateEventComponent::class
 
-    factory { (componentContext: ComponentContext, onTournamentSelected: (String, String) -> Unit) ->
+    factory { (componentContext: ComponentContext, onTournamentSelected: (String) -> Unit) ->
         SearchEventListComponent(
             componentContext = componentContext,
             appwriteRepository = get(),

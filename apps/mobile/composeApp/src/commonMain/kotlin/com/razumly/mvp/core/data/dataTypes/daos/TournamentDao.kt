@@ -30,10 +30,10 @@ interface TournamentDao {
     fun getTournamentFlowById(id: String): Flow<Tournament?>
 
     @Query("SELECT * FROM Tournament WHERE id = :id")
-    fun getTournamentById(id: String): Tournament?
+    suspend fun getTournamentById(id: String): Tournament?
 
     @Query("SELECT * FROM Tournament")
-    fun getAllCachedTournaments(): List<Tournament>
+    suspend fun getAllCachedTournaments(): List<Tournament>
 
     @Transaction
     @Query("SELECT * FROM Tournament WHERE id = :id")

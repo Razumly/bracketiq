@@ -27,5 +27,5 @@ interface PickupGameDao {
     suspend fun deletePickupGameById(id: String)
 
     @Query("SELECT * FROM PickupGame WHERE id = :id")
-    fun getPickupGameById(id: String): PickupGame?
+    suspend fun getPickupGameById(id: String): PickupGame?
 }

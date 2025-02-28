@@ -1,5 +1,8 @@
+import com.android.build.api.dsl.Packaging
 import org.jetbrains.compose.ExperimentalComposeLibrary
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
+import java.io.ByteArrayOutputStream
 
 
 plugins {
@@ -36,7 +39,6 @@ kotlin {
 
     sourceSets {
         commonMain {
-            kotlin.srcDir("build/generated/ksp/metadata/commonMain/kotlin")
             dependencies {
                 implementation(compose.runtime)
                 implementation(compose.foundation)
@@ -44,8 +46,6 @@ kotlin {
                 implementation(compose.ui)
                 implementation(compose.components.resources)
                 implementation(compose.components.uiToolingPreview)
-                implementation(libs.kotlinx.coroutines.core)
-                implementation(libs.kotlinx.serialization.json)
                 implementation(libs.runtime.saveable)
                 implementation(libs.coil.compose)
                 implementation(libs.androidx.room.runtime)
@@ -70,12 +70,11 @@ kotlin {
                 api(libs.napier)
                 api(libs.permissions)
                 api(libs.geo)
-                api("io.appwrite:sdk-for-kmp:0.3.0")
+                api("io.appwrite:sdk-for-kmp:0.4.0")
             }
         }
 
         androidMain {
-            kotlin.srcDir("build/generated/ksp/android/androidMain/kotlin")
             dependencies {
                 implementation(libs.androidx.lifecycle.runtime.compose)
                 implementation(libs.androidx.activity.compose)
@@ -92,22 +91,20 @@ kotlin {
                 implementation(libs.androidx.material3.android)
                 implementation(libs.androidx.navigation.common.ktx)
                 implementation(libs.androidx.activity.ktx)
+                implementation("com.google.auth:google-auth-library-oauth2-http:0.20.0")
+                implementation("com.google.http-client:google-http-client-gson:1.35.0")
+                implementation("com.google.apis:google-api-services-oauth2:v2-rev157-1.25.0")
             }
         }
 
 
     commonTest.dependencies {
-            @OptIn(ExperimentalComposeLibrary::class)
-            implementation(compose.uiTest)
             implementation(libs.kotlin.test)
             implementation(libs.assertk)
-            implementation(libs.compose.ui.test.manifest)
             implementation(libs.koin.test)
             implementation(libs.androidx.sqlite.bundled)
+            implementation(libs.kotlinx.coroutines.test)
             implementation(kotlin("test-annotations-common"))
-            implementation(libs.core.ktx)
-            implementation(libs.junit)
-            implementation(libs.robolectric)
         }
     }
 }
@@ -116,17 +113,17 @@ android {
     namespace = "com.razumly.mvp"
     compileSdk = libs.versions.android.compileSdk.get().toInt()
 
+
+    packaging {
+        resources.excludes.add("META-INF/*")
+        resources.pickFirsts.add("mozilla/*")
+    }
     defaultConfig {
         applicationId = "com.razumly.mvp"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
         versionCode = 1
         versionName = "1.0"
-    }
-    packaging {
-        resources {
-            excludes += "/META-INF/{AL2.0,LGPL2.1}"
-        }
     }
     buildTypes {
         getByName("release") {
@@ -172,4 +169,27 @@ dependencies {
     implementation(libs.androidx.foundation.layout)
     implementation(libs.androidx.ui)
     implementation(libs.androidx.material)
+}
+
+val deviceName = project.findProperty("iosDevice") as? String ?: "iPhone 15"
+
+tasks.register<Exec>("bootIOSSimulator") {
+    isIgnoreExitValue = true
+    val errorBuffer = ByteArrayOutputStream()
+    errorOutput = ByteArrayOutputStream()
+    commandLine("xcrun", "simctl", "boot", deviceName)
+
+    doLast {
+        val result = executionResult.get()
+        if (result.exitValue != 148 && result.exitValue != 149) { // ignoring device already booted errors
+            println(errorBuffer.toString())
+            result.assertNormalExitValue()
+        }
+    }
+}
+
+tasks.withType<KotlinNativeSimulatorTest>().configureEach {
+    dependsOn("bootIOSSimulator")
+    standalone.set(false)
+    device.set(deviceName)
 }

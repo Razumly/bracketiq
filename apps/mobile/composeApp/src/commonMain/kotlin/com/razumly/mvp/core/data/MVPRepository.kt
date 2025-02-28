@@ -31,6 +31,7 @@ import io.appwrite.Client
 import io.appwrite.ID
 import io.appwrite.Query
 import io.appwrite.enums.ExecutionMethod
+import io.appwrite.enums.OAuthProvider
 import io.appwrite.models.Document
 import io.appwrite.models.RealtimeSubscription
 import io.appwrite.models.User
@@ -54,15 +55,16 @@ import kotlinx.datetime.Instant
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import org.koin.mp.KoinPlatform.getKoin
 
 class MVPRepository(
     client: Client,
-    private val tournamentDB: MVPDatabase,
+    internal val tournamentDB: MVPDatabase,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 ) : IMVPRepository {
-    private val account = Account(client)
+    internal val account = Account(client)
 
-    private val database = Databases(client)
+    internal val database = Databases(client)
 
     private val realtime = Realtime(client)
 
@@ -161,7 +163,7 @@ class MVPRepository(
                 tournamentDB.getUserDataDao.getUserWithRelationsById(currentAccount.id)
             return currentUserWithRelations
         } catch (e: Exception) {
-            Napier.e("Failed to get current user", e, DbConstants.ERROR_TAG)
+            Napier.e("User missing User Data: ", e, DbConstants.ERROR_TAG)
             return null
         }
     }
@@ -404,7 +406,7 @@ class MVPRepository(
             channels,
             payloadType = MatchDTO::class
         ) { response ->
-            val matchUpdates = response.payload.data
+            val matchUpdates = response.payload
             scope.launch(Dispatchers.IO) {
                 val id = response.channels.last().split(".").last()
                 val dbMatch = tournamentDB.getMatchDao.getMatchById(id)
