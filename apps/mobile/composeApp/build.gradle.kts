@@ -1,5 +1,4 @@
-import com.android.build.api.dsl.Packaging
-import org.jetbrains.compose.ExperimentalComposeLibrary
+
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
 import java.io.ByteArrayOutputStream
@@ -113,6 +112,9 @@ android {
     namespace = "com.razumly.mvp"
     compileSdk = libs.versions.android.compileSdk.get().toInt()
 
+    buildFeatures {
+        buildConfig = true
+    }
 
     packaging {
         resources.excludes.add("META-INF/*")
