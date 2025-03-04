@@ -2,6 +2,7 @@ package com.razumly.mvp.core.data
 
 import com.razumly.mvp.core.data.dataTypes.Bounds
 import com.razumly.mvp.core.data.dataTypes.EventAbs
+import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.MVPDocument
@@ -15,12 +16,10 @@ import com.razumly.mvp.core.data.dataTypes.UserTournamentCrossRef
 import com.razumly.mvp.core.data.dataTypes.UserWithRelations
 import com.razumly.mvp.core.data.dataTypes.dtos.EventDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.MatchDTO
-import com.razumly.mvp.core.data.dataTypes.dtos.PickupGameDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.TournamentDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.UserDataDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.toEvent
 import com.razumly.mvp.core.data.dataTypes.dtos.toMatch
-import com.razumly.mvp.core.data.dataTypes.dtos.toPickupGame
 import com.razumly.mvp.core.data.dataTypes.dtos.toTournament
 import com.razumly.mvp.core.data.dataTypes.dtos.toUserData
 import com.razumly.mvp.core.data.dataTypes.toMatchDTO
@@ -31,7 +30,6 @@ import io.appwrite.Client
 import io.appwrite.ID
 import io.appwrite.Query
 import io.appwrite.enums.ExecutionMethod
-import io.appwrite.enums.OAuthProvider
 import io.appwrite.models.Document
 import io.appwrite.models.RealtimeSubscription
 import io.appwrite.models.User
@@ -55,7 +53,6 @@ import kotlinx.datetime.Instant
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import org.koin.mp.KoinPlatform.getKoin
 
 class MVPRepository(
     client: Client,
@@ -78,7 +75,7 @@ class MVPRepository(
 
     override suspend fun login(email: String, password: String): UserWithRelations? {
         try {
-            account.createEmailPasswordSession(email, password)
+            val session = account.createEmailPasswordSession(email, password)
             val id = account.get().id
             val currentUser = database.getDocument(
                 DbConstants.DATABASE_NAME,
@@ -87,10 +84,10 @@ class MVPRepository(
                 nestedType =  UserDataDTO::class
             ).data.copy(id = id)
             tournamentDB.getUserDataDao.upsertUserData(currentUser.toUserData(id))
-            val currentUserRelations =
-                tournamentDB.getUserDataDao.getUserWithRelationsById(account.get().id)
+            val currentUserWithRelations =
+                tournamentDB.getUserDataDao.getUserWithRelationsById(session.userId)
 
-            return currentUserRelations
+            return currentUserWithRelations
         } catch (e: Exception) {
             Napier.e("Failed to login", e, DbConstants.ERROR_TAG)
             throw e
@@ -332,31 +329,31 @@ class MVPRepository(
                     tournamentDB.getTournamentDao.deleteTournamentsById(it)
                 }
             )
-            val pickupGames = getDataList(
+            val pickupEvents = getDataList(
                 networkCall = {
                     database.listDocuments(
                         DbConstants.DATABASE_NAME,
-                        DbConstants.PICKUP_GAME_COLLECTION,
+                        DbConstants.EVENT_COLLECTION,
                         queries = listOf(
                             Query.greaterThan(DbConstants.LAT_ATTRIBUTE, bounds.south),
                             Query.lessThan(DbConstants.LAT_ATTRIBUTE, bounds.north),
                             Query.greaterThan(DbConstants.LONG_ATTRIBUTE, bounds.west),
                             Query.lessThan(DbConstants.LONG_ATTRIBUTE, bounds.east),
                         ),
-                        PickupGameDTO::class
-                    ).documents.map { dtoDoc -> dtoDoc.convert { it.toPickupGame(it.id) } }
+                        EventDTO::class
+                    ).documents.map { dtoDoc -> dtoDoc.convert { it.toEvent(it.id) } }
                 },
                 getLocalIds = {
-                    tournamentDB.getPickupGameDao.getAllCachedPickupGames().toSet()
+                    tournamentDB.getEventImpDao.getAllCachedEvents().toSet()
                 },
-                saveData = { pickupGames ->
-                    tournamentDB.getPickupGameDao.upsertPickupGames(pickupGames)
+                saveData = { pickupEvents ->
+                    tournamentDB.getEventImpDao.upsertEvents(pickupEvents)
                 },
                 deleteStaleData = {
-                    tournamentDB.getPickupGameDao.deletePickupGamesById(it)
+                    tournamentDB.getEventImpDao.deleteEventsById(it)
                 }
             )
-            docs = pickupGames as List<EventAbs> + tournaments as List<EventAbs>
+            docs = pickupEvents as List<EventAbs> + tournaments as List<EventAbs>
         } catch (e: Exception) {
             Napier.e("Failed to get events", e, DbConstants.ERROR_TAG)
             return emptyList()
@@ -395,7 +392,7 @@ class MVPRepository(
         }
 
         return allDocs.map {
-            it.data.copy(id = it.id, collectionId = it.collectionId).toEvent()
+            it.data.copy(id = it.id, collectionId = it.collectionId).toEvent(it.id)
         }
     }
 
@@ -480,6 +477,20 @@ class MVPRepository(
             updateMatchFinished(match, time) // Simple retry
         } catch (e: Exception) {
             Napier.e("Failed to update finished match", e, DbConstants.ERROR_TAG)
+        }
+    }
+
+    override suspend fun createEvent(newEvent: EventImp) {
+        try {
+            database.createDocument(
+                DbConstants.DATABASE_NAME,
+                DbConstants.EVENT_COLLECTION,
+                newEvent.id,
+                newEvent,
+                nestedType = EventImp::class
+            )
+        } catch (e: Exception) {
+            Napier.e("Failed to create event", e, DbConstants.ERROR_TAG)
         }
     }
 
@@ -620,5 +631,6 @@ interface IMVPRepository {
     suspend fun updateMatchFinished(match: MatchMVP, time: Instant)
     suspend fun createTournament(newTournament: Tournament)
     suspend fun createNewUser(email: String, password: String, firstName: String, lastName: String)
+    suspend fun createEvent(newEvent: EventImp)
     fun setIgnoreMatch(match: MatchMVP?)
 }

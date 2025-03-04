@@ -18,7 +18,7 @@ data class Team(
     var players: List<String> = emptyList(),
     @PrimaryKey
     override var id: String = ""
-) : MVPDocument() {
+) : MVPDocument {
     constructor() : this(
         name = null,
         tournament = "",

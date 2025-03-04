@@ -3,8 +3,9 @@ package com.razumly.mvp.eventSearch
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.backhandler.BackCallback
 import com.razumly.mvp.core.data.IMVPRepository
-import com.razumly.mvp.core.data.dataTypes.Bounds
 import com.razumly.mvp.core.data.dataTypes.EventAbs
+import com.razumly.mvp.core.util.calcDistance
+import com.razumly.mvp.core.util.getBounds
 import com.razumly.mvp.eventList.EventListComponent
 import dev.icerock.moko.geo.LatLng
 import dev.icerock.moko.geo.LocationTracker
@@ -17,10 +18,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlin.math.PI
-import kotlin.math.acos
-import kotlin.math.cos
-import kotlin.math.sin
 
 class SearchEventListComponent(
     componentContext: ComponentContext,
@@ -118,19 +115,6 @@ class SearchEventListComponent(
         }
     }
 
-    private fun calcDistance(start: LatLng, end: LatLng): Double {
-        return try {
-            acos(
-                sin(start.latitude) * sin(end.latitude) + cos(start.latitude) * cos(end.latitude) * cos(
-                    end.longitude - start.longitude
-                )
-            ) * 3959
-        } catch (e: Exception) {
-            _error.value = "Failed to calculate distance: ${e.message}"
-            0.0
-        }
-    }
-
     private suspend fun getEvents() {
         try {
             _isLoading.value = true
@@ -141,18 +125,7 @@ class SearchEventListComponent(
                 _error.value = "Location not available"
                 return
             }
-
-            val earthCircumference = 24902.0
-            val deltaLatitude = 360.0 * radius / earthCircumference
-            val deltaLongitude =
-                deltaLatitude / cos((currentLocation.latitude.times(PI)) / 180.0)
-
-            val currentBounds = Bounds(
-                north = currentLocation.latitude + deltaLatitude,
-                south = currentLocation.latitude - deltaLatitude,
-                west = currentLocation.longitude - deltaLongitude,
-                east = currentLocation.longitude + deltaLongitude,
-            )
+            val currentBounds = getBounds(radius, currentLocation.latitude, currentLocation.longitude)
 
             _events.value = appwriteRepository.getEvents(currentBounds)
         } catch (e: Exception) {

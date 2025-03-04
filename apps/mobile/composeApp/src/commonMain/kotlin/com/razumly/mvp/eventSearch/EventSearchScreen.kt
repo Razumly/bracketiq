@@ -36,6 +36,7 @@ import com.razumly.mvp.eventList.EventList
 import com.razumly.mvp.eventList.components.FilterBar
 import com.razumly.mvp.eventList.components.SearchBox
 import com.razumly.mvp.eventMap.EventMap
+import com.razumly.mvp.eventMap.MapComponent
 import com.razumly.mvp.home.LocalNavBarPadding
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeEffect
@@ -46,7 +47,7 @@ import dev.icerock.moko.geo.compose.BindLocationTrackerEffect
 
 @OptIn(ExperimentalHazeMaterialsApi::class, ExperimentalSharedTransitionApi::class)
 @Composable
-fun SharedTransitionScope.EventSearchScreen(component: SearchEventListComponent) {
+fun SharedTransitionScope.EventSearchScreen(component: SearchEventListComponent, mapComponent: MapComponent) {
     val events = component.events.collectAsState()
     val showMapCard = component.showMapCard.collectAsState()
     val currentLocation = component.currentLocation.collectAsState()
@@ -61,7 +62,18 @@ fun SharedTransitionScope.EventSearchScreen(component: SearchEventListComponent)
 
     BindLocationTrackerEffect(component.locationTracker)
     if (showMapCard.value) {
-        currentLocation.value?.let { it1 -> EventMap(events.value, it1) }
+        currentLocation.value?.let {
+            EventMap(
+                events.value,
+                it,
+                mapComponent,
+                { event ->
+                    component.selectEvent(event)
+                },
+                {},
+                false
+            )
+        }
     } else {
         Scaffold(
             topBar = {

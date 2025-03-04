@@ -4,14 +4,14 @@ import androidx.room.Embedded
 import androidx.room.Junction
 import androidx.room.Relation
 
-class PickupGameWithRelations (
-        @Embedded val tournament: PickupGame,
-        @Relation(
+class EventWithRelations (
+    @Embedded val event: EventImp,
+    @Relation(
             parentColumn = "id",
             entityColumn = "id",
             associateBy = Junction(
-                value = UserTournamentCrossRef::class,
-                parentColumn = "pickupGameId",
+                value = UserEventCrossRef::class,
+                parentColumn = "eventId",
                 entityColumn = "userId"
             )
         )

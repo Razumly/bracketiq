@@ -13,4 +13,4 @@ data class Field(
     val matches: List<String>,
     val tournament: String,
     @PrimaryKey override val id: String,
-) : MVPDocument()
+) : MVPDocument

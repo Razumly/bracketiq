@@ -5,8 +5,8 @@ import androidx.room.ForeignKey
 import androidx.room.Index
 
 @Entity(
-    tableName = "user_pickup_game_cross_ref",
-    primaryKeys = ["userId", "pickupGameId"],
+    tableName = "user_event_cross_ref",
+    primaryKeys = ["userId", "eventId"],
     foreignKeys = [
         ForeignKey(
             entity = UserData::class,
@@ -17,16 +17,16 @@ import androidx.room.Index
         ForeignKey(
             entity = Tournament::class,
             parentColumns = ["id"],
-            childColumns = ["pickupGameId"],
+            childColumns = ["eventId"],
             onDelete = ForeignKey.CASCADE
         )
     ],
     indices = [
         Index("userId"),
-        Index("pickupGameId")
+        Index("eventId")
     ]
 )
-data class UserPickupGameCrossRef(
+data class UserEventCrossRef(
     val userId: String,
-    val pickupGameId: String
+    val eventId: String
 )

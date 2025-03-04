@@ -167,7 +167,7 @@ fun SharedTransitionScope.EventDetails(
                     }
                 }
 
-                StylizedText("${event.type} Tournament", patterns)
+                StylizedText("${event.fieldType} Tournament", patterns)
                 StylizedText("Divisions: ${event.divisions.joinToString(", ")}", patterns)
                 androidx.compose.material3.HorizontalDivider(thickness = 2.dp)
 

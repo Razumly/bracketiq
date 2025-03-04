@@ -1,22 +1,25 @@
 package com.razumly.mvp.core.data.dataTypes
 
+import com.razumly.mvp.core.data.dataTypes.enums.FieldTypes
 import kotlinx.datetime.Instant
 import kotlinx.serialization.Serializable
 
 @Serializable
-abstract class EventAbs : MVPDocument() {
-    abstract val location: String
-    abstract val name: String
-    abstract val description: String?
-    abstract val divisions: List<String>
-    abstract val lat: Double
-    abstract val long: Double
-    abstract val type: String
-    abstract val start: Instant
-    abstract val end: Instant?
-    abstract val price: Double?
-    abstract val rating: Float?
-    abstract val imageUrl: String
-    abstract val collectionId: String
-    abstract val lastUpdated: Instant
+sealed interface EventAbs : MVPDocument {
+    val location: String
+    val name: String
+    val description: String?
+    val divisions: List<String>
+    val lat: Double
+    val long: Double
+    val fieldType: FieldTypes
+    val start: Instant
+    val end: Instant
+    val price: Double
+    val rating: Float?
+    val imageUrl: String
+    val maxPlayers: Int
+    val teamSizeLimit: Int
+    val collectionId: String
+    val lastUpdated: Instant
 }

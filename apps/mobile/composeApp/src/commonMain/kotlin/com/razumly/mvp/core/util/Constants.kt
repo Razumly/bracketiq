@@ -2,7 +2,7 @@ package com.razumly.mvp.core.util
 
 object DbConstants {
     const val DATABASE_NAME = "mvp"
-    const val PICKUP_GAME_COLLECTION = "pickupGames"
+    const val EVENT_COLLECTION = "pickupEvents"
     const val CHAT_GROUP_COLLECTION = "chatGroup"
     const val MESSAGES_COLLECTION = "messages"
     const val TOURNAMENT_COLLECTION = "tournaments"

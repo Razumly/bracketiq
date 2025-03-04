@@ -1,7 +1,7 @@
 package com.razumly.mvp.core.data.dataTypes.dtos
 
-import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.EventImp
+import com.razumly.mvp.core.data.dataTypes.enums.FieldTypes
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import kotlinx.serialization.Serializable
@@ -13,27 +13,30 @@ data class EventDTO(
     val name: String,
     val description: String?,
     val divisions: List<String>,
-    val type: String,
-    val start: String,  // ISO-8601 format string
-    val end: String?,    // ISO-8601 format string
-    val price: Double?,
+    val fieldType: String,
+    val start: String,
+    val end: String,
+    val price: Double,
     val rating: Float?,
     val imageUrl: String,
     val lat: Double,
     val long: Double,
     val collectionId: String,
+    val hostId: String,
+    val teamSizeLimit: Int,
+    val maxPlayers: Int,
 )
 
-fun EventDTO.toEvent(): EventAbs {
+fun EventDTO.toEvent(id: String): EventImp {
     return EventImp(
         id = id,
         location = location,
         name = name,
         description = description,
         divisions = divisions,
-        type = type,
+        fieldType = FieldTypes.valueOf(fieldType),
         start = Instant.parse(start),
-        end = end?.let { Instant.parse(it) },
+        end = Instant.parse(end),
         price = price,
         rating = rating,
         imageUrl = imageUrl,
@@ -41,5 +44,8 @@ fun EventDTO.toEvent(): EventAbs {
         long = long,
         collectionId = collectionId,
         lastUpdated = Clock.System.now(),
+        hostId = hostId,
+        teamSizeLimit = teamSizeLimit,
+        maxPlayers = maxPlayers,
     )
 }

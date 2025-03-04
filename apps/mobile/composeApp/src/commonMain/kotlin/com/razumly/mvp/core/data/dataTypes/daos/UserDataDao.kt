@@ -5,7 +5,7 @@ import androidx.room.Delete
 import androidx.room.Query
 import androidx.room.Upsert
 import com.razumly.mvp.core.data.dataTypes.UserData
-import com.razumly.mvp.core.data.dataTypes.UserPickupGameCrossRef
+import com.razumly.mvp.core.data.dataTypes.UserEventCrossRef
 import com.razumly.mvp.core.data.dataTypes.UserTournamentCrossRef
 import com.razumly.mvp.core.data.dataTypes.UserWithRelations
 
@@ -30,10 +30,10 @@ interface UserDataDao {
     suspend fun upsertUserTournamentCrossRefs(crossRefs: List<UserTournamentCrossRef>)
 
     @Upsert
-    suspend fun upsertUserPickupGamesCrossRef(crossRef: UserPickupGameCrossRef)
+    suspend fun upsertUserPickupGamesCrossRef(crossRef: UserEventCrossRef)
 
     @Upsert
-    suspend fun upsertUserPickupGamesCrossRefs(crossRefs: List<UserPickupGameCrossRef>)
+    suspend fun upsertUserPickupGamesCrossRefs(crossRefs: List<UserEventCrossRef>)
 
     @Delete
     suspend fun deleteUserData(userData: UserData)

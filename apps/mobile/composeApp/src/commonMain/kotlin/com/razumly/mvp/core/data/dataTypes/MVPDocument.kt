@@ -1,5 +1,5 @@
 package com.razumly.mvp.core.data.dataTypes
 
-abstract class MVPDocument {
+sealed interface MVPDocument {
     abstract val id: String
 }

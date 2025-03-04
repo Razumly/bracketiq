@@ -1,6 +1,7 @@
 package com.razumly.mvp.core.data.dataTypes.dtos
 
 import com.razumly.mvp.core.data.dataTypes.Tournament
+import com.razumly.mvp.core.data.dataTypes.enums.FieldTypes
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import kotlinx.serialization.Serializable
@@ -21,7 +22,7 @@ data class TournamentDTO(
     @Transient
     val id: String = "",
     val location: String,
-    val type: String,
+    val fieldType: String,
     val start: String,  // ISO-8601 format string
     val end: String,    // ISO-8601 format string
     val price: Double,
@@ -30,6 +31,8 @@ data class TournamentDTO(
     val lat: Double,
     val long: Double,
     val collectionId: String,
+    val maxPlayers: Int,
+    val teamSizeLimit: Int,
 )
 
 fun TournamentDTO.toTournament(id: String): Tournament {
@@ -46,7 +49,7 @@ fun TournamentDTO.toTournament(id: String): Tournament {
         loserScoreLimitsPerSet = loserScoreLimitsPerSet,
         id = id,
         location = location,
-        type = type,
+        fieldType = FieldTypes.valueOf(fieldType),
         start = Instant.parse(start),
         end = Instant.parse(end),
         price = price,
@@ -55,6 +58,8 @@ fun TournamentDTO.toTournament(id: String): Tournament {
         lat = lat,
         long = long,
         collectionId = collectionId,
-        lastUpdated = Clock.System.now()
+        lastUpdated = Clock.System.now(),
+        maxPlayers = maxPlayers,
+        teamSizeLimit = teamSizeLimit
     )
 }

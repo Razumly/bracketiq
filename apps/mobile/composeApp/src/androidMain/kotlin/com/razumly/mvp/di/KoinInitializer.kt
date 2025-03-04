@@ -16,7 +16,8 @@ actual class KoinInitializer(
                 locationTrackerModule,
                 clientModule,
                 roomDBModule,
-                componentModule
+                componentModule,
+                mapComponentModule
             )
         }
     }

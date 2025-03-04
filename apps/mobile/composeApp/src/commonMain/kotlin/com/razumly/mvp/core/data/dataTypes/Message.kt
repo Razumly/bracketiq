@@ -12,4 +12,4 @@ data class Message (
     val body: String,
     val attachmentUrls: String,
     val chatId: String
-): MVPDocument()
+): MVPDocument

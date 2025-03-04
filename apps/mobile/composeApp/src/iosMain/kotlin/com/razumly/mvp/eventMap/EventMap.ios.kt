@@ -6,11 +6,12 @@ import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import dev.icerock.moko.geo.LatLng
 
 @Composable
-expect fun EventMap(
+actual fun EventMap(
     events: List<EventAbs>,
     currentLocation: LatLng?,
     component: MapComponent,
     onEventSelected: (event: EventAbs) -> Unit,
     onPlaceSelected: (place: MVPPlace) -> Unit,
     canClickPOI: Boolean
-)
+) {
+}

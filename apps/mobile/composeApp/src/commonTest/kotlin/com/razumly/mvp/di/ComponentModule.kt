@@ -3,20 +3,19 @@ package com.razumly.mvp.di
 import com.arkivanov.decompose.ComponentContext
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
-import com.razumly.mvp.home.DefaultHomeComponent
 import com.razumly.mvp.core.presentation.RootComponent
-import com.razumly.mvp.matchDetailScreen.DefaultMatchContentComponent
-import com.razumly.mvp.tournamentDetailScreen.DefaultTournamentContentComponent
-import com.razumly.mvp.matchDetailScreen.MatchContentComponent
-import com.razumly.mvp.tournamentDetailScreen.TournamentContentComponent
 import com.razumly.mvp.eventCreate.CreateEventComponent
 import com.razumly.mvp.eventCreate.DefaultCreateEventComponent
 import com.razumly.mvp.eventFollowing.FollowingEventListComponent
 import com.razumly.mvp.eventList.EventListComponent
 import com.razumly.mvp.eventSearch.SearchEventListComponent
+import com.razumly.mvp.home.DefaultHomeComponent
+import com.razumly.mvp.matchDetailScreen.DefaultMatchContentComponent
+import com.razumly.mvp.matchDetailScreen.MatchContentComponent
 import com.razumly.mvp.profile.DefaultProfileComponent
 import com.razumly.mvp.profile.ProfileComponent
-import com.razumly.mvp.userAuth.loginScreen.DefaultAuthComponent
+import com.razumly.mvp.tournamentDetailScreen.DefaultTournamentContentComponent
+import com.razumly.mvp.tournamentDetailScreen.TournamentContentComponent
 import com.razumly.mvp.userAuth.loginScreen.AuthComponent
 import org.koin.dsl.bind
 import org.koin.dsl.module
@@ -31,15 +30,18 @@ val componentModule = module {
     }
 
     factory { (componentContext: ComponentContext, onNavigateToHome: () -> Unit) ->
-        DefaultAuthComponent(
+        AuthComponent(
             componentContext = componentContext,
             mvpRepository = get(),
             onNavigateToHome = onNavigateToHome
         )
     } bind AuthComponent::class
 
-    factory { (componentContext: ComponentContext) ->
-        DefaultHomeComponent(componentContext = componentContext)
+    factory { (componentContext: ComponentContext, onNavigateToLogin: () -> Unit) ->
+        DefaultHomeComponent(
+            componentContext = componentContext,
+            onNavigateToLogin = onNavigateToLogin
+        )
     }
 
     factory { (componentContext: ComponentContext, selectedMatch: MatchWithRelations, name: String) ->
@@ -91,9 +93,11 @@ val componentModule = module {
         )
     } bind EventListComponent::class
 
-    factory { (componentContext: ComponentContext) ->
+    factory { (componentContext: ComponentContext, onNavigateToLogin: () -> Unit) ->
         DefaultProfileComponent(
-            componentContext = componentContext
+            componentContext = componentContext,
+            mvpRepository = get(),
+            onNavigateToLogin = onNavigateToLogin
         )
     } bind ProfileComponent::class
 

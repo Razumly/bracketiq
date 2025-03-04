@@ -34,10 +34,10 @@ data class UserWithRelations(
         parentColumn = "id",
         entityColumn = "id",
         associateBy = Junction(
-            value = UserPickupGameCrossRef::class,
+            value = UserEventCrossRef::class,
             parentColumn = "userId",
-            entityColumn = "pickupGameId"
+            entityColumn = "eventId"
         )
     )
-    val pickupGames: List<PickupGame>
+    val pickupGames: List<EventImp>
 )

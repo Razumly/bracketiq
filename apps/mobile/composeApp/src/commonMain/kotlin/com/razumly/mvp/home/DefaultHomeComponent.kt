@@ -7,15 +7,16 @@ import com.arkivanov.decompose.router.stack.pop
 import com.arkivanov.decompose.router.stack.pushNew
 import com.arkivanov.decompose.router.stack.replaceAll
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
-import com.razumly.mvp.matchDetailScreen.DefaultMatchContentComponent
-import com.razumly.mvp.tournamentDetailScreen.DefaultTournamentContentComponent
 import com.razumly.mvp.eventCreate.DefaultCreateEventComponent
 import com.razumly.mvp.eventFollowing.FollowingEventListComponent
+import com.razumly.mvp.eventMap.MapComponent
 import com.razumly.mvp.eventSearch.SearchEventListComponent
 import com.razumly.mvp.home.HomeComponent.Child
 import com.razumly.mvp.home.HomeComponent.Config
 import com.razumly.mvp.home.HomeComponent.Page
+import com.razumly.mvp.matchDetailScreen.DefaultMatchContentComponent
 import com.razumly.mvp.profile.DefaultProfileComponent
+import com.razumly.mvp.tournamentDetailScreen.DefaultTournamentContentComponent
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.koin.core.parameter.parametersOf
@@ -58,6 +59,9 @@ class DefaultHomeComponent(
                 Child.Search(
                     _koin.inject<SearchEventListComponent> {
                         parametersOf(componentContext, ::onTournamentSelected)
+                    }.value,
+                    _koin.inject<MapComponent> {
+                        parametersOf(componentContext)
                     }.value
                 )
             }

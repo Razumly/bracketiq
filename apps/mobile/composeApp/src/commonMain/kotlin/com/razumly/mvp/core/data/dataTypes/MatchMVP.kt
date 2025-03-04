@@ -28,7 +28,7 @@ data class MatchMVP(
     val setResults: List<Int>,
     val refCheckedIn: Boolean?,
     @PrimaryKey override val id: String,
-) : MVPDocument()
+) : MVPDocument
 
 fun MatchMVP.toMatchDTO(): MatchDTO {
     return MatchDTO(

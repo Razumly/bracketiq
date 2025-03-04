@@ -70,7 +70,7 @@ fun HomeScreen(component: HomeComponent) {
                                 when (val instance = child.instance) {
                                     is HomeComponent.Child.Search -> {
                                         Napier.d(tag = "Navigation") { "Navigating to Search Screen" }
-                                        EventSearchScreen(instance.component)
+                                        EventSearchScreen(instance.component, instance.mapComponent)
                                     }
 
                                     is HomeComponent.Child.TournamentContent -> {
