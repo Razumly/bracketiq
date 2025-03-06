@@ -76,7 +76,7 @@ val componentModule = module {
         ) ->
             SearchEventListComponent(
                 componentContext = componentContext,
-                appwriteRepository = get(),
+                mvpRepository = get(),
                 locationTracker = get(),
                 onTournamentSelected = onTournamentSelected
             )

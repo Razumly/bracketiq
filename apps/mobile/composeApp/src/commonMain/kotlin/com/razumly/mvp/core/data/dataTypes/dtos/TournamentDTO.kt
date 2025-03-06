@@ -28,6 +28,7 @@ data class TournamentDTO(
     val price: Double,
     val rating: Float,
     val imageUrl: String,
+    val hostId: String,
     val lat: Double,
     val long: Double,
     val collectionId: String,
@@ -37,6 +38,7 @@ data class TournamentDTO(
 
 fun TournamentDTO.toTournament(id: String): Tournament {
     return Tournament(
+        id = id,
         name = name,
         description = description,
         doubleElimination = doubleElimination,
@@ -47,11 +49,11 @@ fun TournamentDTO.toTournament(id: String): Tournament {
         loserBracketPointsToVictory = loserBracketPointsToVictory,
         winnerScoreLimitsPerSet = winnerScoreLimitsPerSet,
         loserScoreLimitsPerSet = loserScoreLimitsPerSet,
-        id = id,
         location = location,
         fieldType = FieldTypes.valueOf(fieldType),
         start = Instant.parse(start),
         end = Instant.parse(end),
+        hostId = hostId,
         price = price,
         rating = rating,
         imageUrl = imageUrl,

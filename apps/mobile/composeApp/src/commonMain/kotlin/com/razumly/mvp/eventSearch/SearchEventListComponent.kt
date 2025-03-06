@@ -21,7 +21,7 @@ import kotlinx.coroutines.launch
 
 class SearchEventListComponent(
     componentContext: ComponentContext,
-    private val appwriteRepository: IMVPRepository,
+    private val mvpRepository: IMVPRepository,
     val locationTracker: LocationTracker,
     private val onTournamentSelected: (tournamentId: String) -> Unit,
 ) : EventListComponent, ComponentContext by componentContext {
@@ -30,8 +30,8 @@ class SearchEventListComponent(
     private val _events = MutableStateFlow<List<EventAbs>>(emptyList())
     override val events: StateFlow<List<EventAbs>> = _events.asStateFlow()
 
-    private val _currentRadius = MutableStateFlow(50)
-    override val currentRadius: StateFlow<Int> = _currentRadius.asStateFlow()
+    private val _currentRadius = MutableStateFlow(50.0)
+    override val currentRadius: StateFlow<Double> = _currentRadius.asStateFlow()
 
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
@@ -120,14 +120,14 @@ class SearchEventListComponent(
             _isLoading.value = true
             _error.value = null
 
-            val radius = currentRadius.value
+            val radius = _currentRadius.value
             val currentLocation = _currentLocation.value ?: run {
                 _error.value = "Location not available"
                 return
             }
             val currentBounds = getBounds(radius, currentLocation.latitude, currentLocation.longitude)
 
-            _events.value = appwriteRepository.getEvents(currentBounds)
+            _events.value = mvpRepository.getEvents(currentBounds)
         } catch (e: Exception) {
             _error.value = "Failed to fetch events: ${e.message}"
             _events.value = emptyList()

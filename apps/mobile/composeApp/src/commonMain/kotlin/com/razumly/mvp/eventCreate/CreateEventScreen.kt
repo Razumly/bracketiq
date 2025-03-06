@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.Button
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -13,7 +14,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -24,6 +24,7 @@ import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import com.razumly.mvp.eventCreate.steps.Step1
 import com.razumly.mvp.eventCreate.steps.Step2
 import com.razumly.mvp.eventCreate.steps.Step3
+import com.razumly.mvp.home.LocalNavBarPadding
 import io.github.aakira.napier.Napier
 import kotlinx.datetime.Clock
 import mvp.composeapp.generated.resources.Res
@@ -38,8 +39,6 @@ import org.jetbrains.compose.resources.stringResource
 fun CreateEventScreen(
     component: CreateEventComponent
 ) {
-    var currentStep by remember { mutableIntStateOf(0) }
-    val steps = listOf("Basic Info", "Tournament Rules", "Schedule", "Location", "Price")
     val childStack by component.childStack.subscribeAsState()
 
     var lastNavigationTime by remember { mutableStateOf(0L) }
@@ -61,65 +60,68 @@ fun CreateEventScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp),
+            .statusBarsPadding()
+            .padding(bottom = LocalNavBarPadding.current.calculateBottomPadding()),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Text(
+            modifier = Modifier.padding(16.dp),
             text = stringResource(Res.string.create_new_tournament),
-            style = MaterialTheme.typography.titleMedium
-        )
-
-        LinearProgressIndicator(
-            progress = { (currentStep + 1).toFloat() / steps.size },
-            modifier = Modifier.fillMaxWidth(),
-        )
-
-        Text(
-            text = stringResource(
-                Res.string.step_progress,
-                currentStep + 1,
-                steps[currentStep]
-            ),
             style = MaterialTheme.typography.titleMedium
         )
 
         Children(
             stack = childStack,
         ) { child ->
-            when (val instance = child.instance) {
-                is CreateEventComponent.Child.Step1 -> {
-                    currentStep = 1
-                    Step1(component)
-                }
+            Column(Modifier.fillMaxSize()) {
+                LinearProgressIndicator(
+                    progress = { (child.instance.step).toFloat() / CreateEventComponent.Child.steps },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                )
 
-                is CreateEventComponent.Child.Step2 -> {
-                    currentStep = 2
-                    Step2(instance.component, component)
-                }
+                Text(
+                    modifier = Modifier.padding(16.dp),
+                    text = stringResource(
+                        Res.string.step_progress,
+                        child.instance.step,
+                        CreateEventComponent.Child.steps
+                    ),
+                    style = MaterialTheme.typography.titleMedium
+                )
+                when (val instance = child.instance) {
+                    is CreateEventComponent.Child.Step1 -> {
+                        Step1(component)
+                    }
 
-                CreateEventComponent.Child.Step3 -> {
-                    currentStep = 3
-                    Step3(component)
-                }
-            }
+                    is CreateEventComponent.Child.Step2 -> {
+                        Step2(instance.component, component)
+                    }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                if (child.instance != CreateEventComponent.Child.Step1) {
-                    Button(onClick = { component.previousStep() }) {
-                        Text(stringResource(Res.string.previous))
+                    CreateEventComponent.Child.Step3 -> {
+                        Step3(component)
                     }
                 }
 
-                if (child.instance != CreateEventComponent.Child.Step3) {
-                    Button(onClick = { child.instance.nextStep?.let { component.nextStep(it) } }) {
-                        Text(stringResource(Res.string.next))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    if (child.instance != CreateEventComponent.Child.Step1) {
+                        Button(onClick = { component.previousStep() }) {
+                            Text(stringResource(Res.string.previous))
+                        }
                     }
-                } else {
-                    Button(onClick = { component.createTournament() }) {
-                        Text(stringResource(Res.string.create_tournament))
+
+                    if (child.instance != CreateEventComponent.Child.Step3) {
+                        Button(onClick = { child.instance.nextStep?.let { component.nextStep(it) } }) {
+                            Text(stringResource(Res.string.next))
+                        }
+                    } else {
+                        Button(onClick = { component.createTournament() }) {
+                            Text(stringResource(Res.string.create_tournament))
+                        }
                     }
                 }
             }

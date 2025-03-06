@@ -22,7 +22,7 @@ class FollowingEventListComponent(
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private val _events = MutableStateFlow<List<EventAbs>>(emptyList())
     override val events: StateFlow<List<EventAbs>> = _events.asStateFlow()
-    override val currentRadius = MutableStateFlow(50)
+    override val currentRadius = MutableStateFlow(50.0)
     override val selectedEvent = MutableStateFlow<EventAbs?>(null)
 
     override fun selectEvent(event: EventAbs?) {

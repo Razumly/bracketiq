@@ -79,7 +79,7 @@ val componentModule = module {
     factory { (componentContext: ComponentContext, onTournamentSelected: (String) -> Unit) ->
         SearchEventListComponent(
             componentContext = componentContext,
-            appwriteRepository = get(),
+            mvpRepository = get(),
             locationTracker = get(),
             onTournamentSelected = onTournamentSelected
         )

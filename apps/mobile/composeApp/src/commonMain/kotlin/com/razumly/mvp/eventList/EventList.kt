@@ -28,7 +28,7 @@ fun SharedTransitionScope.EventList(
         modifier = modifier,
         state = lazyListState,
     ) {
-        itemsIndexed(items = events) { index, event ->
+        itemsIndexed(items = events, key = {_, item -> item.id }) { index, event ->
             run {
                 when (index) {
                     0 -> {

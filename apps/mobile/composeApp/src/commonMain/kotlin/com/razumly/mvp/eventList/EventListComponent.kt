@@ -5,7 +5,7 @@ import kotlinx.coroutines.flow.StateFlow
 
 interface EventListComponent {
     val events: StateFlow<List<EventAbs>>
-    val currentRadius: StateFlow<Int>
+    val currentRadius: StateFlow<Double>
     val selectedEvent: StateFlow<EventAbs?>
     fun selectEvent(event: EventAbs?)
 }

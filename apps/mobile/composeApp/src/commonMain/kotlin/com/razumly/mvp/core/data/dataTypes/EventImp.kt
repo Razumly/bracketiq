@@ -12,7 +12,7 @@ import kotlinx.serialization.Transient
 @Entity
 @Serializable
 data class EventImp(
-    val hostId: String,
+    override val hostId: String,
     @PrimaryKey override val id: String,
     override val location: String,
     override val name: String,

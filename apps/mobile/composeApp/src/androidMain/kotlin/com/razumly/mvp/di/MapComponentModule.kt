@@ -6,6 +6,6 @@ import org.koin.dsl.module
 
 val mapComponentModule = module {
     factory { (componentContext: ComponentContext) ->
-        MapComponent(componentContext, get(), get())
+        MapComponent(componentContext, get(), get(), get())
     }
 }

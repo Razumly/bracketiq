@@ -9,8 +9,10 @@ import com.google.android.libraries.places.api.model.RectangularBounds
 import com.google.android.libraries.places.api.net.FetchResolvedPhotoUriRequest
 import com.google.android.libraries.places.api.net.FindAutocompletePredictionsRequest
 import com.google.android.libraries.places.api.net.PlacesClient
-import com.google.android.libraries.places.api.net.SearchNearbyRequest
+import com.google.android.libraries.places.api.net.SearchByTextRequest
 import com.razumly.mvp.BuildConfig
+import com.razumly.mvp.core.data.IMVPRepository
+import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.util.calcDistance
 import com.razumly.mvp.core.util.getBounds
@@ -22,6 +24,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -30,8 +33,9 @@ import kotlin.coroutines.resumeWithException
 
 actual class MapComponent(
     componentContext: ComponentContext,
+    private val mvpRepository: IMVPRepository,
     context: Context,
-    locationTracker: LocationTracker
+    val locationTracker: LocationTracker
 ): ComponentContext by componentContext {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private val _locationStateFlow = locationTracker.getLocationsFlow()
@@ -39,6 +43,17 @@ actual class MapComponent(
 
     private val _currentLocation = MutableStateFlow<LatLng?>(null)
     actual val currentLocation = _currentLocation.asStateFlow()
+
+    private val _events = MutableStateFlow<List<EventAbs>>(emptyList())
+    val events: StateFlow<List<EventAbs>> = _events.asStateFlow()
+
+    private val _error = MutableStateFlow<String?>(null)
+    val error: StateFlow<String?> = _error.asStateFlow()
+
+    private val _isLoading = MutableStateFlow(false)
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+
+    private val _currentRadiusMeters = MutableStateFlow(50.0)
 
     private val placesClient: PlacesClient by lazy {
         if (!Places.isInitialized()) {
@@ -55,17 +70,20 @@ actual class MapComponent(
                 }
                 if (_currentLocation.value == null) {
                     _currentLocation.value = it
-                }
-                if (calcDistance(_currentLocation.value!!, it) > 50) {
+                } else if (calcDistance(_currentLocation.value!!, it) > 50) {
                     _currentLocation.value = it
                 }
             }
         }
     }
 
-    suspend fun suggestPlaces(query: String, latLng: LatLng, radius: Int): List<Place> =
+    fun setRadius(radius: Double) {
+        _currentRadiusMeters.value = radius
+    }
+
+    suspend fun suggestPlaces(query: String, latLng: LatLng): List<Place> =
         kotlinx.coroutines.suspendCancellableCoroutine { cont ->
-            val currentBounds = getBounds(radius, latLng.latitude, latLng.longitude)
+            val currentBounds = getBounds(_currentRadiusMeters.value, latLng.latitude, latLng.longitude)
 
             val request = FindAutocompletePredictionsRequest.builder()
                 .setQuery(query)
@@ -98,12 +116,15 @@ actual class MapComponent(
                 Place.Field.LOCATION,
                 Place.Field.PHOTO_METADATAS
             )
-            val request = SearchNearbyRequest.builder(
-                RectangularBounds.newInstance(bounds),
-                fields
-            ).build()
 
-            placesClient.searchNearby(request).addOnSuccessListener { response ->
+            val request = SearchByTextRequest.builder(
+                query,
+                fields
+            )
+                .setLocationBias(RectangularBounds.newInstance(bounds))
+                .build()
+
+            placesClient.searchByText(request).addOnSuccessListener { response ->
                 val result = response.places.map {
                     val metadata = it.photoMetadatas
                     var url = ""
@@ -132,4 +153,29 @@ actual class MapComponent(
                 Napier.e("Failed to search: ${response.message}")
             }
         }
+
+    suspend fun getEvents() {
+        try {
+            _isLoading.value = true
+            _error.value = null
+
+
+            val currentLocation = _currentLocation.value ?: run {
+                _error.value = "Location not available"
+                return
+            }
+            val currentBounds = getBounds(
+                _currentRadiusMeters.value,
+                currentLocation.latitude,
+                currentLocation.longitude
+            )
+
+            _events.value = mvpRepository.getEvents(currentBounds)
+        } catch (e: Exception) {
+            _error.value = "Failed to fetch events: ${e.message}"
+            _events.value = emptyList()
+        } finally {
+            _isLoading.value = false
+        }
+    }
 }

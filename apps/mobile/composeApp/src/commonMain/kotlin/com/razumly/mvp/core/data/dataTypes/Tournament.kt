@@ -32,6 +32,7 @@ data class Tournament(
     override val imageUrl: String,
     override val lat: Double,
     override val long: Double,
+    override val hostId: String,
     @Transient override val collectionId: String = DbConstants.TOURNAMENT_COLLECTION,
     @Transient override val lastUpdated: Instant = Clock.System.now(),
     override val maxPlayers: Int,
@@ -55,6 +56,7 @@ data class Tournament(
                 fieldType = FieldTypes.GRASS,
                 start = Instant.DISTANT_PAST,
                 end = Instant.DISTANT_PAST,
+                hostId = "",
                 price = 0.0,
                 rating = 0f,
                 imageUrl = "",
@@ -83,6 +85,29 @@ data class Tournament(
             collectionId = event.collectionId,
             maxPlayers = event.maxPlayers,
             teamSizeLimit = event.teamSizeLimit,
+            hostId = event.hostId
+        )
+    }
+    fun toEvent(id: String): EventImp {
+        return EventImp(
+            id = id,
+            location = location,
+            name = name,
+            description = description,
+            divisions = divisions,
+            fieldType = fieldType,
+            start = start,
+            end = end,
+            price = price,
+            rating = rating,
+            imageUrl = imageUrl,
+            lat = lat,
+            long = long,
+            collectionId = collectionId,
+            lastUpdated = Clock.System.now(),
+            hostId = hostId,
+            teamSizeLimit = teamSizeLimit,
+            maxPlayers = maxPlayers,
         )
     }
 }

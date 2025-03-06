@@ -26,10 +26,13 @@ interface CreateEventComponent {
     fun previousStep()
     fun selectEventType(type: EventTypes)
 
-    sealed class Child(val nextStep: Config?) {
-        data object Step1 : Child(Step2)
-        data class Step2(val component: MapComponent) : Child(Config.Step3)
-        data object Step3 : Child(null)
+    sealed class Child(val nextStep: Config?, val step: Int) {
+        companion object {
+            val steps = 3
+        }
+        data object Step1 : Child(Step2, 1)
+        data class Step2(val component: MapComponent) : Child(Config.Step3, 2)
+        data object Step3 : Child(null, 3)
     }
 
     @Serializable

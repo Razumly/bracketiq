@@ -22,4 +22,6 @@ sealed interface EventAbs : MVPDocument {
     val teamSizeLimit: Int
     val collectionId: String
     val lastUpdated: Instant
+    val hostId: String
+    override val id: String
 }

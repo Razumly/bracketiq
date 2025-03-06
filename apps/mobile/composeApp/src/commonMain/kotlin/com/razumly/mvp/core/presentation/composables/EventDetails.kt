@@ -63,12 +63,12 @@ fun SharedTransitionScope.EventDetails(
         }
 
         val startDate = event.start.toLocalDateTime(TimeZone.currentSystemDefault()).date
-        val endDate = event.end?.toLocalDateTime(TimeZone.currentSystemDefault())?.date
+        val endDate = event.end.toLocalDateTime(TimeZone.currentSystemDefault()).date
 
         val startStr = startDate.format(dateFormat)
 
         if (startDate != endDate) {
-            val endStr = endDate?.format(dateFormat)
+            val endStr = endDate.format(dateFormat)
             "$startStr - $endStr"
         } else {
             startStr

@@ -11,7 +11,7 @@
     <string name="confirm_set_result_message">Do you want to confirm the results for Set %1$s?</string>
     <string name="set_number">Set %1$s</string>
     <string name="create_new_tournament">Create a New Pickup Tournament</string>"
-    <string name="step_progress">Step %1$: %2$</string>"
+    <string name="step_progress">Step %1$d: %2$d</string>
     <string name="previous">Previous</string>
     <string name="next">Next</string>
     <string name="create_tournament">Create Tournament</string>

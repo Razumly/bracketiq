@@ -18,7 +18,7 @@ fun <T, R> Document<T>.convert(converter: (T) -> R): Document<R> {
     return Document(id, collectionId, databaseId, createdAt, updatedAt, permissions, converter(data))
 }
 
-fun getBounds(radius: Int, latitude: Double, longitude: Double): Bounds {
+fun getBounds(radius: Double, latitude: Double, longitude: Double): Bounds {
     val earthCircumference = 24902.0
     val deltaLatitude = 360.0 * radius / earthCircumference
     val deltaLongitude =

@@ -8,7 +8,10 @@ import androidx.compose.material3.SearchBar
 import androidx.compose.material3.SearchBarDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -16,6 +19,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.CameraPosition
+import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.LatLngBounds
 import com.google.android.gms.maps.model.PointOfInterest
 import com.google.android.libraries.places.api.model.Place
@@ -25,31 +29,47 @@ import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.maps.android.compose.rememberMarkerState
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
-import dev.icerock.moko.geo.LatLng
+import dev.icerock.moko.geo.compose.BindLocationTrackerEffect
+import io.github.aakira.napier.Napier
 import kotlinx.coroutines.launch
 
 @Composable
 actual fun EventMap(
-    events: List<EventAbs>,
-    currentLocation: LatLng?,
     component: MapComponent,
     onEventSelected: (event: EventAbs) -> Unit,
     onPlaceSelected: (place: MVPPlace) -> Unit,
     canClickPOI: Boolean,
+    modifier: Modifier,
 ) {
     val selectedLocation = remember { mutableStateOf<PointOfInterest?>(null) }
     val scope = rememberCoroutineScope()
     val places = remember { mutableStateOf<List<MVPPlace>>(listOf()) }
+    val cameraPositionState = rememberCameraPositionState()
+    val currentLocation by component.currentLocation.collectAsState()
+    val events by component.events.collectAsState()
+    val defaultZoom = 12f
+    val defaultDurationMs = 1000
 
     Box(
-        modifier = Modifier.fillMaxSize(),
+        modifier = modifier.fillMaxSize(),
     ) {
-        val currentLocationGoogle = com.google.android.gms.maps.model.LatLng(
-            currentLocation?.latitude ?: 0.0,
-            currentLocation?.longitude ?: 0.0,
-        )
-        val cameraPositionState = rememberCameraPositionState {
-            position = CameraPosition.fromLatLngZoom(currentLocationGoogle, 10f)
+        BindLocationTrackerEffect(component.locationTracker)
+        LaunchedEffect(currentLocation) {
+            currentLocation?.let { validLoc ->
+                val target = LatLng(
+                    validLoc.latitude,
+                    validLoc.longitude
+                )
+
+                if (!canClickPOI) {
+                    component.getEvents()
+                }
+
+                cameraPositionState.animate(
+                    CameraUpdateFactory.newLatLngZoom(target, defaultZoom),
+                    defaultDurationMs // Animation duration
+                )
+            }
         }
         GoogleMap(
             modifier = Modifier.fillMaxSize(),
@@ -62,7 +82,7 @@ actual fun EventMap(
                             CameraUpdateFactory.newCameraPosition(
                                 CameraPosition.fromLatLngZoom(
                                     poi.latLng,
-                                    10f
+                                    defaultZoom
                                 )
                             )
                         )
@@ -70,25 +90,16 @@ actual fun EventMap(
                 }
             }
         ) {
-            cameraPositionState.projection?.visibleRegion?.latLngBounds?.let {
-                MapSearchBar(
-                    component,
-                    currentLocation ?: LatLng(0.0, 0.0),
-                    100,
-                    it
-                ) { newPlaces ->
-                    places.value = newPlaces
+            selectedLocation.value?.let { poi ->
+                key(poi.placeId) {
+                    Marker(
+                        state = rememberMarkerState(position = poi.latLng),
+                        title = poi.name
+                    )
                 }
             }
-            selectedLocation.value?.let {
-                val eventPosition = it.latLng
-                Marker(
-                    state = rememberMarkerState(position = eventPosition),
-                    title = it.name
-                )
-            }
             events.forEach { event ->
-                val eventPosition = com.google.android.gms.maps.model.LatLng(event.lat, event.long)
+                val eventPosition = LatLng(event.lat, event.long)
                 Marker(
                     state = rememberMarkerState(position = eventPosition),
                     title = event.name,
@@ -97,12 +108,63 @@ actual fun EventMap(
                 )
             }
             places.value.forEach { place ->
-                val position = com.google.android.gms.maps.model.LatLng(place.lat, place.long)
+                val position = LatLng(place.lat, place.long)
                 Marker(
                     state = rememberMarkerState(position = position),
                     title = place.name,
-                    onInfoWindowClick = { onPlaceSelected(place) }
+                    onClick = {
+                        onPlaceSelected(place)
+                        true
+                    }
                 )
+            }
+        }
+
+        cameraPositionState.projection?.visibleRegion?.latLngBounds?.let {
+            MapSearchBar(
+                component,
+                currentLocation ?: dev.icerock.moko.geo.LatLng(0.0, 0.0),
+                it
+            ) { newPlaces ->
+                selectedLocation.value = null
+                if (newPlaces.size > 1) {
+                    val bounds = LatLngBounds.builder()
+                    newPlaces.forEach { place ->
+                        bounds.include(LatLng(place.lat, place.long))
+                    }
+                    scope.launch {
+                        cameraPositionState.animate(
+                            CameraUpdateFactory.newLatLngBounds(bounds.build(), 0),
+                            defaultDurationMs
+                        )
+                    }
+                } else if (newPlaces.isNotEmpty()) {
+                    scope.launch {
+                        val location = LatLng(
+                            newPlaces.first().lat,
+                            newPlaces.first().long
+                        )
+                        cameraPositionState.animate(
+                            CameraUpdateFactory.newLatLngZoom(location, defaultZoom),
+                            defaultDurationMs
+                        )
+                    }
+                } else {
+                    // Fallback to current location
+                    currentLocation?.let { validLoc ->
+                        val target = LatLng(
+                            validLoc.latitude,
+                            validLoc.longitude
+                        )
+                        scope.launch {
+                            cameraPositionState.animate(
+                                CameraUpdateFactory.newLatLngZoom(target, defaultZoom),
+                                defaultDurationMs
+                            )
+                        }
+                    }
+                }
+                places.value = newPlaces
             }
         }
     }
@@ -112,13 +174,12 @@ actual fun EventMap(
 @Composable
 fun MapSearchBar(
     mapComponent: MapComponent,
-    currentLocation: LatLng,
-    radius: Int = 100,
+    currentLocation: dev.icerock.moko.geo.LatLng,
     bounds: LatLngBounds,
     onSearchResults: (List<MVPPlace>) -> Unit,
 ) {
     // State for query text, suggestions and active search mode
-    var query by remember { mutableStateOf("") }
+    var searchInput by remember { mutableStateOf("") }
     var suggestions by remember { mutableStateOf<List<Place>>(emptyList()) }
     var searchActive by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
@@ -127,19 +188,34 @@ fun MapSearchBar(
         searchActive = isActive
     }
     val colors1 =
-        SearchBarDefaults.colors()// When a suggestion is selected, update query and start search immediately
-    // Display dropdown suggestions
+        SearchBarDefaults.colors()
+
+    val onSearch: (query: String) -> Unit = { query ->
+        coroutineScope.launch {
+            val results = try {
+                mapComponent.searchPlaces(query, currentLocation, bounds)
+            } catch (e: Exception) {
+                Napier.e("Failed to get places: $e")
+                emptyList()
+            }
+            onSearchResults(results)
+            searchInput = "" // Clear search query after search
+            suggestions = emptyList()
+            searchActive = false
+        }
+    }
+
     SearchBar(
         inputField = {
             SearchBarDefaults.InputField(
-                query = query,
+                query = searchInput,
                 onQueryChange = { newQuery ->
-                    query = newQuery
+                    searchInput = newQuery
                     // Only get suggestions when there is some text
                     if (newQuery.isNotEmpty()) {
                         coroutineScope.launch {
                             suggestions = try {
-                                mapComponent.suggestPlaces(newQuery, currentLocation, radius)
+                                mapComponent.suggestPlaces(newQuery, currentLocation)
                             } catch (e: Exception) {
                                 emptyList()
                             }
@@ -148,18 +224,7 @@ fun MapSearchBar(
                         suggestions = emptyList()
                     }
                 },
-                onSearch = {
-                    // When search is explicitly executed, start the search with the current query
-                    coroutineScope.launch {
-                        val results = try {
-                            mapComponent.searchPlaces(query, currentLocation, bounds)
-                        } catch (e: Exception) {
-                            emptyList()
-                        }
-                        onSearchResults(results)
-                    }
-                    searchActive = false
-                },
+                onSearch = onSearch,
                 expanded = searchActive,
                 onExpandedChange = onActiveChange,
                 placeholder = { Text("Search places") },
@@ -175,20 +240,8 @@ fun MapSearchBar(
                 DropdownMenuItem(
                     text = { Text(name) },
                     onClick = {
-                        query = name
-                        coroutineScope.launch {
-                            val results = try {
-                                mapComponent.searchPlaces(
-                                    name,
-                                    currentLocation,
-                                    bounds
-                                )
-                            } catch (e: Exception) {
-                                emptyList()
-                            }
-                            onSearchResults(results)
-                        }
-                        searchActive = false
+                        searchInput = name
+                        onSearch(searchInput)
                     }
                 )
             }
