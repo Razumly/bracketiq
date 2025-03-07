@@ -16,8 +16,12 @@ coroutines = "1.10.1"
 decompose = "3.3.0-alpha02"
 foundationLayout = "1.8.0-alpha08"
 geo = "0.7.0"
+googleApiServicesOauth2 = "v2-rev157-1.25.0"
+googleAuthLibraryOauth2Http = "1.23.0"
+googleHttpClientGson = "1.44.1"
 hazeMaterials = "1.2.2"
 junit = "4.13.2"
+kmpDateTimePicker = "1.0.5"
 koin = "4.0.1"
 kotlin = "2.1.0"
 kotlinTest = "2.1.0"
@@ -78,10 +82,14 @@ decompose-extensions = { group = "com.arkivanov.decompose", name = "extensions-c
 decompose-extentions-experimental = { group = "com.arkivanov.decompose", name = "extensions-compose-experimental", version.ref = "decompose" }
 geo = { module = "dev.icerock.moko:geo", version.ref = "geo" }
 geo-compose = { module = "dev.icerock.moko:geo-compose", version.ref = "geo" }
+google-api-services-oauth2 = { module = "com.google.apis:google-api-services-oauth2", version.ref = "googleApiServicesOauth2" }
+google-auth-library-oauth2-http = { module = "com.google.auth:google-auth-library-oauth2-http", version.ref = "googleAuthLibraryOauth2Http" }
+google-http-client-gson = { module = "com.google.http-client:google-http-client-gson", version.ref = "googleHttpClientGson" }
 haze = { module = "dev.chrisbanes.haze:haze", version.ref = "hazeMaterials" }
 haze-materials = { module = "dev.chrisbanes.haze:haze-materials", version.ref = "hazeMaterials" }
 
 junit = { module = "junit:junit", version.ref = "junit" }
+kmp-date-time-picker = { module = "network.chaintech:kmp-date-time-picker", version.ref = "kmpDateTimePicker" }
 koin-android = { module = "io.insert-koin:koin-android", version.ref = "koin" }
 koin-androidx-compose = { module = "io.insert-koin:koin-androidx-compose-navigation", version.ref = "koin" }
 koin-compose = { module = "io.insert-koin:koin-compose-viewmodel-navigation", version.ref = "koin" }

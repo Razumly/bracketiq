@@ -31,7 +31,6 @@ data class TournamentDTO(
     val hostId: String,
     val lat: Double,
     val long: Double,
-    val collectionId: String,
     val maxPlayers: Int,
     val teamSizeLimit: Int,
 )
@@ -59,7 +58,6 @@ fun TournamentDTO.toTournament(id: String): Tournament {
         imageUrl = imageUrl,
         lat = lat,
         long = long,
-        collectionId = collectionId,
         lastUpdated = Clock.System.now(),
         maxPlayers = maxPlayers,
         teamSizeLimit = teamSizeLimit

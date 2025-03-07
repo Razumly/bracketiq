@@ -4,6 +4,7 @@ import com.arkivanov.decompose.ComponentContext
 import com.razumly.mvp.core.data.MVPRepository
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.Tournament
+import com.razumly.mvp.core.data.dataTypes.enums.EventTypes
 import com.razumly.mvp.eventList.EventListComponent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -26,7 +27,8 @@ class FollowingEventListComponent(
     override val selectedEvent = MutableStateFlow<EventAbs?>(null)
 
     override fun selectEvent(event: EventAbs?) {
-        if (event!!.collectionId == "tournaments") {
+        if (event == null) return
+        if (event.eventType == EventTypes.TOURNAMENT) {
             onTournamentSelected(event as Tournament)
         }
     }

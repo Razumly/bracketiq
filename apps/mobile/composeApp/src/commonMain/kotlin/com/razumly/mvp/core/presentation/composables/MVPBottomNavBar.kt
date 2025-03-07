@@ -26,9 +26,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
-import com.razumly.mvp.core.presentation.MVPTransparency
-import com.razumly.mvp.core.presentation.navBarGradientStart
-import com.razumly.mvp.core.presentation.selectedNavBar
 import com.razumly.mvp.home.HomeComponent.Page
 
 data class NavigationItem(
@@ -50,9 +47,9 @@ fun MVPBottomNavBar(
         NavigationItem(Page.Profile, "person", "Profile")
     )
     val colorStops = arrayOf(
-        0.0f to MVPTransparency,
-        0.25f to navBarGradientStart,
-        1f to navBarGradientStart
+        0.0f to Color.Transparent,
+        0.25f to Color(0xff2c2c2c),
+        1f to Color(0xff2c2c2c),
     )
     val navigationBarHeight = WindowInsets.navigationBars.getBottom(LocalDensity.current).dp + 32.dp
 
@@ -100,7 +97,7 @@ fun MVPBottomNavBar(
                         colors = NavigationBarItemColors(
                             selectedIconColor = MaterialTheme.colorScheme.primary,
                             selectedTextColor = MaterialTheme.colorScheme.primary,
-                            selectedIndicatorColor = selectedNavBar,
+                            selectedIndicatorColor = Color.Gray,
                             unselectedIconColor = MaterialTheme.colorScheme.onPrimary,
                             unselectedTextColor = MaterialTheme.colorScheme.onPrimary,
                             disabledIconColor = MaterialTheme.colorScheme.outlineVariant,

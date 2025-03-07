@@ -16,6 +16,7 @@ interface CreateEventComponent {
     val currentStep: StateFlow<Int>
     val currentEventType: StateFlow<EventTypes>
     val childStack: Value<ChildStack<Config, Child>>
+    val canProceed: StateFlow<Boolean>
 
     fun updateEventField(update: EventImp.() -> EventImp)
     fun updateTournamentField(update: Tournament.() -> Tournament)
@@ -28,11 +29,12 @@ interface CreateEventComponent {
 
     sealed class Child(val nextStep: Config?, val step: Int) {
         companion object {
-            val steps = 3
+            const val STEPS = 4
         }
         data object Step1 : Child(Step2, 1)
         data class Step2(val component: MapComponent) : Child(Config.Step3, 2)
-        data object Step3 : Child(null, 3)
+        data object Step3 : Child(Config.Finished, 3)
+        data object Finished : Child(null, 4)
     }
 
     @Serializable
@@ -43,6 +45,8 @@ interface CreateEventComponent {
         data object Step2: Config()
         @Serializable
         data object Step3: Config()
+        @Serializable
+        data object Finished: Config()
     }
 }
 

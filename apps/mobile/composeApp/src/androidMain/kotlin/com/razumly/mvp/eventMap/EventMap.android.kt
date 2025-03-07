@@ -11,7 +11,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -21,9 +20,9 @@ import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.LatLngBounds
-import com.google.android.gms.maps.model.PointOfInterest
 import com.google.android.libraries.places.api.model.Place
 import com.google.maps.android.compose.GoogleMap
+import com.google.maps.android.compose.MapUiSettings
 import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.maps.android.compose.rememberMarkerState
@@ -41,7 +40,7 @@ actual fun EventMap(
     canClickPOI: Boolean,
     modifier: Modifier,
 ) {
-    val selectedLocation = remember { mutableStateOf<PointOfInterest?>(null) }
+    val selectedLocation = remember { mutableStateOf<MVPPlace?>(null) }
     val scope = rememberCoroutineScope()
     val places = remember { mutableStateOf<List<MVPPlace>>(listOf()) }
     val cameraPositionState = rememberCameraPositionState()
@@ -74,10 +73,11 @@ actual fun EventMap(
         GoogleMap(
             modifier = Modifier.fillMaxSize(),
             cameraPositionState = cameraPositionState,
+            uiSettings = MapUiSettings(zoomControlsEnabled = false),
             onPOIClick = { poi ->
                 if (canClickPOI) {
-                    selectedLocation.value = poi
                     scope.launch {
+                        selectedLocation.value = component.getPlace(poi.placeId)
                         cameraPositionState.animate(
                             CameraUpdateFactory.newCameraPosition(
                                 CameraPosition.fromLatLngZoom(
@@ -90,13 +90,16 @@ actual fun EventMap(
                 }
             }
         ) {
-            selectedLocation.value?.let { poi ->
-                key(poi.placeId) {
-                    Marker(
-                        state = rememberMarkerState(position = poi.latLng),
-                        title = poi.name
-                    )
-                }
+            selectedLocation.value?.let { place ->
+                val position = LatLng(place.lat, place.long)
+                Marker(
+                    state = rememberMarkerState(position = position),
+                    title = place.name,
+                    onClick = {
+                        onPlaceSelected(place)
+                        true
+                    }
+                )
             }
             events.forEach { event ->
                 val eventPosition = LatLng(event.lat, event.long)

@@ -2,8 +2,8 @@ package com.razumly.mvp.core.data.dataTypes
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import com.razumly.mvp.core.data.dataTypes.enums.EventTypes
 import com.razumly.mvp.core.data.dataTypes.enums.FieldTypes
-import com.razumly.mvp.core.util.DbConstants
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import kotlinx.serialization.Serializable
@@ -33,7 +33,7 @@ data class Tournament(
     override val lat: Double,
     override val long: Double,
     override val hostId: String,
-    @Transient override val collectionId: String = DbConstants.TOURNAMENT_COLLECTION,
+    @Transient override val eventType: EventTypes = EventTypes.TOURNAMENT,
     @Transient override val lastUpdated: Instant = Clock.System.now(),
     override val maxPlayers: Int,
     override val teamSizeLimit: Int,
@@ -82,7 +82,6 @@ data class Tournament(
             imageUrl = event.imageUrl,
             lat = event.lat,
             long = event.long,
-            collectionId = event.collectionId,
             maxPlayers = event.maxPlayers,
             teamSizeLimit = event.teamSizeLimit,
             hostId = event.hostId
@@ -103,7 +102,6 @@ data class Tournament(
             imageUrl = imageUrl,
             lat = lat,
             long = long,
-            collectionId = collectionId,
             lastUpdated = Clock.System.now(),
             hostId = hostId,
             teamSizeLimit = teamSizeLimit,

@@ -2,8 +2,8 @@ package com.razumly.mvp.core.data.dataTypes
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import com.razumly.mvp.core.data.dataTypes.enums.EventTypes
 import com.razumly.mvp.core.data.dataTypes.enums.FieldTypes
-import com.razumly.mvp.core.util.DbConstants
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import kotlinx.serialization.Serializable
@@ -16,7 +16,7 @@ data class EventImp(
     @PrimaryKey override val id: String,
     override val location: String,
     override val name: String,
-    override val description: String? = null,
+    override val description: String,
     override val divisions: List<String>,
     override val lat: Double,
     override val long: Double,
@@ -28,7 +28,7 @@ data class EventImp(
     override val imageUrl: String,
     override val teamSizeLimit: Int,
     override val maxPlayers: Int,
-    @Transient override val collectionId: String = "",
+    @Transient override val eventType: EventTypes = EventTypes.GENERIC,
     @Transient override val lastUpdated: Instant = Clock.System.now(),
 ): EventAbs {
     companion object {
@@ -43,14 +43,13 @@ data class EventImp(
                 lat = 0.0,
                 long = 0.0,
                 fieldType = FieldTypes.GRASS,
-                start = Instant.DISTANT_PAST,
-                end = Instant.DISTANT_PAST,
+                start = Clock.System.now(),
+                end = Clock.System.now(),
                 price = 0.0,
                 rating = 0f,
                 imageUrl = "",
                 teamSizeLimit = 0,
                 maxPlayers = 0,
-                collectionId = DbConstants.EVENT_COLLECTION,
             )
         }
     }

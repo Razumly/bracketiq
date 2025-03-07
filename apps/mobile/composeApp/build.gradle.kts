@@ -58,6 +58,7 @@ kotlin {
                 implementation(libs.coil.network.ktor)
                 implementation(libs.haze.materials)
                 implementation(libs.haze)
+                implementation(libs.kmp.date.time.picker)
                 api(libs.decompose.decompose)
                 api(libs.decompose.extensions)
                 api(libs.decompose.extentions.experimental)
@@ -90,9 +91,9 @@ kotlin {
                 implementation(libs.androidx.material3.android)
                 implementation(libs.androidx.navigation.common.ktx)
                 implementation(libs.androidx.activity.ktx)
-                implementation("com.google.auth:google-auth-library-oauth2-http:0.20.0")
-                implementation("com.google.http-client:google-http-client-gson:1.35.0")
-                implementation("com.google.apis:google-api-services-oauth2:v2-rev157-1.25.0")
+                implementation(libs.google.auth.library.oauth2.http)
+                implementation(libs.google.http.client.gson)
+                implementation(libs.google.api.services.oauth2)
             }
         }
 

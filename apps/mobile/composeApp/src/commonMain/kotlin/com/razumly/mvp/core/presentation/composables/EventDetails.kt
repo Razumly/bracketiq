@@ -33,15 +33,13 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import com.razumly.mvp.core.data.dataTypes.EventAbs
+import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.eventList.components.StylizedText
 import com.razumly.mvp.eventList.util.TextPatterns
 import com.razumly.mvp.home.LocalAnimatedVisibilityScope
 import com.razumly.mvp.home.LocalSharedTransitionScope
-import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.format
-import kotlinx.datetime.format.MonthNames
-import kotlinx.datetime.format.char
 import kotlinx.datetime.toLocalDateTime
 
 @OptIn(ExperimentalSharedTransitionApi::class)
@@ -56,11 +54,7 @@ fun SharedTransitionScope.EventDetails(
     val patterns = TextPatterns(event.name)
 
     val dateRangeText = remember(event.start, event.end) {
-        val dateFormat = LocalDate.Format {
-            dayOfMonth()
-            char(' ')
-            monthName(MonthNames.ENGLISH_ABBREVIATED)
-        }
+
 
         val startDate = event.start.toLocalDateTime(TimeZone.currentSystemDefault()).date
         val endDate = event.end.toLocalDateTime(TimeZone.currentSystemDefault()).date

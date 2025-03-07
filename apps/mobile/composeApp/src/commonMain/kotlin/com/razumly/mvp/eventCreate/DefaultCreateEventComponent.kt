@@ -47,6 +47,9 @@ class DefaultCreateEventComponent(
     private val _currentEventType = MutableStateFlow(EventTypes.GENERIC)
     override val currentEventType = _currentEventType.asStateFlow()
 
+    private val _canProceed = MutableStateFlow(false)
+    override val canProceed = _canProceed.asStateFlow()
+
     override val childStack = childStack(
         source = navigation,
         initialConfiguration = Config.Step1,
@@ -117,5 +120,6 @@ class DefaultCreateEventComponent(
             }.value
         )
         is Config.Step3 -> Child.Step3
+        is Config.Finished -> Child.Finished
     }
 }

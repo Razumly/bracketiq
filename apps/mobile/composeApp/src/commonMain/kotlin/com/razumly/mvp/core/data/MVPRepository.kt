@@ -392,7 +392,7 @@ class MVPRepository(
         }
 
         return allDocs.map {
-            it.data.copy(id = it.id, collectionId = it.collectionId).toEvent(it.id)
+            it.data.copy(id = it.id).toEvent(it.id)
         }
     }
 

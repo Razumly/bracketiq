@@ -6,6 +6,7 @@ import com.google.android.gms.maps.model.LatLngBounds
 import com.google.android.libraries.places.api.Places
 import com.google.android.libraries.places.api.model.Place
 import com.google.android.libraries.places.api.model.RectangularBounds
+import com.google.android.libraries.places.api.net.FetchPlaceRequest
 import com.google.android.libraries.places.api.net.FetchResolvedPhotoUriRequest
 import com.google.android.libraries.places.api.net.FindAutocompletePredictionsRequest
 import com.google.android.libraries.places.api.net.PlacesClient
@@ -57,7 +58,7 @@ actual class MapComponent(
 
     private val placesClient: PlacesClient by lazy {
         if (!Places.isInitialized()) {
-            Places.initialize(context, BuildConfig.MAPS_API_KEY)
+            Places.initializeWithNewPlacesApiEnabled(context, BuildConfig.MAPS_API_KEY)
         }
         Places.createClient(context)
     }
@@ -80,6 +81,69 @@ actual class MapComponent(
     fun setRadius(radius: Double) {
         _currentRadiusMeters.value = radius
     }
+
+    suspend fun getPlace(placeId: String): MVPPlace =
+        kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+            val fields = listOf(
+                Place.Field.ID,
+                Place.Field.DISPLAY_NAME,
+                Place.Field.LOCATION,
+                Place.Field.PHOTO_METADATAS
+            )
+            val fetchPlaceRequest = FetchPlaceRequest.builder(placeId, fields).build()
+            placesClient.fetchPlace(fetchPlaceRequest)
+                .addOnSuccessListener { placeResponse ->
+                    val photoMetadatas = placeResponse.place.photoMetadatas
+                    if (photoMetadatas != null && photoMetadatas.isNotEmpty()) {
+                        val photoRequest = FetchResolvedPhotoUriRequest.builder(photoMetadatas.first())
+                            .setMaxWidth(500)
+                            .setMaxHeight(300)
+                            .build()
+                        placesClient.fetchResolvedPhotoUri(photoRequest)
+                            .addOnSuccessListener { photoResponse ->
+                                val url = photoResponse.uri?.toString() ?: ""
+                                val result = MVPPlace(
+                                    placeResponse.place.displayName ?: "",
+                                    placeResponse.place.id ?: "",
+                                    placeResponse.place.location?.latitude ?: 0.0,
+                                    placeResponse.place.location?.longitude ?: 0.0,
+                                    url
+                                )
+                                cont.resume(result) { cause, _, _ ->
+                                    Napier.d { "Cancelled photo fetch: $cause" }
+                                }
+                            }
+                            .addOnFailureListener {
+                                // Optionally resume with empty url or handle the failure
+                                val result = MVPPlace(
+                                    placeResponse.place.displayName ?: "",
+                                    placeResponse.place.id ?: "",
+                                    placeResponse.place.location?.latitude ?: 0.0,
+                                    placeResponse.place.location?.longitude ?: 0.0,
+                                    ""
+                                )
+                                cont.resume(result) { cause, _, _ ->
+                                    Napier.d { "Cancelled photo fetch failure: $cause" }
+                                }
+                            }
+                    } else {
+                        // No photo metadata available; resume immediately.
+                        val result = MVPPlace(
+                            placeResponse.place.displayName ?: "",
+                            placeResponse.place.id ?: "",
+                            placeResponse.place.location?.latitude ?: 0.0,
+                            placeResponse.place.location?.longitude ?: 0.0,
+                            ""
+                        )
+                        cont.resume(result) { cause, _, _ ->
+                            Napier.d { "Cancelled fetchPlace: $cause" }
+                        }
+                    }
+                }
+                .addOnFailureListener { exception ->
+                    cont.resumeWithException(exception)
+                }
+        }
 
     suspend fun suggestPlaces(query: String, latLng: LatLng): List<Place> =
         kotlinx.coroutines.suspendCancellableCoroutine { cont ->

@@ -9,7 +9,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -34,14 +33,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
-import com.razumly.mvp.core.presentation.backGroundGradient1
-import com.razumly.mvp.core.presentation.backGroundGradient2
 import com.razumly.mvp.core.presentation.util.CircularRevealShape
 import com.razumly.mvp.core.presentation.util.isScrollingUp
 import com.razumly.mvp.eventList.EventList
@@ -65,16 +61,9 @@ fun SharedTransitionScope.EventSearchScreen(component: SearchEventListComponent,
     val hazeState = remember { HazeState() }
     val offsetNavPadding =
         PaddingValues(bottom = LocalNavBarPadding.current.calculateBottomPadding().plus(32.dp))
-    val backgroundStops = arrayOf(
-        0.0f to backGroundGradient1,
-        1f to backGroundGradient2
-    )
     val lazyListState = rememberLazyListState()
-    // The point (as an Offset) from which the circle will expand.
-    // You might calculate/adjust this value based on the button's position.
     var revealCenter by remember { mutableStateOf(Offset.Zero) }
 
-    // Animate progress from 0f (nothing revealed) to 1f (fully revealed)
     val animationProgress by animateFloatAsState(
         targetValue = if (showMapCard.value) 1f else 0f,
         animationSpec = tween(durationMillis = 1000)
@@ -128,10 +117,7 @@ fun SharedTransitionScope.EventSearchScreen(component: SearchEventListComponent,
                 offsetNavPadding,
                 lazyListState,
                 Modifier
-                    .hazeSource(hazeState)
-                    .background(
-                        Brush.horizontalGradient(colorStops = backgroundStops)
-                    ),
+                    .hazeSource(hazeState),
             )
         }
         EventMap(

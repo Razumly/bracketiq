@@ -6,8 +6,11 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.snapshotFlow
 import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.LocalTime
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.format.MonthNames
 import kotlinx.datetime.format.char
 import kotlinx.datetime.toLocalDateTime
 
@@ -26,6 +29,30 @@ val timeFormat = LocalTime.Format {
     second()
     char(' ')
     amPmMarker("AM", "PM")
+}
+
+val dateFormat = LocalDate.Format {
+    dayOfMonth()
+    char(' ')
+    monthName(MonthNames.ENGLISH_ABBREVIATED)
+}
+
+val dateTimeFormat = LocalDateTime.Format {
+    dayOfMonth()
+    char(' ')
+    monthName(MonthNames.ENGLISH_ABBREVIATED)
+    char(',')
+    char(' ')
+    year()
+    char('-')
+    amPmHour()
+    char(':')
+    minute()
+    char(':')
+    second()
+    char(' ')
+    amPmMarker("AM", "PM")
+
 }
 
 @Composable
