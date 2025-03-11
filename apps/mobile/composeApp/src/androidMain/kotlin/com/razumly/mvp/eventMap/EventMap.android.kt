@@ -2,6 +2,7 @@ package com.razumly.mvp.eventMap
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.SearchBar
@@ -16,21 +17,25 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.LatLngBounds
 import com.google.android.libraries.places.api.model.Place
 import com.google.maps.android.compose.GoogleMap
+import com.google.maps.android.compose.MapProperties
 import com.google.maps.android.compose.MapUiSettings
 import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.maps.android.compose.rememberMarkerState
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
+import com.razumly.mvp.core.util.toGoogle
 import dev.icerock.moko.geo.compose.BindLocationTrackerEffect
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 @Composable
 actual fun EventMap(
@@ -40,9 +45,9 @@ actual fun EventMap(
     canClickPOI: Boolean,
     modifier: Modifier,
 ) {
-    val selectedLocation = remember { mutableStateOf<MVPPlace?>(null) }
+    val selectedPlace = remember { mutableStateOf<MVPPlace?>(null) }
     val scope = rememberCoroutineScope()
-    val places = remember { mutableStateOf<List<MVPPlace>>(listOf()) }
+    val places = remember { mutableStateOf<List<Place>>(listOf()) }
     val cameraPositionState = rememberCameraPositionState()
     val currentLocation by component.currentLocation.collectAsState()
     val events by component.events.collectAsState()
@@ -55,10 +60,7 @@ actual fun EventMap(
         BindLocationTrackerEffect(component.locationTracker)
         LaunchedEffect(currentLocation) {
             currentLocation?.let { validLoc ->
-                val target = LatLng(
-                    validLoc.latitude,
-                    validLoc.longitude
-                )
+                val target = validLoc.toGoogle()
 
                 if (!canClickPOI) {
                     component.getEvents()
@@ -71,13 +73,16 @@ actual fun EventMap(
             }
         }
         GoogleMap(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp),
             cameraPositionState = cameraPositionState,
+            properties = MapProperties(isMyLocationEnabled = true),
             uiSettings = MapUiSettings(zoomControlsEnabled = false),
             onPOIClick = { poi ->
                 if (canClickPOI) {
                     scope.launch {
-                        selectedLocation.value = component.getPlace(poi.placeId)
+                        selectedPlace.value = component.getPlace(poi.placeId)
                         cameraPositionState.animate(
                             CameraUpdateFactory.newCameraPosition(
                                 CameraPosition.fromLatLngZoom(
@@ -86,11 +91,14 @@ actual fun EventMap(
                                 )
                             )
                         )
+                        if (selectedPlace.value != null) {
+                            onPlaceSelected(selectedPlace.value!!)
+                        }
                     }
                 }
             }
         ) {
-            selectedLocation.value?.let { place ->
+            selectedPlace.value?.let { place ->
                 val position = LatLng(place.lat, place.long)
                 Marker(
                     state = rememberMarkerState(position = position),
@@ -111,12 +119,13 @@ actual fun EventMap(
                 )
             }
             places.value.forEach { place ->
-                val position = LatLng(place.lat, place.long)
                 Marker(
-                    state = rememberMarkerState(position = position),
-                    title = place.name,
+                    state = rememberMarkerState(position = place.location!!),
+                    title = place.displayName,
                     onClick = {
-                        onPlaceSelected(place)
+                        runBlocking {
+                            onPlaceSelected(component.getMVPPlace(place))
+                        }
                         true
                     }
                 )
@@ -126,14 +135,14 @@ actual fun EventMap(
         cameraPositionState.projection?.visibleRegion?.latLngBounds?.let {
             MapSearchBar(
                 component,
-                currentLocation ?: dev.icerock.moko.geo.LatLng(0.0, 0.0),
+                cameraPositionState.position.target,
                 it
             ) { newPlaces ->
-                selectedLocation.value = null
+                selectedPlace.value = null
                 if (newPlaces.size > 1) {
                     val bounds = LatLngBounds.builder()
                     newPlaces.forEach { place ->
-                        bounds.include(LatLng(place.lat, place.long))
+                        bounds.include(place.location!!)
                     }
                     scope.launch {
                         cameraPositionState.animate(
@@ -143,10 +152,7 @@ actual fun EventMap(
                     }
                 } else if (newPlaces.isNotEmpty()) {
                     scope.launch {
-                        val location = LatLng(
-                            newPlaces.first().lat,
-                            newPlaces.first().long
-                        )
+                        val location = newPlaces.first().location!!
                         cameraPositionState.animate(
                             CameraUpdateFactory.newLatLngZoom(location, defaultZoom),
                             defaultDurationMs
@@ -155,10 +161,7 @@ actual fun EventMap(
                 } else {
                     // Fallback to current location
                     currentLocation?.let { validLoc ->
-                        val target = LatLng(
-                            validLoc.latitude,
-                            validLoc.longitude
-                        )
+                        val target = validLoc.toGoogle()
                         scope.launch {
                             cameraPositionState.animate(
                                 CameraUpdateFactory.newLatLngZoom(target, defaultZoom),
@@ -177,9 +180,9 @@ actual fun EventMap(
 @Composable
 fun MapSearchBar(
     mapComponent: MapComponent,
-    currentLocation: dev.icerock.moko.geo.LatLng,
+    viewCenter: LatLng,
     bounds: LatLngBounds,
-    onSearchResults: (List<MVPPlace>) -> Unit,
+    onSearchResults: (List<Place>) -> Unit,
 ) {
     // State for query text, suggestions and active search mode
     var searchInput by remember { mutableStateOf("") }
@@ -196,7 +199,7 @@ fun MapSearchBar(
     val onSearch: (query: String) -> Unit = { query ->
         coroutineScope.launch {
             val results = try {
-                mapComponent.searchPlaces(query, currentLocation, bounds)
+                mapComponent.searchPlaces(query, viewCenter, bounds)
             } catch (e: Exception) {
                 Napier.e("Failed to get places: $e")
                 emptyList()
@@ -218,7 +221,7 @@ fun MapSearchBar(
                     if (newQuery.isNotEmpty()) {
                         coroutineScope.launch {
                             suggestions = try {
-                                mapComponent.suggestPlaces(newQuery, currentLocation)
+                                mapComponent.suggestPlaces(newQuery, viewCenter)
                             } catch (e: Exception) {
                                 emptyList()
                             }

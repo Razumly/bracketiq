@@ -1,7 +1,5 @@
 package com.razumly.mvp.eventList.components
 
-import androidx.compose.animation.ExperimentalSharedTransitionApi
-import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -13,9 +11,8 @@ import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.presentation.composables.EventDetails
 
-@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
-fun SharedTransitionScope.EventCard(
+fun EventCard(
     event: EventAbs,
     onFavoriteClick: () -> Unit,
     modifier: Modifier = Modifier,

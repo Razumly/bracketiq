@@ -48,7 +48,7 @@ fun CollapsableHeader(
                     Tab(
                         selected = division == selectedDivision,
                         onClick = { component.selectDivision(division) },
-                        text = { Text(division) }
+                        text = { Text(division.name) }
                     )
                 }
             }

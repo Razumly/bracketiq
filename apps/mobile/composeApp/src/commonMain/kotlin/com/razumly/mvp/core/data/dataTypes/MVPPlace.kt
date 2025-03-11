@@ -5,5 +5,5 @@ data class MVPPlace(
     val id: String,
     val lat: Double = 0.0,
     val long: Double = 0.0,
-    val imageUrl: String = "",
+    val imageUrls: List<String> = listOf(),
 )

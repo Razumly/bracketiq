@@ -9,7 +9,8 @@ val MVPRepositoryModule = module {
     single {
         MVPRepository(
             client = get(),
-            tournamentDB = get()
+            tournamentDB = get(),
+            currentUserDataSource = get()
         )
     } bind IMVPRepository::class
 }

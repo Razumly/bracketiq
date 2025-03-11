@@ -1,9 +1,9 @@
 package com.razumly.mvp.di
 
 import io.github.aakira.napier.Napier
-import org.koin.core.context.startKoin
-import kotlinx.atomicfu.locks.synchronized
 import kotlinx.atomicfu.locks.SynchronizedObject
+import kotlinx.atomicfu.locks.synchronized
+import org.koin.core.context.startKoin
 
 actual class KoinInitializer : SynchronizedObject() {
     companion object {
@@ -25,7 +25,9 @@ actual class KoinInitializer : SynchronizedObject() {
                                 locationTrackerModule,
                                 roomDBModule,
                                 clientModule,
-                                componentModule
+                                componentModule,
+                                datastoreModule,
+                                currentUserDataSourceModule
                             )
                         }
                         isInitialized = true

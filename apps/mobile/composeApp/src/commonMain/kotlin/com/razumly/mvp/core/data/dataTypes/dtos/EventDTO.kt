@@ -1,14 +1,17 @@
 package com.razumly.mvp.core.data.dataTypes.dtos
 
 import com.razumly.mvp.core.data.dataTypes.EventImp
+import com.razumly.mvp.core.data.dataTypes.enums.Divisions
 import com.razumly.mvp.core.data.dataTypes.enums.FieldTypes
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 
 @Serializable
 data class EventDTO(
-    val id: String,
+    @Transient
+    val id: String = "",
     val location: String,
     val name: String,
     val description: String,
@@ -32,7 +35,7 @@ fun EventDTO.toEvent(id: String): EventImp {
         location = location,
         name = name,
         description = description,
-        divisions = divisions,
+        divisions = divisions.map { Divisions.valueOf(it)},
         fieldType = FieldTypes.valueOf(fieldType),
         start = Instant.parse(start),
         end = Instant.parse(end),

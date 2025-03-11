@@ -17,7 +17,9 @@ actual class KoinInitializer(
                 clientModule,
                 roomDBModule,
                 componentModule,
-                mapComponentModule
+                mapComponentModule,
+                datastoreModule,
+                currentUserDataSourceModule,
             )
         }
     }

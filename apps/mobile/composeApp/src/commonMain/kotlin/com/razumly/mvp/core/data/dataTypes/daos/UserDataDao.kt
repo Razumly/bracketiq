@@ -8,6 +8,7 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.UserEventCrossRef
 import com.razumly.mvp.core.data.dataTypes.UserTournamentCrossRef
 import com.razumly.mvp.core.data.dataTypes.UserWithRelations
+import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface UserDataDao {
@@ -48,5 +49,9 @@ interface UserDataDao {
     suspend fun getUserDataById(id: String): UserData?
 
     @Query("SELECT * FROM UserData WHERE id = :id")
-    suspend fun getUserWithRelationsById(id: String): UserWithRelations?
+    suspend fun getUserWithRelationsById(id: String): UserWithRelations
+
+    @Query("SELECT * FROM UserData WHERE id = :id")
+    fun getUserWithRelationsFlowById(id: String): Flow<UserWithRelations>
+
 }

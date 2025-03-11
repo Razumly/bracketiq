@@ -8,7 +8,6 @@ import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.MVPDocument
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
-import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
@@ -16,10 +15,12 @@ import com.razumly.mvp.core.data.dataTypes.UserTournamentCrossRef
 import com.razumly.mvp.core.data.dataTypes.UserWithRelations
 import com.razumly.mvp.core.data.dataTypes.dtos.EventDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.MatchDTO
+import com.razumly.mvp.core.data.dataTypes.dtos.TeamDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.TournamentDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.UserDataDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.toEvent
 import com.razumly.mvp.core.data.dataTypes.dtos.toMatch
+import com.razumly.mvp.core.data.dataTypes.dtos.toTeam
 import com.razumly.mvp.core.data.dataTypes.dtos.toTournament
 import com.razumly.mvp.core.data.dataTypes.dtos.toUserData
 import com.razumly.mvp.core.data.dataTypes.toMatchDTO
@@ -32,7 +33,6 @@ import io.appwrite.Query
 import io.appwrite.enums.ExecutionMethod
 import io.appwrite.models.Document
 import io.appwrite.models.RealtimeSubscription
-import io.appwrite.models.User
 import io.appwrite.services.Account
 import io.appwrite.services.Databases
 import io.appwrite.services.Functions
@@ -42,10 +42,13 @@ import io.ktor.client.network.sockets.SocketTimeoutException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -57,7 +60,8 @@ import kotlinx.serialization.json.Json
 class MVPRepository(
     client: Client,
     internal val tournamentDB: MVPDatabase,
-    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val currentUserDataSource: CurrentUserDataSource
 ) : IMVPRepository {
     internal val account = Account(client)
 
@@ -73,10 +77,12 @@ class MVPRepository(
 
     private var _ignoreMatch: MatchMVP? = null
 
+
     override suspend fun login(email: String, password: String): UserWithRelations? {
         try {
             val session = account.createEmailPasswordSession(email, password)
             val id = account.get().id
+            currentUserDataSource.saveUserId(id)
             val currentUser = database.getDocument(
                 DbConstants.DATABASE_NAME,
                 DbConstants.USER_DATA_COLLECTION,
@@ -95,6 +101,7 @@ class MVPRepository(
     }
 
     override suspend fun logout() {
+        currentUserDataSource.saveUserId("")
         account.deleteSession("current")
     }
 
@@ -115,7 +122,7 @@ class MVPRepository(
             },
             saveCall = { tournament ->
                 tournamentDB.getTournamentDao.upsertTournament(
-                    tournament.data.toTournament(
+                    tournament.toTournament(
                         tournament.id
                     )
                 )
@@ -131,20 +138,26 @@ class MVPRepository(
         tournamentDB.getTeamDao.upsertTeamsWithPlayers(teams)
     }
 
-    override suspend fun getCurrentUser(update: Boolean): UserWithRelations? {
-        val currentAccount: User<Map<String, Any>>
-        try {
-            currentAccount = account.get()
-        } catch (e: Exception) {
-            Napier.e("Failed to get current user", e, DbConstants.ERROR_TAG)
-            return null
+    @OptIn(ExperimentalCoroutinesApi::class)
+    override fun getCurrentUserFlow(): Flow<UserWithRelations> {
+        return currentUserDataSource.getUserId().flatMapLatest { userId ->
+            tournamentDB.getUserDataDao.getUserWithRelationsFlowById(userId)
         }
-        var currentUserWithRelations: UserWithRelations?
-        if (!update) {
-            currentUserWithRelations =
-                tournamentDB.getUserDataDao.getUserWithRelationsById(currentAccount.id)
-            if (currentUserWithRelations != null) {
-                return currentUserWithRelations
+    }
+
+    override suspend fun getCurrentUser(): UserWithRelations? {
+        var userId = ""
+        try {
+            userId = currentUserDataSource.getUserId().first()
+
+        } catch (e: Exception) {
+            Napier.d("No current user ID stored")
+        }
+        if (userId.isBlank()) {
+            try {
+                userId = account.get().id
+            } catch (e: Exception) {
+                Napier.e("Failed to get current user", e, DbConstants.ERROR_TAG)
             }
         }
 
@@ -152,12 +165,12 @@ class MVPRepository(
             val currentUserData = database.getDocument(
                 DbConstants.DATABASE_NAME,
                 DbConstants.USER_DATA_COLLECTION,
-                currentAccount.id,
+                userId,
                 nestedType = UserDataDTO::class,
-            ).data.copy(id = currentAccount.id)
-            tournamentDB.getUserDataDao.upsertUserData(currentUserData.toUserData(currentAccount.id))
-            currentUserWithRelations =
-                tournamentDB.getUserDataDao.getUserWithRelationsById(currentAccount.id)
+            ).data.copy(id = userId)
+            tournamentDB.getUserDataDao.upsertUserData(currentUserData.toUserData(userId))
+            val currentUserWithRelations =
+                tournamentDB.getUserDataDao.getUserWithRelationsById(userId)
             return currentUserWithRelations
         } catch (e: Exception) {
             Napier.e("User missing User Data: ", e, DbConstants.ERROR_TAG)
@@ -182,8 +195,8 @@ class MVPRepository(
                     Query.equal(DbConstants.TOURNAMENT_ATTRIBUTE, tournamentId),
                     Query.limit(200)
                 ),
-                Team::class,
-            ).documents
+                TeamDTO::class,
+            ).documents.map { dtoDoc -> dtoDoc.convert { it.toTeam(dtoDoc.id) } }
         },
         getLocalIds = { tournamentDB.getTeamDao.getTeams(tournamentId).toSet() },
         deleteStaleData = { tournamentDB.getTeamDao.deleteTeamsByIds(it) },
@@ -228,15 +241,16 @@ class MVPRepository(
 
     override suspend fun getMatch(matchId: String) = getData(
         networkCall = {
-            database.getDocument(
+            val doc = database.getDocument(
                 DbConstants.DATABASE_NAME,
                 DbConstants.MATCHES_COLLECTION,
                 matchId,
                 nestedType = MatchDTO::class,
             )
+            doc.convert { it.toMatch(doc.id) }
         },
         saveCall = { match ->
-            tournamentDB.getMatchDao.upsertMatch(match.data.toMatch(matchId))
+            tournamentDB.getMatchDao.upsertMatch(match)
         },
         localData = { id ->
             tournamentDB.getMatchDao.getMatchById(id)?.match
@@ -363,7 +377,7 @@ class MVPRepository(
     }
 
     override suspend fun getEvents(): List<EventAbs> {
-        val currentUserTournamentIds = getCurrentUser(true)?.tournaments ?: return emptyList()
+        val currentUserTournamentIds = getCurrentUser()?.tournaments ?: return emptyList()
         val allDocs = mutableListOf<Document<EventDTO>>()
 
         try {
@@ -480,33 +494,45 @@ class MVPRepository(
         }
     }
 
-    override suspend fun createEvent(newEvent: EventImp) {
-        try {
-            database.createDocument(
-                DbConstants.DATABASE_NAME,
-                DbConstants.EVENT_COLLECTION,
-                newEvent.id,
-                newEvent,
-                nestedType = EventImp::class
-            )
-        } catch (e: Exception) {
-            Napier.e("Failed to create event", e, DbConstants.ERROR_TAG)
-        }
-    }
+    override suspend fun createEvent(newEvent: EventImp) =
+        getData(
+            networkCall = {
+                val doc = database.createDocument(
+                    DbConstants.DATABASE_NAME,
+                    DbConstants.EVENT_COLLECTION,
+                    newEvent.id,
+                    newEvent.toEventDTO(),
+                    nestedType = EventDTO::class
+                )
+                doc.convert { it.toEvent(doc.id) }
+            },
+            localData = { id ->
+                tournamentDB.getEventImpDao.getEventById(id)
+            },
+            saveCall = { event ->
+                tournamentDB.getEventImpDao.upsertEvent(event)
+            }
+        )
 
-    override suspend fun createTournament(newTournament: Tournament) {
-        try {
-            database.createDocument(
-                DbConstants.DATABASE_NAME,
-                DbConstants.TOURNAMENT_COLLECTION,
-                newTournament.id,
-                newTournament,
-                nestedType = Tournament::class
-            )
-        } catch (e: Exception) {
-            Napier.e("Failed to create tournament", e, DbConstants.ERROR_TAG)
-        }
-    }
+    override suspend fun createTournament(newTournament: Tournament) =
+        getData(
+            networkCall = {
+                val doc = database.createDocument(
+                    DbConstants.DATABASE_NAME,
+                    DbConstants.TOURNAMENT_COLLECTION,
+                    newTournament.id,
+                    newTournament.toTournamentDTO(),
+                    nestedType = TournamentDTO::class
+                )
+                doc.convert { dto -> dto.toTournament(doc.id) }
+            },
+            localData = { id ->
+                tournamentDB.getTournamentDao.getTournamentById(id)
+            },
+            saveCall = { tournament ->
+                tournamentDB.getTournamentDao.upsertTournament(tournament)
+            }
+        )
 
     override suspend fun createNewUser(
         email: String,
@@ -569,17 +595,19 @@ class MVPRepository(
     private suspend fun <T> getData(
         networkCall: suspend () -> Document<T>,
         localData: suspend (id: String) -> MVPDocument?,
-        saveCall: suspend (Document<T>) -> Unit
-    ) {
+        saveCall: suspend (T) -> Unit
+    ): T? {
         try {
             // Fetch fresh data from network
             val networkResult = networkCall()
-            saveCall(networkResult)
+            saveCall(networkResult.data)
             if (localData(networkResult.id) == null) {
                 throw Exception("Local data was not updated")
             }
+            return networkResult.data
         } catch (e: Exception) {
             Napier.e("Failed to update data", e, DbConstants.ERROR_TAG)
+            return null
         }
     }
 
@@ -610,7 +638,7 @@ interface IMVPRepository {
         matchId: String
     ): Flow<MatchWithRelations>
 
-    suspend fun getMatch(matchId: String)
+    suspend fun getMatch(matchId: String): MatchMVP?
 
     fun getMatchesFlow(
         tournamentId: String
@@ -621,7 +649,8 @@ interface IMVPRepository {
     fun getPlayersOfTournamentFlow(tournamentId: String): Flow<TournamentWithRelations?>
     suspend fun getEvents(bounds: Bounds): List<EventAbs>
     suspend fun getEvents(): List<EventAbs>
-    suspend fun getCurrentUser(update: Boolean = false): UserWithRelations?
+    fun getCurrentUserFlow(): Flow<UserWithRelations>
+    suspend fun getCurrentUser(): UserWithRelations?
     suspend fun login(email: String, password: String): UserWithRelations?
     suspend fun logout()
     suspend fun subscribeToMatches()
@@ -629,8 +658,8 @@ interface IMVPRepository {
     suspend fun updateMatchUnsafe(match: MatchMVP)
     suspend fun updateMatchSafe(match: MatchMVP)
     suspend fun updateMatchFinished(match: MatchMVP, time: Instant)
-    suspend fun createTournament(newTournament: Tournament)
+    suspend fun createTournament(newTournament: Tournament): Tournament?
     suspend fun createNewUser(email: String, password: String, firstName: String, lastName: String)
-    suspend fun createEvent(newEvent: EventImp)
+    suspend fun createEvent(newEvent: EventImp): EventImp?
     fun setIgnoreMatch(match: MatchMVP?)
 }

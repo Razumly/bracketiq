@@ -86,7 +86,7 @@ class DefaultHomeComponent(
             )
             is Config.Create -> Child.Create(
                 _koin.inject<DefaultCreateEventComponent> {
-                    parametersOf(componentContext)
+                    parametersOf(componentContext, ::onEventCreated)
                 }.value
             )
             is Config.Profile -> Child.Profile(
@@ -106,6 +106,10 @@ class DefaultHomeComponent(
 
     private fun onMatchSelected(match: MatchWithRelations) {
         navigation.pushNew(Config.MatchDetail(match))
+    }
+
+    private fun onEventCreated() {
+        navigation.replaceAll(Config.Search)
     }
 
     override fun onTabSelected(page: Page) {

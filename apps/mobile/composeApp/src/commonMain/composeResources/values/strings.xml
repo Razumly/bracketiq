@@ -33,4 +33,7 @@
     <string name="select_end_time">Select End Time</string>
     <string name="ok">OK</string>
     <string name="cancel">Cancel</string>
+    <string name="team_size_limit">Set Team Size Limit</string>
+    <string name="value_too_low">Please enter a value greater than 0</string>
+    <string name="max_players">Max Players at Event</string>
 </resources>

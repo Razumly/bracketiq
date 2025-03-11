@@ -67,12 +67,12 @@ val componentModule = module {
         )
     } bind TournamentContentComponent::class
 
-    factory { (componentContext: ComponentContext) ->
+    factory { (componentContext: ComponentContext, onEventCreated: () -> Unit) ->
         DefaultCreateEventComponent(
             componentContext = componentContext,
-            appwriteRepository = get(),
-            permissionsController = get(),
-            locationTracker = get()
+            mvpRepository = get(),
+            locationTracker = get(),
+            onEventCreated
         )
     } bind CreateEventComponent::class
 

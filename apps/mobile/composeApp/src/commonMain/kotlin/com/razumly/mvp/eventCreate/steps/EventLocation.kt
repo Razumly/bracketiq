@@ -11,7 +11,7 @@ import com.razumly.mvp.eventMap.EventMap
 import com.razumly.mvp.eventMap.MapComponent
 
 @Composable
-fun Step2(
+fun EventLocation(
     mapComponent: MapComponent,
     createEventComponent: CreateEventComponent,
     isCompleted: (Boolean) -> Unit
@@ -22,8 +22,7 @@ fun Step2(
             eventState?.let { event ->
                 event.location.isNotBlank() &&
                         event.lat != 0.0 &&
-                        event.long != 0.0 &&
-                        event.imageUrl.isNotBlank()
+                        event.long != 0.0
             } ?: false
         )
     }
@@ -36,14 +35,7 @@ fun Step2(
         mapComponent,
         {},
         { place ->
-            createEventComponent.updateEventField {
-                copy(
-                    imageUrl = place.imageUrl,
-                    location = place.name,
-                    lat = place.lat,
-                    long = place.long
-                )
-            }
+            createEventComponent.selectPlace(place)
         },
         true,
     )

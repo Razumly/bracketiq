@@ -60,12 +60,12 @@ val componentModule = module {
             )
     }
 
-    factory { (componentContext: ComponentContext) ->
+    factory { (componentContext: ComponentContext, onCreatedEvent: () -> Unit) ->
         DefaultCreateEventComponent(
             componentContext = componentContext,
-            appwriteRepository = get(),
-            permissionsController = get(),
-            locationTracker = get()
+            mvpRepository = get(),
+            locationTracker = get(),
+            onEventCreated = onCreatedEvent
         )
     }
 

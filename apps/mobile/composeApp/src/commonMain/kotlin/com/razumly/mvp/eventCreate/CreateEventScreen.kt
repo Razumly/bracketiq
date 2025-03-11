@@ -27,6 +27,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,10 +37,12 @@ import androidx.compose.ui.unit.dp
 import com.arkivanov.decompose.extensions.compose.stack.Children
 import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import com.arkivanov.decompose.router.stack.ChildStack
-import com.razumly.mvp.eventCreate.steps.Finished
-import com.razumly.mvp.eventCreate.steps.Step1
-import com.razumly.mvp.eventCreate.steps.Step2
-import com.razumly.mvp.eventCreate.steps.Step3
+import com.razumly.mvp.core.data.dataTypes.enums.EventTypes
+import com.razumly.mvp.eventCreate.steps.EventBasicInfo
+import com.razumly.mvp.eventCreate.steps.EventImage
+import com.razumly.mvp.eventCreate.steps.EventLocation
+import com.razumly.mvp.eventCreate.steps.Preview
+import com.razumly.mvp.eventCreate.steps.TournamentInfo
 import com.razumly.mvp.home.LocalNavBarPadding
 import io.github.aakira.napier.Napier
 import kotlinx.datetime.Clock
@@ -119,21 +122,25 @@ fun CreateEventScreen(
                     stack = childStack,
                 ) { child ->
                     when (val instance = child.instance) {
-                        is CreateEventComponent.Child.Step1 -> {
+                        is CreateEventComponent.Child.EventBasicInfo -> {
                             contentPadding.value = 16.dp
-                            Step1(component) { canProceed.value = it }
+                            EventBasicInfo(component) { canProceed.value = it }
                         }
-                        is CreateEventComponent.Child.Step2 -> {
+                        is CreateEventComponent.Child.EventLocation -> {
                             contentPadding.value = 0.dp
-                            Step2(instance.component, component)  { canProceed.value = it }
+                            EventLocation(instance.component, component)  { canProceed.value = it }
                         }
-                        is CreateEventComponent.Child.Step3 -> {
+                        is CreateEventComponent.Child.EventImage -> {
                             contentPadding.value = 16.dp
-                            Step3(component)
+                            EventImage(component) { canProceed.value = it}
                         }
-                        is CreateEventComponent.Child.Finished -> {
+                        is CreateEventComponent.Child.TournamentInfo -> {
                             contentPadding.value = 16.dp
-                            Finished()
+                            TournamentInfo(component) { canProceed.value = it}
+                        }
+                        is CreateEventComponent.Child.Preview -> {
+                            contentPadding.value = 16.dp
+                            Preview(component)
                         }
                     }
                 }
@@ -167,14 +174,14 @@ fun CreateEventNavigationFABs(
     component: CreateEventComponent,
     enabled: Boolean
 ) {
-    // Using a Row to show both FABs with space between.
+    val currentEventType by component.currentEventType.collectAsState()
     Row(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        if (childStack.active.instance != CreateEventComponent.Child.Step1) {
+        if (childStack.active.instance != CreateEventComponent.Child.EventBasicInfo) {
             FloatingActionButton(
                 onClick = { component.previousStep() }
             ) {
@@ -188,23 +195,47 @@ fun CreateEventNavigationFABs(
             Spacer(modifier = Modifier.width(48.dp))
         }
 
-        if (childStack.active.instance != CreateEventComponent.Child.Step3) {
-            FloatingActionButton(
-                onClick = { childStack.active.instance.nextStep?.let {
-                    if (enabled) {
-                        component.nextStep(it)
+        if (childStack.active.instance != CreateEventComponent.Child.Preview) {
+            if (childStack.active.instance == CreateEventComponent.Child.EventImage &&
+                currentEventType == EventTypes.GENERIC
+            )
+            {
+                FloatingActionButton(
+                    onClick = {
+                        if (enabled) {
+                            component.nextStep(CreateEventComponent.Config.Preview)
+                        }
                     }
-                } }
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                    contentDescription = stringResource(Res.string.next),
-                    tint = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.inversePrimary
-                )
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                        contentDescription = stringResource(Res.string.next),
+                        tint = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.inversePrimary
+                    )
+                }
+            }
+            else {
+                FloatingActionButton(
+                    onClick = {
+                        childStack.active.instance.nextStep?.let {
+                            if (enabled) {
+                                component.nextStep(it)
+                            }
+                        }
+                    }
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                        contentDescription = stringResource(Res.string.next),
+                        tint = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.inversePrimary
+                    )
+                }
             }
         } else {
             FloatingActionButton(
-                onClick = { component.createTournament() }
+                onClick = {
+                    component.createEvent()
+                }
             ) {
                 Icon(
                     imageVector = Icons.Default.Check,

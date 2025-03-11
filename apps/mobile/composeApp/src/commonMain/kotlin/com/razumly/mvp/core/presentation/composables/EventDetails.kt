@@ -1,7 +1,6 @@
 package com.razumly.mvp.core.presentation.composables
 
 import androidx.compose.animation.ExperimentalSharedTransitionApi
-import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -44,7 +43,7 @@ import kotlinx.datetime.toLocalDateTime
 
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
-fun SharedTransitionScope.EventDetails(
+fun EventDetails(
     event: EventAbs,
     showDescription: Boolean,
     onFavoriteClick: () -> Unit,

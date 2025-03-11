@@ -1,7 +1,6 @@
 package com.razumly.mvp.eventList
 
 import androidx.compose.animation.ExperimentalSharedTransitionApi
-import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
@@ -14,9 +13,8 @@ import androidx.compose.ui.Modifier
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.eventList.components.EventCard
 
-@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
-fun SharedTransitionScope.EventList(
+fun EventList(
     component: EventListComponent,
     events: List<EventAbs>,
     firstElementPadding: PaddingValues,

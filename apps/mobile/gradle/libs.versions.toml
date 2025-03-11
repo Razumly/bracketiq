@@ -1,18 +1,20 @@
 [versions]
+accompanistPager = "0.36.0"
 activityKtx = "1.10.0"
 agp = "8.5.0"
 android-compileSdk = "35"
 android-minSdk = "26"
 android-targetSdk = "35"
-androidx-activityCompose = "1.10.0"
+androidx-activityCompose = "1.10.1"
 androidx-lifecycle = "2.8.4"
 assertk = "0.28.1"
 coil3 = "3.0.4"
 compose-multiplatform = "1.7.3"
-composeTest = "1.7.6"
+composeTest = "1.7.8"
 concurrentFuturesKtx = "1.2.0"
 coreKtx = "1.6.1"
 coroutines = "1.10.1"
+datastore = "1.1.3"
 decompose = "3.3.0-alpha02"
 foundationLayout = "1.8.0-alpha08"
 geo = "0.7.0"
@@ -36,7 +38,6 @@ material = "1.8.0-alpha08"
 material3Android = "1.3.1"
 materialAndroid = "1.7.6"
 napier = "2.7.1"
-navigation-compose = "2.8.5"
 navigationCommonKtx = "2.8.5"
 permissions = "0.18.1"
 places = "4.1.0"
@@ -54,9 +55,11 @@ animationAndroid = "1.7.7"
 
 
 [libraries]
+accompanist-pager = { module = "com.google.accompanist:accompanist-pager", version.ref = "accompanistPager" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activityCompose" }
 androidx-activity-ktx = { group = "androidx.activity", name = "activity-ktx", version.ref = "activityKtx" }
 androidx-concurrent-futures-ktx = { module = "androidx.concurrent:concurrent-futures-ktx", version.ref = "concurrentFuturesKtx" }
+androidx-datastore = { module = "androidx.datastore:datastore", version.ref = "datastore" }
 androidx-foundation-layout = { module = "androidx.compose.foundation:foundation-layout", version.ref = "foundationLayout" }
 androidx-lifecycle-runtime-compose = { group = "org.jetbrains.androidx.lifecycle", name = "lifecycle-runtime-compose", version.ref = "androidx-lifecycle" }
 androidx-lifecycle-runtime-compose-android = { group = "androidx.lifecycle", name = "lifecycle-runtime-compose-android", version.ref = "lifecycleRuntimeComposeAndroid" }
@@ -77,6 +80,7 @@ coil-network-ktor = { module = "io.coil-kt.coil3:coil-network-ktor3", version.re
 compose-ui-test-manifest = { module = "androidx.compose.ui:ui-test-manifest", version.ref = "composeTest" }
 compose-vectorize-core = { module = "dev.sergiobelda.compose.vectorize:compose-vectorize-core", version.ref = "vectorize"}
 core-ktx = { group = "androidx.test", name = "core-ktx", version.ref = "coreKtx" }
+datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastore" }
 decompose-decompose = { group = "com.arkivanov.decompose", name = "decompose", version.ref = "decompose" }
 decompose-extensions = { group = "com.arkivanov.decompose", name = "extensions-compose", version.ref = "decompose" }
 decompose-extentions-experimental = { group = "com.arkivanov.decompose", name = "extensions-compose-experimental", version.ref = "decompose" }

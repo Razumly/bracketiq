@@ -1,6 +1,7 @@
 package com.razumly.mvp.core.data.dataTypes.dtos
 
 import com.razumly.mvp.core.data.dataTypes.Tournament
+import com.razumly.mvp.core.data.dataTypes.enums.Divisions
 import com.razumly.mvp.core.data.dataTypes.enums.FieldTypes
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
@@ -41,7 +42,7 @@ fun TournamentDTO.toTournament(id: String): Tournament {
         name = name,
         description = description,
         doubleElimination = doubleElimination,
-        divisions = divisions,
+        divisions = divisions.map { Divisions.valueOf(it)},
         winnerSetCount = winnerSetCount,
         loserSetCount = loserSetCount,
         winnerBracketPointsToVictory = winnerBracketPointsToVictory,

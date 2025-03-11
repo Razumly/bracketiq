@@ -1,8 +1,6 @@
 package com.razumly.mvp.eventSearch
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.ExperimentalSharedTransitionApi
-import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -53,9 +51,9 @@ import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
 import dev.chrisbanes.haze.materials.HazeMaterials
 import dev.icerock.moko.geo.compose.BindLocationTrackerEffect
 
-@OptIn(ExperimentalHazeMaterialsApi::class, ExperimentalSharedTransitionApi::class)
+@OptIn(ExperimentalHazeMaterialsApi::class)
 @Composable
-fun SharedTransitionScope.EventSearchScreen(component: SearchEventListComponent, mapComponent: MapComponent) {
+fun EventSearchScreen(component: SearchEventListComponent, mapComponent: MapComponent) {
     val events = component.events.collectAsState()
     val showMapCard = component.showMapCard.collectAsState()
     val hazeState = remember { HazeState() }

@@ -20,7 +20,7 @@ import com.razumly.mvp.core.data.dataTypes.daos.MatchDao
 import com.razumly.mvp.core.data.dataTypes.daos.TeamDao
 import com.razumly.mvp.core.data.dataTypes.daos.TournamentDao
 import com.razumly.mvp.core.data.dataTypes.daos.UserDataDao
-import com.razumly.mvp.core.util.Converters
+import com.razumly.mvp.core.data.util.Converters
 
 @Database(
     entities = [
@@ -34,7 +34,7 @@ import com.razumly.mvp.core.util.Converters
         UserTournamentCrossRef::class,
         UserEventCrossRef::class,
     ],
-    version = 30
+    version = 31
 )
 @TypeConverters(Converters::class)
 @ConstructedBy(MVPDatabaseCtor::class)

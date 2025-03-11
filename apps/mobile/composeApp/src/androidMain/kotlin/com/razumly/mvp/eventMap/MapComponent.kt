@@ -2,12 +2,12 @@ package com.razumly.mvp.eventMap
 
 import android.content.Context
 import com.arkivanov.decompose.ComponentContext
+import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.LatLngBounds
 import com.google.android.libraries.places.api.Places
 import com.google.android.libraries.places.api.model.Place
 import com.google.android.libraries.places.api.model.RectangularBounds
 import com.google.android.libraries.places.api.net.FetchPlaceRequest
-import com.google.android.libraries.places.api.net.FetchResolvedPhotoUriRequest
 import com.google.android.libraries.places.api.net.FindAutocompletePredictionsRequest
 import com.google.android.libraries.places.api.net.PlacesClient
 import com.google.android.libraries.places.api.net.SearchByTextRequest
@@ -17,7 +17,6 @@ import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.util.calcDistance
 import com.razumly.mvp.core.util.getBounds
-import dev.icerock.moko.geo.LatLng
 import dev.icerock.moko.geo.LocationTracker
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CoroutineScope
@@ -37,12 +36,12 @@ actual class MapComponent(
     private val mvpRepository: IMVPRepository,
     context: Context,
     val locationTracker: LocationTracker
-): ComponentContext by componentContext {
+) : ComponentContext by componentContext {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private val _locationStateFlow = locationTracker.getLocationsFlow()
         .stateIn(scope, SharingStarted.Eagerly, null)
 
-    private val _currentLocation = MutableStateFlow<LatLng?>(null)
+    private val _currentLocation = MutableStateFlow<dev.icerock.moko.geo.LatLng?>(null)
     actual val currentLocation = _currentLocation.asStateFlow()
 
     private val _events = MutableStateFlow<List<EventAbs>>(emptyList())
@@ -78,6 +77,10 @@ actual class MapComponent(
         }
     }
 
+    suspend fun getMVPPlace(place: Place): MVPPlace {
+         return place.toMVPPlace(placesClient)
+    }
+
     fun setRadius(radius: Double) {
         _currentRadiusMeters.value = radius
     }
@@ -93,61 +96,19 @@ actual class MapComponent(
             val fetchPlaceRequest = FetchPlaceRequest.builder(placeId, fields).build()
             placesClient.fetchPlace(fetchPlaceRequest)
                 .addOnSuccessListener { placeResponse ->
-                    val photoMetadatas = placeResponse.place.photoMetadatas
-                    if (photoMetadatas != null && photoMetadatas.isNotEmpty()) {
-                        val photoRequest = FetchResolvedPhotoUriRequest.builder(photoMetadatas.first())
-                            .setMaxWidth(500)
-                            .setMaxHeight(300)
-                            .build()
-                        placesClient.fetchResolvedPhotoUri(photoRequest)
-                            .addOnSuccessListener { photoResponse ->
-                                val url = photoResponse.uri?.toString() ?: ""
-                                val result = MVPPlace(
-                                    placeResponse.place.displayName ?: "",
-                                    placeResponse.place.id ?: "",
-                                    placeResponse.place.location?.latitude ?: 0.0,
-                                    placeResponse.place.location?.longitude ?: 0.0,
-                                    url
-                                )
-                                cont.resume(result) { cause, _, _ ->
-                                    Napier.d { "Cancelled photo fetch: $cause" }
-                                }
-                            }
-                            .addOnFailureListener {
-                                // Optionally resume with empty url or handle the failure
-                                val result = MVPPlace(
-                                    placeResponse.place.displayName ?: "",
-                                    placeResponse.place.id ?: "",
-                                    placeResponse.place.location?.latitude ?: 0.0,
-                                    placeResponse.place.location?.longitude ?: 0.0,
-                                    ""
-                                )
-                                cont.resume(result) { cause, _, _ ->
-                                    Napier.d { "Cancelled photo fetch failure: $cause" }
-                                }
-                            }
-                    } else {
-                        // No photo metadata available; resume immediately.
-                        val result = MVPPlace(
-                            placeResponse.place.displayName ?: "",
-                            placeResponse.place.id ?: "",
-                            placeResponse.place.location?.latitude ?: 0.0,
-                            placeResponse.place.location?.longitude ?: 0.0,
-                            ""
-                        )
-                        cont.resume(result) { cause, _, _ ->
+                    scope.launch {
+                        val place = placeResponse.place.toMVPPlace(placesClient)
+                        cont.resume(place) { cause, _, _ ->
                             Napier.d { "Cancelled fetchPlace: $cause" }
                         }
                     }
-                }
-                .addOnFailureListener { exception ->
-                    cont.resumeWithException(exception)
                 }
         }
 
     suspend fun suggestPlaces(query: String, latLng: LatLng): List<Place> =
         kotlinx.coroutines.suspendCancellableCoroutine { cont ->
-            val currentBounds = getBounds(_currentRadiusMeters.value, latLng.latitude, latLng.longitude)
+            val currentBounds =
+                getBounds(_currentRadiusMeters.value, latLng.latitude, latLng.longitude)
 
             val request = FindAutocompletePredictionsRequest.builder()
                 .setQuery(query)
@@ -163,7 +124,7 @@ actual class MapComponent(
                             .build()
                     }
                     cont.resume(results) { cause, _, _ ->
-                        Napier.d{"Cancelled autocomplete: $cause"}
+                        Napier.d { "Cancelled autocomplete: $cause" }
                     }
                 }
                 .addOnFailureListener { exception ->
@@ -171,9 +132,9 @@ actual class MapComponent(
                 }
         }
 
-    suspend fun searchPlaces(query: String, latLng: LatLng, bounds: LatLngBounds) : List<MVPPlace> =
+    suspend fun searchPlaces(query: String, latLng: LatLng, bounds: LatLngBounds): List<Place> =
         kotlinx.coroutines.suspendCancellableCoroutine { cont ->
-            val center = com.google.android.gms.maps.model.LatLng(latLng.latitude, latLng.longitude)
+            val center = LatLng(latLng.latitude, latLng.longitude)
             val fields = listOf(
                 Place.Field.ID,
                 Place.Field.DISPLAY_NAME,
@@ -189,29 +150,9 @@ actual class MapComponent(
                 .build()
 
             placesClient.searchByText(request).addOnSuccessListener { response ->
-                val result = response.places.map {
-                    val metadata = it.photoMetadatas
-                    var url = ""
-                    if (metadata != null && metadata.isNotEmpty()) {
-                        val photoRequest = FetchResolvedPhotoUriRequest.builder(metadata.first())
-                            .setMaxWidth(500)
-                            .setMaxHeight(300)
-                            .build()
-                        placesClient.fetchResolvedPhotoUri(photoRequest).addOnSuccessListener { response ->
-                            url = response.uri?.toString() ?: ""
-                        }
-                    }
-
-                    MVPPlace(
-                        it.displayName ?: "",
-                        it.id ?: "",
-                        it.location?.latitude ?: 0.0,
-                        it.location?.longitude ?: 0.0,
-                        url
-                    )
-                }
+                val result = response.places
                 cont.resume(result) { cause, _, _ ->
-                    Napier.d{"Cancelled search: $cause"}
+                    Napier.d { "Cancelled search: $cause" }
                 }
             }.addOnFailureListener { response ->
                 Napier.e("Failed to search: ${response.message}")

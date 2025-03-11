@@ -2,8 +2,11 @@ package com.razumly.mvp.core.data.dataTypes
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import com.razumly.mvp.core.data.dataTypes.dtos.EventDTO
+import com.razumly.mvp.core.data.dataTypes.enums.Divisions
 import com.razumly.mvp.core.data.dataTypes.enums.EventTypes
 import com.razumly.mvp.core.data.dataTypes.enums.FieldTypes
+import io.appwrite.ID
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import kotlinx.serialization.Serializable
@@ -17,7 +20,7 @@ data class EventImp(
     override val location: String,
     override val name: String,
     override val description: String,
-    override val divisions: List<String>,
+    override val divisions: List<Divisions>,
     override val lat: Double,
     override val long: Double,
     override val fieldType: FieldTypes,
@@ -35,7 +38,7 @@ data class EventImp(
         operator fun invoke(): EventImp {
             return EventImp(
                 hostId = "",
-                id = "",
+                id = ID.unique(),
                 location = "",
                 name = "",
                 description = "",
@@ -52,5 +55,26 @@ data class EventImp(
                 maxPlayers = 0,
             )
         }
+    }
+
+    fun toEventDTO(): EventDTO {
+        return EventDTO(
+            id = id,
+            location = location,
+            name = name,
+            description = description,
+            divisions = divisions.map { it.name },
+            fieldType = fieldType.name,
+            start = start.toString(),
+            end = end.toString(),
+            price = price,
+            rating = rating,
+            imageUrl = imageUrl,
+            lat = lat,
+            long = long,
+            hostId = hostId,
+            teamSizeLimit = teamSizeLimit,
+            maxPlayers = maxPlayers
+        )
     }
 }

@@ -8,13 +8,13 @@ import com.arkivanov.decompose.router.stack.pushNew
 import com.arkivanov.decompose.router.stack.replaceCurrent
 import com.razumly.mvp.core.data.IMVPRepository
 import com.razumly.mvp.core.data.dataTypes.EventImp
+import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.enums.EventTypes
 import com.razumly.mvp.eventCreate.CreateEventComponent.Child
 import com.razumly.mvp.eventCreate.CreateEventComponent.Config
 import com.razumly.mvp.eventMap.MapComponent
 import dev.icerock.moko.geo.LocationTracker
-import dev.icerock.moko.permissions.PermissionsController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -27,9 +27,9 @@ import org.koin.mp.KoinPlatform.getKoin
 
 class DefaultCreateEventComponent(
     componentContext: ComponentContext,
-    private val appwriteRepository: IMVPRepository,
-    val permissionsController: PermissionsController,
-    val locationTracker: LocationTracker
+    private val mvpRepository: IMVPRepository,
+    val locationTracker: LocationTracker,
+    val onEventCreated: () -> Unit
 ) : CreateEventComponent, ComponentContext by componentContext {
     private val navigation = StackNavigation<Config>()
     private val _koin = getKoin()
@@ -50,6 +50,9 @@ class DefaultCreateEventComponent(
     private val _canProceed = MutableStateFlow(false)
     override val canProceed = _canProceed.asStateFlow()
 
+    private val _selectedPlace = MutableStateFlow<MVPPlace?>(null)
+    override val selectedPlace = _selectedPlace.asStateFlow()
+
     override val childStack = childStack(
         source = navigation,
         initialConfiguration = Config.Step1,
@@ -60,6 +63,11 @@ class DefaultCreateEventComponent(
 
     init {
         childStack.subscribe {}
+        scope.launch {
+            val currentUserId = mvpRepository.getCurrentUser()?.user?.id ?: ""
+            updateEventField { copy(hostId = currentUserId) }
+            updateTournamentField { copy(hostId = currentUserId) }
+        }
     }
 
     override fun nextStep(config: Config) {
@@ -72,13 +80,11 @@ class DefaultCreateEventComponent(
 
     override fun createEvent() {
         scope.launch {
-            appwriteRepository.createEvent(_newEventState.value)
-        }
-    }
-
-    override fun createTournament() {
-        scope.launch {
-            appwriteRepository.createTournament(_newTournamentState.value)
+            when (currentEventType.value) {
+                EventTypes.TOURNAMENT -> mvpRepository.createTournament(_newTournamentState.value)
+                EventTypes.GENERIC -> mvpRepository.createEvent(_newEventState.value)
+            }
+            onEventCreated()
         }
     }
 
@@ -101,25 +107,31 @@ class DefaultCreateEventComponent(
         }
     }
 
+    override fun selectPlace(place: MVPPlace) {
+        _selectedPlace.value = place
+        updateEventField { copy(lat = place.lat, long = place.long, location = place.name) }
+    }
+
     override fun selectTournamentEvent(
     ) {
-        _newTournamentState.value.updateTournamentFromEvent(_newEventState.value)
+        _newTournamentState.value = _newTournamentState.value.updateTournamentFromEvent(_newEventState.value)
     }
 
     private fun createChild(
         config: Config,
         componentContext: ComponentContext
     ): Child = when (config) {
-        is Config.Step1 -> Child.Step1
-        is Config.Step2 -> Child.Step2(
+        is Config.Step1 -> Child.EventBasicInfo
+        is Config.EventLocation -> Child.EventLocation(
             _koin.inject<MapComponent> {
                 parametersOf(
                     componentContext,
-                    { navigation.replaceCurrent(Config.Step3)}
+                    { navigation.replaceCurrent(Config.TournamentInfo)}
                 )
             }.value
         )
-        is Config.Step3 -> Child.Step3
-        is Config.Finished -> Child.Finished
+        is Config.EventImage -> Child.EventImage
+        is Config.TournamentInfo -> Child.TournamentInfo
+        is Config.Preview -> Child.Preview
     }
 }

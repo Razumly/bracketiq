@@ -2,8 +2,11 @@ package com.razumly.mvp.core.data.dataTypes
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import com.razumly.mvp.core.data.dataTypes.dtos.TournamentDTO
+import com.razumly.mvp.core.data.dataTypes.enums.Divisions
 import com.razumly.mvp.core.data.dataTypes.enums.EventTypes
 import com.razumly.mvp.core.data.dataTypes.enums.FieldTypes
+import io.appwrite.ID
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import kotlinx.serialization.Serializable
@@ -22,7 +25,7 @@ data class Tournament(
     @PrimaryKey override var id: String,
     override val name: String,
     override val description: String,
-    override val divisions: List<String>,
+    override val divisions: List<Divisions>,
     override val location: String,
     override val fieldType: FieldTypes,
     override val start: Instant,
@@ -48,7 +51,7 @@ data class Tournament(
                 loserBracketPointsToVictory = listOf(),
                 winnerScoreLimitsPerSet = listOf(),
                 loserScoreLimitsPerSet = listOf(),
-                id = "",
+                id = ID.unique(),
                 name = "",
                 description = "",
                 divisions = listOf(),
@@ -71,7 +74,7 @@ data class Tournament(
     fun updateTournamentFromEvent(event: EventImp): Tournament {
         return this.copy(
             name = event.name,
-            description = event.description ?: "",
+            description = event.description,
             divisions = event.divisions,
             location = event.location,
             fieldType = event.fieldType,
@@ -106,6 +109,33 @@ data class Tournament(
             hostId = hostId,
             teamSizeLimit = teamSizeLimit,
             maxPlayers = maxPlayers,
+        )
+    }
+    fun toTournamentDTO(): TournamentDTO {
+        return TournamentDTO(
+            name = name,
+            description = description,
+            doubleElimination = doubleElimination,
+            divisions = divisions.map { it.name },
+            winnerSetCount = winnerSetCount,
+            loserSetCount = loserSetCount,
+            winnerBracketPointsToVictory = winnerBracketPointsToVictory,
+            loserBracketPointsToVictory = loserBracketPointsToVictory,
+            winnerScoreLimitsPerSet = winnerScoreLimitsPerSet,
+            loserScoreLimitsPerSet = loserScoreLimitsPerSet,
+            id = id,
+            location = location,
+            fieldType = fieldType.name,
+            start = start.toString(),
+            end = end.toString(),
+            price = price,
+            rating = rating,
+            imageUrl = imageUrl,
+            hostId = hostId,
+            lat = lat,
+            long = long,
+            maxPlayers = maxPlayers,
+            teamSizeLimit = teamSizeLimit
         )
     }
 }

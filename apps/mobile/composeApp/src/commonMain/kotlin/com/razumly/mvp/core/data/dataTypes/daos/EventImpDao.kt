@@ -9,7 +9,7 @@ import com.razumly.mvp.core.data.dataTypes.EventImp
 @Dao
 interface EventImpDao {
     @Upsert
-    suspend fun upsertEvents(game: EventImp)
+    suspend fun upsertEvent(game: EventImp)
 
     @Upsert
     suspend fun upsertEvents(games: List<EventImp>)
