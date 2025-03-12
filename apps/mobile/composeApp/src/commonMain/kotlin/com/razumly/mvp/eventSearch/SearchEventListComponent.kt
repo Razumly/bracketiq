@@ -4,7 +4,7 @@ import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.backhandler.BackCallback
 import com.razumly.mvp.core.data.IMVPRepository
 import com.razumly.mvp.core.data.dataTypes.EventAbs
-import com.razumly.mvp.core.data.dataTypes.enums.EventTypes
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.util.calcDistance
 import com.razumly.mvp.core.util.getBounds
 import com.razumly.mvp.eventList.EventListComponent
@@ -108,7 +108,7 @@ class SearchEventListComponent(
     override fun selectEvent(event: EventAbs?) {
         try {
             if (event == null) return
-            if (event.eventType == EventTypes.TOURNAMENT) {
+            if (event.eventType == EventType.TOURNAMENT) {
                 onTournamentSelected(event.id)
             }
         } catch (e: Exception) {

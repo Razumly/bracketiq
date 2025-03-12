@@ -16,8 +16,8 @@ import kotlinx.serialization.Serializable
 
 interface HomeComponent {
     val childStack: Value<ChildStack<*, Child>>
-    val selectedPage: StateFlow<Page>
-    fun onTabSelected(page: Page)
+    val selectedPage: StateFlow<Config>
+    fun onTabSelected(page: Config)
 
     fun onBack()
 
@@ -56,9 +56,5 @@ interface HomeComponent {
 
         @Serializable
         data object Search : Config()
-    }
-
-    enum class Page {
-        Search, Following, Create, Profile
     }
 }

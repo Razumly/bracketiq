@@ -5,7 +5,7 @@ import com.arkivanov.decompose.value.Value
 import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.Tournament
-import com.razumly.mvp.core.data.dataTypes.enums.EventTypes
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.eventCreate.CreateEventComponent.Config.EventLocation
 import com.razumly.mvp.eventMap.MapComponent
 import kotlinx.coroutines.flow.StateFlow
@@ -15,7 +15,7 @@ interface CreateEventComponent {
     val newEventState: StateFlow<EventImp?>
     val newTournamentState: StateFlow<Tournament?>
     val currentStep: StateFlow<Int>
-    val currentEventType: StateFlow<EventTypes>
+    val currentEventType: StateFlow<EventType>
     val childStack: Value<ChildStack<Config, Child>>
     val canProceed: StateFlow<Boolean>
     val selectedPlace: StateFlow<MVPPlace?>
@@ -26,7 +26,7 @@ interface CreateEventComponent {
     fun selectTournamentEvent()
     fun nextStep(config: Config)
     fun previousStep()
-    fun selectEventType(type: EventTypes)
+    fun selectEventType(type: EventType)
     fun selectPlace(place: MVPPlace)
 
     sealed class Child(val nextStep: Config?, val step: Int) {

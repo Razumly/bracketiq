@@ -22,7 +22,7 @@ fun EventCard(
             .padding(horizontal = 16.dp, vertical = 8.dp)
             .fillMaxWidth(),
         elevation = CardDefaults.cardElevation(4.dp),
-        shape = RoundedCornerShape(12.dp)
+        shape = RoundedCornerShape(12.dp),
     ) {
         EventDetails(
             event,

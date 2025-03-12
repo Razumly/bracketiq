@@ -3,7 +3,7 @@ package com.razumly.mvp.core.data.dataTypes
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import com.razumly.mvp.core.data.dataTypes.dtos.MatchDTO
-import com.razumly.mvp.core.data.dataTypes.enums.Divisions
+import com.razumly.mvp.core.data.dataTypes.enums.Division
 import kotlinx.datetime.Instant
 import kotlinx.serialization.Serializable
 
@@ -18,7 +18,7 @@ data class MatchMVP(
     val field: String?,
     var start: Instant,
     var end: Instant?,
-    val division: Divisions,
+    val division: Division,
     var team1Points: List<Int>,
     var team2Points: List<Int>,
     val losersBracket: Boolean,

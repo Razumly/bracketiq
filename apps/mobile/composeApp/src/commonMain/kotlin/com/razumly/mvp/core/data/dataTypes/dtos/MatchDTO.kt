@@ -1,7 +1,7 @@
 package com.razumly.mvp.core.data.dataTypes.dtos
 
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
-import com.razumly.mvp.core.data.dataTypes.enums.Divisions
+import com.razumly.mvp.core.data.dataTypes.enums.Division
 import kotlinx.datetime.Instant
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
@@ -41,7 +41,7 @@ fun MatchDTO.toMatch(id: String): MatchMVP {
         field = field,
         start = Instant.parse(start),
         end = end?.let { Instant.parse(it) },
-        division = Divisions.valueOf(division),
+        division = Division.valueOf(division),
         team1Points = team1Points,
         team2Points = team2Points,
         losersBracket = losersBracket,

@@ -13,6 +13,8 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.format.MonthNames
 import kotlinx.datetime.format.char
 import kotlinx.datetime.toLocalDateTime
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 fun instantToDateTimeString(instant: Instant): String {
     return instant.toLocalDateTime(timeZone = TimeZone.currentSystemDefault()).toString()
@@ -48,8 +50,6 @@ val dateTimeFormat = LocalDateTime.Format {
     amPmHour()
     char(':')
     minute()
-    char(':')
-    second()
     char(' ')
     amPmMarker("AM", "PM")
 
@@ -71,4 +71,26 @@ fun LazyListState.isScrollingUp(): State<Boolean> {
             }
         }
     }
+}
+
+fun String.toTitleCase(): String {
+    return this
+        .lowercase()
+        .split(" ")
+        .joinToString(" ") { word ->
+            word.replaceFirstChar { char ->
+                char.uppercase()
+            }
+        }
+}
+
+fun cleanup(input: String): String {
+    val number = input.toDoubleOrNull() ?: return "0.00"
+    // Multiply by 100 and round to get the nearest hundredth as an integer.
+    val rounded = (number * 100).roundToInt()
+    val whole = rounded / 100
+    // Use absolute value for the fractional part to handle negatives properly.
+    val fraction = abs(rounded % 100)
+    // Format the fractional part to always have two digits.
+    return "$whole.${if (fraction < 10) "0" else ""}$fraction"
 }

@@ -3,7 +3,7 @@ package com.razumly.mvp.core.data.dataTypes
 import androidx.room.Entity
 import androidx.room.Ignore
 import androidx.room.PrimaryKey
-import com.razumly.mvp.core.data.dataTypes.enums.Divisions
+import com.razumly.mvp.core.data.dataTypes.enums.Division
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 
@@ -12,7 +12,7 @@ import kotlinx.serialization.Transient
 data class Team(
     var tournament: String,
     var seed: Int,
-    var division: Divisions,
+    var division: Division,
     var wins: Int,
     var losses: Int,
     var name: String? = null,
@@ -26,7 +26,7 @@ data class Team(
     constructor() : this(
         tournament = "",
         seed = 0,
-        division = Divisions.NOVICE,
+        division = Division.NOVICE,
         wins = 0,
         losses = 0,
         name = null,

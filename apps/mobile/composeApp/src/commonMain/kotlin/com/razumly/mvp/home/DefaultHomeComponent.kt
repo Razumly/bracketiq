@@ -13,7 +13,6 @@ import com.razumly.mvp.eventMap.MapComponent
 import com.razumly.mvp.eventSearch.SearchEventListComponent
 import com.razumly.mvp.home.HomeComponent.Child
 import com.razumly.mvp.home.HomeComponent.Config
-import com.razumly.mvp.home.HomeComponent.Page
 import com.razumly.mvp.matchDetailScreen.DefaultMatchContentComponent
 import com.razumly.mvp.profile.DefaultProfileComponent
 import com.razumly.mvp.tournamentDetailScreen.DefaultTournamentContentComponent
@@ -26,14 +25,13 @@ class DefaultHomeComponent(
     componentContext: ComponentContext,
     private val onNavigateToLogin: () -> Unit,
 ) : HomeComponent, ComponentContext by componentContext {
-
     init {
         println("iOS Home: Component initialized")
     }
 
     private val navigation = StackNavigation<Config>()
     private val _koin = getKoin()
-    private val _selectedPage = MutableStateFlow(Page.Search)
+    private val _selectedPage = MutableStateFlow<Config>(Config.Search)
     override val selectedPage = _selectedPage.asStateFlow()
 
     override val childStack = childStack(
@@ -110,15 +108,17 @@ class DefaultHomeComponent(
 
     private fun onEventCreated() {
         navigation.replaceAll(Config.Search)
+        _selectedPage.value = Config.Search
     }
 
-    override fun onTabSelected(page: Page) {
+    override fun onTabSelected(page: Config) {
         _selectedPage.value = page
         when (page) {
-            Page.Search -> navigation.replaceAll(Config.Search)
-            Page.Following -> navigation.replaceAll(Config.Following)
-            Page.Create -> navigation.replaceAll(Config.Create)
-            Page.Profile -> navigation.replaceAll(Config.Profile)
+            Config.Search -> navigation.replaceAll(Config.Search)
+            Config.Following -> navigation.replaceAll(Config.Following)
+            Config.Create -> navigation.replaceAll(Config.Create)
+            Config.Profile -> navigation.replaceAll(Config.Profile)
+            else -> {}
         }
     }
 }

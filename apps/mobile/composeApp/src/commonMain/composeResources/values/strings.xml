@@ -10,14 +10,13 @@
     <string name="confirm_set_result_title">Confirm Set Result</string>
     <string name="confirm_set_result_message">Do you want to confirm the results for Set %1$s?</string>
     <string name="set_number">Set %1$s</string>
-    <string name="create_new_tournament">Create a New Pickup Tournament</string>"
+    <string name="create_new_event">Create a New Event</string>"
     <string name="step_progress">Step %1$d: %2$d</string>
     <string name="previous">Previous</string>
     <string name="next">Next</string>
     <string name="create_tournament">Create Tournament</string>
-    <string name="tournament_name">Tournament Name</string>
-    <string name="tournament_description">Tournament Description</string>
-    <string name="tournament_type">Tournament Type</string>
+    <string name="event_name">Event Name</string>
+    <string name="event_description">Event Description</string>
     <string name="location_name">Location Name</string>
     <string name="latitude">Latitude</string>
     <string name="longitude">Longitude</string>
@@ -33,7 +32,7 @@
     <string name="select_end_time">Select End Time</string>
     <string name="ok">OK</string>
     <string name="cancel">Cancel</string>
-    <string name="team_size_limit">Set Team Size Limit</string>
+    <string name="team_size_limit">Team Size Limit</string>
     <string name="value_too_low">Please enter a value greater than 0</string>
     <string name="max_players">Max Players at Event</string>
 </resources>

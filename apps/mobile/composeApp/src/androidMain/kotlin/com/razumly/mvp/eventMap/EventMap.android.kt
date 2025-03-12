@@ -1,6 +1,7 @@
 package com.razumly.mvp.eventMap
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.DropdownMenuItem
@@ -16,26 +17,27 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.LatLngBounds
+import com.google.android.gms.maps.model.PointOfInterest
 import com.google.android.libraries.places.api.model.Place
 import com.google.maps.android.compose.GoogleMap
 import com.google.maps.android.compose.MapProperties
 import com.google.maps.android.compose.MapUiSettings
 import com.google.maps.android.compose.Marker
+import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.rememberCameraPositionState
-import com.google.maps.android.compose.rememberMarkerState
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.util.toGoogle
 import dev.icerock.moko.geo.compose.BindLocationTrackerEffect
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 
 @Composable
 actual fun EventMap(
@@ -44,15 +46,24 @@ actual fun EventMap(
     onPlaceSelected: (place: MVPPlace) -> Unit,
     canClickPOI: Boolean,
     modifier: Modifier,
+    searchBarPadding: PaddingValues,
 ) {
-    val selectedPlace = remember { mutableStateOf<MVPPlace?>(null) }
+    val selectedPlace = remember { mutableStateOf<PointOfInterest?>(null) }
     val scope = rememberCoroutineScope()
-    val places = remember { mutableStateOf<List<Place>>(listOf()) }
+    var places by remember { mutableStateOf<List<Place>>(listOf()) }
     val cameraPositionState = rememberCameraPositionState()
     val currentLocation by component.currentLocation.collectAsState()
     val events by component.events.collectAsState()
     val defaultZoom = 12f
     val defaultDurationMs = 1000
+    var currentCameraState by remember { mutableStateOf(cameraPositionState) }
+
+    LaunchedEffect(cameraPositionState) {
+        snapshotFlow { cameraPositionState }
+            .collect { newTarget ->
+                currentCameraState = newTarget
+            }
+    }
 
     Box(
         modifier = modifier.fillMaxSize(),
@@ -74,15 +85,14 @@ actual fun EventMap(
         }
         GoogleMap(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 16.dp),
+                .fillMaxSize(),
             cameraPositionState = cameraPositionState,
             properties = MapProperties(isMyLocationEnabled = true),
             uiSettings = MapUiSettings(zoomControlsEnabled = false),
             onPOIClick = { poi ->
                 if (canClickPOI) {
                     scope.launch {
-                        selectedPlace.value = component.getPlace(poi.placeId)
+                        selectedPlace.value = poi
                         cameraPositionState.animate(
                             CameraUpdateFactory.newCameraPosition(
                                 CameraPosition.fromLatLngZoom(
@@ -91,39 +101,43 @@ actual fun EventMap(
                                 )
                             )
                         )
-                        if (selectedPlace.value != null) {
-                            onPlaceSelected(selectedPlace.value!!)
-                        }
                     }
                 }
             }
         ) {
-            selectedPlace.value?.let { place ->
-                val position = LatLng(place.lat, place.long)
+            selectedPlace.value?.let { poi ->
+                val state = rememberUpdatedMarkerState(poi.latLng)
+                state.showInfoWindow()
+                scope.launch {
+                    onPlaceSelected(component.getPlace(poi.placeId))
+                }
                 Marker(
-                    state = rememberMarkerState(position = position),
-                    title = place.name,
+                    state = state,
+                    title = poi.name,
                     onClick = {
-                        onPlaceSelected(place)
+                        state.showInfoWindow()
                         true
                     }
                 )
             }
             events.forEach { event ->
                 val eventPosition = LatLng(event.lat, event.long)
+                val state = rememberUpdatedMarkerState(eventPosition)
                 Marker(
-                    state = rememberMarkerState(position = eventPosition),
+                    state = state,
                     title = event.name,
                     snippet = "${event.fieldType} - $${event.price}",
                     onInfoWindowClick = { onEventSelected(event) }
                 )
             }
-            places.value.forEach { place ->
+            places.forEach { place ->
+                val state = rememberUpdatedMarkerState(place.location!!)
                 Marker(
-                    state = rememberMarkerState(position = place.location!!),
+                    state = state,
                     title = place.displayName,
                     onClick = {
-                        runBlocking {
+                        state.showInfoWindow()
+                        scope.launch {
                             onPlaceSelected(component.getMVPPlace(place))
                         }
                         true
@@ -132,10 +146,13 @@ actual fun EventMap(
             }
         }
 
-        cameraPositionState.projection?.visibleRegion?.latLngBounds?.let {
+        currentCameraState.projection?.visibleRegion?.latLngBounds?.let {
             MapSearchBar(
+                Modifier
+                    .padding(horizontal = 16.dp)
+                    .padding(searchBarPadding),
                 component,
-                cameraPositionState.position.target,
+                currentCameraState.position.target,
                 it
             ) { newPlaces ->
                 selectedPlace.value = null
@@ -143,12 +160,6 @@ actual fun EventMap(
                     val bounds = LatLngBounds.builder()
                     newPlaces.forEach { place ->
                         bounds.include(place.location!!)
-                    }
-                    scope.launch {
-                        cameraPositionState.animate(
-                            CameraUpdateFactory.newLatLngBounds(bounds.build(), 0),
-                            defaultDurationMs
-                        )
                     }
                 } else if (newPlaces.isNotEmpty()) {
                     scope.launch {
@@ -170,7 +181,7 @@ actual fun EventMap(
                         }
                     }
                 }
-                places.value = newPlaces
+                places = newPlaces
             }
         }
     }
@@ -179,6 +190,7 @@ actual fun EventMap(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MapSearchBar(
+    modifier: Modifier,
     mapComponent: MapComponent,
     viewCenter: LatLng,
     bounds: LatLngBounds,
@@ -212,6 +224,7 @@ fun MapSearchBar(
     }
 
     SearchBar(
+        modifier = modifier,
         inputField = {
             SearchBarDefaults.InputField(
                 query = searchInput,
@@ -254,3 +267,8 @@ fun MapSearchBar(
         }
     }
 }
+
+@Composable
+private fun rememberUpdatedMarkerState(newPosition: LatLng): MarkerState =
+    remember { MarkerState(position = newPosition) }
+        .apply { position = newPosition }

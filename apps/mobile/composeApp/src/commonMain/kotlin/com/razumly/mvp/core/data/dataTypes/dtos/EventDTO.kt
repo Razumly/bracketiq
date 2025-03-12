@@ -1,8 +1,8 @@
 package com.razumly.mvp.core.data.dataTypes.dtos
 
 import com.razumly.mvp.core.data.dataTypes.EventImp
-import com.razumly.mvp.core.data.dataTypes.enums.Divisions
-import com.razumly.mvp.core.data.dataTypes.enums.FieldTypes
+import com.razumly.mvp.core.data.dataTypes.enums.Division
+import com.razumly.mvp.core.data.dataTypes.enums.FieldType
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import kotlinx.serialization.Serializable
@@ -35,8 +35,8 @@ fun EventDTO.toEvent(id: String): EventImp {
         location = location,
         name = name,
         description = description,
-        divisions = divisions.map { Divisions.valueOf(it)},
-        fieldType = FieldTypes.valueOf(fieldType),
+        divisions = divisions.map { Division.valueOf(it)},
+        fieldType = FieldType.valueOf(fieldType),
         start = Instant.parse(start),
         end = Instant.parse(end),
         price = price,

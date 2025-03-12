@@ -27,7 +27,7 @@ import coil3.compose.rememberAsyncImagePainter
 import com.razumly.mvp.eventCreate.CreateEventComponent
 
 @Composable
-fun EventImage(component: CreateEventComponent, isCompleted: (Boolean) -> Unit) {
+fun EventImage(modifier: Modifier, component: CreateEventComponent, isCompleted: (Boolean) -> Unit) {
     val selectedPlace by component.selectedPlace.collectAsState()
     val imageUrls = selectedPlace?.imageUrls ?: emptyList()
     val columnCount = 3
@@ -36,7 +36,7 @@ fun EventImage(component: CreateEventComponent, isCompleted: (Boolean) -> Unit) 
 
     LazyVerticalGrid(
         columns = GridCells.Fixed(columnCount),
-        modifier = Modifier.fillMaxSize(),
+        modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(4.dp)
     ) {
         items(imageUrls) { url ->

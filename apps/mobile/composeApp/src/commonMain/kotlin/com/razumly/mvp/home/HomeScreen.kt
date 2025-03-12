@@ -9,8 +9,10 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.zIndex
 import com.arkivanov.decompose.ExperimentalDecomposeApi
@@ -26,6 +28,9 @@ import com.razumly.mvp.eventSearch.EventSearchScreen
 import com.razumly.mvp.matchDetailScreen.MatchDetailScreen
 import com.razumly.mvp.profile.ProfileScreen
 import com.razumly.mvp.tournamentDetailScreen.TournamentDetailScreen
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeSource
+import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
 import io.github.aakira.napier.Napier
 
 val LocalNavBarPadding = compositionLocalOf<PaddingValues> { error("No padding values provided") }
@@ -36,11 +41,14 @@ val LocalAnimatedVisibilityScope =
 val LocalSharedTransitionScope =
     compositionLocalOf<SharedTransitionScope> { error("No Animated Visibility Scope provided") }
 
-@OptIn(ExperimentalSharedTransitionApi::class, ExperimentalDecomposeApi::class)
+@OptIn(ExperimentalSharedTransitionApi::class, ExperimentalDecomposeApi::class,
+    ExperimentalHazeMaterialsApi::class
+)
 @Composable
 fun HomeScreen(component: HomeComponent) {
     val childStack by component.childStack.subscribeAsState()
-    val selectedPage = component.selectedPage.value
+    val selectedPage by component.selectedPage.collectAsState()
+    val hazeState = remember { HazeState() }
     Napier.d(tag = "HomeScreen") { "Current tab: ${childStack.active.configuration}" }
 
     MVPBottomNavBar(
@@ -58,7 +66,9 @@ fun HomeScreen(component: HomeComponent) {
                 ) { child ->
                     CompositionLocalProvider(LocalAnimatedVisibilityScope provides this) {
                         CompositionLocalProvider(LocalSharedTransitionScope provides this@SharedTransitionLayout) {
-                            Box(modifier = Modifier.fillMaxSize()) {
+                            Box(modifier = Modifier
+                                .fillMaxSize()
+                            ) {
                                 // Only show back button if we have screens to go back to
                                 if (childStack.backStack.isNotEmpty()) {
                                     PlatformBackButton(

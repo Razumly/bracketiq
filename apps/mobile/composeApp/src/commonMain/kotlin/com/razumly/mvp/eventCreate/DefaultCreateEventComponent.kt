@@ -10,7 +10,7 @@ import com.razumly.mvp.core.data.IMVPRepository
 import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.Tournament
-import com.razumly.mvp.core.data.dataTypes.enums.EventTypes
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.eventCreate.CreateEventComponent.Child
 import com.razumly.mvp.eventCreate.CreateEventComponent.Config
 import com.razumly.mvp.eventMap.MapComponent
@@ -44,7 +44,7 @@ class DefaultCreateEventComponent(
     private val _currentStep = MutableStateFlow(0)
     override val currentStep = _currentStep.asStateFlow()
 
-    private val _currentEventType = MutableStateFlow(EventTypes.GENERIC)
+    private val _currentEventType = MutableStateFlow(EventType.EVENT)
     override val currentEventType = _currentEventType.asStateFlow()
 
     private val _canProceed = MutableStateFlow(false)
@@ -81,8 +81,8 @@ class DefaultCreateEventComponent(
     override fun createEvent() {
         scope.launch {
             when (currentEventType.value) {
-                EventTypes.TOURNAMENT -> mvpRepository.createTournament(_newTournamentState.value)
-                EventTypes.GENERIC -> mvpRepository.createEvent(_newEventState.value)
+                EventType.TOURNAMENT -> mvpRepository.createTournament(_newTournamentState.value)
+                EventType.EVENT -> mvpRepository.createEvent(_newEventState.value)
             }
             onEventCreated()
         }
@@ -90,7 +90,7 @@ class DefaultCreateEventComponent(
 
     override fun updateEventField(update: EventImp.() -> EventImp) {
         _newEventState.value = _newEventState.value.update()
-        if (currentEventType.value == EventTypes.TOURNAMENT) {
+        if (currentEventType.value == EventType.TOURNAMENT) {
             selectTournamentEvent()
         }
     }
@@ -99,11 +99,11 @@ class DefaultCreateEventComponent(
         _newTournamentState.value = _newTournamentState.value.update()
     }
 
-    override fun selectEventType(type: EventTypes) {
+    override fun selectEventType(type: EventType) {
         _currentEventType.value = type
         when (type) {
-            EventTypes.TOURNAMENT -> selectTournamentEvent()
-            EventTypes.GENERIC -> {}
+            EventType.TOURNAMENT -> selectTournamentEvent()
+            EventType.EVENT -> {}
         }
     }
 

@@ -1,8 +1,8 @@
 package com.razumly.mvp.core.data.dataTypes
 
-import com.razumly.mvp.core.data.dataTypes.enums.Divisions
-import com.razumly.mvp.core.data.dataTypes.enums.EventTypes
-import com.razumly.mvp.core.data.dataTypes.enums.FieldTypes
+import com.razumly.mvp.core.data.dataTypes.enums.Division
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.enums.FieldType
 import kotlinx.datetime.Instant
 import kotlinx.serialization.Serializable
 
@@ -11,10 +11,10 @@ sealed interface EventAbs : MVPDocument {
     val location: String
     val name: String
     val description: String
-    val divisions: List<Divisions>
+    val divisions: List<Division>
     val lat: Double
     val long: Double
-    val fieldType: FieldTypes
+    val fieldType: FieldType
     val start: Instant
     val end: Instant
     val price: Double
@@ -24,7 +24,7 @@ sealed interface EventAbs : MVPDocument {
     val teamSizeLimit: Int
     val lastUpdated: Instant
     val hostId: String
-    val eventType: EventTypes
+    val eventType: EventType
     override val id: String
 }
 

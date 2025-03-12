@@ -32,11 +32,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
-import com.razumly.mvp.core.data.dataTypes.enums.Divisions
-import com.razumly.mvp.core.data.dataTypes.enums.EventTypes
-import com.razumly.mvp.core.data.dataTypes.enums.FieldTypes
+import com.razumly.mvp.core.data.dataTypes.enums.Division
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.enums.FieldType
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
+import com.razumly.mvp.core.util.CurrencyAmountInputVisualTransformation
 import com.razumly.mvp.eventCreate.CreateEventComponent
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDateTime
@@ -46,19 +48,19 @@ import kotlinx.datetime.toInstant
 import kotlinx.datetime.toLocalDateTime
 import mvp.composeapp.generated.resources.Res
 import mvp.composeapp.generated.resources.entry_fee
+import mvp.composeapp.generated.resources.event_description
+import mvp.composeapp.generated.resources.event_name
 import mvp.composeapp.generated.resources.free_entry_hint
 import mvp.composeapp.generated.resources.invalid_price
 import mvp.composeapp.generated.resources.max_players
 import mvp.composeapp.generated.resources.team_size_limit
-import mvp.composeapp.generated.resources.tournament_description
-import mvp.composeapp.generated.resources.tournament_name
 import mvp.composeapp.generated.resources.value_too_low
 import network.chaintech.kmp_date_time_picker.ui.datetimepicker.WheelDateTimePickerDialog
 import network.chaintech.kmp_date_time_picker.utils.now
 import org.jetbrains.compose.resources.stringResource
 
 @Composable
-fun EventBasicInfo(component: CreateEventComponent, isCompleted: (Boolean) -> Unit) {
+fun EventBasicInfo(modifier: Modifier, component: CreateEventComponent, isCompleted: (Boolean) -> Unit) {
     val eventState by component.newEventState.collectAsState()
     var price by remember { mutableStateOf("") }
     var showPriceError by remember { mutableStateOf(false) }
@@ -70,7 +72,7 @@ fun EventBasicInfo(component: CreateEventComponent, isCompleted: (Boolean) -> Un
     var showEndPicker by remember { mutableStateOf(false) }
     var startDateSelected by remember { mutableStateOf(false) }
     var endDateSelected by remember { mutableStateOf(false) }
-    var selectedDivisions by remember { mutableStateOf(emptyList<Divisions>()) }
+    var selectedDivisions by remember { mutableStateOf(emptyList<Division>()) }
 
     val formValid by remember(eventState, price, showPriceError) {
         mutableStateOf(
@@ -117,30 +119,16 @@ fun EventBasicInfo(component: CreateEventComponent, isCompleted: (Boolean) -> Un
     }
 
     Column(
+        modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         eventState?.let { event ->
-            DropdownField(
-                value = event.eventType.name,
-                label = "Event Type"
-            ) { dismiss ->
-                EventTypes.entries.forEach { eventType ->
-                    DropdownMenuItem(
-                        onClick = {
-                            dismiss()
-                            component.selectEventType(eventType)
-                            component.updateEventField { copy(eventType = eventType) }
-                        },
-                        text = { Text(text = eventType.name) }
-                    )
-                }
-            }
             OutlinedTextField(
                 value = event.name,
                 onValueChange = { input ->
                     component.updateEventField { copy(name = input) }
                 },
-                label = { Text(stringResource(Res.string.tournament_name)) },
+                label = { Text(stringResource(Res.string.event_name)) },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
             )
@@ -150,56 +138,86 @@ fun EventBasicInfo(component: CreateEventComponent, isCompleted: (Boolean) -> Un
                 onValueChange = { input ->
                     component.updateEventField { copy(description = input) }
                 },
-                label = { Text(stringResource(Res.string.tournament_description)) },
+                label = { Text(stringResource(Res.string.event_description)) },
                 modifier = Modifier.fillMaxWidth(),
                 minLines = 3
             )
 
-            DropdownField(
-                value = event.fieldType.name,
-                label = "Field Type"
-            ) { dismiss ->
-                FieldTypes.entries.forEach { fieldType ->
-                    DropdownMenuItem(
-                        onClick = {
-                            dismiss()
-                            component.updateEventField { copy(fieldType = fieldType) }
-                        },
-                        text = { Text(text = fieldType.name) }
-                    )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                DropdownField(
+                    modifier = Modifier.weight(1.2f),
+                    value = event.eventType.name,
+                    label = "Event Type"
+                ) { dismiss ->
+                    EventType.entries.forEach { eventType ->
+                        DropdownMenuItem(
+                            onClick = {
+                                dismiss()
+                                component.selectEventType(eventType)
+                                component.updateEventField { copy(eventType = eventType) }
+                            },
+                            text = { Text(text = eventType.name) }
+                        )
+                    }
                 }
-            }
+                DropdownField(
+                    modifier = Modifier.weight(1f),
+                    value = event.fieldType.name,
+                    label = "Field Type",
+                ) { dismiss ->
+                    FieldType.entries.forEach { fieldType ->
+                        DropdownMenuItem(
+                            onClick = {
+                                dismiss()
+                                component.updateEventField { copy(fieldType = fieldType) }
+                            },
+                            text = { Text(text = fieldType.name) }
+                        )
+                    }
+                }
 
-            MultiSelectDropdownField(
-                selectedItems = selectedDivisions,
-                label = "Skill levels",
-            ) { newSelection ->
-                selectedDivisions = newSelection
-                component.updateEventField { copy(divisions = selectedDivisions) }
+                MultiSelectDropdownField(
+                    selectedItems = selectedDivisions,
+                    label = "Skill levels",
+                    modifier = Modifier.weight(1f)
+                ) { newSelection ->
+                    selectedDivisions = newSelection
+                    component.updateEventField { copy(divisions = selectedDivisions) }
+                }
             }
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                NumberInputField(
-                    value = price,
-                    label = stringResource(Res.string.entry_fee),
-                    onValueChange = { newValue ->
-                        price = newValue
-                        showPriceError = false
-                        newValue.toDoubleOrNull()?.let { amount ->
-                            if (amount >= 0) {
-                                component.updateEventField { copy(price = amount) }
-                            } else {
-                                showPriceError = true
-                            }
-                        } ?: run { showPriceError = true }
-                    },
-                    isError = showPriceError,
-                    errorMessage = stringResource(Res.string.invalid_price),
-                    modifier = Modifier.weight(1f)
-                )
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    NumberInputField(
+                        value = price,
+                        label = stringResource(Res.string.entry_fee),
+                        onValueChange = { newValue ->
+                            price = newValue
+                            showPriceError = false
+                            newValue.toDoubleOrNull()?.let { amount ->
+                                if (amount >= 0) {
+                                    component.updateEventField { copy(price = amount/100) }
+                                } else {
+                                    showPriceError = true
+                                }
+                            } ?: run { showPriceError = true }
+                        },
+                        isError = showPriceError,
+                        errorMessage = stringResource(Res.string.invalid_price),
+                        modifier = Modifier.fillMaxWidth(),
+                        isMoney = true,
+                        supportingText = stringResource(Res.string.free_entry_hint)
+                    )
+                }
                 NumberInputField(
                     value = teamSizeLimit,
                     label = stringResource(Res.string.team_size_limit),
@@ -216,7 +234,9 @@ fun EventBasicInfo(component: CreateEventComponent, isCompleted: (Boolean) -> Un
                     },
                     isError = showTeamSizeLimitError,
                     errorMessage = stringResource(Res.string.value_too_low),
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    isMoney = false,
+                    supportingText = "2-6"
                 )
                 NumberInputField(
                     value = maxPlayers,
@@ -234,56 +254,57 @@ fun EventBasicInfo(component: CreateEventComponent, isCompleted: (Boolean) -> Un
                     },
                     isError = showMaxPlayersError,
                     errorMessage = stringResource(Res.string.value_too_low),
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    isMoney = false,
                 )
             }
 
-            Text(
-                text = stringResource(Res.string.free_entry_hint),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            OutlinedTextField(
-                value = event.start.toLocalDateTime(TimeZone.currentSystemDefault()).format(
-                    dateTimeFormat
-                ),
-                onValueChange = {},
-                label = { Text("Start Date & Time") },
-                readOnly = true,
-                modifier = Modifier
-                    .fillMaxWidth(),
-                interactionSource = remember { MutableInteractionSource() }
-                    .also { interactionSource ->
-                        LaunchedEffect(interactionSource) {
-                            interactionSource.interactions.collect {
-                                if (it is PressInteraction.Release) {
-                                    showStartPicker = true
-                                }
-                            }
-                        }
-                    }
-            )
-
-            OutlinedTextField(
-                value = event.end.toLocalDateTime(TimeZone.currentSystemDefault()).format(
-                    dateTimeFormat
-                ),
-                onValueChange = { },
-                label = { Text("End Date & Time") },
-                readOnly = true,
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-                interactionSource = remember { MutableInteractionSource() }
-                    .also { interactionSource ->
-                        LaunchedEffect(interactionSource) {
-                            interactionSource.interactions.collect {
-                                if (it is PressInteraction.Release) {
-                                    showEndPicker = true
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ){
+                OutlinedTextField(
+                    value = event.start.toLocalDateTime(TimeZone.currentSystemDefault()).format(
+                        dateTimeFormat
+                    ),
+                    onValueChange = {},
+                    label = { Text("Start Date & Time") },
+                    readOnly = true,
+                    modifier = Modifier.weight(1f),
+                    interactionSource = remember { MutableInteractionSource() }
+                        .also { interactionSource ->
+                            LaunchedEffect(interactionSource) {
+                                interactionSource.interactions.collect {
+                                    if (it is PressInteraction.Release) {
+                                        showStartPicker = true
+                                    }
                                 }
                             }
-                        }
-                    }
-            )
+                        },
+                    singleLine = true
+                )
+
+                OutlinedTextField(
+                    value = event.end.toLocalDateTime(TimeZone.currentSystemDefault()).format(
+                        dateTimeFormat
+                    ),
+                    onValueChange = { },
+                    label = { Text("End Date & Time") },
+                    readOnly = true,
+                    modifier = Modifier.weight(1f),
+                    interactionSource = remember { MutableInteractionSource() }
+                        .also { interactionSource ->
+                            LaunchedEffect(interactionSource) {
+                                interactionSource.interactions.collect {
+                                    if (it is PressInteraction.Release) {
+                                        showEndPicker = true
+                                    }
+                                }
+                            }
+                        },
+                    singleLine = true
+                )
+            }
         }
     }
 }
@@ -316,6 +337,7 @@ fun DateTimePickerDialog(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DropdownField(
+    modifier: Modifier,
     value: String,
     label: String,
     content: @Composable (onDismiss: () -> Unit) -> Unit
@@ -323,6 +345,7 @@ fun DropdownField(
     var expanded by remember { mutableStateOf(false) }
 
     ExposedDropdownMenuBox(
+        modifier = modifier,
         expanded = expanded,
         onExpandedChange = { state -> expanded = state }
     ) {
@@ -335,8 +358,8 @@ fun DropdownField(
                 ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
             },
             modifier = Modifier
-                .menuAnchor(MenuAnchorType.PrimaryEditable, true)
                 .fillMaxWidth()
+                .menuAnchor(MenuAnchorType.PrimaryEditable, true)
         )
         ExposedDropdownMenu(
             expanded = expanded,
@@ -350,10 +373,10 @@ fun DropdownField(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MultiSelectDropdownField(
-    selectedItems: List<Divisions>,
+    selectedItems: List<Division>,
     label: String,
     modifier: Modifier = Modifier,
-    onSelectionChange: (List<Divisions>) -> Unit,
+    onSelectionChange: (List<Division>) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
 
@@ -367,13 +390,14 @@ fun MultiSelectDropdownField(
     ExposedDropdownMenuBox(
         expanded = expanded,
         onExpandedChange = { expanded = it },
-        modifier = modifier.fillMaxWidth()
+        modifier = modifier
     ) {
         OutlinedTextField(
             value = displayText,
             onValueChange = {},
             readOnly = true,
-            label = { Text(label) },
+            singleLine = true,
+            label = { Text(label, maxLines = 1) },
             trailingIcon = {
                 ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
             },
@@ -386,7 +410,7 @@ fun MultiSelectDropdownField(
             expanded = expanded,
             onDismissRequest = { expanded = false }
         ) {
-            Divisions.entries.forEach { division ->
+            Division.entries.forEach { division ->
                 DropdownMenuItem(
                     onClick = {
                         // Toggle selection without dismissing the menu.
@@ -431,22 +455,30 @@ fun NumberInputField(
     label: String,
     onValueChange: (String) -> Unit,
     isError: Boolean,
+    isMoney: Boolean,
     errorMessage: String? = null,
     modifier: Modifier = Modifier,
-    keyboardType: KeyboardType = KeyboardType.Number
+    keyboardType: KeyboardType = KeyboardType.Number,
+    supportingText: String? = null
 ) {
     Column(modifier = modifier) {
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
-            label = { Text(label) },
+            label = { Text(label, maxLines = 1) },
             keyboardOptions = KeyboardOptions(
                 keyboardType = keyboardType,
                 imeAction = ImeAction.Done
             ),
             singleLine = true,
             isError = isError,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth(),
+            visualTransformation = if (isMoney) CurrencyAmountInputVisualTransformation() else VisualTransformation.None,
+            supportingText = {
+                if (supportingText != null) {
+                    Text(supportingText)
+                }
+            }
         )
         if (isError && errorMessage != null) {
             Text(

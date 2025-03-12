@@ -1,6 +1,6 @@
 package com.razumly.mvp.core.data.dataTypes.enums
 
-enum class Divisions {
+enum class Division {
     NOVICE,
     B,
     BB,

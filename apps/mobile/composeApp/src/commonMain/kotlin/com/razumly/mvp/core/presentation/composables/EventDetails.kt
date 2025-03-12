@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddCircle
@@ -32,7 +33,9 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import com.razumly.mvp.core.data.dataTypes.EventAbs
+import com.razumly.mvp.core.presentation.util.cleanup
 import com.razumly.mvp.core.presentation.util.dateFormat
+import com.razumly.mvp.core.presentation.util.toTitleCase
 import com.razumly.mvp.eventList.components.StylizedText
 import com.razumly.mvp.eventList.util.TextPatterns
 import com.razumly.mvp.home.LocalAnimatedVisibilityScope
@@ -74,7 +77,7 @@ fun EventDetails(
                     rememberSharedContentState(event.id),
                     LocalAnimatedVisibilityScope.current,
                 )
-                .fillMaxSize()
+                .wrapContentSize()
         ) {
             // Image Section with Favorite Button
             Box(
@@ -118,7 +121,7 @@ fun EventDetails(
             // Event Details Section
             Column(
                 modifier = Modifier.padding(16.dp)
-                    .fillMaxSize(),
+                    .wrapContentSize(),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Row(
@@ -155,12 +158,10 @@ fun EventDetails(
                 }
 
                 if (showDescription) {
-                    event.description?.let {
-                        StylizedText(it, patterns)
-                    }
+                    StylizedText(event.description, patterns)
                 }
 
-                StylizedText("${event.fieldType} Tournament", patterns)
+                StylizedText("${event.fieldType} ${event.eventType}".toTitleCase(), patterns)
                 StylizedText("Divisions: ${event.divisions.joinToString(", ")}", patterns)
                 androidx.compose.material3.HorizontalDivider(thickness = 2.dp)
 
@@ -173,7 +174,7 @@ fun EventDetails(
                         style = MaterialTheme.typography.bodyMedium
                     )
                     Text(
-                        text = "$${event.price}",
+                        text = "$"+cleanup("${event.price}"),
                         style = MaterialTheme.typography.bodyMedium
                     )
                 }

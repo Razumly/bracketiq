@@ -33,7 +33,7 @@ import androidx.compose.ui.unit.dp
 import com.razumly.mvp.eventCreate.CreateEventComponent
 
 @Composable
-fun TournamentInfo(component: CreateEventComponent, isCompleted: (Boolean) -> Unit) {
+fun TournamentInfo(modifier: Modifier, component: CreateEventComponent, isCompleted: (Boolean) -> Unit) {
     val tournamentState by component.newTournamentState.collectAsState()
     var doubleElimination by remember { mutableStateOf(false) }
     var winnerSetCount by remember { mutableIntStateOf(3) }
@@ -68,6 +68,7 @@ fun TournamentInfo(component: CreateEventComponent, isCompleted: (Boolean) -> Un
     }
 
     Column(
+        modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Row(

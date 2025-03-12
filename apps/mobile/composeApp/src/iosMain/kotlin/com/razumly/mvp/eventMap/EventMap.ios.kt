@@ -1,5 +1,6 @@
 package com.razumly.mvp.eventMap
 
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import com.razumly.mvp.core.data.dataTypes.EventAbs
@@ -11,6 +12,7 @@ actual fun EventMap(
     onEventSelected: (event: EventAbs) -> Unit,
     onPlaceSelected: (place: MVPPlace) -> Unit,
     canClickPOI: Boolean,
-    modifier: Modifier
+    modifier: Modifier,
+    searchBarPadding: PaddingValues
 ) {
 }

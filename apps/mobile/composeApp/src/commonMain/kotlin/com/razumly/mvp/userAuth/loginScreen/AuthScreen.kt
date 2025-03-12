@@ -1,5 +1,6 @@
 package com.razumly.mvp.userAuth.loginScreen
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -10,6 +11,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -27,7 +29,6 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.LoginState
-import com.razumly.mvp.core.data.dataTypes.UserWithRelations
 import com.razumly.mvp.icons.BaselineVisibility24
 import com.razumly.mvp.icons.BaselineVisibilityOff24
 import com.razumly.mvp.icons.MVPIcons
@@ -48,9 +49,10 @@ fun AuthScreenBase(component: AuthComponent, onOauth2: () -> Unit?) {
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
             .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+        verticalArrangement = Arrangement.Center,
     ) {
         if (isSignup) {
             OutlinedTextField(

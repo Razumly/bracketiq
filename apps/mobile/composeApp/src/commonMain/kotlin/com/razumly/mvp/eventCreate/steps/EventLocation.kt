@@ -1,5 +1,6 @@
 package com.razumly.mvp.eventCreate.steps
 
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -12,6 +13,7 @@ import com.razumly.mvp.eventMap.MapComponent
 
 @Composable
 fun EventLocation(
+    searchBarPadding: PaddingValues,
     mapComponent: MapComponent,
     createEventComponent: CreateEventComponent,
     isCompleted: (Boolean) -> Unit
@@ -38,5 +40,6 @@ fun EventLocation(
             createEventComponent.selectPlace(place)
         },
         true,
+        searchBarPadding = searchBarPadding,
     )
 }

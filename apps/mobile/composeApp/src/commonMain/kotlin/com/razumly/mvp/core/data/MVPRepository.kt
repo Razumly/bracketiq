@@ -355,7 +355,7 @@ class MVPRepository(
                             Query.lessThan(DbConstants.LONG_ATTRIBUTE, bounds.east),
                         ),
                         EventDTO::class
-                    ).documents.map { dtoDoc -> dtoDoc.convert { it.toEvent(it.id) } }
+                    ).documents.map { dtoDoc -> dtoDoc.convert { it.toEvent(dtoDoc.id) } }
                 },
                 getLocalIds = {
                     tournamentDB.getEventImpDao.getAllCachedEvents().toSet()

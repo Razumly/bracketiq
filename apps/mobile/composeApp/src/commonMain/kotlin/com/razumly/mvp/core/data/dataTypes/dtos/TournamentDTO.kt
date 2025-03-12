@@ -1,8 +1,8 @@
 package com.razumly.mvp.core.data.dataTypes.dtos
 
 import com.razumly.mvp.core.data.dataTypes.Tournament
-import com.razumly.mvp.core.data.dataTypes.enums.Divisions
-import com.razumly.mvp.core.data.dataTypes.enums.FieldTypes
+import com.razumly.mvp.core.data.dataTypes.enums.Division
+import com.razumly.mvp.core.data.dataTypes.enums.FieldType
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import kotlinx.serialization.Serializable
@@ -42,7 +42,7 @@ fun TournamentDTO.toTournament(id: String): Tournament {
         name = name,
         description = description,
         doubleElimination = doubleElimination,
-        divisions = divisions.map { Divisions.valueOf(it)},
+        divisions = divisions.map { Division.valueOf(it)},
         winnerSetCount = winnerSetCount,
         loserSetCount = loserSetCount,
         winnerBracketPointsToVictory = winnerBracketPointsToVictory,
@@ -50,7 +50,7 @@ fun TournamentDTO.toTournament(id: String): Tournament {
         winnerScoreLimitsPerSet = winnerScoreLimitsPerSet,
         loserScoreLimitsPerSet = loserScoreLimitsPerSet,
         location = location,
-        fieldType = FieldTypes.valueOf(fieldType),
+        fieldType = FieldType.valueOf(fieldType),
         start = Instant.parse(start),
         end = Instant.parse(end),
         hostId = hostId,

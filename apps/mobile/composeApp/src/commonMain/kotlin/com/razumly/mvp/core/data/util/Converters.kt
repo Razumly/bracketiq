@@ -1,7 +1,7 @@
 package com.razumly.mvp.core.data.util
 
 import androidx.room.TypeConverter
-import com.razumly.mvp.core.data.dataTypes.enums.Divisions
+import com.razumly.mvp.core.data.dataTypes.enums.Division
 import kotlinx.datetime.Instant
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -41,13 +41,13 @@ class Converters {
     }
 
     @TypeConverter
-    fun fromDivisionsList(divisions: List<Divisions>?): String {
+    fun fromDivisionsList(divisions: List<Division>?): String {
         return divisions?.joinToString(separator = ",") { it.name } ?: ""
     }
 
     @TypeConverter
-    fun toDivisionsList(data: String?): List<Divisions> {
+    fun toDivisionsList(data: String?): List<Division> {
         if (data.isNullOrEmpty()) return emptyList()
-        return data.split(",").map { Divisions.valueOf(it) }
+        return data.split(",").map { Division.valueOf(it) }
     }
 }

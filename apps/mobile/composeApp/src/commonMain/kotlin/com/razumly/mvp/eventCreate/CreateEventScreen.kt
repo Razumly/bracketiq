@@ -4,6 +4,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,6 +26,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarColors
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -33,26 +35,33 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.arkivanov.decompose.extensions.compose.stack.Children
 import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import com.arkivanov.decompose.router.stack.ChildStack
-import com.razumly.mvp.core.data.dataTypes.enums.EventTypes
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.eventCreate.steps.EventBasicInfo
 import com.razumly.mvp.eventCreate.steps.EventImage
 import com.razumly.mvp.eventCreate.steps.EventLocation
 import com.razumly.mvp.eventCreate.steps.Preview
 import com.razumly.mvp.eventCreate.steps.TournamentInfo
 import com.razumly.mvp.home.LocalNavBarPadding
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeEffect
+import dev.chrisbanes.haze.hazeSource
+import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
+import dev.chrisbanes.haze.materials.HazeMaterials
 import io.github.aakira.napier.Napier
 import kotlinx.datetime.Clock
 import mvp.composeapp.generated.resources.Res
-import mvp.composeapp.generated.resources.create_new_tournament
+import mvp.composeapp.generated.resources.create_new_event
 import mvp.composeapp.generated.resources.create_tournament
 import mvp.composeapp.generated.resources.next
 import mvp.composeapp.generated.resources.previous
 import org.jetbrains.compose.resources.stringResource
 
+@OptIn(ExperimentalHazeMaterialsApi::class)
 @Composable
 fun CreateEventScreen(
     component: CreateEventComponent
@@ -62,21 +71,19 @@ fun CreateEventScreen(
     val stepsTotal = CreateEventComponent.Child.STEPS
     val contentPadding = remember { mutableStateOf(16.dp) }
     val canProceed = remember { mutableStateOf(false) }
+    val hazeState = remember { HazeState() }
 
-    // Animation control for the progress indicator.
     val targetProgress = remember { mutableStateOf(0f) }
     val animatedProgress by animateFloatAsState(
         targetValue = targetProgress.value,
         animationSpec = tween(durationMillis = 500)
     )
 
-    // Update progress when step changes.
     LaunchedEffect(currentStep) {
         val newProgress = currentStep.toFloat() / stepsTotal
         targetProgress.value = newProgress
     }
 
-    // Prevent rapid navigation.
     var lastNavigationTime by remember { mutableStateOf(0L) }
     var lastInstance by remember { mutableStateOf<Any?>(null) }
     LaunchedEffect(childStack.active.instance) {
@@ -93,7 +100,12 @@ fun CreateEventScreen(
 
     Scaffold(
         topBar = {
-            CreateEventTopBar(animatedProgress = animatedProgress)
+            Column(
+                Modifier
+                    .hazeEffect(hazeState, HazeMaterials.ultraThin())
+            ){
+                CreateEventTopBar(animatedProgress = animatedProgress)
+            }
         },
         floatingActionButton = {
             CreateEventNavigationFABs(
@@ -108,40 +120,55 @@ fun CreateEventScreen(
         // Place the FABs in the center at the bottom (they will appear above the system nav bar)
         floatingActionButtonPosition = FabPosition.Center,
         content = { innerPadding ->
-            Column(
+            Children(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(innerPadding)
-                    .padding(contentPadding.value)
-                    .statusBarsPadding(), // Ensures top status bar padding is applied
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                // The step content is rendered here.
-                Children(
-                    modifier = Modifier.weight(1f),
-                    stack = childStack,
-                ) { child ->
-                    when (val instance = child.instance) {
-                        is CreateEventComponent.Child.EventBasicInfo -> {
-                            contentPadding.value = 16.dp
-                            EventBasicInfo(component) { canProceed.value = it }
-                        }
-                        is CreateEventComponent.Child.EventLocation -> {
-                            contentPadding.value = 0.dp
-                            EventLocation(instance.component, component)  { canProceed.value = it }
-                        }
-                        is CreateEventComponent.Child.EventImage -> {
-                            contentPadding.value = 16.dp
-                            EventImage(component) { canProceed.value = it}
-                        }
-                        is CreateEventComponent.Child.TournamentInfo -> {
-                            contentPadding.value = 16.dp
-                            TournamentInfo(component) { canProceed.value = it}
-                        }
-                        is CreateEventComponent.Child.Preview -> {
-                            contentPadding.value = 16.dp
-                            Preview(component)
-                        }
+                    .hazeSource(hazeState),
+                stack = childStack,
+            ) { child ->
+                when (val instance = child.instance) {
+                    is CreateEventComponent.Child.EventBasicInfo -> {
+                        EventBasicInfo(
+                            Modifier
+                                .statusBarsPadding()
+                                .padding(innerPadding)
+                                .padding(horizontal = 16.dp),
+                            component
+                        ) { canProceed.value = it }
+                    }
+                    is CreateEventComponent.Child.EventLocation -> {
+                        EventLocation(
+                            PaddingValues(top = 64.dp),
+                            instance.component,
+                            component
+                        )  { canProceed.value = it }
+                    }
+                    is CreateEventComponent.Child.EventImage -> {
+                        EventImage(
+                            Modifier
+                                .statusBarsPadding()
+                                .padding(innerPadding)
+                                .padding(horizontal = 16.dp),
+                            component
+                        ) { canProceed.value = it}
+                    }
+                    is CreateEventComponent.Child.TournamentInfo -> {
+                        TournamentInfo(
+                            Modifier
+                                .statusBarsPadding()
+                                .padding(innerPadding)
+                                .padding(horizontal = 16.dp),
+                            component
+                        ) { canProceed.value = it}
+                    }
+                    is CreateEventComponent.Child.Preview -> {
+                        Preview(
+                            Modifier
+                                .statusBarsPadding()
+                                .padding(innerPadding)
+                                .padding(horizontal = 16.dp),
+                            component
+                        )
                     }
                 }
             }
@@ -153,10 +180,18 @@ fun CreateEventScreen(
 @Composable
 fun CreateEventTopBar(animatedProgress: Float) {
     // A custom top bar that shows the title and a linear progress indicator.
+    val colors = TopAppBarColors(
+        containerColor = Color.Transparent,
+        scrolledContainerColor = Color.Transparent,
+        navigationIconContentColor = MaterialTheme.colorScheme.onBackground,
+        titleContentColor = MaterialTheme.colorScheme.onBackground,
+        actionIconContentColor = MaterialTheme.colorScheme.onBackground
+    )
     Column {
         TopAppBar(
-            title = { Text(stringResource(Res.string.create_new_tournament)) },
-            modifier = Modifier.fillMaxWidth()
+            title = { Text(stringResource(Res.string.create_new_event)) },
+            modifier = Modifier.fillMaxWidth(),
+            colors = colors
         )
         LinearProgressIndicator(
             progress = { animatedProgress },
@@ -197,7 +232,7 @@ fun CreateEventNavigationFABs(
 
         if (childStack.active.instance != CreateEventComponent.Child.Preview) {
             if (childStack.active.instance == CreateEventComponent.Child.EventImage &&
-                currentEventType == EventTypes.GENERIC
+                currentEventType == EventType.EVENT
             )
             {
                 FloatingActionButton(
@@ -205,12 +240,21 @@ fun CreateEventNavigationFABs(
                         if (enabled) {
                             component.nextStep(CreateEventComponent.Config.Preview)
                         }
-                    }
+                    },
+                    containerColor = if (enabled) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.tertiaryContainer
+                    },
+                    contentColor = if (enabled) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onTertiaryContainer
+                    },
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                         contentDescription = stringResource(Res.string.next),
-                        tint = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.inversePrimary
                     )
                 }
             }
@@ -222,12 +266,21 @@ fun CreateEventNavigationFABs(
                                 component.nextStep(it)
                             }
                         }
-                    }
+                    },
+                    containerColor = if (enabled) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.tertiaryContainer
+                    },
+                    contentColor = if (enabled) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onTertiaryContainer
+                    },
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                         contentDescription = stringResource(Res.string.next),
-                        tint = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.inversePrimary
                     )
                 }
             }

@@ -20,8 +20,10 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FabPosition
 import androidx.compose.material3.Icon
+import androidx.compose.material3.NavigationBarDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.contentColorFor
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -39,7 +41,6 @@ import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.presentation.util.CircularRevealShape
 import com.razumly.mvp.core.presentation.util.isScrollingUp
 import com.razumly.mvp.eventList.EventList
-import com.razumly.mvp.eventList.components.FilterBar
 import com.razumly.mvp.eventList.components.SearchBox
 import com.razumly.mvp.eventMap.EventMap
 import com.razumly.mvp.eventMap.MapComponent
@@ -74,11 +75,10 @@ fun EventSearchScreen(component: SearchEventListComponent, mapComponent: MapComp
                 Column(
                     modifier = Modifier
                         .wrapContentSize()
-                        .hazeEffect(hazeState, HazeMaterials.ultraThin())
+                        .hazeEffect(hazeState, HazeMaterials.ultraThin(NavigationBarDefaults.containerColor))
                         .statusBarsPadding()
                 ) {
                     SearchBox()
-                    FilterBar()
                 }
             },
             floatingActionButton = {
@@ -117,17 +117,18 @@ fun EventSearchScreen(component: SearchEventListComponent, mapComponent: MapComp
                 Modifier
                     .hazeSource(hazeState),
             )
+            EventMap(
+                mapComponent,
+                { event ->
+                    component.selectEvent(event)
+                },
+                {},
+                false,
+                Modifier
+                    .graphicsLayer { alpha = if (showMapCard.value) 1f else 0f }
+                    .clip(CircularRevealShape(animationProgress, revealCenter)),
+                PaddingValues()
+            )
         }
-        EventMap(
-            mapComponent,
-            { event ->
-                component.selectEvent(event)
-            },
-            {},
-            false,
-            Modifier
-                .graphicsLayer { alpha = if (showMapCard.value) 1f else 0f }
-                .clip(CircularRevealShape(animationProgress, revealCenter))
-        )
     }
 }

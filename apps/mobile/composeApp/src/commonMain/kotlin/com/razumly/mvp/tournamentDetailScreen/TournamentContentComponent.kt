@@ -5,7 +5,7 @@ import com.razumly.mvp.core.data.IMVPRepository
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
-import com.razumly.mvp.core.data.dataTypes.enums.Divisions
+import com.razumly.mvp.core.data.dataTypes.enums.Division
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -23,7 +23,7 @@ interface TournamentContentComponent : ComponentContext {
     val divisionMatches: StateFlow<List<MatchWithRelations>>
     val currentMatches: StateFlow<Map<String, MatchWithRelations>>
     val divisionTeams: StateFlow<List<TeamWithPlayers>>
-    val selectedDivision: StateFlow<Divisions?>
+    val selectedDivision: StateFlow<Division?>
     val isBracketView: StateFlow<Boolean>
     val rounds: StateFlow<List<List<MatchWithRelations?>>>
     val losersBracket: StateFlow<Boolean>
@@ -31,7 +31,7 @@ interface TournamentContentComponent : ComponentContext {
     val currentTeams: StateFlow<Map<String, TeamWithPlayers>>
 
     fun matchSelected(selectedMatch: MatchWithRelations)
-    fun selectDivision(division: Divisions)
+    fun selectDivision(division: Division)
     fun toggleBracketView()
     fun toggleLosersBracket()
     fun toggleDetails()
@@ -67,7 +67,7 @@ class DefaultTournamentContentComponent(
     private val _divisionTeams = MutableStateFlow<List<TeamWithPlayers>>(listOf())
     override val divisionTeams = _divisionTeams.asStateFlow()
 
-    private val _selectedDivision = MutableStateFlow<Divisions?>(null)
+    private val _selectedDivision = MutableStateFlow<Division?>(null)
     override val selectedDivision = _selectedDivision.asStateFlow()
 
     private val _isBracketView = MutableStateFlow(false)
@@ -121,7 +121,7 @@ class DefaultTournamentContentComponent(
         onMatchSelected(selectedMatch)
     }
 
-    override fun selectDivision(division: Divisions) {
+    override fun selectDivision(division: Division) {
         _selectedDivision.value = division
         _divisionTeams.value =
             currentTeams.value.values.filter { it.team.division == division }

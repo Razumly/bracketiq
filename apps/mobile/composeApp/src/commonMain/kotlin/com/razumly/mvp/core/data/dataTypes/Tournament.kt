@@ -3,9 +3,9 @@ package com.razumly.mvp.core.data.dataTypes
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import com.razumly.mvp.core.data.dataTypes.dtos.TournamentDTO
-import com.razumly.mvp.core.data.dataTypes.enums.Divisions
-import com.razumly.mvp.core.data.dataTypes.enums.EventTypes
-import com.razumly.mvp.core.data.dataTypes.enums.FieldTypes
+import com.razumly.mvp.core.data.dataTypes.enums.Division
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.enums.FieldType
 import io.appwrite.ID
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
@@ -25,9 +25,9 @@ data class Tournament(
     @PrimaryKey override var id: String,
     override val name: String,
     override val description: String,
-    override val divisions: List<Divisions>,
+    override val divisions: List<Division>,
     override val location: String,
-    override val fieldType: FieldTypes,
+    override val fieldType: FieldType,
     override val start: Instant,
     override val end: Instant,
     override val price: Double,
@@ -36,7 +36,7 @@ data class Tournament(
     override val lat: Double,
     override val long: Double,
     override val hostId: String,
-    @Transient override val eventType: EventTypes = EventTypes.TOURNAMENT,
+    @Transient override val eventType: EventType = EventType.TOURNAMENT,
     @Transient override val lastUpdated: Instant = Clock.System.now(),
     override val maxPlayers: Int,
     override val teamSizeLimit: Int,
@@ -56,7 +56,7 @@ data class Tournament(
                 description = "",
                 divisions = listOf(),
                 location = "",
-                fieldType = FieldTypes.GRASS,
+                fieldType = FieldType.GRASS,
                 start = Instant.DISTANT_PAST,
                 end = Instant.DISTANT_PAST,
                 hostId = "",

@@ -3,9 +3,9 @@ package com.razumly.mvp.core.data.dataTypes
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import com.razumly.mvp.core.data.dataTypes.dtos.EventDTO
-import com.razumly.mvp.core.data.dataTypes.enums.Divisions
-import com.razumly.mvp.core.data.dataTypes.enums.EventTypes
-import com.razumly.mvp.core.data.dataTypes.enums.FieldTypes
+import com.razumly.mvp.core.data.dataTypes.enums.Division
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.enums.FieldType
 import io.appwrite.ID
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
@@ -20,10 +20,10 @@ data class EventImp(
     override val location: String,
     override val name: String,
     override val description: String,
-    override val divisions: List<Divisions>,
+    override val divisions: List<Division>,
     override val lat: Double,
     override val long: Double,
-    override val fieldType: FieldTypes,
+    override val fieldType: FieldType,
     override val start: Instant,
     override val end: Instant,
     override val price: Double,
@@ -31,7 +31,7 @@ data class EventImp(
     override val imageUrl: String,
     override val teamSizeLimit: Int,
     override val maxPlayers: Int,
-    @Transient override val eventType: EventTypes = EventTypes.GENERIC,
+    @Transient override val eventType: EventType = EventType.EVENT,
     @Transient override val lastUpdated: Instant = Clock.System.now(),
 ): EventAbs {
     companion object {
@@ -45,7 +45,7 @@ data class EventImp(
                 divisions = listOf(),
                 lat = 0.0,
                 long = 0.0,
-                fieldType = FieldTypes.GRASS,
+                fieldType = FieldType.GRASS,
                 start = Clock.System.now(),
                 end = Clock.System.now(),
                 price = 0.0,
