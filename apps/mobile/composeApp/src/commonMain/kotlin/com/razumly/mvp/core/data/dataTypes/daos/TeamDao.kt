@@ -34,7 +34,11 @@ interface TeamDao {
 
     @Transaction
     @Query("SELECT * FROM Team WHERE tournament = :tournamentId")
-    fun getTeamsWithPlayers(tournamentId: String): Flow<List<TeamWithPlayers>>
+    fun getTeamsInTournamentFlow(tournamentId: String): Flow<List<TeamWithPlayers>>
+
+    @Transaction
+    @Query("SELECT * FROM Team WHERE id In (:ids)")
+    fun getTeamsWithPlayersFlowByIds(ids: List<String>): Flow<List<TeamWithPlayers>>
 
     // Add player to team
     @Transaction

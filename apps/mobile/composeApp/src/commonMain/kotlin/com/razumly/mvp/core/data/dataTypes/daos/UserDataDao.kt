@@ -31,16 +31,19 @@ interface UserDataDao {
     suspend fun upsertUserTournamentCrossRefs(crossRefs: List<UserTournamentCrossRef>)
 
     @Upsert
-    suspend fun upsertUserPickupGamesCrossRef(crossRef: UserEventCrossRef)
+    suspend fun upsertUserEventCrossRef(crossRef: UserEventCrossRef)
 
     @Upsert
-    suspend fun upsertUserPickupGamesCrossRefs(crossRefs: List<UserEventCrossRef>)
+    suspend fun upsertUserEventCrossRefs(crossRefs: List<UserEventCrossRef>)
 
     @Delete
     suspend fun deleteUserData(userData: UserData)
 
     @Query("DELETE FROM user_tournament_cross_ref WHERE userId IN (:userIds)")
     suspend fun deleteTournamentCrossRefById(userIds: List<String>)
+
+    @Query("DELETE FROM user_event_cross_ref WHERE userId IN (:userIds)")
+    suspend fun deleteEventCrossRefById(userIds: List<String>)
 
     @Query("DELETE FROM team_user_cross_ref WHERE userId IN (:userIds)")
     suspend fun deleteTeamCrossRefById(userIds: List<String>)
@@ -52,6 +55,6 @@ interface UserDataDao {
     suspend fun getUserWithRelationsById(id: String): UserWithRelations
 
     @Query("SELECT * FROM UserData WHERE id = :id")
-    fun getUserWithRelationsFlowById(id: String): Flow<UserWithRelations>
+    fun getUserWithRelationsFlowById(id: String): Flow<UserWithRelations?>
 
 }

@@ -8,7 +8,7 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.MailOutline
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
@@ -39,7 +39,7 @@ fun MVPBottomNavBar(
 ) {
     val items = listOf(
         NavigationItem(HomeComponent.Config.Search,"search","Search"),
-        NavigationItem(HomeComponent.Config.Following,"favorite", "Following"),
+        NavigationItem(HomeComponent.Config.Messages,"messages", "Messages"),
         NavigationItem(HomeComponent.Config.Create, "add", "Create"),
         NavigationItem(HomeComponent.Config.Profile, "person", "Profile")
     )
@@ -72,8 +72,8 @@ fun MVPBottomNavBar(
                                     Icons.Default.Search,
                                     contentDescription = item.titleResId
                                 )
-                                "favorite" -> Icon(
-                                    Icons.Default.Favorite,
+                                "messages" -> Icon(
+                                    Icons.Default.MailOutline,
                                     contentDescription = item.titleResId
                                 )
                                 "add" -> Icon(

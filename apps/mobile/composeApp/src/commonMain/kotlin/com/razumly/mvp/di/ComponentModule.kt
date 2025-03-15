@@ -1,16 +1,16 @@
 package com.razumly.mvp.di
 
 import com.arkivanov.decompose.ComponentContext
+import com.razumly.mvp.Message.DefaultMessagesComponent
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.presentation.RootComponent
 import com.razumly.mvp.eventCreate.DefaultCreateEventComponent
-import com.razumly.mvp.eventFollowing.FollowingEventListComponent
 import com.razumly.mvp.eventSearch.SearchEventListComponent
 import com.razumly.mvp.home.DefaultHomeComponent
 import com.razumly.mvp.matchDetailScreen.DefaultMatchContentComponent
 import com.razumly.mvp.profile.DefaultProfileComponent
-import com.razumly.mvp.tournamentDetailScreen.DefaultTournamentContentComponent
+import com.razumly.mvp.eventDetailScreen.DefaultEventContentComponent
 import com.razumly.mvp.userAuth.loginScreen.AuthComponent
 import org.koin.dsl.module
 
@@ -49,13 +49,13 @@ val componentModule = module {
     factory {
         (
             componentContext: ComponentContext,
-            tournamentId: String,
+            event: EventAbs,
             onMatchSelected: (MatchWithRelations) -> Unit,
         ) ->
-            DefaultTournamentContentComponent(
+            DefaultEventContentComponent(
                 componentContext = componentContext,
                 mvpRepository = get(),
-                tournamentId = tournamentId,
+                event = event,
                 onMatchSelected = onMatchSelected,
             )
     }
@@ -72,21 +72,25 @@ val componentModule = module {
     factory {
         (
             componentContext: ComponentContext,
-            onTournamentSelected: (tournamentId: String) -> Unit,
+            onEventSelected: (event: EventAbs) -> Unit,
         ) ->
             SearchEventListComponent(
                 componentContext = componentContext,
                 mvpRepository = get(),
                 locationTracker = get(),
-                onTournamentSelected = onTournamentSelected
+                onEventSelected = onEventSelected
             )
     }
 
-    factory { (componentContext: ComponentContext, onTournamentSelected: (EventAbs) -> Unit) ->
-        FollowingEventListComponent(
+    factory {
+        (
+            componentContext: ComponentContext,
+            onEventSelected: (tournamentId: String) -> Unit
+        ) ->
+        DefaultMessagesComponent(
             componentContext = componentContext,
             mvpRepository = get(),
-            onTournamentSelected = onTournamentSelected
+            onEventSelected = onEventSelected
         )
     }
 

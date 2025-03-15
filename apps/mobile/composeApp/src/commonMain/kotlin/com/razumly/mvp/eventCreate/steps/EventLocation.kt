@@ -41,5 +41,6 @@ fun EventLocation(
         },
         true,
         searchBarPadding = searchBarPadding,
+        focusLocation = null,
     )
 }

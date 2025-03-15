@@ -20,16 +20,15 @@ import com.arkivanov.decompose.extensions.compose.experimental.stack.ChildStack
 import com.arkivanov.decompose.extensions.compose.experimental.stack.animation.fade
 import com.arkivanov.decompose.extensions.compose.experimental.stack.animation.stackAnimation
 import com.arkivanov.decompose.extensions.compose.subscribeAsState
+import com.razumly.mvp.Message.MessagesScreen
 import com.razumly.mvp.core.presentation.composables.MVPBottomNavBar
 import com.razumly.mvp.core.presentation.composables.PlatformBackButton
 import com.razumly.mvp.eventCreate.CreateEventScreen
-import com.razumly.mvp.eventFollowing.EventFollowingScreen
 import com.razumly.mvp.eventSearch.EventSearchScreen
 import com.razumly.mvp.matchDetailScreen.MatchDetailScreen
 import com.razumly.mvp.profile.ProfileScreen
-import com.razumly.mvp.tournamentDetailScreen.TournamentDetailScreen
+import com.razumly.mvp.eventDetailScreen.EventDetailScreen
 import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
 import io.github.aakira.napier.Napier
 
@@ -85,7 +84,7 @@ fun HomeScreen(component: HomeComponent) {
 
                                     is HomeComponent.Child.TournamentContent -> {
                                         Napier.d(tag = "Navigation") { "Navigating to Tournament Detail Screen" }
-                                        TournamentDetailScreen(instance.component)
+                                        EventDetailScreen(instance.component)
                                     }
 
                                     is HomeComponent.Child.MatchContent -> {
@@ -93,9 +92,9 @@ fun HomeScreen(component: HomeComponent) {
                                         MatchDetailScreen(instance.component)
                                     }
 
-                                    is HomeComponent.Child.Following -> {
-                                        Napier.d(tag = "Navigation") { "Navigating to Following Screen" }
-                                        EventFollowingScreen(instance.component)
+                                    is HomeComponent.Child.Messages -> {
+                                        Napier.d(tag = "Navigation") { "Navigating to Messages Screen" }
+                                        MessagesScreen(instance.component)
                                     }
 
                                     is HomeComponent.Child.Create -> {

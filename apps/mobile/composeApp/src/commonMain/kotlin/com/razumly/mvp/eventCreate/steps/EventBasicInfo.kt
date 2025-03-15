@@ -53,6 +53,7 @@ import mvp.composeapp.generated.resources.event_name
 import mvp.composeapp.generated.resources.free_entry_hint
 import mvp.composeapp.generated.resources.invalid_price
 import mvp.composeapp.generated.resources.max_players
+import mvp.composeapp.generated.resources.team_size_error
 import mvp.composeapp.generated.resources.team_size_limit
 import mvp.composeapp.generated.resources.value_too_low
 import network.chaintech.kmp_date_time_picker.ui.datetimepicker.WheelDateTimePickerDialog
@@ -83,8 +84,7 @@ fun EventBasicInfo(modifier: Modifier, component: CreateEventComponent, isComple
                         && endDateSelected
                         && event.teamSizeLimit != 0
                         && event.maxPlayers != 0
-                        && (price.toDoubleOrNull() != null
-                        && price.toDouble() >= 0
+                        && (event.price >= 0
                         && !showPriceError)
             } ?: false
         )
@@ -193,64 +193,45 @@ fun EventBasicInfo(modifier: Modifier, component: CreateEventComponent, isComple
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Column(
+                NumberInputField(
+                    value = price,
+                    label = stringResource(Res.string.entry_fee),
+                    onValueChange = { newValue ->
+                        price = newValue
+                        // Delegate validation and update to the helper function.
+                        component.validateAndUpdatePrice(newValue) { isError ->
+                            showPriceError = isError
+                        }
+                    },
+                    isError = showPriceError,
+                    errorMessage = stringResource(Res.string.invalid_price),
                     modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    NumberInputField(
-                        value = price,
-                        label = stringResource(Res.string.entry_fee),
-                        onValueChange = { newValue ->
-                            price = newValue
-                            showPriceError = false
-                            newValue.toDoubleOrNull()?.let { amount ->
-                                if (amount >= 0) {
-                                    component.updateEventField { copy(price = amount/100) }
-                                } else {
-                                    showPriceError = true
-                                }
-                            } ?: run { showPriceError = true }
-                        },
-                        isError = showPriceError,
-                        errorMessage = stringResource(Res.string.invalid_price),
-                        modifier = Modifier.fillMaxWidth(),
-                        isMoney = true,
-                        supportingText = stringResource(Res.string.free_entry_hint)
-                    )
-                }
+                    isMoney = true,
+                    supportingText = stringResource(Res.string.free_entry_hint)
+                )
                 NumberInputField(
                     value = teamSizeLimit,
                     label = stringResource(Res.string.team_size_limit),
                     onValueChange = { newValue ->
                         teamSizeLimit = newValue
-                        showTeamSizeLimitError = false
-                        newValue.toIntOrNull()?.let { amount ->
-                            if (amount > 0) {
-                                component.updateEventField { copy(teamSizeLimit = amount) }
-                            } else {
-                                showTeamSizeLimitError = true
-                            }
-                        } ?: run { showTeamSizeLimitError = true }
+                        component.validateAndUpdateTeamSize(newValue) { isError ->
+                            showTeamSizeLimitError = isError
+                        }
                     },
                     isError = showTeamSizeLimitError,
-                    errorMessage = stringResource(Res.string.value_too_low),
+                    errorMessage = stringResource(Res.string.team_size_error),
                     modifier = Modifier.weight(1f),
                     isMoney = false,
-                    supportingText = "2-6"
+                    placeholder = "2-6"
                 )
                 NumberInputField(
                     value = maxPlayers,
                     label = stringResource(Res.string.max_players),
                     onValueChange = { newValue ->
                         maxPlayers = newValue
-                        showMaxPlayersError = false
-                        newValue.toIntOrNull()?.let { amount ->
-                            if (amount > 0) {
-                                component.updateEventField { copy(maxPlayers = amount) }
-                            } else {
-                                showMaxPlayersError = true
-                            }
-                        } ?: run { showMaxPlayersError = true }
+                        component.validateAndUpdateMaxPlayers(newValue) { isError ->
+                            showTeamSizeLimitError = isError
+                        }
                     },
                     isError = showMaxPlayersError,
                     errorMessage = stringResource(Res.string.value_too_low),
@@ -459,7 +440,8 @@ fun NumberInputField(
     errorMessage: String? = null,
     modifier: Modifier = Modifier,
     keyboardType: KeyboardType = KeyboardType.Number,
-    supportingText: String? = null
+    supportingText: String? = null,
+    placeholder: String? = null,
 ) {
     Column(modifier = modifier) {
         OutlinedTextField(
@@ -475,18 +457,21 @@ fun NumberInputField(
             modifier = Modifier.fillMaxWidth(),
             visualTransformation = if (isMoney) CurrencyAmountInputVisualTransformation() else VisualTransformation.None,
             supportingText = {
-                if (supportingText != null) {
+                if (isError && errorMessage != null) {
+                    Text(
+                        text = errorMessage,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                else if (supportingText != null) {
                     Text(supportingText)
+                }
+            },
+            placeholder = {
+                if (placeholder != null) {
+                    Text(placeholder)
                 }
             }
         )
-        if (isError && errorMessage != null) {
-            Text(
-                text = errorMessage,
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(start = 8.dp, top = 4.dp)
-            )
-        }
     }
 }

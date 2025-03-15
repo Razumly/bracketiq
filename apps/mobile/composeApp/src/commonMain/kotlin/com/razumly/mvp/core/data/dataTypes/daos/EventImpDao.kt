@@ -3,8 +3,11 @@ package com.razumly.mvp.core.data.dataTypes.daos
 import androidx.room.Dao
 import androidx.room.Delete
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Upsert
 import com.razumly.mvp.core.data.dataTypes.EventImp
+import com.razumly.mvp.core.data.dataTypes.EventWithRelations
+import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface EventImpDao {
@@ -28,4 +31,8 @@ interface EventImpDao {
 
     @Query("SELECT * FROM EventImp WHERE id = :id")
     suspend fun getEventById(id: String): EventImp?
+
+    @Transaction
+    @Query("SELECT * FROM EventImp WHERE id = :id")
+    fun getUsersOfEvent(id: String): Flow<EventWithRelations?>
 }

@@ -7,15 +7,14 @@ import com.razumly.mvp.core.presentation.RootComponent
 import com.razumly.mvp.eventCreate.CreateEventComponent
 import com.razumly.mvp.eventCreate.DefaultCreateEventComponent
 import com.razumly.mvp.eventFollowing.FollowingEventListComponent
-import com.razumly.mvp.eventList.EventListComponent
 import com.razumly.mvp.eventSearch.SearchEventListComponent
 import com.razumly.mvp.home.DefaultHomeComponent
 import com.razumly.mvp.matchDetailScreen.DefaultMatchContentComponent
 import com.razumly.mvp.matchDetailScreen.MatchContentComponent
 import com.razumly.mvp.profile.DefaultProfileComponent
 import com.razumly.mvp.profile.ProfileComponent
-import com.razumly.mvp.tournamentDetailScreen.DefaultTournamentContentComponent
-import com.razumly.mvp.tournamentDetailScreen.TournamentContentComponent
+import com.razumly.mvp.eventDetailScreen.DefaultEventContentComponent
+import com.razumly.mvp.eventDetailScreen.EventContentComponent
 import com.razumly.mvp.userAuth.loginScreen.AuthComponent
 import org.koin.dsl.bind
 import org.koin.dsl.module
@@ -59,13 +58,13 @@ val componentModule = module {
             onMatchSelected: (MatchWithRelations) -> Unit,
             name: String,
         ) ->
-        DefaultTournamentContentComponent(
+        DefaultEventContentComponent(
             componentContext = componentContext,
             mvpRepository = get(),
             tournamentId = tournamentId,
             onMatchSelected = onMatchSelected,
         )
-    } bind TournamentContentComponent::class
+    } bind EventContentComponent::class
 
     factory { (componentContext: ComponentContext, onEventCreated: () -> Unit) ->
         DefaultCreateEventComponent(
@@ -81,7 +80,7 @@ val componentModule = module {
             componentContext = componentContext,
             mvpRepository = get(),
             locationTracker = get(),
-            onTournamentSelected = onTournamentSelected
+            onEventSelected = onTournamentSelected
         )
     } bind EventListComponent::class
 

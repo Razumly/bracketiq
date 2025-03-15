@@ -54,7 +54,7 @@ class DefaultMatchContentComponent(
         .stateIn(scope, SharingStarted.Eagerly, null)
 
     override val currentTeams = mvpRepository
-        .getTeamsWithPlayersFlow(selectedMatch.match.tournamentId)
+        .getTeamsInTournamentFlow(selectedMatch.match.tournamentId)
         .stateIn(scope, SharingStarted.Eagerly, mapOf())
 
     private val _matchFinished = MutableStateFlow(false)

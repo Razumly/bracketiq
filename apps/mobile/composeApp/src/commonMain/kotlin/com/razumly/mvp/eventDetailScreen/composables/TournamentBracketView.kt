@@ -1,7 +1,6 @@
-package com.razumly.mvp.tournamentDetailScreen.composables
+package com.razumly.mvp.eventDetailScreen.composables
 
 import androidx.compose.animation.ExperimentalSharedTransitionApi
-import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
@@ -36,18 +35,17 @@ import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.presentation.util.getScreenWidth
 import com.razumly.mvp.core.util.ceilDiv
+import com.razumly.mvp.eventDetailScreen.LocalTournamentComponent
 import com.razumly.mvp.home.LocalNavBarPadding
-import com.razumly.mvp.tournamentDetailScreen.LocalTournamentComponent
 
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
-fun SharedTransitionScope.TournamentBracketView(
+fun TournamentBracketView(
     onMatchClick: (MatchWithRelations) -> Unit = {},
 ) {
     val component = LocalTournamentComponent.current
     val losersBracket by component.losersBracket.collectAsState()
     val roundsList by component.rounds.collectAsState()
-    val showDetails by component.showDetails.collectAsState()
     val columnScrollState = rememberScrollState()
 
     val lazyRowState = rememberLazyListState()

@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FabPosition
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -55,7 +56,6 @@ import dev.chrisbanes.haze.materials.HazeMaterials
 import io.github.aakira.napier.Napier
 import kotlinx.datetime.Clock
 import mvp.composeapp.generated.resources.Res
-import mvp.composeapp.generated.resources.create_new_event
 import mvp.composeapp.generated.resources.create_tournament
 import mvp.composeapp.generated.resources.next
 import mvp.composeapp.generated.resources.previous
@@ -104,7 +104,10 @@ fun CreateEventScreen(
                 Modifier
                     .hazeEffect(hazeState, HazeMaterials.ultraThin())
             ){
-                CreateEventTopBar(animatedProgress = animatedProgress)
+                CreateEventTopBar(
+                    animatedProgress = animatedProgress,
+                    title = childStack.active.instance.title
+                )
             }
         },
         floatingActionButton = {
@@ -117,7 +120,7 @@ fun CreateEventScreen(
                 canProceed.value
             )
         },
-        // Place the FABs in the center at the bottom (they will appear above the system nav bar)
+
         floatingActionButtonPosition = FabPosition.Center,
         content = { innerPadding ->
             Children(
@@ -178,8 +181,7 @@ fun CreateEventScreen(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CreateEventTopBar(animatedProgress: Float) {
-    // A custom top bar that shows the title and a linear progress indicator.
+fun CreateEventTopBar(animatedProgress: Float, title: String) {
     val colors = TopAppBarColors(
         containerColor = Color.Transparent,
         scrolledContainerColor = Color.Transparent,
@@ -189,7 +191,7 @@ fun CreateEventTopBar(animatedProgress: Float) {
     )
     Column {
         TopAppBar(
-            title = { Text(stringResource(Res.string.create_new_event)) },
+            title = { Text(title) },
             modifier = Modifier.fillMaxWidth(),
             colors = colors
         )
@@ -226,7 +228,6 @@ fun CreateEventNavigationFABs(
                 )
             }
         } else {
-            // Ensure proper spacing when the previous button is absent.
             Spacer(modifier = Modifier.width(48.dp))
         }
 
@@ -268,14 +269,14 @@ fun CreateEventNavigationFABs(
                         }
                     },
                     containerColor = if (enabled) {
-                        MaterialTheme.colorScheme.primaryContainer
+                        FloatingActionButtonDefaults.containerColor
                     } else {
-                        MaterialTheme.colorScheme.tertiaryContainer
+                        MaterialTheme.colorScheme.errorContainer
                     },
                     contentColor = if (enabled) {
                         MaterialTheme.colorScheme.onPrimaryContainer
                     } else {
-                        MaterialTheme.colorScheme.onTertiaryContainer
+                        MaterialTheme.colorScheme.onErrorContainer
                     },
                 ) {
                     Icon(

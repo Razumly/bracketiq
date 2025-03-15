@@ -6,16 +6,17 @@ import com.arkivanov.decompose.router.stack.childStack
 import com.arkivanov.decompose.router.stack.pop
 import com.arkivanov.decompose.router.stack.pushNew
 import com.arkivanov.decompose.router.stack.replaceAll
+import com.razumly.mvp.Message.DefaultMessagesComponent
+import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.eventCreate.DefaultCreateEventComponent
-import com.razumly.mvp.eventFollowing.FollowingEventListComponent
 import com.razumly.mvp.eventMap.MapComponent
 import com.razumly.mvp.eventSearch.SearchEventListComponent
 import com.razumly.mvp.home.HomeComponent.Child
 import com.razumly.mvp.home.HomeComponent.Config
 import com.razumly.mvp.matchDetailScreen.DefaultMatchContentComponent
 import com.razumly.mvp.profile.DefaultProfileComponent
-import com.razumly.mvp.tournamentDetailScreen.DefaultTournamentContentComponent
+import com.razumly.mvp.eventDetailScreen.DefaultEventContentComponent
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.koin.core.parameter.parametersOf
@@ -56,7 +57,7 @@ class DefaultHomeComponent(
             is Config.Search -> {
                 Child.Search(
                     _koin.inject<SearchEventListComponent> {
-                        parametersOf(componentContext, ::onTournamentSelected)
+                        parametersOf(componentContext, ::onEventSelected)
                     }.value,
                     _koin.inject<MapComponent> {
                         parametersOf(componentContext)
@@ -65,8 +66,8 @@ class DefaultHomeComponent(
             }
             is Config.TournamentDetail -> {
                 Child.TournamentContent(
-                    _koin.inject<DefaultTournamentContentComponent> {
-                        parametersOf(componentContext, config.tournamentId, ::onMatchSelected)
+                    _koin.inject<DefaultEventContentComponent> {
+                        parametersOf(componentContext, config.event, ::onMatchSelected)
                     }.value
                 )
             }
@@ -77,9 +78,9 @@ class DefaultHomeComponent(
                     }.value
                 )
             }
-            is Config.Following -> Child.Following(
-                _koin.inject<FollowingEventListComponent> {
-                    parametersOf(componentContext, ::onTournamentSelected)
+            is Config.Messages -> Child.Messages(
+                _koin.inject<DefaultMessagesComponent> {
+                    parametersOf(componentContext, ::onEventSelected)
                 }.value
             )
             is Config.Create -> Child.Create(
@@ -98,8 +99,8 @@ class DefaultHomeComponent(
         }
     }
 
-    private fun onTournamentSelected(tournamentId: String) {
-        navigation.pushNew(Config.TournamentDetail(tournamentId))
+    private fun onEventSelected(event: EventAbs) {
+        navigation.pushNew(Config.TournamentDetail(event))
     }
 
     private fun onMatchSelected(match: MatchWithRelations) {
@@ -115,7 +116,7 @@ class DefaultHomeComponent(
         _selectedPage.value = page
         when (page) {
             Config.Search -> navigation.replaceAll(Config.Search)
-            Config.Following -> navigation.replaceAll(Config.Following)
+            Config.Messages -> navigation.replaceAll(Config.Messages)
             Config.Create -> navigation.replaceAll(Config.Create)
             Config.Profile -> navigation.replaceAll(Config.Profile)
             else -> {}

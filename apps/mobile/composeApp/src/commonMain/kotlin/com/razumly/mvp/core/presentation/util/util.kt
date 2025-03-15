@@ -1,5 +1,6 @@
 package com.razumly.mvp.core.presentation.util
 
+import androidx.compose.animation.core.Easing
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State

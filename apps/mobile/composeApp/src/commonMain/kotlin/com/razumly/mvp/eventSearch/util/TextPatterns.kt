@@ -1,4 +1,4 @@
-package com.razumly.mvp.eventList.util
+package com.razumly.mvp.eventSearch.util
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Person
@@ -11,12 +11,12 @@ import com.razumly.mvp.icons.MVPIcons
 
 class TextPatterns(title: String) {
     val divisions = listOf(
-        TextPattern("NOVICE", Color(0xff3c4b59), true, null),
-        TextPattern("B", Color(0xff3c4b59), true, null),
-        TextPattern("BB", Color(0xff3c4b59), true, null),
-        TextPattern("A", Color(0xff3c4b59), true, null),
-        TextPattern("AA", Color(0xff3c4b59), true, null),
-        TextPattern("OPEN", Color(0xff3c4b59), true, null)
+        TextPattern("NOVICE", Color(0xffa0c1ea), true, null),
+        TextPattern("B", Color(0xffa0c1ea), true, null),
+        TextPattern("BB", Color(0xffa0c1ea), true, null),
+        TextPattern("A", Color(0xffa0c1ea), true, null),
+        TextPattern("AA", Color(0xffa0c1ea), true, null),
+        TextPattern("OPEN", Color(0xffa0c1ea), true, null)
     )
     val playerCounts = listOf(
         TextPattern("twos", Color(0xff5183ab), icon = Icons.Default.Person),

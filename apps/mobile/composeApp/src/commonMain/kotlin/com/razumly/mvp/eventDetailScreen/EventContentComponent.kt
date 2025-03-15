@@ -1,10 +1,11 @@
-package com.razumly.mvp.tournamentDetailScreen
+package com.razumly.mvp.eventDetailScreen
 
 import com.arkivanov.decompose.ComponentContext
 import com.razumly.mvp.core.data.IMVPRepository
+import com.razumly.mvp.core.data.dataTypes.EventAbs
+import com.razumly.mvp.core.data.dataTypes.EventAbsWithPlayers
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
-import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
 import com.razumly.mvp.core.data.dataTypes.enums.Division
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -18,8 +19,8 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-interface TournamentContentComponent : ComponentContext {
-    val selectedTournament: StateFlow<TournamentWithRelations?>
+interface EventContentComponent : ComponentContext {
+    val selectedEvent: StateFlow<EventAbsWithPlayers?>
     val divisionMatches: StateFlow<List<MatchWithRelations>>
     val currentMatches: StateFlow<Map<String, MatchWithRelations>>
     val divisionTeams: StateFlow<List<TeamWithPlayers>>
@@ -37,23 +38,23 @@ interface TournamentContentComponent : ComponentContext {
     fun toggleDetails()
 }
 
-class DefaultTournamentContentComponent(
+class DefaultEventContentComponent(
     componentContext: ComponentContext,
     private val mvpRepository: IMVPRepository,
-    tournamentId: String,
+    event: EventAbs,
     private val onMatchSelected: (MatchWithRelations) -> Unit
-) : TournamentContentComponent, ComponentContext by componentContext {
+) : EventContentComponent, ComponentContext by componentContext {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-    override val selectedTournament = mvpRepository
-        .getPlayersOfTournamentFlow(tournamentId)
+    override val selectedEvent = mvpRepository
+        .getPlayersOfEventFlow(event)
         .stateIn(scope, SharingStarted.Eagerly, null)
 
     private val _divisionMatches = MutableStateFlow<List<MatchWithRelations>>(emptyList())
     override val divisionMatches = _divisionMatches.asStateFlow()
 
     override val currentMatches = mvpRepository
-        .getMatchesFlow(tournamentId)
+        .getMatchesFlow(event.id)
         .stateIn(
             scope = scope,
             started = SharingStarted.Eagerly,
@@ -61,7 +62,7 @@ class DefaultTournamentContentComponent(
         )
 
     override val currentTeams = mvpRepository
-        .getTeamsWithPlayersFlow(tournamentId)
+        .getTeamsInTournamentFlow(event.id)
         .stateIn(scope, SharingStarted.Eagerly, mapOf())
 
     private val _divisionTeams = MutableStateFlow<List<TeamWithPlayers>>(listOf())
@@ -87,24 +88,24 @@ class DefaultTournamentContentComponent(
     init {
         scope.launch {
             mvpRepository.setIgnoreMatch(null)
-            selectedTournament
+            selectedEvent
                 .distinctUntilChanged { old, new -> old == new }
                 .filterNotNull()
-                .collect { tournament ->
+                .collect { event ->
                     mvpRepository.subscribeToMatches()
                     _userInTournament.value =
-                        tournament.players.contains(mvpRepository.getCurrentUser()?.user)
+                        event.players.contains(mvpRepository.getCurrentUser()?.user)
                     if (_userInTournament.value) {
                         _showDetails.value = true
                     }
                     if (selectedDivision.value == null) {
-                        tournament.tournament.divisions.firstOrNull()?.let { selectDivision(it) }
+                        event.event.divisions.firstOrNull()?.let { selectDivision(it) }
                     }
                 }
 
         }
         scope.launch {
-            mvpRepository.getTournament(tournamentId)
+            mvpRepository.getEvent(event)
         }
         scope.launch {
             currentMatches

@@ -1,13 +1,9 @@
-package com.razumly.mvp.tournamentDetailScreen.composables
+package com.razumly.mvp.eventDetailScreen.composables
 
-import androidx.compose.animation.ExperimentalSharedTransitionApi
-import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -16,18 +12,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.presentation.composables.EventDetails
-import com.razumly.mvp.icons.ArrowDown
-import com.razumly.mvp.icons.ArrowUp
-import com.razumly.mvp.icons.MVPIcons
-import com.razumly.mvp.tournamentDetailScreen.TournamentContentComponent
+import com.razumly.mvp.eventDetailScreen.EventContentComponent
 
 
-@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
-fun SharedTransitionScope.Header(
-    component: TournamentContentComponent,
+fun Header(
+    component: EventContentComponent,
 ) {
-    val tournament by component.selectedTournament.collectAsState()
+    val tournament by component.selectedEvent.collectAsState()
     val showDetails by component.showDetails.collectAsState()
 
     Column(
@@ -36,13 +28,14 @@ fun SharedTransitionScope.Header(
             .background(MaterialTheme.colorScheme.background),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        tournament?.tournament?.let {
+        tournament?.event?.let {
             EventDetails(
                 it,
                 true,
                 {},
-                Modifier.padding(top = 32.dp, end = 8.dp)
-            )
+                Modifier.padding(top = 32.dp, end = 8.dp),
+                onMapClick = {}
+            ){}
         }
 
 //        Icon(

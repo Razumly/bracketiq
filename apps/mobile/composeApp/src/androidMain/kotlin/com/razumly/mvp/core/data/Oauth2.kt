@@ -37,7 +37,7 @@ suspend fun MVPRepository.oauth2Login(activity: ComponentActivity): UserWithRela
                     firstName = userInfo.givenName,
                     lastName = userInfo.familyName,
                     tournamentIds = listOf(),
-                    pickupGameIds = listOf(),
+                    eventIds = listOf(),
                     id = id
                 ),
                 nestedType = UserDataDTO::class

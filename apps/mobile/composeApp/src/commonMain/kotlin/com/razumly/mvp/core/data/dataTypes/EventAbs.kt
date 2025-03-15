@@ -25,6 +25,8 @@ sealed interface EventAbs : MVPDocument {
     val lastUpdated: Instant
     val hostId: String
     val eventType: EventType
+    val teamSignup: Boolean
+    val singleDivision: Boolean
     override val id: String
 }
 
@@ -35,3 +37,8 @@ fun EventAbs.toMVPPlace() = MVPPlace(
     long = this.long,
     imageUrls = listOf(this.imageUrl)
 )
+
+sealed interface EventAbsWithPlayers {
+    val event: EventAbs
+    val players: List<UserData>
+}

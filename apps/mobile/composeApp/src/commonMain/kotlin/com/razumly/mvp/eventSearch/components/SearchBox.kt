@@ -1,4 +1,4 @@
-package com.razumly.mvp.eventList.components
+package com.razumly.mvp.eventSearch.components
 
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box

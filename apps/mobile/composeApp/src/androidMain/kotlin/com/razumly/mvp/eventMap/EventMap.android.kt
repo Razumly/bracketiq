@@ -47,15 +47,35 @@ actual fun EventMap(
     canClickPOI: Boolean,
     modifier: Modifier,
     searchBarPadding: PaddingValues,
+    focusLocation: dev.icerock.moko.geo.LatLng?,
 ) {
     val selectedPlace = remember { mutableStateOf<PointOfInterest?>(null) }
     val scope = rememberCoroutineScope()
     var places by remember { mutableStateOf<List<Place>>(listOf()) }
-    val cameraPositionState = rememberCameraPositionState()
     val currentLocation by component.currentLocation.collectAsState()
     val events by component.events.collectAsState()
     val defaultZoom = 12f
     val defaultDurationMs = 1000
+    val initCameraState = focusLocation?.toGoogle()
+    val cameraPositionState = rememberCameraPositionState()
+
+    LaunchedEffect(initCameraState, currentLocation) {
+        if (initCameraState != null) {
+            cameraPositionState.move(
+                CameraUpdateFactory.newLatLngZoom(
+                    initCameraState,
+                    defaultZoom
+                )
+            )
+        } else if (currentLocation != null) {
+            cameraPositionState.move(
+                CameraUpdateFactory.newLatLngZoom(
+                    currentLocation!!.toGoogle(),
+                    defaultZoom
+                )
+            )
+        }
+    }
     var currentCameraState by remember { mutableStateOf(cameraPositionState) }
 
     LaunchedEffect(cameraPositionState) {
@@ -146,42 +166,44 @@ actual fun EventMap(
             }
         }
 
-        currentCameraState.projection?.visibleRegion?.latLngBounds?.let {
-            MapSearchBar(
-                Modifier
-                    .padding(horizontal = 16.dp)
-                    .padding(searchBarPadding),
-                component,
-                currentCameraState.position.target,
-                it
-            ) { newPlaces ->
-                selectedPlace.value = null
-                if (newPlaces.size > 1) {
-                    val bounds = LatLngBounds.builder()
-                    newPlaces.forEach { place ->
-                        bounds.include(place.location!!)
-                    }
-                } else if (newPlaces.isNotEmpty()) {
-                    scope.launch {
-                        val location = newPlaces.first().location!!
-                        cameraPositionState.animate(
-                            CameraUpdateFactory.newLatLngZoom(location, defaultZoom),
-                            defaultDurationMs
-                        )
-                    }
-                } else {
-                    // Fallback to current location
-                    currentLocation?.let { validLoc ->
-                        val target = validLoc.toGoogle()
+        if (canClickPOI) {
+            currentCameraState.projection?.visibleRegion?.latLngBounds?.let {
+                MapSearchBar(
+                    Modifier
+                        .padding(horizontal = 16.dp)
+                        .padding(searchBarPadding),
+                    component,
+                    currentCameraState.position.target,
+                    it
+                ) { newPlaces ->
+                    selectedPlace.value = null
+                    if (newPlaces.size > 1) {
+                        val bounds = LatLngBounds.builder()
+                        newPlaces.forEach { place ->
+                            bounds.include(place.location!!)
+                        }
+                    } else if (newPlaces.isNotEmpty()) {
                         scope.launch {
+                            val location = newPlaces.first().location!!
                             cameraPositionState.animate(
-                                CameraUpdateFactory.newLatLngZoom(target, defaultZoom),
+                                CameraUpdateFactory.newLatLngZoom(location, defaultZoom),
                                 defaultDurationMs
                             )
                         }
+                    } else {
+                        // Fallback to current location
+                        currentLocation?.let { validLoc ->
+                            val target = validLoc.toGoogle()
+                            scope.launch {
+                                cameraPositionState.animate(
+                                    CameraUpdateFactory.newLatLngZoom(target, defaultZoom),
+                                    defaultDurationMs
+                                )
+                            }
+                        }
                     }
+                    places = newPlaces
                 }
-                places = newPlaces
             }
         }
     }

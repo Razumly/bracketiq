@@ -5,6 +5,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
+import dev.icerock.moko.geo.LatLng
 
 @Composable
 actual fun EventMap(
@@ -13,6 +14,7 @@ actual fun EventMap(
     onPlaceSelected: (place: MVPPlace) -> Unit,
     canClickPOI: Boolean,
     modifier: Modifier,
-    searchBarPadding: PaddingValues
+    searchBarPadding: PaddingValues,
+    focusLocation: LatLng?
 ) {
 }

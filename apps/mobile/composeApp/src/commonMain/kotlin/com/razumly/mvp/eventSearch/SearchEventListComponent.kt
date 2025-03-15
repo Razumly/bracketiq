@@ -4,10 +4,9 @@ import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.backhandler.BackCallback
 import com.razumly.mvp.core.data.IMVPRepository
 import com.razumly.mvp.core.data.dataTypes.EventAbs
-import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.util.calcDistance
 import com.razumly.mvp.core.util.getBounds
-import com.razumly.mvp.eventList.EventListComponent
 import dev.icerock.moko.geo.LatLng
 import dev.icerock.moko.geo.LocationTracker
 import kotlinx.coroutines.CoroutineScope
@@ -24,15 +23,15 @@ class SearchEventListComponent(
     componentContext: ComponentContext,
     private val mvpRepository: IMVPRepository,
     val locationTracker: LocationTracker,
-    private val onTournamentSelected: (tournamentId: String) -> Unit,
-) : EventListComponent, ComponentContext by componentContext {
+    private val onEventSelected: (event: EventAbs) -> Unit,
+) : ComponentContext by componentContext {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     private val _events = MutableStateFlow<List<EventAbs>>(emptyList())
-    override val events: StateFlow<List<EventAbs>> = _events.asStateFlow()
+    val events: StateFlow<List<EventAbs>> = _events.asStateFlow()
 
     private val _currentRadius = MutableStateFlow(50.0)
-    override val currentRadius: StateFlow<Double> = _currentRadius.asStateFlow()
+    val currentRadius: StateFlow<Double> = _currentRadius.asStateFlow()
 
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
@@ -47,14 +46,23 @@ class SearchEventListComponent(
     val currentLocation = _currentLocation.asStateFlow()
 
     private val _selectedEvent = MutableStateFlow<EventAbs?>(null)
-    override val selectedEvent: StateFlow<EventAbs?> = _selectedEvent.asStateFlow()
+    val selectedEvent: StateFlow<EventAbs?> = _selectedEvent.asStateFlow()
 
     private val _showMapCard = MutableStateFlow(false)
     val showMapCard: StateFlow<Boolean> = _showMapCard.asStateFlow()
 
+    private val _validTeams = MutableStateFlow<List<TeamWithPlayers>>(listOf())
+    val validTeams = _validTeams.asStateFlow()
+
     private val backCallback = BackCallback(false) {
         _showMapCard.value = false
     }
+
+    val currentUser = mvpRepository
+        .getCurrentUserFlow()
+        .stateIn(scope, SharingStarted.Eagerly, null)
+
+    private val _userTeams = MutableStateFlow<List<TeamWithPlayers>>(listOf())
 
     init {
         backHandler.register(backCallback)
@@ -62,6 +70,16 @@ class SearchEventListComponent(
         scope.launch {
             _showMapCard.collect {
                 backCallback.isEnabled = it
+            }
+        }
+
+        scope.launch {
+            currentUser.collect { user ->
+                if (user != null) {
+                    mvpRepository.getTeamsWithPlayers(user.user.teams).collect { teams ->
+                        _userTeams.value = teams
+                    }
+                }
             }
         }
 
@@ -102,14 +120,29 @@ class SearchEventListComponent(
     }
 
     fun onMapClick() {
-        _showMapCard.value = true
+        _showMapCard.value = !_showMapCard.value
     }
 
-    override fun selectEvent(event: EventAbs?) {
+    fun clearSelectedEvent() {
+        _selectedEvent.value = null
+    }
+
+    fun selectEvent(event: EventAbs) {
+        _selectedEvent.value = event
+        _validTeams.value = _userTeams.value.filter { team ->
+            team.players.size == event.teamSizeLimit
+        }
+    }
+
+    fun viewEvent(event: EventAbs) {
+        onEventSelected(event)
+    }
+
+    fun joinEvent(event: EventAbs?) {
         try {
-            if (event == null) return
-            if (event.eventType == EventType.TOURNAMENT) {
-                onTournamentSelected(event.id)
+            if(event == null) return
+            scope.launch {
+                mvpRepository.addUserToEvent(event)
             }
         } catch (e: Exception) {
             _error.value = "Failed to select event: ${e.message}"

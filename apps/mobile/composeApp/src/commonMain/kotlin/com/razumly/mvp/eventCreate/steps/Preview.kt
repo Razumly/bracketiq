@@ -5,8 +5,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -37,10 +39,15 @@ fun Preview(modifier: Modifier, component: CreateEventComponent) {
             previewEvent?.let {
                 EventDetails(
                     it,
-                    showDescription = true,
+                    expanded = true,
                     onFavoriteClick = {},
-                    favoritesModifier = Modifier.alpha(0f)
-                )
+                    favoritesModifier = Modifier.alpha(0f),
+                    onMapClick = {}
+                ) {
+                    Button(onClick = {}) {
+                        Text("Join")
+                    }
+                }
             }
         }
     }

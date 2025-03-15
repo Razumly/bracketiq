@@ -10,11 +10,13 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -23,7 +25,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBarDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.contentColorFor
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -40,31 +41,33 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.presentation.util.CircularRevealShape
 import com.razumly.mvp.core.presentation.util.isScrollingUp
-import com.razumly.mvp.eventList.EventList
-import com.razumly.mvp.eventList.components.SearchBox
 import com.razumly.mvp.eventMap.EventMap
 import com.razumly.mvp.eventMap.MapComponent
+import com.razumly.mvp.eventSearch.components.SearchBox
 import com.razumly.mvp.home.LocalNavBarPadding
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
 import dev.chrisbanes.haze.materials.HazeMaterials
+import dev.icerock.moko.geo.LatLng
 import dev.icerock.moko.geo.compose.BindLocationTrackerEffect
 
 @OptIn(ExperimentalHazeMaterialsApi::class)
 @Composable
 fun EventSearchScreen(component: SearchEventListComponent, mapComponent: MapComponent) {
-    val events = component.events.collectAsState()
-    val showMapCard = component.showMapCard.collectAsState()
+    val events by component.events.collectAsState()
+    val showMapCard by component.showMapCard.collectAsState()
+    val selectedEvent by component.selectedEvent.collectAsState()
     val hazeState = remember { HazeState() }
     val offsetNavPadding =
         PaddingValues(bottom = LocalNavBarPadding.current.calculateBottomPadding().plus(32.dp))
     val lazyListState = rememberLazyListState()
+    var fabOffset by remember { mutableStateOf(Offset.Zero) }
     var revealCenter by remember { mutableStateOf(Offset.Zero) }
 
     val animationProgress by animateFloatAsState(
-        targetValue = if (showMapCard.value) 1f else 0f,
+        targetValue = if (showMapCard) 1f else 0f,
         animationSpec = tween(durationMillis = 1000)
     )
 
@@ -75,7 +78,10 @@ fun EventSearchScreen(component: SearchEventListComponent, mapComponent: MapComp
                 Column(
                     modifier = Modifier
                         .wrapContentSize()
-                        .hazeEffect(hazeState, HazeMaterials.ultraThin(NavigationBarDefaults.containerColor))
+                        .hazeEffect(
+                            hazeState,
+                            HazeMaterials.ultraThin(NavigationBarDefaults.containerColor)
+                        )
                         .statusBarsPadding()
                 ) {
                     SearchBox()
@@ -83,52 +89,66 @@ fun EventSearchScreen(component: SearchEventListComponent, mapComponent: MapComp
             },
             floatingActionButton = {
                 AnimatedVisibility(
-                    visible = lazyListState.isScrollingUp().value,
+                    visible = lazyListState.isScrollingUp().value || showMapCard,
                     enter = (slideInVertically { it / 2 } + fadeIn()),
                     exit = (slideOutVertically { it / 2 } + fadeOut())
                 ) {
                     Button(
-                        onClick = { component.onMapClick() },
+                        onClick = {
+                            revealCenter = fabOffset
+                            component.onMapClick()
+                        },
                         modifier = Modifier
                             .padding(offsetNavPadding)
                             .onGloballyPositioned { layoutCoordinates ->
                                 val boundsInWindow = layoutCoordinates.boundsInWindow()
-                                revealCenter = boundsInWindow.center
+                                fabOffset = boundsInWindow.center
                             },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Color.Black,
                             contentColor = Color.White
                         )
                     ) {
-                        Text("Map")
-                        Icon(Icons.Default.Place, contentDescription = "Map")
+                        val text = if (showMapCard) "List" else "Map"
+                        val icon = if (showMapCard) Icons.AutoMirrored.Filled.List else Icons.Default.Place
+                        Text(text)
+                        Icon(icon, contentDescription = "$text Button")
                     }
                 }
             },
             floatingActionButtonPosition = FabPosition.Center,
         ) { paddingValues ->
             val firstElementPadding = PaddingValues(top = paddingValues.calculateTopPadding())
-            EventList(
-                component,
-                events.value,
-                firstElementPadding,
-                offsetNavPadding,
-                lazyListState,
+            Box(
                 Modifier
-                    .hazeSource(hazeState),
-            )
-            EventMap(
-                mapComponent,
-                { event ->
-                    component.selectEvent(event)
-                },
-                {},
-                false,
-                Modifier
-                    .graphicsLayer { alpha = if (showMapCard.value) 1f else 0f }
-                    .clip(CircularRevealShape(animationProgress, revealCenter)),
-                PaddingValues()
-            )
+                .hazeSource(hazeState)
+                .fillMaxSize()
+            ) {
+                EventList(
+                    component,
+                    events,
+                    firstElementPadding,
+                    offsetNavPadding,
+                    lazyListState
+                ) { offset ->
+                    revealCenter = offset
+                }
+                EventMap(
+                    component = mapComponent,
+                    onEventSelected = { event ->
+                        component.joinEvent(event)
+                    },
+                    onPlaceSelected = {},
+                    canClickPOI = false,
+                    modifier = Modifier
+                        .graphicsLayer { alpha = if (animationProgress > 0f) 1f else 0f }
+                        .clip(CircularRevealShape(animationProgress, revealCenter)),
+                    searchBarPadding = PaddingValues(),
+                    focusLocation = selectedEvent?.let {
+                        LatLng(it.lat, it.long)
+                    }
+                )
+            }
         }
     }
 }

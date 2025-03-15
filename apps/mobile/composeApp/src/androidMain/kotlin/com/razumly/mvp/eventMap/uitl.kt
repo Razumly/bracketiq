@@ -12,9 +12,9 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resumeWithException
 
 suspend fun Place.toMVPPlace(placesClient: PlacesClient): MVPPlace = coroutineScope {
-    val photoMetadatas = this@toMVPPlace.photoMetadatas
+    val photoMetadatas = this@toMVPPlace.photoMetadatas?.take(10)
     // If there are photo metadata entries, fetch the URLs concurrently.
-    val urls: List<String> = if (photoMetadatas != null && photoMetadatas.isNotEmpty()) {
+    val urls: List<String> = if (!photoMetadatas.isNullOrEmpty()) {
         photoMetadatas.map { metadata ->
             async {
                 suspendCancellableCoroutine<String> { cont ->

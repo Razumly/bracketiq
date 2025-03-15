@@ -6,7 +6,7 @@ import androidx.room.Relation
 
 
 data class TournamentWithRelations (
-    @Embedded val tournament: Tournament,
+    @Embedded override val event: Tournament,
     @Relation(
         parentColumn = "id",
         entityColumn = "id",
@@ -16,5 +16,5 @@ data class TournamentWithRelations (
             entityColumn = "userId"
         )
     )
-    val players: List<UserData>
-)
+    override val players: List<UserData>
+) : EventAbsWithPlayers

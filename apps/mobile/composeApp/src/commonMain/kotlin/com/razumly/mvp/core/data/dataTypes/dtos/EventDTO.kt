@@ -27,6 +27,8 @@ data class EventDTO(
     val hostId: String,
     val teamSizeLimit: Int,
     val maxPlayers: Int,
+    val teamSignup: Boolean,
+    val singleDivision: Boolean
 )
 
 fun EventDTO.toEvent(id: String): EventImp {
@@ -48,5 +50,7 @@ fun EventDTO.toEvent(id: String): EventImp {
         hostId = hostId,
         teamSizeLimit = teamSizeLimit,
         maxPlayers = maxPlayers,
+        teamSignup = teamSignup,
+        singleDivision = singleDivision
     )
 }

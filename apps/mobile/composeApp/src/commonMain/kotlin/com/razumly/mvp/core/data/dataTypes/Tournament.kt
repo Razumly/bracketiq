@@ -36,6 +36,8 @@ data class Tournament(
     override val lat: Double,
     override val long: Double,
     override val hostId: String,
+    override val teamSignup: Boolean,
+    override val singleDivision: Boolean,
     @Transient override val eventType: EventType = EventType.TOURNAMENT,
     @Transient override val lastUpdated: Instant = Clock.System.now(),
     override val maxPlayers: Int,
@@ -67,6 +69,8 @@ data class Tournament(
                 long = 0.0,
                 maxPlayers = 0,
                 teamSizeLimit = 0,
+                singleDivision = false,
+                teamSignup = true,
             )
         }
     }
@@ -109,6 +113,8 @@ data class Tournament(
             hostId = hostId,
             teamSizeLimit = teamSizeLimit,
             maxPlayers = maxPlayers,
+            singleDivision = singleDivision,
+            teamSignup = teamSignup
         )
     }
     fun toTournamentDTO(): TournamentDTO {
@@ -135,7 +141,9 @@ data class Tournament(
             lat = lat,
             long = long,
             maxPlayers = maxPlayers,
-            teamSizeLimit = teamSizeLimit
+            teamSizeLimit = teamSizeLimit,
+            singleDivision = singleDivision,
+            teamSignup = teamSignup,
         )
     }
 }

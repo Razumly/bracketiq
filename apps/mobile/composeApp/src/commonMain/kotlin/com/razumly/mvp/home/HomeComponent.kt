@@ -2,14 +2,15 @@ package com.razumly.mvp.home
 
 import com.arkivanov.decompose.router.stack.ChildStack
 import com.arkivanov.decompose.value.Value
+import com.razumly.mvp.Message.MessagesComponent
+import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.eventCreate.CreateEventComponent
-import com.razumly.mvp.eventFollowing.FollowingEventListComponent
 import com.razumly.mvp.eventMap.MapComponent
 import com.razumly.mvp.eventSearch.SearchEventListComponent
 import com.razumly.mvp.matchDetailScreen.MatchContentComponent
 import com.razumly.mvp.profile.ProfileComponent
-import com.razumly.mvp.tournamentDetailScreen.TournamentContentComponent
+import com.razumly.mvp.eventDetailScreen.EventContentComponent
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.Serializable
 
@@ -26,9 +27,9 @@ interface HomeComponent {
             val component: SearchEventListComponent,
             val mapComponent: MapComponent
         ) : Child()
-        data class TournamentContent(val component: TournamentContentComponent) : Child()
+        data class TournamentContent(val component: EventContentComponent) : Child()
         data class MatchContent(val component: MatchContentComponent) : Child()
-        data class Following(val component: FollowingEventListComponent) : Child()
+        data class Messages(val component: MessagesComponent) : Child()
         data class Create(val component: CreateEventComponent) : Child()
         data class Profile(val component: ProfileComponent) : Child()
     }
@@ -37,7 +38,7 @@ interface HomeComponent {
     sealed class Config{
         @Serializable
         data class TournamentDetail(
-            val tournamentId: String,
+            val event: EventAbs,
         ) : Config()
 
         @Serializable
@@ -46,7 +47,7 @@ interface HomeComponent {
         ) : Config()
 
         @Serializable
-        data object Following : Config()
+        data object Messages : Config()
 
         @Serializable
         data object Create : Config()

@@ -117,6 +117,38 @@ class DefaultCreateEventComponent(
         _newTournamentState.value = _newTournamentState.value.updateTournamentFromEvent(_newEventState.value)
     }
 
+    override fun validateAndUpdatePrice(input: String, onError: (Boolean) -> Unit) {
+        val amount = input.toDoubleOrNull()
+        if (amount == null || amount < 0) {
+            onError(true)
+        } else {
+            // Update the event field. For money, you may want to store cents or
+            // use appropriate conversion.
+            updateEventField { copy(price = amount) }
+            onError(false)
+        }
+    }
+
+    override fun validateAndUpdateTeamSize(input: String, onError: (Boolean) -> Unit) {
+        val teamSize = input.toIntOrNull()
+        if (teamSize == null || teamSize !in 2..6) {
+            onError(true)
+        } else {
+            updateEventField { copy(teamSizeLimit = teamSize) }
+            onError(false)
+        }
+    }
+
+    override fun validateAndUpdateMaxPlayers(input: String, onError: (Boolean) -> Unit) {
+        val players = input.toIntOrNull()
+        if (players == null || players <= 0) {
+            onError(true)
+        } else {
+            updateEventField { copy(maxPlayers = players) }
+            onError(false)
+        }
+    }
+
     private fun createChild(
         config: Config,
         componentContext: ComponentContext

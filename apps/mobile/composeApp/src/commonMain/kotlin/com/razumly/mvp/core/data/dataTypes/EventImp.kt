@@ -31,6 +31,8 @@ data class EventImp(
     override val imageUrl: String,
     override val teamSizeLimit: Int,
     override val maxPlayers: Int,
+    override val teamSignup: Boolean,
+    override val singleDivision: Boolean,
     @Transient override val eventType: EventType = EventType.EVENT,
     @Transient override val lastUpdated: Instant = Clock.System.now(),
 ): EventAbs {
@@ -53,6 +55,8 @@ data class EventImp(
                 imageUrl = "",
                 teamSizeLimit = 0,
                 maxPlayers = 0,
+                singleDivision = false,
+                teamSignup = false,
             )
         }
     }
@@ -74,7 +78,9 @@ data class EventImp(
             long = long,
             hostId = hostId,
             teamSizeLimit = teamSizeLimit,
-            maxPlayers = maxPlayers
+            maxPlayers = maxPlayers,
+            singleDivision = singleDivision,
+            teamSignup = teamSignup
         )
     }
 }

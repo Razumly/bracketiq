@@ -28,16 +28,19 @@ interface CreateEventComponent {
     fun previousStep()
     fun selectEventType(type: EventType)
     fun selectPlace(place: MVPPlace)
+    fun validateAndUpdatePrice(input: String, onError: (Boolean) -> Unit)
+    fun validateAndUpdateTeamSize(input: String, onError: (Boolean) -> Unit)
+    fun validateAndUpdateMaxPlayers(input: String, onError: (Boolean) -> Unit)
 
-    sealed class Child(val nextStep: Config?, val step: Int) {
+    sealed class Child(val nextStep: Config?, val step: Int, val title: String) {
         companion object {
             const val STEPS = 5
         }
-        data object EventBasicInfo : Child(EventLocation, 1)
-        data class EventLocation(val component: MapComponent) : Child(Config.EventImage, 2)
-        data object EventImage : Child(Config.TournamentInfo, 3)
-        data object TournamentInfo : Child(Config.Preview, 4)
-        data object Preview : Child(null, 5)
+        data object EventBasicInfo : Child(EventLocation, 1, "Basic Info")
+        data class EventLocation(val component: MapComponent) : Child(Config.EventImage, 2, "Select Location")
+        data object EventImage : Child(Config.TournamentInfo, 3, "Select Image")
+        data object TournamentInfo : Child(Config.Preview, 4, "Tournament Info")
+        data object Preview : Child(null, 5, "Preview")
     }
 
     @Serializable
