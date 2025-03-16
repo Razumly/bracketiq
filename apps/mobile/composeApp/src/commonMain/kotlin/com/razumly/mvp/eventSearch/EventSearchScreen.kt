@@ -43,7 +43,7 @@ import com.razumly.mvp.core.presentation.util.CircularRevealShape
 import com.razumly.mvp.core.presentation.util.isScrollingUp
 import com.razumly.mvp.eventMap.EventMap
 import com.razumly.mvp.eventMap.MapComponent
-import com.razumly.mvp.eventSearch.components.SearchBox
+import com.razumly.mvp.eventSearch.composables.SearchBox
 import com.razumly.mvp.home.LocalNavBarPadding
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeEffect

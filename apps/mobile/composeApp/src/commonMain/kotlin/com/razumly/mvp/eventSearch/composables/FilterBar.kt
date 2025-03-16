@@ -1,4 +1,4 @@
-package com.razumly.mvp.eventSearch.components
+package com.razumly.mvp.eventSearch.composables
 
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height

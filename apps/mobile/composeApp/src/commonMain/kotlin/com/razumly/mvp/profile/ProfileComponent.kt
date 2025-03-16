@@ -9,12 +9,14 @@ import kotlinx.coroutines.launch
 
 interface ProfileComponent {
     fun onLogout()
+    fun manageTeams()
 }
 
 class DefaultProfileComponent(
     private val componentContext: ComponentContext,
     private val mvpRepository: IMVPRepository,
-    private val onNavigateToLogin: () -> Unit
+    private val onNavigateToLogin: () -> Unit,
+    private val onNavigateToTeamSettings: () -> Unit,
 ) : ProfileComponent, ComponentContext by componentContext {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     override fun onLogout() {
@@ -22,5 +24,9 @@ class DefaultProfileComponent(
             mvpRepository.logout()
             onNavigateToLogin()
         }
+    }
+
+    override fun manageTeams() {
+        onNavigateToTeamSettings()
     }
 }

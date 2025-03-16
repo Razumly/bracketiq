@@ -43,7 +43,7 @@ import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.presentation.util.cleanup
 import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.toTitleCase
-import com.razumly.mvp.eventSearch.components.StylizedText
+import com.razumly.mvp.eventSearch.composables.StylizedText
 import com.razumly.mvp.eventSearch.util.TextPatterns
 import dev.chrisbanes.haze.ExperimentalHazeApi
 import dev.chrisbanes.haze.HazeInputScale

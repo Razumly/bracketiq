@@ -1,5 +1,6 @@
 package com.razumly.mvp.profile
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -11,15 +12,21 @@ import androidx.compose.ui.Modifier
 
 @Composable
 fun ProfileScreen(component: ProfileComponent) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .statusBarsPadding(),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
+    Box {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Button(onClick = { component.manageTeams() }){
+                Text("Manage Teams")
+            }
+        }
         Button(
+            modifier = Modifier.align(Alignment.BottomCenter),
             onClick = { component.onLogout() },
-        ){
+        ) {
             Text("Logout")
         }
     }

@@ -27,8 +27,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.EventAbs
-import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.presentation.composables.EventDetails
+import com.razumly.mvp.core.presentation.composables.TeamCard
 
 @Composable
 fun EventList(
@@ -42,27 +43,16 @@ fun EventList(
 
     val selectedEvent by component.selectedEvent.collectAsState()
     val currentUser by component.currentUser.collectAsState()
+    val validTeams by component.validTeams.collectAsState()
     var isUserInEvent by remember { mutableStateOf(false) }
     val teamSignup = selectedEvent?.teamSignup
 
     // Control the team selection dialog visibility
     var showTeamSelectionDialog by remember { mutableStateOf(false) }
-    // Save the event for which the user is trying to join
-    var joiningEvent by remember { mutableStateOf<EventAbs?>(null) }
 
     LaunchedEffect(currentUser, selectedEvent) {
         isUserInEvent = (currentUser?.user?.tournamentIds?.contains(selectedEvent?.id) == true) ||
                 (currentUser?.user?.eventIds?.contains(selectedEvent?.id) == true)
-    }
-
-    // Filter valid teams based on event's teamSizeLimit
-    val validTeams = remember(currentUser, joiningEvent) {
-        joiningEvent?.let { event ->
-            // Assuming each Team has a member count and you want teams that haven't reached the teamSizeLimit.
-            currentUser?.teams?.filter { team ->
-                team.players.size < event.teamSizeLimit
-            } ?: emptyList()
-        } ?: emptyList()
     }
 
     LazyColumn(
@@ -117,20 +107,15 @@ fun EventList(
     }
 
     // Dialog for team selection when joining an event that requires team signup
-    if (showTeamSelectionDialog && joiningEvent != null) {
+    if (showTeamSelectionDialog && selectedEvent != null) {
         TeamSelectionDialog(
             teams = validTeams,
             onTeamSelected = { selectedTeam ->
                 showTeamSelectionDialog = false
-                joiningEvent?.let { event ->
-                    // Call a component function that joins event with the chosen team.
-                    component.joinEventWithTeam(event, selectedTeam)
-                }
-                joiningEvent = null
+                component.joinEventAsTeam(selectedTeam)
             },
             onDismiss = {
                 showTeamSelectionDialog = false
-                joiningEvent = null
             }
         )
     }
@@ -139,8 +124,8 @@ fun EventList(
 
 @Composable
 fun TeamSelectionDialog(
-    teams: List<Team>,
-    onTeamSelected: (Team) -> Unit,
+    teams: List<TeamWithPlayers>,
+    onTeamSelected: (TeamWithPlayers) -> Unit,
     onDismiss: () -> Unit
 ) {
     AlertDialog(
@@ -156,11 +141,11 @@ fun TeamSelectionDialog(
                             .clickable { onTeamSelected(team) }
                             .padding(8.dp)
                     ) {
-                        Text(text = team)
+                        TeamCard(team)
                     }
                 }
             }
         },
-        confirmButton = {} // or add a cancel button here if needed
+        confirmButton = {}
     )
 }

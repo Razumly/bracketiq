@@ -139,13 +139,16 @@ class SearchEventListComponent(
     }
 
     fun joinEvent(event: EventAbs?) {
-        try {
-            if(event == null) return
-            scope.launch {
-                mvpRepository.addUserToEvent(event)
-            }
-        } catch (e: Exception) {
-            _error.value = "Failed to select event: ${e.message}"
+        if(event == null) return
+        scope.launch {
+            mvpRepository.addCurrentUserToEvent(event)
+        }
+    }
+
+    fun joinEventAsTeam(team: TeamWithPlayers) {
+        if(_selectedEvent.value == null) return
+        scope.launch {
+            mvpRepository.addTeamToEvent(_selectedEvent.value!!, team)
         }
     }
 
