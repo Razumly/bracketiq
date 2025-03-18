@@ -76,7 +76,7 @@ class SearchEventListComponent(
         scope.launch {
             currentUser.collect { user ->
                 if (user != null) {
-                    mvpRepository.getTeamsWithPlayers(user.user.teams).collect { teams ->
+                    mvpRepository.getTeamsWithPlayers(user.user.teamIds).collect { teams ->
                         _userTeams.value = teams
                     }
                 }
@@ -164,7 +164,7 @@ class SearchEventListComponent(
             }
             val currentBounds = getBounds(radius, currentLocation.latitude, currentLocation.longitude)
 
-            _events.value = mvpRepository.getEvents(currentBounds)
+            _events.value = mvpRepository.getEvents(currentBounds, null)
         } catch (e: Exception) {
             _error.value = "Failed to fetch events: ${e.message}"
             _events.value = emptyList()

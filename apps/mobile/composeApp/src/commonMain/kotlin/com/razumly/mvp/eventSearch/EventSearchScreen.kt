@@ -39,11 +39,11 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
+import com.razumly.mvp.core.presentation.composables.SearchBox
 import com.razumly.mvp.core.presentation.util.CircularRevealShape
 import com.razumly.mvp.core.presentation.util.isScrollingUp
 import com.razumly.mvp.eventMap.EventMap
 import com.razumly.mvp.eventMap.MapComponent
-import com.razumly.mvp.eventSearch.composables.SearchBox
 import com.razumly.mvp.home.LocalNavBarPadding
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeEffect
@@ -84,7 +84,14 @@ fun EventSearchScreen(component: SearchEventListComponent, mapComponent: MapComp
                         )
                         .statusBarsPadding()
                 ) {
-                    SearchBox()
+                    SearchBox(
+                        placeholder = "Search for Events",
+                        filter = true,
+                        onChange = {  },
+                        onSearch = {  },
+                        initialList = {  },
+                        suggestions = { }
+                    )
                 }
             },
             floatingActionButton = {

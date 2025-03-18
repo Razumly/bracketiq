@@ -1,41 +1,42 @@
 package com.razumly.mvp.core.data.dataTypes
 
 import androidx.room.Entity
-import androidx.room.Ignore
 import androidx.room.PrimaryKey
 import com.razumly.mvp.core.data.dataTypes.dtos.TeamDTO
 import com.razumly.mvp.core.data.dataTypes.enums.Division
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.Transient
 
 @Entity
 @Serializable
 data class Team(
-    var tournamentIds: List<String>,
+    val tournamentIds: List<String>,
     val eventIds: List<String>,
-    var seed: Int,
-    var division: Division,
-    var wins: Int,
-    var losses: Int,
-    var name: String? = null,
-    @Ignore
-    var players: List<String> = emptyList(),
-    @PrimaryKey
-    @Transient
-    override var id: String = ""
+    val seed: Int,
+    val division: Division,
+    val wins: Int,
+    val losses: Int,
+    val name: String?,
+    val captainId: String,
+    val players: List<String> = emptyList(),
+    @PrimaryKey override val id: String
 ) : MVPDocument {
-    // Provide an explicit no-arg constructor for Room.
-    constructor() : this(
-        tournamentIds = listOf(),
-        eventIds = listOf(),
-        seed = 0,
-        division = Division.NOVICE,
-        wins = 0,
-        losses = 0,
-        name = null,
-        players = emptyList(),
-        id = ""
-    )
+
+    companion object {
+        operator fun invoke(captainId: String): Team {
+            return Team(
+                tournamentIds = listOf(),
+                eventIds = listOf(),
+                seed = 0,
+                division = Division.NOVICE,
+                wins = 0,
+                losses = 0,
+                name = null,
+                players = listOf(captainId),
+                id = "",
+                captainId = captainId
+            )
+        }
+    }
 
     fun toTeamDTO(): TeamDTO {
         return TeamDTO(
@@ -47,6 +48,7 @@ data class Team(
             wins = wins,
             losses = losses,
             players = players,
+            captainId = captainId,
             id = id
         )
     }

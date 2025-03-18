@@ -19,8 +19,11 @@ interface TeamDao {
     @Upsert
     suspend fun upsertTeams(teams: List<Team>)
 
-    @Query("SELECT * FROM Team WHERE tournament = :tournamentId")
-    suspend fun getTeams(tournamentId: String): List<Team>
+    @Query("SELECT * FROM Team WHERE tournamentIds = :tournamentId")
+    suspend fun getTeamsInTournament(tournamentId: String): List<Team>
+
+    @Query("SELECT * FROM Team WHERE id in (:teamIds)")
+    suspend fun getTeams(teamIds: List<String>): List<Team>?
 
     @Query("DELETE FROM Team WHERE id IN (:ids)")
     suspend fun deleteTeamsByIds(ids: List<String>)
@@ -28,12 +31,22 @@ interface TeamDao {
     @Upsert
     suspend fun upsertTeamPlayerCrossRef(crossRef: TeamPlayerCrossRef)
 
+    @Upsert
+    suspend fun upsertTeamPlayerCrossRefs(crossRefs: List<TeamPlayerCrossRef>)
+
+    @Delete
+    suspend fun deleteTeamPlayerCrossRef(crossRef: TeamPlayerCrossRef)
+
     @Transaction
     @Query("SELECT * FROM Team WHERE id = :teamId")
     suspend fun getTeamWithPlayers(teamId: String): TeamWithPlayers?
 
     @Transaction
-    @Query("SELECT * FROM Team WHERE tournament = :tournamentId")
+    @Query("SELECT * FROM Team WHERE id in (:teamIds)")
+    suspend fun getTeamsWithPlayers(teamIds: List<String>): List<TeamWithPlayers>?
+
+    @Transaction
+    @Query("SELECT * FROM Team WHERE tournamentIds = :tournamentId")
     fun getTeamsInTournamentFlow(tournamentId: String): Flow<List<TeamWithPlayers>>
 
     @Transaction

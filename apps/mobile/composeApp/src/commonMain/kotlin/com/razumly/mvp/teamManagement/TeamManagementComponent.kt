@@ -22,9 +22,12 @@ class TeamManagementComponent(
     val mvpRepository: MVPRepository,
 ) : ComponentContext by componentContext {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    val currentUser = mvpRepository.getCurrentUserFlow().stateIn(
+    private val currentUser = mvpRepository.getCurrentUserFlow().stateIn(
         scope, SharingStarted.Eagerly, null
     )
+
+    private val _friends = MutableStateFlow<List<UserData>>(listOf())
+    val friends = _friends.asStateFlow()
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val currentTeams = currentUser.map { user ->
@@ -36,12 +39,41 @@ class TeamManagementComponent(
     private val _selectedTeam = MutableStateFlow<TeamWithPlayers?>(null)
     val selectedTeam = _selectedTeam.asStateFlow()
 
+    private val _suggestedPlayers = MutableStateFlow<List<UserData>>(listOf())
+    val suggestedPlayers = _suggestedPlayers.asStateFlow()
+
+    init {
+        scope.launch {
+            currentUser.collect { user ->
+                _friends.value = mvpRepository.getPlayers(user?.user?.friendIds) ?: listOf()
+            }
+        }
+        scope.launch {
+            currentTeams.collect{ teams ->
+                if (_selectedTeam.value != null) {
+                    _selectedTeam.value =
+                        teams.find { team -> team.team.id == _selectedTeam.value!!.team.id }
+                }
+            }
+        }
+    }
+
     fun selectTeam(team: TeamWithPlayers) {
         _selectedTeam.value = team
     }
 
+    fun createTeam() {
+        scope.launch { mvpRepository.createTeam() }
+    }
+
     fun deselectTeam() {
         _selectedTeam.value = null
+    }
+
+    fun changeTeamName(newName: String) {
+        scope.launch {
+            selectedTeam.value?.team?.let { mvpRepository.changeTeamName(it.copy(name = newName)) }
+        }
     }
 
     fun addPlayer(player: UserData) {
@@ -54,5 +86,9 @@ class TeamManagementComponent(
         scope.launch {
             selectedTeam.value?.team?.let { mvpRepository.removePlayerFromTeam(it, player) }
         }
+    }
+
+    fun searchPlayers(query: String) {
+        scope.launch { _suggestedPlayers.value = mvpRepository.getPlayers(query = query) ?: listOf() }
     }
 }

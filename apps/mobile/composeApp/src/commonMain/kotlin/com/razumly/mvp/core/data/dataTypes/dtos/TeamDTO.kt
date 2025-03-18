@@ -7,7 +7,7 @@ import kotlinx.serialization.Transient
 
 @Serializable
 data class TeamDTO (
-    var name: String? = null,
+    var name: String?,
     var tournamentIds: List<String>,
     val eventIds: List<String>,
     var seed: Int,
@@ -15,6 +15,7 @@ data class TeamDTO (
     var wins: Int,
     var losses: Int,
     var players: List<String> = emptyList(),
+    val captainId: String,
     @Transient
     val id: String = ""
 )
@@ -22,13 +23,14 @@ data class TeamDTO (
 fun TeamDTO.toTeam(id: String): Team {
     return Team(
         name = name,
-        tournament = tournamentIds,
+        tournamentIds = tournamentIds,
         eventIds = eventIds,
         seed = seed,
         division = Division.valueOf(division),
         wins = wins,
         losses = losses,
         players = players,
+        captainId = captainId,
         id = id
     )
 }

@@ -24,10 +24,11 @@ import com.razumly.mvp.Message.MessagesScreen
 import com.razumly.mvp.core.presentation.composables.MVPBottomNavBar
 import com.razumly.mvp.core.presentation.composables.PlatformBackButton
 import com.razumly.mvp.eventCreate.CreateEventScreen
+import com.razumly.mvp.eventDetailScreen.EventDetailScreen
 import com.razumly.mvp.eventSearch.EventSearchScreen
 import com.razumly.mvp.matchDetailScreen.MatchDetailScreen
 import com.razumly.mvp.profile.ProfileScreen
-import com.razumly.mvp.eventDetailScreen.EventDetailScreen
+import com.razumly.mvp.teamManagement.TeamManagementScreen
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
 import io.github.aakira.napier.Napier
@@ -105,6 +106,11 @@ fun HomeScreen(component: HomeComponent) {
                                     is HomeComponent.Child.Profile -> {
                                         Napier.d(tag = "Navigation") { "Navigating to Profile Screen" }
                                         ProfileScreen(instance.component)
+                                    }
+
+                                    is HomeComponent.Child.Teams -> {
+                                        Napier.d(tag = "Navigation") { "Navigating to Team Management Screen"}
+                                        TeamManagementScreen(instance.component)
                                     }
                                 }
                             }

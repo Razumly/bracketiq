@@ -40,11 +40,16 @@ fun AuthScreenBase(component: AuthComponent, onOauth2: () -> Unit?) {
     var confirmPassword by remember { mutableStateOf("") }
     var firstName by remember { mutableStateOf("") }
     var lastName by remember { mutableStateOf("") }
+    var userName by remember { mutableStateOf("") }
     var isPasswordVisible by remember { mutableStateOf(false) }
     var isConfirmPasswordVisible by remember { mutableStateOf(false) }
+    val passwordError by component.passwordError.collectAsState()
 
     val loginState by component.loginState.collectAsState()
     val isSignup by component.isSignup.collectAsState()
+
+    val isPasswordValid = password.length in 8..256
+    val isConfirmPasswordValid = confirmPassword.length in 8..256
 
     Column(
         modifier = Modifier
@@ -72,6 +77,19 @@ fun AuthScreenBase(component: AuthComponent, onOauth2: () -> Unit?) {
                 value = lastName,
                 onValueChange = { lastName = it },
                 label = { Text("Last Name") },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Text,
+                    imeAction = ImeAction.Next
+                ),
+                singleLine = true
+            )
+            OutlinedTextField(
+                value = userName,
+                onValueChange = { userName = it },
+                label = { Text("Username") },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 8.dp),
@@ -111,6 +129,7 @@ fun AuthScreenBase(component: AuthComponent, onOauth2: () -> Unit?) {
                 keyboardType = KeyboardType.Password,
                 imeAction = ImeAction.Next
             ),
+            isError = passwordError.isNotBlank(),
             trailingIcon = {
                 IconButton(
                     onClick = { isPasswordVisible = !isPasswordVisible }
@@ -124,7 +143,8 @@ fun AuthScreenBase(component: AuthComponent, onOauth2: () -> Unit?) {
                     )
                 }
             },
-            singleLine = true
+            singleLine = true,
+            supportingText = { Text(passwordError, color = MaterialTheme.colorScheme.error) }
         )
 
         if (isSignup) {
@@ -178,7 +198,7 @@ fun AuthScreenBase(component: AuthComponent, onOauth2: () -> Unit?) {
         Button(
             onClick = {
                 if (isSignup) {
-                    component.onSignup(email, password, confirmPassword, firstName, lastName)
+                    component.onSignup(email, password, confirmPassword, firstName, lastName, userName)
                 } else {
                     component.onLogin(email, password)
                 }
@@ -188,7 +208,8 @@ fun AuthScreenBase(component: AuthComponent, onOauth2: () -> Unit?) {
                 .padding(vertical = 16.dp),
             enabled = email.isNotBlank() &&
                     password.isNotBlank() &&
-                    (!isSignup || confirmPassword.isNotBlank()) &&
+                    isPasswordValid &&
+                    (!isSignup || (confirmPassword.isNotBlank() && isConfirmPasswordValid)) &&
                     loginState !is LoginState.Loading
         ) {
             Text(if (isSignup) "Create Account" else "Login")

@@ -6,11 +6,12 @@ import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.presentation.RootComponent
 import com.razumly.mvp.eventCreate.DefaultCreateEventComponent
+import com.razumly.mvp.eventDetailScreen.DefaultEventContentComponent
 import com.razumly.mvp.eventSearch.SearchEventListComponent
 import com.razumly.mvp.home.DefaultHomeComponent
 import com.razumly.mvp.matchDetailScreen.DefaultMatchContentComponent
 import com.razumly.mvp.profile.DefaultProfileComponent
-import com.razumly.mvp.eventDetailScreen.DefaultEventContentComponent
+import com.razumly.mvp.teamManagement.TeamManagementComponent
 import com.razumly.mvp.userAuth.loginScreen.AuthComponent
 import org.koin.dsl.module
 
@@ -94,11 +95,19 @@ val componentModule = module {
         )
     }
 
-    factory { (componentContext: ComponentContext, onNavigateToLogin: () -> Unit) ->
+    factory { (componentContext: ComponentContext, onNavigateToLogin: () -> Unit, onNavigateToTeamSettings: () -> Unit) ->
         DefaultProfileComponent(
             componentContext = componentContext,
             mvpRepository = get(),
-            onNavigateToLogin = onNavigateToLogin
+            onNavigateToLogin = onNavigateToLogin,
+            onNavigateToTeamSettings = onNavigateToTeamSettings
+        )
+    }
+
+    factory { (componentContext: ComponentContext) ->
+        TeamManagementComponent(
+            componentContext = componentContext,
+            mvpRepository = get(),
         )
     }
 }

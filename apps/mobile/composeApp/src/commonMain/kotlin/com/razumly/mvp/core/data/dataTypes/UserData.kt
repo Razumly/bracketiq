@@ -12,10 +12,12 @@ data class UserData(
     val lastName: String,
     val tournamentIds: List<String>,
     val eventIds: List<String>,
-    val teams: List<String>,
+    val teamIds: List<String>,
+    val friendIds: List<String>,
+    val userName: String,
     @PrimaryKey override val id: String,
 ) : MVPDocument
 
 fun UserData.toUserDataDTO(): UserDataDTO {
-    return UserDataDTO(firstName, lastName, tournamentIds, eventIds, teams, id)
+    return UserDataDTO(firstName, lastName, tournamentIds, eventIds, teamIds, friendIds, userName, id)
 }

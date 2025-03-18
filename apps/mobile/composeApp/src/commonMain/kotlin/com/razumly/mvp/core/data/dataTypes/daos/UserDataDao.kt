@@ -3,6 +3,7 @@ package com.razumly.mvp.core.data.dataTypes.daos
 import androidx.room.Dao
 import androidx.room.Delete
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Upsert
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.UserEventCrossRef
@@ -54,10 +55,23 @@ interface UserDataDao {
     @Query("SELECT * FROM UserData WHERE id in (:ids)")
     suspend fun getUserDatasById(ids: List<String>): List<UserData>
 
+    @Transaction
     @Query("SELECT * FROM UserData WHERE id = :id")
     suspend fun getUserWithRelationsById(id: String): UserWithRelations
 
+    @Transaction
     @Query("SELECT * FROM UserData WHERE id = :id")
     fun getUserWithRelationsFlowById(id: String): Flow<UserWithRelations?>
 
+    @Transaction
+    @Query("SELECT * FROM UserData WHERE id in (:ids)")
+    fun getUserByIdFlow(ids: List<String>): Flow<List<UserWithRelations>>
+
+    @Query(
+        "SELECT * FROM UserData " +
+                "WHERE userName LIKE '%' || :search || '%' " +
+                "OR firstName LIKE '%' || :search || '%' " +
+                "OR lastName LIKE '%' || :search || '%'"
+    )
+    suspend fun searchUsers(search: String): List<UserData>
 }

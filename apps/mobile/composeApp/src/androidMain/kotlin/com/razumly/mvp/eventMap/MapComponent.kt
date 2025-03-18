@@ -175,7 +175,7 @@ actual class MapComponent(
                 currentLocation.longitude
             )
 
-            _events.value = mvpRepository.getEvents(currentBounds)
+            _events.value = mvpRepository.getEvents(currentBounds, null)
         } catch (e: Exception) {
             _error.value = "Failed to fetch events: ${e.message}"
             _events.value = emptyList()

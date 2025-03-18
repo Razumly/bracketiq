@@ -15,7 +15,7 @@ import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 fun TeamCard(team: TeamWithPlayers, modifier: Modifier = Modifier) {
     Card(modifier.padding(vertical = 4.dp, horizontal = 8.dp)) {
         Row(modifier = Modifier.padding(4.dp)) {
-            if (team.team.name != null) {
+            if (!team.team.name.isNullOrBlank()) {
                 Text(
                     team.team.name.toString(),
                     overflow = TextOverflow.Ellipsis,

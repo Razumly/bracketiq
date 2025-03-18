@@ -1,7 +1,6 @@
 package com.razumly.mvp.userAuth.loginScreen
 
 import com.arkivanov.decompose.ComponentContext
-import com.razumly.mvp.core.data.IMVPRepository
 import com.razumly.mvp.core.data.MVPRepository
 import com.razumly.mvp.core.data.dataTypes.LoginState
 import com.razumly.mvp.core.data.dataTypes.UserWithRelations
@@ -29,6 +28,9 @@ class AuthComponent(
 
     internal val _isSignup = MutableStateFlow(false)
     val isSignup: StateFlow<Boolean> = _isSignup.asStateFlow()
+
+    internal val _passwordError = MutableStateFlow("")
+    val passwordError = _passwordError.asStateFlow()
 
     init {
         scope.launch {
@@ -73,13 +75,24 @@ class AuthComponent(
         _isSignup.value = !_isSignup.value
     }
 
-    fun onSignup(email: String, password: String, confirmPassword: String, firstName: String, lastName: String) {
+    fun onSignup(
+        email: String,
+        password: String,
+        confirmPassword: String,
+        firstName: String,
+        lastName: String,
+        userName: String
+    ) {
         if (password != confirmPassword) {
             return
         }
         scope.launch {
-            mvpRepository.createNewUser(email, password, firstName, lastName)
-            onLogin(email, password)
+            val user = mvpRepository.createNewUser(email, password, firstName, lastName, userName)
+            if (user == null) {
+                _passwordError.value = "Password is too long, or is a common password"
+            } else {
+                onLogin(email, password)
+            }
         }
     }
 }

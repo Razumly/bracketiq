@@ -10,13 +10,14 @@ import com.razumly.mvp.Message.DefaultMessagesComponent
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.eventCreate.DefaultCreateEventComponent
+import com.razumly.mvp.eventDetailScreen.DefaultEventContentComponent
 import com.razumly.mvp.eventMap.MapComponent
 import com.razumly.mvp.eventSearch.SearchEventListComponent
 import com.razumly.mvp.home.HomeComponent.Child
 import com.razumly.mvp.home.HomeComponent.Config
 import com.razumly.mvp.matchDetailScreen.DefaultMatchContentComponent
 import com.razumly.mvp.profile.DefaultProfileComponent
-import com.razumly.mvp.eventDetailScreen.DefaultEventContentComponent
+import com.razumly.mvp.teamManagement.TeamManagementComponent
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.koin.core.parameter.parametersOf
@@ -92,8 +93,17 @@ class DefaultHomeComponent(
                 _koin.inject<DefaultProfileComponent> {
                     parametersOf(
                         componentContext,
-                        onNavigateToLogin
+                        onNavigateToLogin,
+                        ::onNavigateToTeamSettings
                         )
+                }.value
+            )
+
+            is Config.Teams -> Child.Teams(
+                _koin.inject<TeamManagementComponent> {
+                    parametersOf(
+                        componentContext
+                    )
                 }.value
             )
         }
@@ -110,6 +120,10 @@ class DefaultHomeComponent(
     private fun onEventCreated() {
         navigation.replaceAll(Config.Search)
         _selectedPage.value = Config.Search
+    }
+
+    private fun onNavigateToTeamSettings() {
+        navigation.pushNew(Config.Teams)
     }
 
     override fun onTabSelected(page: Config) {

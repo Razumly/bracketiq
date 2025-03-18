@@ -6,6 +6,7 @@ import com.razumly.mvp.core.data.dataTypes.dtos.UserDataDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.toUserData
 import com.razumly.mvp.core.util.DbConstants
 import com.razumly.mvp.userAuth.util.getGoogleUserInfo
+import io.appwrite.ID
 import io.appwrite.enums.OAuthProvider
 import io.appwrite.extensions.createOAuth2Session
 import io.github.aakira.napier.Napier
@@ -36,9 +37,12 @@ suspend fun MVPRepository.oauth2Login(activity: ComponentActivity): UserWithRela
                 data = UserDataDTO(
                     firstName = userInfo.givenName,
                     lastName = userInfo.familyName,
+                    userName = "${userInfo.givenName}${ID.unique()}",
+                    id = id,
                     tournamentIds = listOf(),
                     eventIds = listOf(),
-                    id = id
+                    teamIds = listOf(),
+                    friendIds = listOf()
                 ),
                 nestedType = UserDataDTO::class
             )

@@ -10,6 +10,7 @@ import com.razumly.mvp.core.data.dataTypes.MVPDocument
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.TeamPlayerCrossRef
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.UserData
@@ -80,7 +81,8 @@ class MVPRepository(
     private val _currentUser = getCurrentUserFlow().stateIn(scope, SharingStarted.Eagerly, null)
 
 
-    override suspend fun login(email: String, password: String): UserWithRelations {
+    override suspend fun login(email: String, password: String): UserWithRelations? {
+        var currentUserWithRelations: UserWithRelations? = null
         try {
             val session = account.createEmailPasswordSession(email, password)
             val id = account.get().id
@@ -92,14 +94,12 @@ class MVPRepository(
                 nestedType = UserDataDTO::class
             ).data.copy(id = id)
             tournamentDB.getUserDataDao.upsertUserData(currentUser.toUserData(id))
-            val currentUserWithRelations =
+            currentUserWithRelations =
                 tournamentDB.getUserDataDao.getUserWithRelationsById(session.userId)
-
-            return currentUserWithRelations
         } catch (e: Exception) {
             Napier.e("Failed to login", e, DbConstants.ERROR_TAG)
-            throw e
         }
+        return currentUserWithRelations
     }
 
     override suspend fun logout() {
@@ -110,8 +110,7 @@ class MVPRepository(
     override suspend fun subscribeToUserData() {
         val channels = listOf(USER_CHANNEL)
         realtime.subscribe(
-            channels,
-            payloadType = UserDataDTO::class
+            channels, payloadType = UserDataDTO::class
         ) { response ->
             val userUpdates = response.payload
             scope.launch(Dispatchers.IO) {
@@ -126,59 +125,47 @@ class MVPRepository(
     ) = tournamentDB.getTournamentDao.getTournamentFlowById(tournamentId)
 
     private suspend fun getTournament(tournamentId: String) {
-        singleResponse(
-            networkCall = {
-                database.getDocument(
-                    DbConstants.DATABASE_NAME,
-                    DbConstants.TOURNAMENT_COLLECTION,
-                    tournamentId,
-                    nestedType = TournamentDTO::class,
-                    queries = null
+        singleResponse(networkCall = {
+            database.getDocument(
+                DbConstants.DATABASE_NAME,
+                DbConstants.TOURNAMENT_COLLECTION,
+                tournamentId,
+                nestedType = TournamentDTO::class,
+                queries = null
+            )
+        }, saveCall = { tournament ->
+            tournamentDB.getTournamentDao.upsertTournament(
+                tournament.toTournament(
+                    tournament.id
                 )
-            },
-            saveCall = { tournament ->
-                tournamentDB.getTournamentDao.upsertTournament(
-                    tournament.toTournament(
-                        tournament.id
-                    )
-                )
-            },
-            localData = { id ->
-                tournamentDB.getTournamentDao.getTournamentById(id)
-            }
-        )
+            )
+        })
         getPlayersOfTournament(tournamentId)
         getFields(tournamentId)
-        val teams = getTeams(tournamentId)
+        val teams = getTeamsInTournament(tournamentId)
         getMatches(tournamentId)
         tournamentDB.getTeamDao.upsertTeamsWithPlayers(teams)
     }
 
     private suspend fun getGenericEvent(eventId: String) {
-        val doc = singleResponse(
-            networkCall = {
-                database.getDocument(
-                    DbConstants.DATABASE_NAME,
-                    DbConstants.EVENT_COLLECTION,
-                    eventId,
-                    nestedType = EventDTO::class,
-                    queries = null
+        val doc = singleResponse(networkCall = {
+            database.getDocument(
+                DbConstants.DATABASE_NAME,
+                DbConstants.EVENT_COLLECTION,
+                eventId,
+                nestedType = EventDTO::class,
+                queries = null
+            )
+        }, saveCall = { event ->
+            tournamentDB.getEventImpDao.upsertEvent(
+                event.toEvent(
+                    event.id
                 )
-            },
-            saveCall = { event ->
-                tournamentDB.getEventImpDao.upsertEvent(
-                    event.toEvent(
-                        event.id
-                    )
-                )
-            },
-            localData = { id ->
-                tournamentDB.getEventImpDao.getEventById(id)
-            }
-        )
+            )
+        })
         getPlayersOfEvent(eventId)
         if (doc != null && doc.teamSignup) {
-            val teams = getTeams(eventId)
+            val teams = getTeamsInTournament(eventId)
             tournamentDB.getTeamDao.upsertTeamsWithPlayers(teams)
         }
     }
@@ -201,7 +188,6 @@ class MVPRepository(
         var userId = ""
         try {
             userId = currentUserDataSource.getUserId().first()
-
         } catch (e: Exception) {
             Napier.d("No current user ID stored")
         }
@@ -222,6 +208,12 @@ class MVPRepository(
                 nestedType = UserDataDTO::class,
             ).data.copy(id = userId)
             tournamentDB.getUserDataDao.upsertUserData(currentUserData.toUserData(userId))
+            getTeams(currentUserData.teamIds)
+            tournamentDB.getTeamDao.upsertTeamPlayerCrossRefs(currentUserData.teamIds.map { teamId ->
+                TeamPlayerCrossRef(
+                    teamId, currentUserData.id
+                )
+            })
             val currentUserWithRelations =
                 tournamentDB.getUserDataDao.getUserWithRelationsById(userId)
             return currentUserWithRelations
@@ -231,111 +223,128 @@ class MVPRepository(
         }
     }
 
-    override suspend fun getPlayers(playerIds: List<String>): List<UserData>? {
-        val localUsers = tournamentDB.getUserDataDao.getUserDatasById(playerIds)
-        if (localUsers.size == playerIds.size) {
-            return localUsers
-        } else {
-            val localIds = localUsers.map { user -> user.id }
-            val filteredIds = playerIds.filter { id -> localIds.contains(id) }
-            try {
-                val userDatas = database.listDocuments(
+    override fun getPlayersFlow(playerIds: List<String>): Flow<List<UserWithRelations>> =
+        tournamentDB.getUserDataDao.getUserByIdFlow(playerIds)
+
+    override suspend fun getPlayers(playerIds: List<String>?, query: String?): List<UserData>? {
+        val queryList = playerIds?.let {
+            if (playerIds.isEmpty()) return null
+            listOf(Query.equal("\$id", playerIds))
+        } ?: query?.let {
+            if (query.isBlank()) return null
+            listOf(
+                Query.or(
+                    listOf(
+                        Query.contains("userName", query),
+                        Query.contains("firstName", query),
+                        Query.contains("lastName", query)
+                    )
+                )
+            )
+        }
+
+        return queryList?.let {
+            multiResponse(networkCall = {
+                database.listDocuments(
                     DbConstants.DATABASE_NAME,
                     DbConstants.USER_DATA_COLLECTION,
-                    listOf(Query.equal("\$id", filteredIds)),
+                    queryList,
                     nestedType = UserDataDTO::class,
-                ).documents.map{ docDTO -> docDTO.convert { it.toUserData(docDTO.id) }.data }
-                tournamentDB.getUserDataDao.upsertUsersData(userDatas)
-
-                return userDatas
-            } catch (e: Exception) {
-                Napier.e("User missing User Data: ", e, DbConstants.ERROR_TAG)
-                return null
-            }
+                ).documents.map { docDTO -> docDTO.convert { it.toUserData(docDTO.id) }.data }
+            }, getLocalIds = {
+                playerIds?.let {
+                    tournamentDB.getUserDataDao.getUserDatasById(playerIds).toSet()
+                } ?: tournamentDB.getUserDataDao.searchUsers(query!!).toSet()
+            }, saveData = { newData ->
+                tournamentDB.getUserDataDao.upsertUsersData(newData)
+            }, deleteStaleData = { ids ->
+                tournamentDB.getUserDataDao.deleteUsersById(ids)
+            })
         }
     }
 
     override fun getTeamsInTournamentFlow(
         tournamentId: String
     ) = tournamentDB.getTeamDao.getTeamsInTournamentFlow(tournamentId)
-        .map { teams -> teams.associateBy { it.team.id } }
-        .flowOn(ioDispatcher)
+        .map { teams -> teams.associateBy { it.team.id } }.flowOn(ioDispatcher)
 
     override fun getTeamsWithPlayers(ids: List<String>): Flow<List<TeamWithPlayers>> =
         tournamentDB.getTeamDao.getTeamsWithPlayersFlowByIds(ids)
 
-    private suspend fun getTeams(
-        tournamentId: String,
-    ) = multiResponse(
-        networkCall = {
+    private suspend fun getTeams(teamIds: List<String>): List<TeamWithPlayers>? {
+        val teams = multiResponse(networkCall = {
             database.listDocuments(
                 DbConstants.DATABASE_NAME,
                 DbConstants.VOLLEYBALL_TEAMS_COLLECTION,
                 queries = listOf(
-                    Query.equal(DbConstants.TOURNAMENT_ATTRIBUTE, tournamentId),
-                    Query.limit(200)
+                    Query.equal("\$id", teamIds), Query.limit(200)
                 ),
                 TeamDTO::class,
-            ).documents.map { dtoDoc -> dtoDoc.convert { it.toTeam(dtoDoc.id) } }
-        },
-        getLocalIds = { tournamentDB.getTeamDao.getTeams(tournamentId).toSet() },
+            ).documents.map { dtoDoc -> dtoDoc.convert { it.toTeam(dtoDoc.id) }.data }
+        }, getLocalIds = {
+            tournamentDB.getTeamDao.getTeams(teamIds)?.toSet() ?: emptySet()
+        }, saveData = { teams ->
+            tournamentDB.getTeamDao.upsertTeams(teams)
+        }, deleteStaleData = { ids ->
+            tournamentDB.getTeamDao.deleteTeamsByIds(ids)
+        })
+
+        return tournamentDB.getTeamDao.getTeamsWithPlayers(teams.map { it.id })
+    }
+
+    private suspend fun getTeamsInTournament(
+        tournamentId: String,
+    ) = multiResponse(networkCall = {
+        database.listDocuments(
+            DbConstants.DATABASE_NAME,
+            DbConstants.VOLLEYBALL_TEAMS_COLLECTION,
+            queries = listOf(
+                Query.equal(DbConstants.TOURNAMENT_ATTRIBUTE, tournamentId), Query.limit(200)
+            ),
+            TeamDTO::class,
+        ).documents.map { dtoDoc -> dtoDoc.convert { it.toTeam(dtoDoc.id) }.data }
+    },
+        getLocalIds = { tournamentDB.getTeamDao.getTeamsInTournament(tournamentId).toSet() },
         deleteStaleData = { tournamentDB.getTeamDao.deleteTeamsByIds(it) },
-        saveData = { teams -> tournamentDB.getTeamDao.upsertTeams(teams) }
-    )
+        saveData = { teams -> tournamentDB.getTeamDao.upsertTeams(teams) })
 
     override fun getMatchesFlow(
         tournamentId: String
     ) = tournamentDB.getMatchDao.getMatchesByTournamentId(tournamentId)
-        .map { matches -> matches.associateBy { it.match.id } }
-        .flowOn(ioDispatcher)
+        .map { matches -> matches.associateBy { it.match.id } }.flowOn(ioDispatcher)
 
     private suspend fun getMatches(tournamentId: String): List<MatchMVP> =
-        multiResponse(
-            networkCall = {
-                val remoteMatches = database.listDocuments(
-                    DbConstants.DATABASE_NAME,
-                    DbConstants.MATCHES_COLLECTION,
-                    listOf(
-                        Query.equal(DbConstants.TOURNAMENT_ATTRIBUTE, tournamentId),
-                        Query.limit(200)
-                    ),
-                    MatchDTO::class
-                ).documents
-                remoteMatches.map { it.convert { matchDTO -> matchDTO.toMatch(it.id) } }
-            },
-            getLocalIds = {
-                val localMatches = tournamentDB.getMatchDao.getMatches(tournamentId)
-                localMatches.toSet()
-            },
-            deleteStaleData = { ids ->
-                tournamentDB.getMatchDao.deleteMatchesById(ids)
-            },
-            saveData = { matches ->
-                tournamentDB.getMatchDao.upsertMatches(matches)
-            }
-        )
+        multiResponse(networkCall = {
+            val remoteMatches = database.listDocuments(
+                DbConstants.DATABASE_NAME, DbConstants.MATCHES_COLLECTION, listOf(
+                    Query.equal(DbConstants.TOURNAMENT_ATTRIBUTE, tournamentId), Query.limit(200)
+                ), MatchDTO::class
+            ).documents
+            remoteMatches.map { it.convert { matchDTO -> matchDTO.toMatch(it.id) }.data }
+        }, getLocalIds = {
+            val localMatches = tournamentDB.getMatchDao.getMatches(tournamentId)
+            localMatches.toSet()
+        }, deleteStaleData = { ids ->
+            tournamentDB.getMatchDao.deleteMatchesById(ids)
+        }, saveData = { matches ->
+            tournamentDB.getMatchDao.upsertMatches(matches)
+        })
 
     override fun getMatchFlow(
         matchId: String
     ) = tournamentDB.getMatchDao.getMatchFlowById(matchId)
 
-    override suspend fun getMatch(matchId: String) = singleResponse(
-        networkCall = {
-            val doc = database.getDocument(
-                DbConstants.DATABASE_NAME,
-                DbConstants.MATCHES_COLLECTION,
-                matchId,
-                nestedType = MatchDTO::class,
-            )
-            doc.convert { it.toMatch(doc.id) }
-        },
-        saveCall = { match ->
-            tournamentDB.getMatchDao.upsertMatch(match)
-        },
-        localData = { id ->
-            tournamentDB.getMatchDao.getMatchById(id)?.match
-        }
-    )
+    override suspend fun getMatch(matchId: String) = singleResponse(networkCall = {
+        val doc = database.getDocument(
+            DbConstants.DATABASE_NAME,
+            DbConstants.MATCHES_COLLECTION,
+            matchId,
+            nestedType = MatchDTO::class,
+        )
+        doc.convert { it.toMatch(doc.id) }
+    }, saveCall = { match ->
+        tournamentDB.getMatchDao.upsertMatch(match)
+    })
 
     override fun getFieldsFlow(
         tournamentId: String
@@ -343,22 +352,19 @@ class MVPRepository(
 
     private suspend fun getFields(
         tournamentId: String
-    ) = multiResponse(
-        networkCall = {
-            database.listDocuments(
-                DbConstants.DATABASE_NAME,
-                DbConstants.FIELDS_COLLECTION,
-                queries = listOf(
-                    Query.equal(DbConstants.TOURNAMENT_ATTRIBUTE, tournamentId),
-                    Query.limit(100)
-                ),
-                Field::class,
-            ).documents
-        },
+    ) = multiResponse(networkCall = {
+        database.listDocuments(
+            DbConstants.DATABASE_NAME,
+            DbConstants.FIELDS_COLLECTION,
+            queries = listOf(
+                Query.equal(DbConstants.TOURNAMENT_ATTRIBUTE, tournamentId), Query.limit(100)
+            ),
+            Field::class,
+        ).documents.map { it.data }
+    },
         getLocalIds = { tournamentDB.getFieldDao.getFields(tournamentId).toSet() },
         deleteStaleData = { tournamentDB.getFieldDao.deleteFieldsById(it) },
-        saveData = { fields -> tournamentDB.getFieldDao.upsertFields(fields) }
-    )
+        saveData = { fields -> tournamentDB.getFieldDao.upsertFields(fields) })
 
     override fun getPlayersOfEventFlow(
         event: EventAbs
@@ -371,20 +377,14 @@ class MVPRepository(
 
     private suspend fun getPlayersOfEvent(
         eventId: String,
-    ) = multiResponse(
-        networkCall = {
-            val remotePlayers =
-                database.listDocuments(
-                    DbConstants.DATABASE_NAME,
-                    DbConstants.USER_DATA_COLLECTION,
-                    listOf(
-                        Query.contains(DbConstants.EVENTS_ATTRIBUTE, eventId),
-                        Query.limit(500)
-                    ),
-                    UserDataDTO::class
-                ).documents
-            remotePlayers.map { it.convert { userData -> userData.toUserData(it.id) } }
-        },
+    ) = multiResponse(networkCall = {
+        val remotePlayers = database.listDocuments(
+            DbConstants.DATABASE_NAME, DbConstants.USER_DATA_COLLECTION, listOf(
+                Query.contains(DbConstants.EVENTS_ATTRIBUTE, eventId), Query.limit(500)
+            ), UserDataDTO::class
+        ).documents
+        remotePlayers.map { it.convert { userData -> userData.toUserData(it.id) }.data }
+    },
         getLocalIds = { tournamentDB.getUserDataDao.getUsers(eventId).toSet() },
         deleteStaleData = {
             tournamentDB.getUserDataDao.deleteEventCrossRefById(it)
@@ -396,25 +396,19 @@ class MVPRepository(
             tournamentDB.getUserDataDao.upsertUserEventCrossRefs(players.map { user ->
                 UserEventCrossRef(user.id, eventId)
             })
-        }
-    )
+        })
 
     private suspend fun getPlayersOfTournament(
         tournamentId: String,
-    ) = multiResponse(
-        networkCall = {
-            val remotePlayers =
-                database.listDocuments(
-                    DbConstants.DATABASE_NAME,
-                    DbConstants.USER_DATA_COLLECTION,
-                    listOf(
-                        Query.contains(DbConstants.TOURNAMENTS_ATTRIBUTE, tournamentId),
-                        Query.limit(500)
-                    ),
-                    UserDataDTO::class
-                ).documents
-            remotePlayers.map { it.convert { userData -> userData.toUserData(it.id) } }
-        },
+    ) = multiResponse(networkCall = {
+        val remotePlayers = database.listDocuments(
+            DbConstants.DATABASE_NAME, DbConstants.USER_DATA_COLLECTION, listOf(
+                Query.contains(DbConstants.TOURNAMENTS_ATTRIBUTE, tournamentId),
+                Query.limit(500)
+            ), UserDataDTO::class
+        ).documents
+        remotePlayers.map { it.convert { userData -> userData.toUserData(it.id) }.data }
+    },
         getLocalIds = { tournamentDB.getUserDataDao.getUsers(tournamentId).toSet() },
         deleteStaleData = {
             tournamentDB.getUserDataDao.deleteTournamentCrossRefById(it)
@@ -426,62 +420,50 @@ class MVPRepository(
             tournamentDB.getUserDataDao.upsertUserTournamentCrossRefs(players.map { user ->
                 UserTournamentCrossRef(user.id, tournamentId)
             })
-        }
-    )
+        })
 
     override suspend fun getEvents(
-        bounds: Bounds
+        bounds: Bounds?, query: String?
     ): List<EventAbs> {
         val docs: List<EventAbs>
         try {
-            val tournaments = multiResponse(
-                networkCall = {
-                    database.listDocuments(
-                        DbConstants.DATABASE_NAME,
-                        DbConstants.TOURNAMENT_COLLECTION,
-                        queries = listOf(
-                            Query.greaterThan(DbConstants.LAT_ATTRIBUTE, bounds.south),
-                            Query.lessThan(DbConstants.LAT_ATTRIBUTE, bounds.north),
-                            Query.greaterThan(DbConstants.LONG_ATTRIBUTE, bounds.west),
-                            Query.lessThan(DbConstants.LONG_ATTRIBUTE, bounds.east),
-                        ),
-                        TournamentDTO::class
-                    ).documents.map { dtoDoc -> dtoDoc.convert { it.toTournament(dtoDoc.id) } }
-                },
-                getLocalIds = {
-                    tournamentDB.getTournamentDao.getAllCachedTournaments().toSet()
-                },
-                saveData = { tournaments ->
-                    tournamentDB.getTournamentDao.upsertTournaments(tournaments)
-                },
-                deleteStaleData = {
-                    tournamentDB.getTournamentDao.deleteTournamentsById(it)
-                }
-            )
-            val pickupEvents = multiResponse(
-                networkCall = {
-                    database.listDocuments(
-                        DbConstants.DATABASE_NAME,
-                        DbConstants.EVENT_COLLECTION,
-                        queries = listOf(
-                            Query.greaterThan(DbConstants.LAT_ATTRIBUTE, bounds.south),
-                            Query.lessThan(DbConstants.LAT_ATTRIBUTE, bounds.north),
-                            Query.greaterThan(DbConstants.LONG_ATTRIBUTE, bounds.west),
-                            Query.lessThan(DbConstants.LONG_ATTRIBUTE, bounds.east),
-                        ),
-                        EventDTO::class
-                    ).documents.map { dtoDoc -> dtoDoc.convert { it.toEvent(dtoDoc.id) } }
-                },
-                getLocalIds = {
-                    tournamentDB.getEventImpDao.getAllCachedEvents().toSet()
-                },
-                saveData = { pickupEvents ->
-                    tournamentDB.getEventImpDao.upsertEvents(pickupEvents)
-                },
-                deleteStaleData = {
-                    tournamentDB.getEventImpDao.deleteEventsById(it)
-                }
-            )
+            val queries = bounds?.let {
+                listOf(
+                    Query.greaterThan(DbConstants.LAT_ATTRIBUTE, bounds.south),
+                    Query.lessThan(DbConstants.LAT_ATTRIBUTE, bounds.north),
+                    Query.greaterThan(DbConstants.LONG_ATTRIBUTE, bounds.west),
+                    Query.lessThan(DbConstants.LONG_ATTRIBUTE, bounds.east),
+                )
+            } ?: query?.let { listOf(it) }
+
+            val tournaments = multiResponse(networkCall = {
+                database.listDocuments(
+                    DbConstants.DATABASE_NAME,
+                    DbConstants.TOURNAMENT_COLLECTION,
+                    queries = queries,
+                    TournamentDTO::class
+                ).documents.map { dtoDoc -> dtoDoc.convert { it.toTournament(dtoDoc.id) }.data }
+            }, getLocalIds = {
+                tournamentDB.getTournamentDao.getAllCachedTournaments().toSet()
+            }, saveData = { tournaments ->
+                tournamentDB.getTournamentDao.upsertTournaments(tournaments)
+            }, deleteStaleData = {
+                tournamentDB.getTournamentDao.deleteTournamentsById(it)
+            })
+            val pickupEvents = multiResponse(networkCall = {
+                database.listDocuments(
+                    DbConstants.DATABASE_NAME,
+                    DbConstants.EVENT_COLLECTION,
+                    queries = queries,
+                    EventDTO::class
+                ).documents.map { dtoDoc -> dtoDoc.convert { it.toEvent(dtoDoc.id) }.data }
+            }, getLocalIds = {
+                tournamentDB.getEventImpDao.getAllCachedEvents().toSet()
+            }, saveData = { pickupEvents ->
+                tournamentDB.getEventImpDao.upsertEvents(pickupEvents)
+            }, deleteStaleData = {
+                tournamentDB.getEventImpDao.deleteEventsById(it)
+            })
             docs = pickupEvents + tournaments
         } catch (e: Exception) {
             Napier.e("Failed to get events", e, DbConstants.ERROR_TAG)
@@ -501,14 +483,11 @@ class MVPRepository(
 
             while (hasMore) {
                 val docs = database.listDocuments(
-                    DbConstants.DATABASE_NAME,
-                    DbConstants.TOURNAMENT_COLLECTION,
-                    queries = listOf(
+                    DbConstants.DATABASE_NAME, DbConstants.TOURNAMENT_COLLECTION, queries = listOf(
                         Query.equal("\$id", currentUserTournamentIds),
                         Query.limit(100),
                         Query.offset(offset)
-                    ),
-                    EventDTO::class
+                    ), EventDTO::class
                 )
 
                 allDocs.addAll(docs.documents)
@@ -529,8 +508,7 @@ class MVPRepository(
         matchSubscription?.close()
         val channels = listOf(MATCHES_CHANNEL)
         matchSubscription = realtime.subscribe(
-            channels,
-            payloadType = MatchDTO::class
+            channels, payloadType = MatchDTO::class
         ) { response ->
             val matchUpdates = response.payload
             scope.launch(Dispatchers.IO) {
@@ -541,8 +519,7 @@ class MVPRepository(
                 }
                 dbMatch?.let { match ->
                     val updatedMatch = match.copy(
-                        match = match.match.copy(
-                            team1Points = matchUpdates.team1Points,
+                        match = match.match.copy(team1Points = matchUpdates.team1Points,
                             team2Points = matchUpdates.team2Points,
                             field = matchUpdates.field,
                             refId = matchUpdates.refId,
@@ -550,8 +527,7 @@ class MVPRepository(
                             team2 = matchUpdates.team2,
                             refCheckedIn = matchUpdates.refereeCheckedIn,
                             start = Instant.parse(matchUpdates.start),
-                            end = matchUpdates.end?.let { Instant.parse(it) }
-                        )
+                            end = matchUpdates.end?.let { Instant.parse(it) })
                     )
                     tournamentDB.getMatchDao.upsertMatch(updatedMatch.match)
                 }
@@ -596,10 +572,7 @@ class MVPRepository(
         val jsonArgs = Json.encodeToString(args)
         try {
             functions.createExecution(
-                "updateMatch",
-                jsonArgs,
-                false,
-                method = ExecutionMethod.POST
+                "updateMatch", jsonArgs, false, method = ExecutionMethod.POST
             )
         } catch (e: SocketTimeoutException) {
             Napier.e("Connection timeout, retrying...", e, DbConstants.ERROR_TAG)
@@ -608,7 +581,6 @@ class MVPRepository(
             Napier.e("Failed to update finished match", e, DbConstants.ERROR_TAG)
         }
     }
-
 
 
     override suspend fun addCurrentUserToEvent(event: EventAbs) {
@@ -631,82 +603,76 @@ class MVPRepository(
     }
 
     private suspend fun addPlayerToEvent(user: UserDataDTO) {
-        singleResponse(
-            networkCall = {
-                val updatedDoc = database.updateDocument(
-                    DbConstants.DATABASE_NAME,
-                    DbConstants.USER_DATA_COLLECTION,
-                    user.id,
-                    user,
-                    nestedType = UserDataDTO::class
-                )
-                updatedDoc.convert { it.toUserData(updatedDoc.id) }
-            },
-            localData = { id ->
-                tournamentDB.getUserDataDao.getUserDataById(id)
-            },
-            saveCall = { newData ->
-                tournamentDB.getUserDataDao.upsertUserData(newData)
-            }
-        )
+        singleResponse(networkCall = {
+            val updatedDoc = database.updateDocument(
+                DbConstants.DATABASE_NAME,
+                DbConstants.USER_DATA_COLLECTION,
+                user.id,
+                user,
+                nestedType = UserDataDTO::class
+            )
+            updatedDoc.convert { it.toUserData(updatedDoc.id) }
+        }, saveCall = { newData ->
+            tournamentDB.getUserDataDao.upsertUserData(newData)
+        })
+    }
+
+    override suspend fun changeTeamName(team: Team) {
+        updateTeam(team)
     }
 
     override suspend fun addPlayerToTeam(team: Team, player: UserData) {
-        val updatedTeam = team.copy(players = team.players + player.id)
-        val updatedUserData = player.copy(teams = player.teams + team.id)
-
-        updateUser(updatedUserData)
-        updateTeam(updatedTeam)
+        if (!team.players.contains(player.id)) {
+            val updatedTeam = team.copy(players = team.players + player.id)
+            updateTeam(updatedTeam)
+        }
+        if (!player.teamIds.contains(team.id)) {
+            val updatedUserData = player.copy(teamIds = player.teamIds + team.id)
+            updateUser(updatedUserData)
+        }
+        tournamentDB.getTeamDao.upsertTeamPlayerCrossRef(TeamPlayerCrossRef(team.id, player.id))
     }
 
     override suspend fun removePlayerFromTeam(team: Team, player: UserData) {
-        val updatedTeam = team.copy(players = team.players - player.id)
-        val updatedUserData = player.copy(teams = player.teams - team.id)
-
-        updateUser(updatedUserData)
-        updateTeam(updatedTeam)
+        if (team.players.contains(player.id)) {
+            val updatedTeam = team.copy(players = team.players - player.id)
+            updateTeam(updatedTeam)
+        }
+        if (player.teamIds.contains(team.id)) {
+            val updatedUserData = player.copy(teamIds = player.teamIds - team.id)
+            updateUser(updatedUserData)
+        }
+        tournamentDB.getTeamDao.deleteTeamPlayerCrossRef(TeamPlayerCrossRef(team.id, player.id))
     }
 
     private suspend fun updateUser(newUserData: UserData) {
-        singleResponse(
-            networkCall = {
-                val updatedDoc = database.updateDocument(
-                    databaseId = DbConstants.DATABASE_NAME,
-                    collectionId = DbConstants.USER_DATA_COLLECTION,
-                    documentId = newUserData.id,
-                    data = newUserData,
-                    nestedType = UserDataDTO::class
-                )
-                updatedDoc.convert { it.toUserData(updatedDoc.id) }
-            },
-            localData = { id ->
-                tournamentDB.getUserDataDao.getUserDataById(id)
-            },
-            saveCall = { newData ->
-                tournamentDB.getUserDataDao.upsertUserData(newData)
-            }
-        )
+        singleResponse(networkCall = {
+            val updatedDoc = database.updateDocument(
+                databaseId = DbConstants.DATABASE_NAME,
+                collectionId = DbConstants.USER_DATA_COLLECTION,
+                documentId = newUserData.id,
+                data = newUserData.toUserDataDTO(),
+                nestedType = UserDataDTO::class
+            )
+            updatedDoc.convert { it.toUserData(updatedDoc.id) }
+        }, saveCall = { newData ->
+            tournamentDB.getUserDataDao.upsertUserData(newData)
+        })
     }
 
     private suspend fun updateTeam(newTeamData: Team) {
-        singleResponse(
-            networkCall = {
-                val updatedDoc = database.updateDocument(
-                    databaseId = DbConstants.DATABASE_NAME,
-                    collectionId = DbConstants.VOLLEYBALL_TEAMS_COLLECTION,
-                    documentId = newTeamData.id,
-                    data = newTeamData,
-                    nestedType = TeamDTO::class
-                )
-                updatedDoc.convert { it.toTeam(updatedDoc.id) }
-            },
-            localData = { id ->
-                tournamentDB.getTeamDao.getTeamWithPlayers(id)?.team
-            },
-            saveCall = { newData ->
-                tournamentDB.getTeamDao.upsertTeam(newData)
-            }
-        )
+        singleResponse(networkCall = {
+            val updatedDoc = database.updateDocument(
+                databaseId = DbConstants.DATABASE_NAME,
+                collectionId = DbConstants.VOLLEYBALL_TEAMS_COLLECTION,
+                documentId = newTeamData.id,
+                data = newTeamData.toTeamDTO(),
+                nestedType = TeamDTO::class
+            )
+            updatedDoc.convert { it.toTeam(updatedDoc.id) }
+        }, saveCall = { newData ->
+            tournamentDB.getTeamDao.upsertTeam(newData)
+        })
     }
 
     override suspend fun addTeamToEvent(event: EventAbs, team: TeamWithPlayers) {
@@ -715,6 +681,7 @@ class MVPRepository(
                 is EventImp -> {
                     player.copy(tournamentIds = player.tournamentIds + event.id)
                 }
+
                 is Tournament -> {
                     player.copy(eventIds = player.tournamentIds + event.id)
                 }
@@ -771,68 +738,75 @@ class MVPRepository(
         return null
     }
 
-    override suspend fun createEvent(newEvent: EventImp) =
-        singleResponse(
-            networkCall = {
-                val doc = database.createDocument(
-                    DbConstants.DATABASE_NAME,
-                    DbConstants.EVENT_COLLECTION,
-                    newEvent.id,
-                    newEvent.toEventDTO(),
-                    nestedType = EventDTO::class
-                )
-                doc.convert { it.toEvent(doc.id) }
-            },
-            localData = { id ->
-                tournamentDB.getEventImpDao.getEventById(id)
-            },
-            saveCall = { event ->
-                tournamentDB.getEventImpDao.upsertEvent(event)
-            }
+    override suspend fun createEvent(newEvent: EventImp) = singleResponse(networkCall = {
+        val doc = database.createDocument(
+            DbConstants.DATABASE_NAME,
+            DbConstants.EVENT_COLLECTION,
+            newEvent.id,
+            newEvent.toEventDTO(),
+            nestedType = EventDTO::class
         )
+        doc.convert { it.toEvent(doc.id) }
+    }, saveCall = { event ->
+        tournamentDB.getEventImpDao.upsertEvent(event)
+    })
 
     override suspend fun createTournament(newTournament: Tournament) =
-        singleResponse(
-            networkCall = {
-                val doc = database.createDocument(
-                    DbConstants.DATABASE_NAME,
-                    DbConstants.TOURNAMENT_COLLECTION,
-                    newTournament.id,
-                    newTournament.toTournamentDTO(),
-                    nestedType = TournamentDTO::class
-                )
-                doc.convert { dto -> dto.toTournament(doc.id) }
-            },
-            localData = { id ->
-                tournamentDB.getTournamentDao.getTournamentById(id)
-            },
-            saveCall = { tournament ->
-                tournamentDB.getTournamentDao.upsertTournament(tournament)
-            }
-        )
+        singleResponse(networkCall = {
+            val doc = database.createDocument(
+                DbConstants.DATABASE_NAME,
+                DbConstants.TOURNAMENT_COLLECTION,
+                newTournament.id,
+                newTournament.toTournamentDTO(),
+                nestedType = TournamentDTO::class
+            )
+            doc.convert { dto -> dto.toTournament(doc.id) }
+        }, saveCall = { tournament ->
+            tournamentDB.getTournamentDao.upsertTournament(tournament)
+        })
 
     override suspend fun createNewUser(
         email: String,
         password: String,
         firstName: String,
-        lastName: String
-    ) {
+        lastName: String,
+        userName: String,
+    ): UserData? {
         try {
             val userId = ID.unique()
             account.create(
-                userId = userId,
-                email = email,
-                password = password,
+                userId = userId, email = email, password = password, name = userName
             )
-            database.createDocument(
+            val doc = database.createDocument(
                 databaseId = DbConstants.DATABASE_NAME,
                 collectionId = DbConstants.USER_DATA_COLLECTION,
                 documentId = userId,
                 nestedType = UserDataDTO::class,
-                data = UserDataDTO(firstName, lastName, listOf(), listOf(), listOf(), userId),
+                data = UserDataDTO(firstName, lastName, userName, userId),
             )
+            return doc.data.toUserData(doc.id)
         } catch (e: Exception) {
             Napier.e("Failed to create a user", e, DbConstants.ERROR_TAG)
+        }
+        return null
+    }
+
+    override suspend fun createTeam() {
+        val id = ID.unique()
+        val currentUser = _currentUser.value ?: return
+        val team = singleResponse(networkCall = {
+            database.createDocument(
+                databaseId = DbConstants.DATABASE_NAME,
+                collectionId = DbConstants.VOLLEYBALL_TEAMS_COLLECTION,
+                documentId = id,
+                data = Team(captainId = currentUser.user.id).toTeamDTO(),
+                nestedType = TeamDTO::class,
+            ).convert { it.toTeam(id) }
+        }, saveCall = { team ->
+            tournamentDB.getTeamDao.upsertTeam(team)
+        })
+        if (team != null) {
+            addPlayerToTeam(team, currentUser.user)
         }
     }
 
@@ -840,9 +814,13 @@ class MVPRepository(
         matchSubscription?.close()
     }
 
-    private suspend fun <T> multiResponse(
-        networkCall: suspend () -> List<Document<T>>,
-        getLocalIds: suspend () -> Set<MVPDocument>,
+    override suspend fun searchEvents(query: String): List<EventAbs> {
+        return getEvents(query = Query.contains("name", query))
+    }
+
+    private suspend fun <T : MVPDocument> multiResponse(
+        networkCall: suspend () -> List<T>,
+        getLocalIds: suspend () -> Set<T>,
         saveData: suspend (List<T>) -> Unit,
         deleteStaleData: suspend (List<String>) -> Unit
     ): List<T> {
@@ -861,8 +839,10 @@ class MVPRepository(
             deleteStaleData(staleIds.toList())
 
             // Save new/updated items
-            dataToSave = remoteData.map { it.data }.toList()
-            saveData(dataToSave)
+            if (remoteData.isNotEmpty()) {
+                dataToSave = remoteData.toList()
+                saveData(dataToSave)
+            }
         } catch (e: Exception) {
             Napier.e("Failed to sync data", e)
         }
@@ -870,17 +850,12 @@ class MVPRepository(
     }
 
     private suspend fun <T> singleResponse(
-        networkCall: suspend () -> Document<T>,
-        localData: suspend (id: String) -> MVPDocument?,
-        saveCall: suspend (T) -> Unit
+        networkCall: suspend () -> Document<T>, saveCall: suspend (T) -> Unit
     ): T? {
         try {
             // Fetch fresh data from network
             val networkResult = networkCall()
             saveCall(networkResult.data)
-            if (localData(networkResult.id) == null) {
-                throw Exception("Local data was not updated")
-            }
             return networkResult.data
         } catch (e: Exception) {
             Napier.e("Failed to update data", e, DbConstants.ERROR_TAG)
@@ -925,10 +900,11 @@ interface IMVPRepository {
 
     fun getFieldsFlow(tournamentId: String): Flow<List<FieldWithMatches>>
 
-    suspend fun getPlayers(playerIds: List<String>): List<UserData>?
+    fun getPlayersFlow(playerIds: List<String>): Flow<List<UserWithRelations>>
+    suspend fun getPlayers(playerIds: List<String>? = null, query: String? = null): List<UserData>?
 
     fun getPlayersOfEventFlow(event: EventAbs): Flow<EventAbsWithPlayers?>
-    suspend fun getEvents(bounds: Bounds): List<EventAbs>
+    suspend fun getEvents(bounds: Bounds? = null, query: String? = null): List<EventAbs>
     suspend fun getEvents(): List<EventAbs>
     fun getCurrentUserFlow(): Flow<UserWithRelations?>
     suspend fun getCurrentUser(): UserWithRelations?
@@ -942,11 +918,17 @@ interface IMVPRepository {
     suspend fun updateMatchFinished(match: MatchMVP, time: Instant)
     suspend fun updateTournament(newTournament: Tournament): Tournament?
     suspend fun addCurrentUserToEvent(event: EventAbs)
+    suspend fun changeTeamName(team: Team)
     suspend fun addTeamToEvent(event: EventAbs, team: TeamWithPlayers)
     suspend fun addPlayerToTeam(team: Team, player: UserData)
     suspend fun removePlayerFromTeam(team: Team, player: UserData)
     suspend fun createTournament(newTournament: Tournament): Tournament?
-    suspend fun createNewUser(email: String, password: String, firstName: String, lastName: String)
+    suspend fun createNewUser(
+        email: String, password: String, firstName: String, lastName: String, userName: String
+    ): UserData?
+
     suspend fun createEvent(newEvent: EventImp): EventImp?
+    suspend fun createTeam()
+    suspend fun searchEvents(query: String): List<EventAbs>
     fun setIgnoreMatch(match: MatchMVP?)
 }
