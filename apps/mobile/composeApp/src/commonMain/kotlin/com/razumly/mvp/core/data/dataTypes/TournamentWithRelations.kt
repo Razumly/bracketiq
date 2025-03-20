@@ -3,6 +3,9 @@ package com.razumly.mvp.core.data.dataTypes
 import androidx.room.Embedded
 import androidx.room.Junction
 import androidx.room.Relation
+import com.razumly.mvp.core.data.dataTypes.crossRef.TournamentMatchCrossRef
+import com.razumly.mvp.core.data.dataTypes.crossRef.TournamentTeamCrossRef
+import com.razumly.mvp.core.data.dataTypes.crossRef.TournamentUserCrossRef
 
 
 data class TournamentWithRelations (
@@ -11,10 +14,32 @@ data class TournamentWithRelations (
         parentColumn = "id",
         entityColumn = "id",
         associateBy = Junction(
-            value = UserTournamentCrossRef::class,
+            value = TournamentUserCrossRef::class,
             parentColumn = "tournamentId",
             entityColumn = "userId"
         )
     )
-    override val players: List<UserData>
+    override val players: List<UserData>,
+
+    @Relation(
+        parentColumn = "id",
+        entityColumn = "id",
+        associateBy = Junction(
+            value = TournamentMatchCrossRef::class,
+            parentColumn = "tournamentId",
+            entityColumn = "matchId"
+        )
+    )
+    val matches: List<MatchMVP>,
+
+    @Relation(
+        parentColumn = "id",
+        entityColumn = "id",
+        associateBy = Junction(
+            value = TournamentTeamCrossRef::class,
+            parentColumn = "tournamentId",
+            entityColumn = "teamId"
+        )
+    )
+    override val teams: List<Team>,
 ) : EventAbsWithPlayers

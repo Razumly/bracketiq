@@ -6,8 +6,8 @@ import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Upsert
 import com.razumly.mvp.core.data.dataTypes.Team
-import com.razumly.mvp.core.data.dataTypes.TeamPlayerCrossRef
-import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
+import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
+import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.flow.Flow
 
@@ -21,6 +21,9 @@ interface TeamDao {
 
     @Query("SELECT * FROM Team WHERE tournamentIds = :tournamentId")
     suspend fun getTeamsInTournament(tournamentId: String): List<Team>
+
+    @Query("SELECT * FROM Team WHERE eventIds = :eventId")
+    suspend fun getTeamsInEvent(eventId: String): List<Team>
 
     @Query("SELECT * FROM Team WHERE id in (:teamIds)")
     suspend fun getTeams(teamIds: List<String>): List<Team>?
@@ -39,26 +42,25 @@ interface TeamDao {
 
     @Transaction
     @Query("SELECT * FROM Team WHERE id = :teamId")
-    suspend fun getTeamWithPlayers(teamId: String): TeamWithPlayers?
+    suspend fun getTeamWithPlayers(teamId: String): TeamWithRelations?
 
     @Transaction
     @Query("SELECT * FROM Team WHERE id in (:teamIds)")
-    suspend fun getTeamsWithPlayers(teamIds: List<String>): List<TeamWithPlayers>?
+    suspend fun getTeamsWithPlayers(teamIds: List<String>): List<TeamWithRelations>?
 
     @Transaction
     @Query("SELECT * FROM Team WHERE tournamentIds = :tournamentId")
-    fun getTeamsInTournamentFlow(tournamentId: String): Flow<List<TeamWithPlayers>>
+    fun getTeamsInTournamentFlow(tournamentId: String): Flow<List<TeamWithRelations>>
 
     @Transaction
     @Query("SELECT * FROM Team WHERE id In (:ids)")
-    fun getTeamsWithPlayersFlowByIds(ids: List<String>): Flow<List<TeamWithPlayers>>
+    fun getTeamsWithPlayersFlowByIds(ids: List<String>): Flow<List<TeamWithRelations>>
 
     // Add player to team
     @Transaction
     suspend fun upsertTeamsWithPlayers(teams: List<Team>) {
         teams.forEach { team ->
             team.players.forEach { playerId ->
-
                 try {
                     upsertTeamPlayerCrossRef(TeamPlayerCrossRef(team.id, playerId))
                 } catch (e: Exception) {

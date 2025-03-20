@@ -2,7 +2,7 @@ package com.razumly.mvp.teamManagement
 
 import com.arkivanov.decompose.ComponentContext
 import com.razumly.mvp.core.data.MVPRepository
-import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
+import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
 import com.razumly.mvp.core.data.dataTypes.UserData
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -33,10 +33,10 @@ class TeamManagementComponent(
     val currentTeams = currentUser.map { user ->
         user?.teams?.map { it.id } ?: emptyList()
     }.distinctUntilChanged().flatMapLatest { teamIds ->
-        mvpRepository.getTeamsWithPlayers(teamIds)
+        mvpRepository.getTeamsWithPlayersFlow(teamIds)
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
-    private val _selectedTeam = MutableStateFlow<TeamWithPlayers?>(null)
+    private val _selectedTeam = MutableStateFlow<TeamWithRelations?>(null)
     val selectedTeam = _selectedTeam.asStateFlow()
 
     private val _suggestedPlayers = MutableStateFlow<List<UserData>>(listOf())
@@ -58,7 +58,7 @@ class TeamManagementComponent(
         }
     }
 
-    fun selectTeam(team: TeamWithPlayers) {
+    fun selectTeam(team: TeamWithRelations) {
         _selectedTeam.value = team
     }
 

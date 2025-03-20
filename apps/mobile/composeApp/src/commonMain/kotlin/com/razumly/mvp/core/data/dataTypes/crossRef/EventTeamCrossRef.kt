@@ -1,32 +1,34 @@
-package com.razumly.mvp.core.data.dataTypes
+package com.razumly.mvp.core.data.dataTypes.crossRef
 
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
+import com.razumly.mvp.core.data.dataTypes.EventImp
+import com.razumly.mvp.core.data.dataTypes.Team
 
 @Entity(
-    tableName = "user_event_cross_ref",
-    primaryKeys = ["userId", "eventId"],
+    tableName = "team_event_cross_ref",
+    primaryKeys = ["teamId", "eventId"],
     foreignKeys = [
         ForeignKey(
-            entity = UserData::class,
+            entity = Team::class,
             parentColumns = ["id"],
-            childColumns = ["userId"],
+            childColumns = ["teamId"],
             onDelete = ForeignKey.CASCADE
         ),
         ForeignKey(
-            entity = Tournament::class,
+            entity = EventImp::class,
             parentColumns = ["id"],
             childColumns = ["eventId"],
             onDelete = ForeignKey.CASCADE
         )
     ],
     indices = [
-        Index("userId"),
+        Index("teamId"),
         Index("eventId")
     ]
 )
-data class UserEventCrossRef(
-    val userId: String,
+data class EventTeamCrossRef(
+    val teamId: String,
     val eventId: String
 )

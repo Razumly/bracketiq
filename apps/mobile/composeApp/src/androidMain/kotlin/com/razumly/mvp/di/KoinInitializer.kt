@@ -15,6 +15,7 @@ actual class KoinInitializer(
                 permissionsControllerModule,
                 locationTrackerModule,
                 clientModule,
+                appwriteModule,
                 roomDBModule,
                 componentModule,
                 mapComponentModule,

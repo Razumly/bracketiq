@@ -9,11 +9,12 @@ import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.Team
-import com.razumly.mvp.core.data.dataTypes.TeamPlayerCrossRef
+import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
 import com.razumly.mvp.core.data.dataTypes.Tournament
+import com.razumly.mvp.core.data.dataTypes.crossRef.TournamentMatchCrossRef
 import com.razumly.mvp.core.data.dataTypes.UserData
-import com.razumly.mvp.core.data.dataTypes.UserEventCrossRef
-import com.razumly.mvp.core.data.dataTypes.UserTournamentCrossRef
+import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
+import com.razumly.mvp.core.data.dataTypes.crossRef.TournamentUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.daos.EventImpDao
 import com.razumly.mvp.core.data.dataTypes.daos.FieldDao
 import com.razumly.mvp.core.data.dataTypes.daos.MatchDao
@@ -31,10 +32,11 @@ import com.razumly.mvp.core.data.util.Converters
         EventImp::class,
         Team::class,
         TeamPlayerCrossRef::class,
-        UserTournamentCrossRef::class,
-        UserEventCrossRef::class,
+        TournamentUserCrossRef::class,
+        EventUserCrossRef::class,
+        TournamentMatchCrossRef::class,
     ],
-    version = 36
+    version = 39
 )
 @TypeConverters(Converters::class)
 @ConstructedBy(MVPDatabaseCtor::class)

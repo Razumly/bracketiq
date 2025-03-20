@@ -5,8 +5,9 @@ import com.razumly.mvp.core.data.IMVPRepository
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.EventAbsWithPlayers
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
-import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
+import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
 import com.razumly.mvp.core.data.dataTypes.enums.Division
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -16,6 +17,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -23,13 +26,13 @@ interface EventContentComponent : ComponentContext {
     val selectedEvent: StateFlow<EventAbsWithPlayers?>
     val divisionMatches: StateFlow<List<MatchWithRelations>>
     val currentMatches: StateFlow<Map<String, MatchWithRelations>>
-    val divisionTeams: StateFlow<List<TeamWithPlayers>>
+    val divisionTeams: StateFlow<List<TeamWithRelations>>
     val selectedDivision: StateFlow<Division?>
     val isBracketView: StateFlow<Boolean>
     val rounds: StateFlow<List<List<MatchWithRelations?>>>
     val losersBracket: StateFlow<Boolean>
     val showDetails: StateFlow<Boolean>
-    val currentTeams: StateFlow<Map<String, TeamWithPlayers>>
+    val currentTeams: StateFlow<Map<String, TeamWithRelations>>
 
     fun matchSelected(selectedMatch: MatchWithRelations)
     fun selectDivision(division: Division)
@@ -42,7 +45,8 @@ class DefaultEventContentComponent(
     componentContext: ComponentContext,
     private val mvpRepository: IMVPRepository,
     event: EventAbs,
-    private val onMatchSelected: (MatchWithRelations) -> Unit
+    private val onMatchSelected: (MatchWithRelations) -> Unit,
+    private val ioDispatcher: CoroutineDispatcher
 ) : EventContentComponent, ComponentContext by componentContext {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
@@ -63,9 +67,11 @@ class DefaultEventContentComponent(
 
     override val currentTeams = mvpRepository
         .getTeamsInTournamentFlow(event.id)
+        .map { teams -> teams.associateBy { it.team.id } }
+        .flowOn(ioDispatcher)
         .stateIn(scope, SharingStarted.Eagerly, mapOf())
 
-    private val _divisionTeams = MutableStateFlow<List<TeamWithPlayers>>(listOf())
+    private val _divisionTeams = MutableStateFlow<List<TeamWithRelations>>(listOf())
     override val divisionTeams = _divisionTeams.asStateFlow()
 
     private val _selectedDivision = MutableStateFlow<Division?>(null)

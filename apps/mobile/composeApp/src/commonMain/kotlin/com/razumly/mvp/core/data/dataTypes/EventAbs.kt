@@ -27,6 +27,8 @@ sealed interface EventAbs : MVPDocument {
     val eventType: EventType
     val teamSignup: Boolean
     val singleDivision: Boolean
+    val waitList: List<String>
+    val freeAgents: List<String>
     override val id: String
 }
 
@@ -41,4 +43,5 @@ fun EventAbs.toMVPPlace() = MVPPlace(
 sealed interface EventAbsWithPlayers {
     val event: EventAbs
     val players: List<UserData>
+    val teams: List<Team>
 }

@@ -12,7 +12,7 @@ data class Field(
     val fieldNumber: Int,
     val divisions: List<String>,
     val matches: List<String>,
-    val tournament: String,
+    val tournamentId: String,
     @Transient
     @PrimaryKey
     override val id: String = "",

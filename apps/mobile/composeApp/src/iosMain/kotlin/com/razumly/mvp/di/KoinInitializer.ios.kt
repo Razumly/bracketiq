@@ -27,7 +27,8 @@ actual class KoinInitializer : SynchronizedObject() {
                                 clientModule,
                                 componentModule,
                                 datastoreModule,
-                                currentUserDataSourceModule
+                                currentUserDataSourceModule,
+                                appwriteModule
                             )
                         }
                         isInitialized = true

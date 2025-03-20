@@ -28,7 +28,9 @@ data class EventDTO(
     val teamSizeLimit: Int,
     val maxPlayers: Int,
     val teamSignup: Boolean,
-    val singleDivision: Boolean
+    val singleDivision: Boolean,
+    val waitList: List<String>,
+    val freeAgents: List<String>,
 )
 
 fun EventDTO.toEvent(id: String): EventImp {
@@ -51,6 +53,8 @@ fun EventDTO.toEvent(id: String): EventImp {
         teamSizeLimit = teamSizeLimit,
         maxPlayers = maxPlayers,
         teamSignup = teamSignup,
-        singleDivision = singleDivision
+        singleDivision = singleDivision,
+        waitList = waitList,
+        freeAgents = freeAgents,
     )
 }

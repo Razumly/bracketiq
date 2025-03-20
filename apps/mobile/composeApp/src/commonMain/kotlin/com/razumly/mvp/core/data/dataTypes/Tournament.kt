@@ -38,6 +38,8 @@ data class Tournament(
     override val hostId: String,
     override val teamSignup: Boolean,
     override val singleDivision: Boolean,
+    override val freeAgents: List<String>,
+    override val waitList: List<String>,
     @Transient override val eventType: EventType = EventType.TOURNAMENT,
     @Transient override val lastUpdated: Instant = Clock.System.now(),
     override val maxPlayers: Int,
@@ -71,6 +73,8 @@ data class Tournament(
                 teamSizeLimit = 0,
                 singleDivision = false,
                 teamSignup = true,
+                waitList = listOf(),
+                freeAgents = listOf(),
             )
         }
     }
@@ -114,7 +118,9 @@ data class Tournament(
             teamSizeLimit = teamSizeLimit,
             maxPlayers = maxPlayers,
             singleDivision = singleDivision,
-            teamSignup = teamSignup
+            teamSignup = teamSignup,
+            waitList = waitList,
+            freeAgents = freeAgents,
         )
     }
     fun toTournamentDTO(): TournamentDTO {
@@ -144,6 +150,8 @@ data class Tournament(
             teamSizeLimit = teamSizeLimit,
             singleDivision = singleDivision,
             teamSignup = teamSignup,
+            waitList = waitList,
+            freeAgents = freeAgents,
         )
     }
 }

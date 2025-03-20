@@ -3,35 +3,24 @@ package com.razumly.mvp.core.data.dataTypes
 import androidx.room.Embedded
 import androidx.room.Junction
 import androidx.room.Relation
-import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
-import com.razumly.mvp.core.data.dataTypes.crossRef.TournamentUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
+import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
+import com.razumly.mvp.core.data.dataTypes.crossRef.TournamentTeamCrossRef
 import kotlinx.serialization.Serializable
 
 @Serializable
-data class UserWithRelations(
-    @Embedded val user: UserData,
+data class TeamWithRelations(
+    @Embedded val team: Team,
     @Relation(
         parentColumn = "id",
         entityColumn = "id",
         associateBy = Junction(
             value = TeamPlayerCrossRef::class,
-            parentColumn = "userId",
-            entityColumn = "teamId"
+            parentColumn = "teamId",
+            entityColumn = "userId"
         )
     )
-    val teams: List<Team>,
-
-    @Relation(
-        parentColumn = "id",
-        entityColumn = "id",
-        associateBy = Junction(
-            value = TournamentUserCrossRef::class,
-            parentColumn = "userId",
-            entityColumn = "tournamentId"
-        )
-    )
-    val tournaments: List<Tournament>,
+    val players: List<UserData>,
 
     @Relation(
         parentColumn = "id",
@@ -42,5 +31,16 @@ data class UserWithRelations(
             entityColumn = "eventId"
         )
     )
-    val pickupGames: List<EventImp>
+    val event: EventImp,
+
+    @Relation(
+        parentColumn = "id",
+        entityColumn = "id",
+        associateBy = Junction(
+            value = TournamentTeamCrossRef::class,
+            parentColumn = "userId",
+            entityColumn = "tournamentId"
+        )
+    )
+    val tournament: Tournament
 )

@@ -3,7 +3,7 @@ package com.razumly.mvp.matchDetailScreen
 import com.arkivanov.decompose.ComponentContext
 import com.razumly.mvp.core.data.IMVPRepository
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
-import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
+import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.UserWithRelations
 import io.github.aakira.napier.Napier
@@ -21,7 +21,7 @@ import kotlin.math.ceil
 interface MatchContentComponent {
     val match: StateFlow<MatchWithRelations>
     val tournament: StateFlow<Tournament?>
-    val currentTeams: StateFlow<Map<String, TeamWithPlayers>>
+    val currentTeams: StateFlow<Map<String, TeamWithRelations>>
     val matchFinished: StateFlow<Boolean>
     val refCheckedIn: StateFlow<Boolean>
     val currentSet: StateFlow<Int>

@@ -1,8 +1,10 @@
-package com.razumly.mvp.core.data.dataTypes
+package com.razumly.mvp.core.data.dataTypes.crossRef
 
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
+import com.razumly.mvp.core.data.dataTypes.Tournament
+import com.razumly.mvp.core.data.dataTypes.UserData
 
 @Entity(
     tableName = "user_tournament_cross_ref",
@@ -26,7 +28,7 @@ import androidx.room.Index
         Index("tournamentId")
     ]
 )
-data class UserTournamentCrossRef(
+data class TournamentUserCrossRef(
     val userId: String,
     val tournamentId: String
 )

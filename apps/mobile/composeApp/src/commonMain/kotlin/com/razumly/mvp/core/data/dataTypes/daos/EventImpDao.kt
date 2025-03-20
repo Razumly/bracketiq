@@ -32,6 +32,9 @@ interface EventImpDao {
     @Query("SELECT * FROM EventImp WHERE id = :id")
     suspend fun getEventById(id: String): EventImp?
 
+    @Query("SELECT * FROM EventImp WHERE id = :id")
+    suspend fun getEventWithRelationsById(id: String): EventWithRelations?
+
     @Transaction
     @Query("SELECT * FROM EventImp WHERE id = :id")
     fun getUsersOfEvent(id: String): Flow<EventWithRelations?>

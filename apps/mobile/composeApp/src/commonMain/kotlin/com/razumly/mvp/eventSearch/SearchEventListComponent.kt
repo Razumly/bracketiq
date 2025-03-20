@@ -4,7 +4,7 @@ import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.backhandler.BackCallback
 import com.razumly.mvp.core.data.IMVPRepository
 import com.razumly.mvp.core.data.dataTypes.EventAbs
-import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
+import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
 import com.razumly.mvp.core.util.calcDistance
 import com.razumly.mvp.core.util.getBounds
 import dev.icerock.moko.geo.LatLng
@@ -43,7 +43,6 @@ class SearchEventListComponent(
         .stateIn(scope, SharingStarted.Eagerly, null)
 
     private val _currentLocation = MutableStateFlow<LatLng?>(null)
-    val currentLocation = _currentLocation.asStateFlow()
 
     private val _selectedEvent = MutableStateFlow<EventAbs?>(null)
     val selectedEvent: StateFlow<EventAbs?> = _selectedEvent.asStateFlow()
@@ -51,7 +50,7 @@ class SearchEventListComponent(
     private val _showMapCard = MutableStateFlow(false)
     val showMapCard: StateFlow<Boolean> = _showMapCard.asStateFlow()
 
-    private val _validTeams = MutableStateFlow<List<TeamWithPlayers>>(listOf())
+    private val _validTeams = MutableStateFlow<List<TeamWithRelations>>(listOf())
     val validTeams = _validTeams.asStateFlow()
 
     private val backCallback = BackCallback(false) {
@@ -62,7 +61,7 @@ class SearchEventListComponent(
         .getCurrentUserFlow()
         .stateIn(scope, SharingStarted.Eagerly, null)
 
-    private val _userTeams = MutableStateFlow<List<TeamWithPlayers>>(listOf())
+    private val _userTeams = MutableStateFlow<List<TeamWithRelations>>(listOf())
 
     init {
         backHandler.register(backCallback)
@@ -76,7 +75,7 @@ class SearchEventListComponent(
         scope.launch {
             currentUser.collect { user ->
                 if (user != null) {
-                    mvpRepository.getTeamsWithPlayers(user.user.teamIds).collect { teams ->
+                    mvpRepository.getTeamsWithPlayersFlow(user.user.teamIds).collect { teams ->
                         _userTeams.value = teams
                     }
                 }
@@ -145,7 +144,7 @@ class SearchEventListComponent(
         }
     }
 
-    fun joinEventAsTeam(team: TeamWithPlayers) {
+    fun joinEventAsTeam(team: TeamWithRelations) {
         if(_selectedEvent.value == null) return
         scope.launch {
             mvpRepository.addTeamToEvent(_selectedEvent.value!!, team)

@@ -30,12 +30,36 @@ interface TournamentDao {
     fun getTournamentFlowById(id: String): Flow<Tournament?>
 
     @Query("SELECT * FROM Tournament WHERE id = :id")
-    suspend fun getTournamentById(id: String): Tournament?
+    suspend fun getTournamentById(id: String): Tournament
 
     @Query("SELECT * FROM Tournament")
     suspend fun getAllCachedTournaments(): List<Tournament>
 
     @Transaction
     @Query("SELECT * FROM Tournament WHERE id = :id")
-    fun getUsersOfTournament(id: String): Flow<TournamentWithRelations?>
+    fun getTournamentWithRelationsFlow(id: String): Flow<TournamentWithRelations?>
+
+    @Transaction
+    @Query("SELECT * FROM Tournament WHERE id = :id")
+    suspend fun getTournamentWithRelations(id: String): TournamentWithRelations
+
+    @Transaction
+    suspend fun deleteTournamentWithCrossRefs(tournamentId: String) {
+        // Manually delete the cross-references
+        deleteTournamentUserCrossRefs(tournamentId)
+        deleteTournamentMatchCrossRefs(tournamentId)
+        deleteTournamentTeamCrossRefs(tournamentId)
+
+        // Now delete the tournament
+        deleteTournamentById(tournamentId)
+    }
+
+    @Query("DELETE FROM TournamentUserCrossRef WHERE tournamentId = :tournamentId")
+    suspend fun deleteTournamentUserCrossRefs(tournamentId: String)
+
+    @Query("DELETE FROM TournamentMatchCrossRef WHERE tournamentId = :tournamentId")
+    suspend fun deleteTournamentMatchCrossRefs(tournamentId: String)
+
+    @Query("DELETE FROM TournamentTeamCrossRef WHERE tournamentId = :tournamentId")
+    suspend fun deleteTournamentTeamCrossRefs(tournamentId: String)
 }

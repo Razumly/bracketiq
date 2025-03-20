@@ -10,7 +10,7 @@ object DbConstants {
     const val VOLLEYBALL_TEAMS_COLLECTION = "volleyballTeams"
     const val MATCHES_COLLECTION = "matches"
     const val FIELDS_COLLECTION = "fields"
-    const val TOURNAMENT_ATTRIBUTE = "tournament"
+    const val TOURNAMENT_ATTRIBUTE = "tournamentId"
     const val TOURNAMENTS_ATTRIBUTE = "tournamentIds"
     const val EVENTS_ATTRIBUTE = "eventIds"
     const val LAT_ATTRIBUTE = "lat"

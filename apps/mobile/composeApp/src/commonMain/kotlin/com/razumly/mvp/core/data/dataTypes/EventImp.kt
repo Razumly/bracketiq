@@ -33,6 +33,8 @@ data class EventImp(
     override val maxPlayers: Int,
     override val teamSignup: Boolean,
     override val singleDivision: Boolean,
+    override val waitList: List<String>,
+    override val freeAgents: List<String>,
     @Transient override val eventType: EventType = EventType.EVENT,
     @Transient override val lastUpdated: Instant = Clock.System.now(),
 ): EventAbs {
@@ -57,6 +59,8 @@ data class EventImp(
                 maxPlayers = 0,
                 singleDivision = false,
                 teamSignup = false,
+                waitList = listOf(),
+                freeAgents = listOf()
             )
         }
     }
@@ -80,7 +84,9 @@ data class EventImp(
             teamSizeLimit = teamSizeLimit,
             maxPlayers = maxPlayers,
             singleDivision = singleDivision,
-            teamSignup = teamSignup
+            teamSignup = teamSignup,
+            waitList = waitList,
+            freeAgents = freeAgents
         )
     }
 }

@@ -13,7 +13,7 @@ data class MatchDTO(
     val matchId: Int,
     val team1: String?,
     val team2: String?,
-    val tournament: String,
+    val tournamentId: String,
     val refId: String?,
     val field: String?,
     val start: String,
@@ -33,7 +33,7 @@ data class MatchDTO(
 fun MatchDTO.toMatch(id: String): MatchMVP {
     return MatchMVP(
         id = id,
-        tournamentId = tournament,
+        tournamentId = tournamentId,
         team1 = team1,
         team2 = team2,
         matchNumber = matchId,

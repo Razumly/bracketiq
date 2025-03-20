@@ -6,9 +6,9 @@ import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Upsert
 import com.razumly.mvp.core.data.dataTypes.UserData
-import com.razumly.mvp.core.data.dataTypes.UserEventCrossRef
-import com.razumly.mvp.core.data.dataTypes.UserTournamentCrossRef
 import com.razumly.mvp.core.data.dataTypes.UserWithRelations
+import com.razumly.mvp.core.data.dataTypes.crossRef.TournamentUserCrossRef
+import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -26,16 +26,16 @@ interface UserDataDao {
     suspend fun deleteUsersById(ids: List<String>)
 
     @Upsert
-    suspend fun upsertUserTournamentCrossRef(crossRef: UserTournamentCrossRef)
+    suspend fun upsertUserTournamentCrossRef(crossRef: TournamentUserCrossRef)
 
     @Upsert
-    suspend fun upsertUserTournamentCrossRefs(crossRefs: List<UserTournamentCrossRef>)
+    suspend fun upsertUserTournamentCrossRefs(crossRefs: List<TournamentUserCrossRef>)
 
     @Upsert
-    suspend fun upsertUserEventCrossRef(crossRef: UserEventCrossRef)
+    suspend fun upsertUserEventCrossRef(crossRef: EventUserCrossRef)
 
     @Upsert
-    suspend fun upsertUserEventCrossRefs(crossRefs: List<UserEventCrossRef>)
+    suspend fun upsertUserEventCrossRefs(crossRefs: List<EventUserCrossRef>)
 
     @Delete
     suspend fun deleteUserData(userData: UserData)
@@ -62,6 +62,10 @@ interface UserDataDao {
     @Transaction
     @Query("SELECT * FROM UserData WHERE id = :id")
     fun getUserWithRelationsFlowById(id: String): Flow<UserWithRelations?>
+
+    @Transaction
+    @Query("SELECT * FROM UserData WHERE id = :id")
+    fun getUserFlowById(id: String): Flow<UserData?>
 
     @Transaction
     @Query("SELECT * FROM UserData WHERE id in (:ids)")

@@ -1,13 +1,27 @@
 package com.razumly.mvp.core.data.dataTypes
 
 import androidx.room.Embedded
+import androidx.room.Junction
 import androidx.room.Relation
+import com.razumly.mvp.core.data.dataTypes.crossRef.TournamentMatchCrossRef
 import kotlinx.serialization.Serializable
 
 @Serializable
 data class MatchWithRelations(
     @Embedded
     val match: MatchMVP,
+
+    @Relation(
+        parentColumn = "tournamentId",
+        entity = Tournament::class,
+        entityColumn = "id",
+        associateBy = Junction(
+            value = TournamentMatchCrossRef::class,
+            parentColumn = "matchId",
+            entityColumn = "tournamentId"
+        )
+    )
+    val tournament: Tournament,
 
     @Relation(
         parentColumn = "team1",

@@ -35,7 +35,9 @@ data class TournamentDTO(
     val maxPlayers: Int,
     val teamSizeLimit: Int,
     val teamSignup: Boolean,
-    val singleDivision: Boolean
+    val singleDivision: Boolean,
+    val freeAgents: List<String>,
+    val waitList: List<String>,
 )
 
 fun TournamentDTO.toTournament(id: String): Tournament {
@@ -65,6 +67,8 @@ fun TournamentDTO.toTournament(id: String): Tournament {
         maxPlayers = maxPlayers,
         teamSizeLimit = teamSizeLimit,
         teamSignup = teamSignup,
-        singleDivision = singleDivision
+        singleDivision = singleDivision,
+        waitList = waitList,
+        freeAgents = freeAgents,
     )
 }

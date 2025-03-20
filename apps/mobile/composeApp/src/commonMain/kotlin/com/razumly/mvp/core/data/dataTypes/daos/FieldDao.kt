@@ -17,7 +17,7 @@ interface FieldDao {
     @Upsert
     suspend fun upsertFields(fields: List<Field>)
 
-    @Query("SELECT * FROM Field WHERE tournament = :tournamentId")
+    @Query("SELECT * FROM Field WHERE tournamentId = :tournamentId")
     suspend fun getFields(tournamentId: String): List<Field>
 
     @Query("DELETE FROM Field WHERE id IN (:ids)")
@@ -31,6 +31,6 @@ interface FieldDao {
     fun getFieldById(id: String): Flow<FieldWithMatches?>
 
     @Transaction
-    @Query("SELECT * FROM Field WHERE tournament = :tournament")
+    @Query("SELECT * FROM Field WHERE tournamentId = :tournament")
     fun getFieldsByTournamentId(tournament: String): Flow<List<FieldWithMatches>>
 }

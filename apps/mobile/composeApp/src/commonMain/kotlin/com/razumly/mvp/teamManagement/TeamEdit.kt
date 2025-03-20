@@ -31,14 +31,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
-import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
+import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.SearchBox
 
 @Composable
 fun TeamEdit(
-    team: TeamWithPlayers,
+    team: TeamWithRelations,
     onTeamNameChange: (String) -> Unit,
     onAddPlayer: (UserData) -> Unit,
     onRemovePlayer: (UserData) -> Unit,

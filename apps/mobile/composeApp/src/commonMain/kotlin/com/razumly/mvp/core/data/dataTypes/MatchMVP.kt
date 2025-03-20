@@ -37,7 +37,7 @@ fun MatchMVP.toMatchDTO(): MatchDTO {
         matchId = matchNumber,
         team1 = team1,
         team2 = team2,
-        tournament = tournamentId,
+        tournamentId = tournamentId,
         refId = refId,
         field = field,
         start = start.toString(),
