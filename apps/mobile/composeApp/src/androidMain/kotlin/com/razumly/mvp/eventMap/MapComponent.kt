@@ -12,7 +12,7 @@ import com.google.android.libraries.places.api.net.FindAutocompletePredictionsRe
 import com.google.android.libraries.places.api.net.PlacesClient
 import com.google.android.libraries.places.api.net.SearchByTextRequest
 import com.razumly.mvp.BuildConfig
-import com.razumly.mvp.core.data.IMVPRepository
+import com.razumly.mvp.core.data.repositories.IMVPRepository
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.util.calcDistance

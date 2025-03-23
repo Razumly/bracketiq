@@ -1,7 +1,7 @@
 package com.razumly.mvp.profile
 
 import com.arkivanov.decompose.ComponentContext
-import com.razumly.mvp.core.data.IMVPRepository
+import com.razumly.mvp.core.data.repositories.IMVPRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob

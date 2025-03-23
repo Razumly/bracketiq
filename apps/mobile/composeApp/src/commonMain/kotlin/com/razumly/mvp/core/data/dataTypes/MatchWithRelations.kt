@@ -3,6 +3,8 @@ package com.razumly.mvp.core.data.dataTypes
 import androidx.room.Embedded
 import androidx.room.Junction
 import androidx.room.Relation
+import com.razumly.mvp.core.data.dataTypes.crossRef.FieldMatchCrossRef
+import com.razumly.mvp.core.data.dataTypes.crossRef.MatchTeamCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TournamentMatchCrossRef
 import kotlinx.serialization.Serializable
 
@@ -25,15 +27,23 @@ data class MatchWithRelations(
 
     @Relation(
         parentColumn = "team1",
-        entity = Team::class,
-        entityColumn = "id"
+        entityColumn = "id",
+        associateBy = Junction(
+            value = MatchTeamCrossRef::class,
+            parentColumn = "matchId",
+            entityColumn = "teamId"
+        )
     )
     val team1: Team?,
 
     @Relation(
         parentColumn = "team2",
-        entity = Team::class,
-        entityColumn = "id"
+        entityColumn = "id",
+        associateBy = Junction(
+            value = MatchTeamCrossRef::class,
+            parentColumn = "matchId",
+            entityColumn = "teamId"
+        )
     )
     val team2: Team?,
 
@@ -46,10 +56,14 @@ data class MatchWithRelations(
 
     @Relation(
         parentColumn = "field",
-        entity = Field::class,
-        entityColumn = "id"
+        entityColumn = "id",
+        associateBy = Junction(
+            value = FieldMatchCrossRef::class,
+            parentColumn = "matchId",
+            entityColumn = "fieldId"
+        )
     )
-    val field: Field?,  // Simplified to avoid circular reference
+    val field: Field?,
 
     @Relation(
         parentColumn = "winnerNextMatchId",

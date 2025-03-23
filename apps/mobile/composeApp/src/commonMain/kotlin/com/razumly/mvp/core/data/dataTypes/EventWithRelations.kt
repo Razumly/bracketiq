@@ -31,4 +31,4 @@ class EventWithRelations(
         )
     )
     override val teams: List<Team>
-) : EventAbsWithPlayers
+) : EventAbsWithRelations

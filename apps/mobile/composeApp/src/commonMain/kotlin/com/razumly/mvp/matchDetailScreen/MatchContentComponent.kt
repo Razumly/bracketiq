@@ -1,7 +1,7 @@
 package com.razumly.mvp.matchDetailScreen
 
 import com.arkivanov.decompose.ComponentContext
-import com.razumly.mvp.core.data.IMVPRepository
+import com.razumly.mvp.core.data.repositories.IMVPRepository
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
 import com.razumly.mvp.core.data.dataTypes.Tournament

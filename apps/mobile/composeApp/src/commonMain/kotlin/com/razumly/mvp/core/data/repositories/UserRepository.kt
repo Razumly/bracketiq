@@ -1,7 +1,10 @@
-package com.razumly.mvp.core.data
+package com.razumly.mvp.core.data.repositories
 
+import com.razumly.mvp.core.data.Companion.multiResponse
+import com.razumly.mvp.core.data.CurrentUserDataSource
+import com.razumly.mvp.core.data.MVPDatabase
 import com.razumly.mvp.core.data.dataTypes.UserData
-import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
+import com.razumly.mvp.core.data.dataTypes.crossRef.TournamentUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.dtos.UserDataDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.toUserData
 import com.razumly.mvp.core.util.DbConstants
@@ -9,45 +12,52 @@ import io.appwrite.ID
 import io.appwrite.Query
 import io.appwrite.services.Account
 import io.appwrite.services.Databases
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.IO
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class UserRepository(
-    private val tournamentDB: MVPDatabase,
+    private val mvpDatabase: MVPDatabase,
     private val account: Account,
     private val database: Databases,
-    private val currentUserDataSource: CurrentUserDataSource
+    private val currentUserDataSource: CurrentUserDataSource,
 ) : IUserRepository {
-    override suspend fun login(email: String, password: String): Result<UserData> =
-        runCatching {
-            val session = account.createEmailPasswordSession(email, password)
-            val id = account.get().id
-            currentUserDataSource.saveUserId(id)
-            val currentUser = database.getDocument(
-                DbConstants.DATABASE_NAME,
-                DbConstants.USER_DATA_COLLECTION,
-                id,
-                nestedType = UserDataDTO::class
-            ).data.copy(id = id).toUserData(id)
-            tournamentDB.getUserDataDao.upsertUserData(currentUser)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-            return Result.success(currentUser)
-        }
+    override suspend fun login(email: String, password: String): Result<UserData> = runCatching {
+        account.createEmailPasswordSession(email, password)
+        val id = account.get().id
+        currentUserDataSource.saveUserId(id)
+        val currentUser = database.getDocument(
+            DbConstants.DATABASE_NAME,
+            DbConstants.USER_DATA_COLLECTION,
+            id,
+            nestedType = UserDataDTO::class
+        ).data.copy(id = id).toUserData(id)
+        mvpDatabase.getUserDataDao.upsertUserData(currentUser)
+
+        return Result.success(currentUser)
+    }
 
     override suspend fun logout(): Result<Unit> = kotlin.runCatching {
         currentUserDataSource.saveUserId("")
         account.deleteSession("current")
     }
 
-    @OptIn(ExperimentalCoroutinesApi::class)
     override suspend fun getCurrentUserFlow(): Flow<Result<UserData>> {
         return currentUserDataSource.getUserId().flatMapLatest { userId ->
             if (userId.isBlank()) {
                 flow {
-                    emit(IMVPRepository.singleResponse(
-                        networkCall = {
+                    emit(
+                        singleResponse(networkCall = {
                             val fetchedUserId = account.get().id
                             currentUserDataSource.saveUserId(fetchedUserId)
                             database.getDocument(
@@ -57,17 +67,15 @@ class UserRepository(
                                 nestedType = UserDataDTO::class,
                             ).data.toUserData(fetchedUserId)
                         }, saveCall = { userData ->
-                            tournamentDB.getUserDataDao.upsertUserData(userData)
-                            tournamentDB.getTeamDao.upsertTeamPlayerCrossRefs(
-                                userData.teamIds.map { teamId ->
-                                    TeamPlayerCrossRef(teamId, userData.id)
-                                })
+                            mvpDatabase.getUserDataDao.upsertUserWithRelations(userData)
+                            currentUserDataSource.saveUserId(userData.id)
                         }, onReturn = { data ->
                             data
-                        }))
+                        })
+                    )
                 }
             } else {
-                tournamentDB.getUserDataDao.getUserFlowById(userId).flatMapLatest { user ->
+                mvpDatabase.getUserDataDao.getUserFlowById(userId).flatMapLatest { user ->
                     flow {
                         if (user != null) {
                             emit(Result.success(user))
@@ -82,8 +90,8 @@ class UserRepository(
     }
 
     override suspend fun getUsersOfTournament(tournamentId: String): Result<List<UserData>> =
-        IMVPRepository.multiResponse(
-            networkCall = {
+        multiResponse(
+            getRemoteData = {
                 val docs = database.listDocuments(
                     DbConstants.DATABASE_NAME,
                     DbConstants.USER_DATA_COLLECTION,
@@ -93,14 +101,42 @@ class UserRepository(
                 docs.documents.map { it.data.toUserData(it.id) }
             },
             saveData = { usersData ->
-                tournamentDB.getUserDataDao.upsertUsersData(usersData)
+                mvpDatabase.getUserDataDao.upsertUsersData(usersData)
+                mvpDatabase.getUserDataDao.upsertUserTournamentCrossRefs(usersData.map {
+                    TournamentUserCrossRef(
+                        it.id, tournamentId
+                    )
+                })
             },
-            getLocalIds = { tournamentDB.getUserDataDao.getUsers(tournamentId).toSet() },
-            deleteStaleData = { ids -> tournamentDB.getUserDataDao.deleteUsersById(ids) },
+            getLocalData = { mvpDatabase.getUserDataDao.getUsersInTournament(tournamentId) },
         )
 
-    override suspend fun getUsersOfTournamentFlow(tournamentId: String): Flow<Result<List<UserData>>> {
-        TODO("Not yet implemented")
+    override suspend fun getUsersOfEvent(eventId: String): Result<List<UserData>> =
+        multiResponse(
+            getRemoteData = {
+                val docs = database.listDocuments(
+                    DbConstants.DATABASE_NAME,
+                    DbConstants.USER_DATA_COLLECTION,
+                    listOf(Query.contains(DbConstants.TOURNAMENTS_ATTRIBUTE, eventId)),
+                    nestedType = UserDataDTO::class,
+                )
+                docs.documents.map { it.data.toUserData(it.id) }
+            },
+            saveData = { usersData ->
+                mvpDatabase.getUserDataDao.upsertUsersData(usersData)
+            },
+            getLocalData = { mvpDatabase.getUserDataDao.getUsersInTournament(eventId) },
+        )
+
+    override fun getUsersOfTournamentFlow(tournamentId: String): Flow<Result<List<UserData>>> {
+        val localUsersFlow = mvpDatabase.getUserDataDao.getUsersInTournamentFlow(tournamentId)
+            .map { Result.success(it) }
+
+        scope.launch {
+            getUsersOfTournament(tournamentId)
+        }
+
+        return localUsersFlow
     }
 
 
@@ -124,7 +160,7 @@ class UserRepository(
     }
 
     override suspend fun updateUser(user: UserData): Result<UserData> {
-        return IMVPRepository.singleResponse(networkCall = {
+        return singleResponse(networkCall = {
             database.updateDocument(
                 DbConstants.DATABASE_NAME,
                 DbConstants.USER_DATA_COLLECTION,
@@ -133,9 +169,10 @@ class UserRepository(
                 nestedType = UserDataDTO::class
             ).data.toUserData(user.id)
         }, saveCall = { newData ->
-            tournamentDB.getUserDataDao.upsertUserData(newData)
+            mvpDatabase.getUserDataDao.upsertUserWithRelations(newData)
         }, onReturn = { data ->
             data
         })
     }
+
 }

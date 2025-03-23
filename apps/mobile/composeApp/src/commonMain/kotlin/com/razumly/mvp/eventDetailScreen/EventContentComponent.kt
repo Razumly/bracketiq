@@ -1,9 +1,9 @@
 package com.razumly.mvp.eventDetailScreen
 
 import com.arkivanov.decompose.ComponentContext
-import com.razumly.mvp.core.data.IMVPRepository
+import com.razumly.mvp.core.data.repositories.IMVPRepository
 import com.razumly.mvp.core.data.dataTypes.EventAbs
-import com.razumly.mvp.core.data.dataTypes.EventAbsWithPlayers
+import com.razumly.mvp.core.data.dataTypes.EventAbsWithRelations
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
 import com.razumly.mvp.core.data.dataTypes.enums.Division
@@ -23,7 +23,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 interface EventContentComponent : ComponentContext {
-    val selectedEvent: StateFlow<EventAbsWithPlayers?>
+    val selectedEvent: StateFlow<EventAbsWithRelations?>
     val divisionMatches: StateFlow<List<MatchWithRelations>>
     val currentMatches: StateFlow<Map<String, MatchWithRelations>>
     val divisionTeams: StateFlow<List<TeamWithRelations>>

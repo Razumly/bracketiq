@@ -42,4 +42,4 @@ data class TournamentWithRelations (
         )
     )
     override val teams: List<Team>,
-) : EventAbsWithPlayers
+) : EventAbsWithRelations

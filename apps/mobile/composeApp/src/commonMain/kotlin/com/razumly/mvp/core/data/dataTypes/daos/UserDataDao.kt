@@ -7,8 +7,10 @@ import androidx.room.Transaction
 import androidx.room.Upsert
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.UserWithRelations
-import com.razumly.mvp.core.data.dataTypes.crossRef.TournamentUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
+import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
+import com.razumly.mvp.core.data.dataTypes.crossRef.TournamentUserCrossRef
+import io.github.aakira.napier.Napier
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -19,8 +21,14 @@ interface UserDataDao {
     @Upsert
     suspend fun upsertUsersData(usersData: List<UserData>)
 
+    @Query("SELECT * FROM UserData WHERE eventIds LIKE '%' || :eventId || '%'")
+    suspend fun getUsersInEvent(eventId: String): List<UserData>
+
     @Query("SELECT * FROM UserData WHERE tournamentIds LIKE '%' || :tournamentId || '%'")
-    suspend fun getUsers(tournamentId: String): List<UserData>
+    suspend fun getUsersInTournament(tournamentId: String): List<UserData>
+
+    @Query("SELECT * FROM UserData WHERE tournamentIds LIKE '%' || :tournamentId || '%'")
+    fun getUsersInTournamentFlow(tournamentId: String): Flow<List<UserData>>
 
     @Query("DELETE FROM UserData WHERE id IN (:ids)")
     suspend fun deleteUsersById(ids: List<String>)
@@ -36,6 +44,9 @@ interface UserDataDao {
 
     @Upsert
     suspend fun upsertUserEventCrossRefs(crossRefs: List<EventUserCrossRef>)
+
+    @Upsert
+    suspend fun upsertUserTeamCrossRefs(crossRefs: List<TeamPlayerCrossRef>)
 
     @Delete
     suspend fun deleteUserData(userData: UserData)
@@ -54,6 +65,40 @@ interface UserDataDao {
 
     @Query("SELECT * FROM UserData WHERE id in (:ids)")
     suspend fun getUserDatasById(ids: List<String>): List<UserData>
+
+    @Transaction
+    suspend fun upsertUserWithRelations(userData: UserData) {
+        deleteTournamentCrossRefById(listOf(userData.id))
+        deleteEventCrossRefById(listOf(userData.id))
+        deleteTeamCrossRefById(listOf(userData.id))
+        try {
+            upsertUserTournamentCrossRefs(userData.tournamentIds.map {
+                TournamentUserCrossRef(
+                    userData.id,
+                    it
+                )
+            })
+        } catch(e: Exception) {
+            Napier.d("Failed to add user tournament crossRef for user: ${userData.id}")
+        }
+        try {
+            upsertUserEventCrossRefs(userData.eventIds.map { EventUserCrossRef(userData.id, it) })
+        } catch(e: Exception) {
+            Napier.d("Failed to add user event crossRef for user: ${userData.id}")
+        }
+        try {
+            upsertUserTeamCrossRefs(userData.teamIds.map { TeamPlayerCrossRef(it, userData.id) })
+        } catch(e: Exception) {
+            Napier.d("Failed to add user team crossRef for user: ${userData.id}")
+        }
+    }
+
+    @Transaction
+    suspend fun upsertUsersWithRelations(usersData: List<UserData>) {
+        usersData.forEach { userData ->
+            upsertUserWithRelations(userData)
+        }
+    }
 
     @Transaction
     @Query("SELECT * FROM UserData WHERE id = :id")

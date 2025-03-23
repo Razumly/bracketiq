@@ -2,7 +2,7 @@ package com.razumly.mvp.eventSearch
 
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.backhandler.BackCallback
-import com.razumly.mvp.core.data.IMVPRepository
+import com.razumly.mvp.core.data.repositories.IMVPRepository
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
 import com.razumly.mvp.core.util.calcDistance

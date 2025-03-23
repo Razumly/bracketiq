@@ -33,24 +33,27 @@ interface TournamentDao {
     suspend fun getTournamentById(id: String): Tournament
 
     @Query("SELECT * FROM Tournament")
-    suspend fun getAllCachedTournaments(): List<Tournament>
+    fun getAllCachedTournamentsFlow(): Flow<List<TournamentWithRelations>>
 
     @Transaction
     @Query("SELECT * FROM Tournament WHERE id = :id")
-    fun getTournamentWithRelationsFlow(id: String): Flow<TournamentWithRelations?>
+    fun getTournamentWithRelationsFlow(id: String): Flow<TournamentWithRelations>
 
     @Transaction
     @Query("SELECT * FROM Tournament WHERE id = :id")
     suspend fun getTournamentWithRelations(id: String): TournamentWithRelations
 
     @Transaction
+    suspend fun upsertTournamentWithRelations(tournament: Tournament) {
+        deleteTournamentWithCrossRefs(tournament.id)
+        upsertTournament(tournament)
+    }
+
+    @Transaction
     suspend fun deleteTournamentWithCrossRefs(tournamentId: String) {
-        // Manually delete the cross-references
         deleteTournamentUserCrossRefs(tournamentId)
         deleteTournamentMatchCrossRefs(tournamentId)
         deleteTournamentTeamCrossRefs(tournamentId)
-
-        // Now delete the tournament
         deleteTournamentById(tournamentId)
     }
 

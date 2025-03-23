@@ -1,15 +1,15 @@
-package com.razumly.mvp.core.data
+package com.razumly.mvp.core.data.repositories
 
 import com.razumly.mvp.core.data.dataTypes.UserData
-import com.razumly.mvp.core.data.dataTypes.UserWithRelations
 import kotlinx.coroutines.flow.Flow
 
-interface IUserRepository {
+interface IUserRepository : IMVPRepository {
     suspend fun login(email: String, password: String): Result<UserData>
     suspend fun logout(): Result<Unit>
     suspend fun getCurrentUserFlow(): Flow<Result<UserData>>
     suspend fun getUsersOfTournament(tournamentId: String): Result<List<UserData>>
-    suspend fun getUsersOfTournamentFlow(tournamentId: String): Flow<Result<List<UserData>>>
+    suspend fun getUsersOfEvent(eventId: String): Result<List<UserData>>
+    fun getUsersOfTournamentFlow(tournamentId: String): Flow<Result<List<UserData>>>
     suspend fun createNewUser(
         email: String,
         password: String,
