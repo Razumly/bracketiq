@@ -25,7 +25,7 @@ class EventRepository(
     private val userRepository: IUserRepository,
 ): IEventRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    override fun getEventFlow(eventId: String): Flow<Result<EventWithRelations?>> {
+    override fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations?>> {
         val localFlow = mvpDatabase.getEventImpDao.getEventWithRelationsFlow(eventId)
             .map { Result.success(it) }
         scope.launch{

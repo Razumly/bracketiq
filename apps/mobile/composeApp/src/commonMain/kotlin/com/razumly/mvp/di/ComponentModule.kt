@@ -27,7 +27,7 @@ val componentModule = module {
     factory { (componentContext: ComponentContext, onNavigateToHome: () -> Unit) ->
         AuthComponent(
             componentContext = componentContext,
-            mvpRepository = get(),
+            userRepository = get(),
             onNavigateToHome = onNavigateToHome
         )
     }

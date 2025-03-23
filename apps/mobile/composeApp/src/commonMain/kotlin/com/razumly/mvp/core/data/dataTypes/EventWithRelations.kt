@@ -18,7 +18,7 @@ class EventWithRelations(
             entityColumn = "userId"
         )
     )
-    override val players: List<UserData>,
+    override val players: List<UserData> = listOf(),
 
 
     @Relation(
@@ -30,5 +30,5 @@ class EventWithRelations(
             entityColumn = "teamId"
         )
     )
-    override val teams: List<Team>
+    override val teams: List<Team> = listOf()
 ) : EventAbsWithRelations

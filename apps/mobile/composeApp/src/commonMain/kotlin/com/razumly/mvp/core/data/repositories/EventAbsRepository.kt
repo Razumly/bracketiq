@@ -23,11 +23,19 @@ class EventAbsRepository(
     private val teamRepository: ITeamRepository,
 ): IEventAbsRepository {
     override suspend fun getEvent(event: EventAbs): Result<EventAbsWithRelations> {
-        val eventWithPlayers = when (event) {
+        val eventWithRelations = when (event) {
             is EventImp -> eventRepository.getEvent(event.id)
             is Tournament -> tournamentRepository.getTournament(event.id)
         }
-        return eventWithPlayers
+        return eventWithRelations
+    }
+
+    override fun getEventWithRelationsFlow(event: EventAbs): Flow<Result<EventAbsWithRelations>> {
+        val eventWithRelations = when (event) {
+            is EventImp -> eventRepository.getEventWithRelationsFlow(event.id)
+            is Tournament -> tournamentRepository.getTournamentWithRelationsFlow(event.id)
+        }
+        return eventWithRelations
     }
 
     override fun getEventsInBounds(bounds: Bounds, userLocation: LatLng): Flow<Result<List<EventAbsWithRelations>>> {

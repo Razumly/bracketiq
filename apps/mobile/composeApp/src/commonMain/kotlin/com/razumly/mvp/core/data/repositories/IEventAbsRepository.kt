@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.Flow
 
 interface IEventAbsRepository : IMVPRepository {
     suspend fun getEvent(event: EventAbs): Result<EventAbsWithRelations>
+    fun getEventWithRelationsFlow(event: EventAbs): Flow<Result<EventAbsWithRelations>>
     fun getEventsInBounds(bounds: Bounds, userLocation: LatLng): Flow<Result<List<EventAbsWithRelations>>>
     fun getEvents(query: String, userLocation: LatLng): Flow<Result<List<EventAbsWithRelations>>>
     suspend fun searchEvents(searchQuery: String, userLocation: LatLng): Flow<Result<List<EventAbsWithRelations>>>

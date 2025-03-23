@@ -5,7 +5,7 @@ import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import kotlinx.coroutines.flow.Flow
 
 interface IEventRepository : IMVPRepository {
-    fun getEventFlow(eventId: String): Flow<Result<EventWithRelations?>>
+    fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>>
     suspend fun getEvent(eventId: String): Result<EventWithRelations>
     suspend fun createEvent(newEvent: EventImp): Result<EventImp>
     suspend fun updateEvent(newEvent: EventImp): Result<EventImp>

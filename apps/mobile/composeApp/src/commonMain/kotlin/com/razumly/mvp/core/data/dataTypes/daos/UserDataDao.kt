@@ -24,6 +24,9 @@ interface UserDataDao {
     @Query("SELECT * FROM UserData WHERE eventIds LIKE '%' || :eventId || '%'")
     suspend fun getUsersInEvent(eventId: String): List<UserData>
 
+    @Query("SELECT * FROM UserData WHERE eventIds LIKE '%' || :eventId || '%'")
+    fun getUsersInEventFlow(eventId: String): Flow<List<UserData>>
+
     @Query("SELECT * FROM UserData WHERE tournamentIds LIKE '%' || :tournamentId || '%'")
     suspend fun getUsersInTournament(tournamentId: String): List<UserData>
 

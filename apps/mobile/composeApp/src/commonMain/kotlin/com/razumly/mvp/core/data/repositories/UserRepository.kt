@@ -1,12 +1,13 @@
 package com.razumly.mvp.core.data.repositories
 
-import com.razumly.mvp.core.data.Companion.multiResponse
 import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.MVPDatabase
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.crossRef.TournamentUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.dtos.UserDataDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.toUserData
+import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResponse
+import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
 import com.razumly.mvp.core.util.DbConstants
 import io.appwrite.ID
 import io.appwrite.Query
@@ -25,9 +26,9 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class UserRepository(
-    private val mvpDatabase: MVPDatabase,
-    private val account: Account,
-    private val database: Databases,
+    internal val mvpDatabase: MVPDatabase,
+    internal val account: Account,
+    internal val database: Databases,
     private val currentUserDataSource: CurrentUserDataSource,
 ) : IUserRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -52,7 +53,7 @@ class UserRepository(
         account.deleteSession("current")
     }
 
-    override suspend fun getCurrentUserFlow(): Flow<Result<UserData>> {
+    override fun getCurrentUserFlow(): Flow<Result<UserData>> {
         return currentUserDataSource.getUserId().flatMapLatest { userId ->
             if (userId.isBlank()) {
                 flow {
@@ -134,6 +135,17 @@ class UserRepository(
 
         scope.launch {
             getUsersOfTournament(tournamentId)
+        }
+
+        return localUsersFlow
+    }
+
+    override fun getUsersOfEventFlow(eventId: String): Flow<Result<List<UserData>>> {
+        val localUsersFlow = mvpDatabase.getUserDataDao.getUsersInEventFlow(eventId)
+            .map { Result.success(it) }
+
+        scope.launch {
+            getUsersOfTournament(eventId)
         }
 
         return localUsersFlow

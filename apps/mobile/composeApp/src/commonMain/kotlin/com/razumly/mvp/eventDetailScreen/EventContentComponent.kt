@@ -1,13 +1,18 @@
 package com.razumly.mvp.eventDetailScreen
 
 import com.arkivanov.decompose.ComponentContext
-import com.razumly.mvp.core.data.repositories.IMVPRepository
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.EventAbsWithRelations
+import com.razumly.mvp.core.data.dataTypes.EventImp
+import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
+import com.razumly.mvp.core.data.dataTypes.Tournament
+import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
 import com.razumly.mvp.core.data.dataTypes.enums.Division
-import kotlinx.coroutines.CoroutineDispatcher
+import com.razumly.mvp.core.data.repositories.EventAbsRepository
+import com.razumly.mvp.core.data.repositories.UserRepository
+import com.razumly.mvp.eventDetailScreen.data.MatchRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -17,13 +22,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
-import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 interface EventContentComponent : ComponentContext {
-    val selectedEvent: StateFlow<EventAbsWithRelations?>
+    val selectedEvent: StateFlow<Result<EventAbsWithRelations>>
     val divisionMatches: StateFlow<List<MatchWithRelations>>
     val currentMatches: StateFlow<Map<String, MatchWithRelations>>
     val divisionTeams: StateFlow<List<TeamWithRelations>>
@@ -43,33 +46,34 @@ interface EventContentComponent : ComponentContext {
 
 class DefaultEventContentComponent(
     componentContext: ComponentContext,
-    private val mvpRepository: IMVPRepository,
+    eventAbsRepository: EventAbsRepository,
+    userRepository: UserRepository,
     event: EventAbs,
+    private val matchRepository: MatchRepository,
     private val onMatchSelected: (MatchWithRelations) -> Unit,
-    private val ioDispatcher: CoroutineDispatcher
 ) : EventContentComponent, ComponentContext by componentContext {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-    override val selectedEvent = mvpRepository
-        .getPlayersOfEventFlow(event)
-        .stateIn(scope, SharingStarted.Eagerly, null)
+    override val selectedEvent = eventAbsRepository.getEventWithRelationsFlow(event).stateIn(
+            scope, SharingStarted.Eagerly, Result.success(
+                when (event) {
+                    is EventImp -> EventWithRelations(EventImp())
+                    is Tournament -> TournamentWithRelations(Tournament())
+                }
+            )
+        )
+
+    private val _currentMatches = MutableStateFlow<Map<String, MatchWithRelations>>(emptyMap())
+    override val currentMatches = _currentMatches.asStateFlow()
+
+    override val currentTeams = MutableStateFlow(null)
+
+    private val _currentUser = userRepository.getCurrentUserFlow().stateIn(
+        scope, SharingStarted.Eagerly, Result.success(null)
+    )
 
     private val _divisionMatches = MutableStateFlow<List<MatchWithRelations>>(emptyList())
     override val divisionMatches = _divisionMatches.asStateFlow()
-
-    override val currentMatches = mvpRepository
-        .getMatchesFlow(event.id)
-        .stateIn(
-            scope = scope,
-            started = SharingStarted.Eagerly,
-            initialValue = emptyMap()
-        )
-
-    override val currentTeams = mvpRepository
-        .getTeamsInTournamentFlow(event.id)
-        .map { teams -> teams.associateBy { it.team.id } }
-        .flowOn(ioDispatcher)
-        .stateIn(scope, SharingStarted.Eagerly, mapOf())
 
     private val _divisionTeams = MutableStateFlow<List<TeamWithRelations>>(listOf())
     override val divisionTeams = _divisionTeams.asStateFlow()
@@ -93,25 +97,20 @@ class DefaultEventContentComponent(
 
     init {
         scope.launch {
-            mvpRepository.setIgnoreMatch(null)
-            selectedEvent
-                .distinctUntilChanged { old, new -> old == new }
-                .filterNotNull()
+            matchRepository.setIgnoreMatch(null)
+            selectedEvent.distinctUntilChanged { old, new -> old == new }.filterNotNull()
                 .collect { event ->
-                    mvpRepository.subscribeToMatches()
+                    matchRepository.subscribeToMatches()
                     _userInTournament.value =
-                        event.players.contains(mvpRepository.getCurrentUser()?.user)
+                        event.getOrNull()?.players?.contains(_currentUser.value.getOrNull()) == true
                     if (_userInTournament.value) {
                         _showDetails.value = true
                     }
                     if (selectedDivision.value == null) {
-                        event.event.divisions.firstOrNull()?.let { selectDivision(it) }
+                        event.getOrNull()?.event?.divisions?.firstOrNull()
+                            ?.let { selectDivision(it) }
                     }
                 }
-
-        }
-        scope.launch {
-            mvpRepository.getEvent(event)
         }
         scope.launch {
             currentMatches

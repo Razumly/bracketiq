@@ -19,7 +19,7 @@ data class TournamentWithRelations (
             entityColumn = "userId"
         )
     )
-    override val players: List<UserData>,
+    override val players: List<UserData> = listOf(),
 
     @Relation(
         parentColumn = "id",
@@ -30,7 +30,7 @@ data class TournamentWithRelations (
             entityColumn = "matchId"
         )
     )
-    val matches: List<MatchMVP>,
+    val matches: List<MatchMVP> = listOf(),
 
     @Relation(
         parentColumn = "id",
@@ -41,5 +41,5 @@ data class TournamentWithRelations (
             entityColumn = "teamId"
         )
     )
-    override val teams: List<Team>,
+    override val teams: List<Team> = listOf(),
 ) : EventAbsWithRelations
