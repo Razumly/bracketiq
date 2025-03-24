@@ -9,6 +9,8 @@ import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
 class EventWithRelations(
     @Embedded override val event: EventImp,
 
+    override val matches: List<MatchWithRelations> = listOf(),
+
     @Relation(
         parentColumn = "id",
         entityColumn = "id",
@@ -30,5 +32,5 @@ class EventWithRelations(
             entityColumn = "teamId"
         )
     )
-    override val teams: List<Team> = listOf()
+    override val teams: List<TeamWithRelations> = listOf()
 ) : EventAbsWithRelations

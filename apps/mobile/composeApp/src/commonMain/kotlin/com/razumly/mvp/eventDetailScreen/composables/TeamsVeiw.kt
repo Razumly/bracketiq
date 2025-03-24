@@ -22,8 +22,8 @@ fun ParticipantsView() {
     val component = LocalTournamentComponent.current
     val teams by component.divisionTeams.collectAsState()
     val selectedEvent by component.selectedEvent.collectAsState()
-    val participants = selectedEvent?.players
-    val teamSignup = selectedEvent?.event?.teamSignup
+    val participants = selectedEvent.players
+    val teamSignup = selectedEvent.event.teamSignup
     val navPadding = LocalNavBarPadding.current
 
     LazyColumn(
@@ -38,15 +38,13 @@ fun ParticipantsView() {
             Header(component)
             CollapsableHeader(component)
         }
-        if (teamSignup == true) {
+        if (teamSignup) {
             itemsIndexed(teams, key = { _, team -> team.team.id }) { _, team ->
                 TeamCard(team)
             }
         } else {
-            participants?.let {
-                itemsIndexed(it, key = { _, participant -> participant.id }) { _, participant ->
-                    PlayerCard(participant)
-                }
+            itemsIndexed(participants, key = { _, participant -> participant.id }) { _, participant ->
+                PlayerCard(participant)
             }
         }
     }

@@ -19,6 +19,7 @@ interface CreateEventComponent {
     val childStack: Value<ChildStack<Config, Child>>
     val canProceed: StateFlow<Boolean>
     val selectedPlace: StateFlow<MVPPlace?>
+    val errorMessage: StateFlow<String?>
 
     fun updateEventField(update: EventImp.() -> EventImp)
     fun updateTournamentField(update: Tournament.() -> Tournament)

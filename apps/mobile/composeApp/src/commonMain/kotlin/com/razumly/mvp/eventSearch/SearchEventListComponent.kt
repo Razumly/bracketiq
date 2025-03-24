@@ -2,26 +2,34 @@ package com.razumly.mvp.eventSearch
 
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.backhandler.BackCallback
-import com.razumly.mvp.core.data.repositories.IMVPRepository
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
+import com.razumly.mvp.core.data.repositories.IEventAbsRepository
+import com.razumly.mvp.core.data.repositories.ITeamRepository
+import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.util.calcDistance
 import com.razumly.mvp.core.util.getBounds
 import dev.icerock.moko.geo.LatLng
 import dev.icerock.moko.geo.LocationTracker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class SearchEventListComponent(
     componentContext: ComponentContext,
-    private val mvpRepository: IMVPRepository,
+    userRepository: IUserRepository,
+    private val teamRepository: ITeamRepository,
+    private val eventAbsRepository: IEventAbsRepository,
     val locationTracker: LocationTracker,
     private val onEventSelected: (event: EventAbs) -> Unit,
 ) : ComponentContext by componentContext {
@@ -57,11 +65,29 @@ class SearchEventListComponent(
         _showMapCard.value = false
     }
 
-    val currentUser = mvpRepository
+    val currentUser = userRepository
         .getCurrentUserFlow()
+        .map { result ->
+            result.getOrElse {
+                _error.value = it.message
+                null
+            }
+        }
         .stateIn(scope, SharingStarted.Eagerly, null)
 
-    private val _userTeams = MutableStateFlow<List<TeamWithRelations>>(listOf())
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val _userTeams = currentUser
+        .filterNotNull()
+        .flatMapLatest { user ->
+            teamRepository.getTeamsWithPlayersFlow(user.teamIds)
+                .map { result ->
+                    result.getOrElse {
+                        _error.value = it.message
+                        emptyList()
+                    }
+                }
+        }
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     init {
         backHandler.register(backCallback)
@@ -69,16 +95,6 @@ class SearchEventListComponent(
         scope.launch {
             _showMapCard.collect {
                 backCallback.isEnabled = it
-            }
-        }
-
-        scope.launch {
-            currentUser.collect { user ->
-                if (user != null) {
-                    mvpRepository.getTeamsWithPlayersFlow(user.user.teamIds).collect { teams ->
-                        _userTeams.value = teams
-                    }
-                }
             }
         }
 
@@ -105,7 +121,6 @@ class SearchEventListComponent(
 
         scope.launch {
             try {
-                getEvents()
                 currentRadius
                     .collect {
                         if (_locationStateFlow.value != null) {
@@ -140,14 +155,14 @@ class SearchEventListComponent(
     fun joinEvent(event: EventAbs?) {
         if(event == null) return
         scope.launch {
-            mvpRepository.addCurrentUserToEvent(event)
+            eventAbsRepository.addCurrentUserToEvent(event)
         }
     }
 
     fun joinEventAsTeam(team: TeamWithRelations) {
         if(_selectedEvent.value == null) return
         scope.launch {
-            mvpRepository.addTeamToEvent(_selectedEvent.value!!, team)
+            eventAbsRepository.addTeamToEvent(_selectedEvent.value!!, team)
         }
     }
 
@@ -163,7 +178,7 @@ class SearchEventListComponent(
             }
             val currentBounds = getBounds(radius, currentLocation.latitude, currentLocation.longitude)
 
-            _events.value = mvpRepository.getEvents(currentBounds, null)
+            _events.value = eventAbsRepository.getEvents(currentBounds, null)
         } catch (e: Exception) {
             _error.value = "Failed to fetch events: ${e.message}"
             _events.value = emptyList()

@@ -3,12 +3,8 @@ package com.razumly.mvp.eventDetailScreen
 import com.arkivanov.decompose.ComponentContext
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.EventAbsWithRelations
-import com.razumly.mvp.core.data.dataTypes.EventImp
-import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
-import com.razumly.mvp.core.data.dataTypes.Tournament
-import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
 import com.razumly.mvp.core.data.dataTypes.enums.Division
 import com.razumly.mvp.core.data.repositories.EventAbsRepository
 import com.razumly.mvp.core.data.repositories.UserRepository
@@ -22,20 +18,22 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 interface EventContentComponent : ComponentContext {
-    val selectedEvent: StateFlow<Result<EventAbsWithRelations>>
+    val selectedEvent: StateFlow<EventAbsWithRelations>
     val divisionMatches: StateFlow<List<MatchWithRelations>>
     val currentMatches: StateFlow<Map<String, MatchWithRelations>>
+    val currentTeams: StateFlow<Map<String, TeamWithRelations>>
     val divisionTeams: StateFlow<List<TeamWithRelations>>
     val selectedDivision: StateFlow<Division?>
     val isBracketView: StateFlow<Boolean>
     val rounds: StateFlow<List<List<MatchWithRelations?>>>
     val losersBracket: StateFlow<Boolean>
     val showDetails: StateFlow<Boolean>
-    val currentTeams: StateFlow<Map<String, TeamWithRelations>>
+    val errorState: StateFlow<String?>
 
     fun matchSelected(selectedMatch: MatchWithRelations)
     fun selectDivision(division: Division)
@@ -54,19 +52,22 @@ class DefaultEventContentComponent(
 ) : EventContentComponent, ComponentContext by componentContext {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-    override val selectedEvent = eventAbsRepository.getEventWithRelationsFlow(event).stateIn(
-            scope, SharingStarted.Eagerly, Result.success(
-                when (event) {
-                    is EventImp -> EventWithRelations(EventImp())
-                    is Tournament -> TournamentWithRelations(Tournament())
+    private val _errorState = MutableStateFlow<String?>(null)
+    override val errorState = _errorState.asStateFlow()
+
+    override val selectedEvent: StateFlow<EventAbsWithRelations> =
+        eventAbsRepository.getEventWithRelationsFlow(event).map { result ->
+                result.getOrElse {
+                    _errorState.value = it.message
+                    EventAbsWithRelations.getEmptyEvent(event)
                 }
-            )
-        )
+            }.stateIn(scope, SharingStarted.Eagerly, EventAbsWithRelations.getEmptyEvent(event))
 
     private val _currentMatches = MutableStateFlow<Map<String, MatchWithRelations>>(emptyMap())
     override val currentMatches = _currentMatches.asStateFlow()
 
-    override val currentTeams = MutableStateFlow(null)
+    private val _currentTeams = MutableStateFlow<Map<String, TeamWithRelations>>(emptyMap())
+    override val currentTeams = _currentTeams.asStateFlow()
 
     private val _currentUser = userRepository.getCurrentUserFlow().stateIn(
         scope, SharingStarted.Eagerly, Result.success(null)
@@ -102,15 +103,21 @@ class DefaultEventContentComponent(
                 .collect { event ->
                     matchRepository.subscribeToMatches()
                     _userInTournament.value =
-                        event.getOrNull()?.players?.contains(_currentUser.value.getOrNull()) == true
+                        event.players.contains(_currentUser.value.getOrNull()) == true
                     if (_userInTournament.value) {
                         _showDetails.value = true
                     }
                     if (selectedDivision.value == null) {
-                        event.getOrNull()?.event?.divisions?.firstOrNull()
+                        event.event.divisions.firstOrNull()
                             ?.let { selectDivision(it) }
                     }
                 }
+        }
+        scope.launch {
+            selectedEvent.collect {
+                _currentMatches.value = selectedEvent.value.matches.associateBy { it.match.id }
+                _currentTeams.value = selectedEvent.value.teams.associateBy { it.team.id }
+            }
         }
         scope.launch {
             currentMatches
@@ -130,7 +137,7 @@ class DefaultEventContentComponent(
     override fun selectDivision(division: Division) {
         _selectedDivision.value = division
         _divisionTeams.value =
-            currentTeams.value.values.filter { it.team.division == division }
+            selectedEvent.value.teams.filter { it.team.division == division }
         _divisionMatches.value =
             currentMatches.value.values.filter { it.match.division == division }
     }

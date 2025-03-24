@@ -39,9 +39,3 @@ fun EventAbs.toMVPPlace() = MVPPlace(
     long = this.long,
     imageUrls = listOf(this.imageUrl)
 )
-
-sealed interface EventAbsWithRelations {
-    val event: EventAbs
-    val players: List<UserData>
-    val teams: List<Team>
-}

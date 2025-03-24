@@ -6,11 +6,13 @@ import com.arkivanov.decompose.router.stack.childStack
 import com.arkivanov.decompose.router.stack.pop
 import com.arkivanov.decompose.router.stack.pushNew
 import com.arkivanov.decompose.router.stack.replaceCurrent
-import com.razumly.mvp.core.data.repositories.IMVPRepository
 import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.repositories.IEventRepository
+import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.data.repositories.TournamentRepository
 import com.razumly.mvp.eventCreate.CreateEventComponent.Child
 import com.razumly.mvp.eventCreate.CreateEventComponent.Config
 import com.razumly.mvp.eventMap.MapComponent
@@ -20,6 +22,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.koin.core.parameter.parametersOf
 import org.koin.mp.KoinPlatform.getKoin
@@ -27,7 +30,9 @@ import org.koin.mp.KoinPlatform.getKoin
 
 class DefaultCreateEventComponent(
     componentContext: ComponentContext,
-    private val mvpRepository: IMVPRepository,
+    private val userRespository: IUserRepository,
+    private val eventRepository: IEventRepository,
+    private val tournamentRepository: TournamentRepository,
     val locationTracker: LocationTracker,
     val onEventCreated: () -> Unit
 ) : CreateEventComponent, ComponentContext by componentContext {
@@ -53,6 +58,9 @@ class DefaultCreateEventComponent(
     private val _selectedPlace = MutableStateFlow<MVPPlace?>(null)
     override val selectedPlace = _selectedPlace.asStateFlow()
 
+    private val _errorMessage = MutableStateFlow<String?>(null)
+    override val errorMessage = _errorMessage.asStateFlow()
+
     override val childStack = childStack(
         source = navigation,
         initialConfiguration = Config.Step1,
@@ -64,9 +72,12 @@ class DefaultCreateEventComponent(
     init {
         childStack.subscribe {}
         scope.launch {
-            val currentUserId = mvpRepository.getCurrentUser()?.user?.id ?: ""
-            updateEventField { copy(hostId = currentUserId) }
-            updateTournamentField { copy(hostId = currentUserId) }
+            userRespository.getCurrentUserFlow().first().onSuccess { currentUser ->
+                updateEventField { copy(hostId = currentUser.id) }
+                updateTournamentField { copy(hostId = currentUser.id) }
+            }.onFailure {
+                _errorMessage.value = it.message
+            }
         }
     }
 
@@ -81,10 +92,13 @@ class DefaultCreateEventComponent(
     override fun createEvent() {
         scope.launch {
             when (currentEventType.value) {
-                EventType.TOURNAMENT -> mvpRepository.createTournament(_newTournamentState.value)
-                EventType.EVENT -> mvpRepository.createEvent(_newEventState.value)
+                EventType.TOURNAMENT -> tournamentRepository.createTournament(_newTournamentState.value)
+                EventType.EVENT -> eventRepository.createEvent(_newEventState.value)
+            }.onSuccess {
+                onEventCreated()
+            }.onFailure {
+                _errorMessage.value = it.message
             }
-            onEventCreated()
         }
     }
 
