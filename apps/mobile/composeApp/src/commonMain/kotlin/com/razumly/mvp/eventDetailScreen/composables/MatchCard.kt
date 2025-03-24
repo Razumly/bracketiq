@@ -19,6 +19,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -44,8 +46,8 @@ fun MatchCard(
 ) {
     val component = LocalTournamentComponent.current
     val textModifier = Modifier.width(70.dp)
-    val teams = component.currentTeams.value
-    val matches = component.currentMatches.value
+    val teams by component.divisionTeams.collectAsState()
+    val matches by component.divisionMatches.collectAsState()
     val matchCardColor = if (match != null && match.match.losersBracket == losersBracket) {
         matchCard
     } else {

@@ -73,8 +73,8 @@ class DefaultCreateEventComponent(
         childStack.subscribe {}
         scope.launch {
             userRespository.getCurrentUserFlow().first().onSuccess { currentUser ->
-                updateEventField { copy(hostId = currentUser.id) }
-                updateTournamentField { copy(hostId = currentUser.id) }
+                updateEventField { copy(hostId = currentUser.user.id) }
+                updateTournamentField { copy(hostId = currentUser.user.id) }
             }.onFailure {
                 _errorMessage.value = it.message
             }

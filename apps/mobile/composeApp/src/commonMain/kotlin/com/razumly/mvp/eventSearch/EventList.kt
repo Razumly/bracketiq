@@ -29,7 +29,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.EventAbs
+import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
+import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.presentation.composables.EventDetails
 import com.razumly.mvp.core.presentation.composables.TeamCard
 
@@ -54,10 +56,15 @@ fun EventList(
     var showDropdownMenu by remember { mutableStateOf(false) }
 
     LaunchedEffect(currentUser, selectedEvent) {
-        isUserInEvent =
-            (currentUser?.user?.tournamentIds?.contains(selectedEvent?.id) == true) || (currentUser?.user?.eventIds?.contains(
-                selectedEvent?.id
-            ) == true)
+        isUserInEvent = when (selectedEvent) {
+            is EventImp -> currentUser?.pickupGames?.map { it.id }
+                ?.contains((selectedEvent as EventImp).id) == true
+
+            is Tournament -> currentUser?.tournaments?.map { it.id }
+                ?.contains((selectedEvent as Tournament).id) == true
+
+            null -> false
+        }
     }
 
     LazyColumn(

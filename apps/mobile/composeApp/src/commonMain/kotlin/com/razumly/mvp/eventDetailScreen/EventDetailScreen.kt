@@ -10,8 +10,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import com.razumly.mvp.core.data.dataTypes.EventWithRelations
-import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
+import com.razumly.mvp.core.data.dataTypes.EventWithPlayers
+import com.razumly.mvp.core.data.dataTypes.TournamentWithPlayers
 import com.razumly.mvp.eventDetailScreen.composables.ParticipantsView
 import com.razumly.mvp.eventDetailScreen.composables.TournamentBracketView
 
@@ -32,7 +32,7 @@ fun EventDetailScreen(
             .fillMaxSize()
         ) {
             when (selectedEvent) {
-                is TournamentWithRelations -> {
+                is TournamentWithPlayers -> {
                     if (isBracketView) {
                         TournamentBracketView { match ->
                             component.matchSelected(match)
@@ -42,10 +42,9 @@ fun EventDetailScreen(
                     }
                 }
 
-                is EventWithRelations -> {
+                is EventWithPlayers -> {
                     ParticipantsView()
                 }
-                null -> {}
             }
         }
     }

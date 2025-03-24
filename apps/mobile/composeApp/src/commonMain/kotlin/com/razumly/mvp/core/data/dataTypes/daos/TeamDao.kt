@@ -27,6 +27,9 @@ interface TeamDao {
     @Query("SELECT * FROM Team WHERE eventIds = :eventId")
     suspend fun getTeamsInEvent(eventId: String): List<Team>
 
+    @Query("SELECT * FROM Team WHERE id = :teamId")
+    suspend fun getTeam(teamId: String): Team
+
     @Query("SELECT * FROM Team WHERE id in (:teamIds)")
     suspend fun getTeams(teamIds: List<String>): List<Team>
 
@@ -56,12 +59,19 @@ interface TeamDao {
     suspend fun getTeamWithPlayers(teamId: String): TeamWithRelations?
 
     @Transaction
+    @Query("SELECT * FROM Team WHERE id = :teamId")
+    fun getTeamWithPlayersFlow(teamId: String): Flow<TeamWithRelations>
+
+    @Transaction
     @Query("SELECT * FROM Team WHERE id in (:teamIds)")
     suspend fun getTeamsWithPlayers(teamIds: List<String>): List<TeamWithRelations>
 
     @Transaction
     @Query("SELECT * FROM Team WHERE tournamentIds = :tournamentId")
     fun getTeamsInTournamentFlow(tournamentId: String): Flow<List<TeamWithRelations>>
+
+    @Query("SELECT * FROM Team WHERE eventIds = :eventId")
+    fun getTeamsInEventFlow(eventId: String): Flow<List<TeamWithRelations>>
 
     @Transaction
     @Query("SELECT * FROM Team WHERE id In (:ids)")

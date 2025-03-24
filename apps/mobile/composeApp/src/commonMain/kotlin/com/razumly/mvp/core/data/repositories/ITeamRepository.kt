@@ -6,11 +6,15 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 import kotlinx.coroutines.flow.Flow
 
 interface ITeamRepository : IMVPRepository {
+    fun getTeamsOfTournamentFlow(tournamentId: String): Flow<Result<List<TeamWithRelations>>>
+    fun getTeamsOfEventFlow(eventId: String): Flow<Result<List<TeamWithRelations>>>
+    suspend fun getTeam(teamId: String): Result<Team>
     suspend fun getTeamsOfTournament(tournamentId: String): Result<List<Team>>
     suspend fun getTeamsOfEvent(eventId: String): Result<List<Team>>
     suspend fun addPlayerToTeam(team: Team, player: UserData): Result<Unit>
     suspend fun removePlayerFromTeam(team: Team, player: UserData): Result<Unit>
     suspend fun createTeam(): Result<Team>
     suspend fun updateTeam(newTeam: Team): Result<Team>
-    suspend fun getTeamsWithPlayersFlow(ids: List<String>): Flow<Result<List<TeamWithRelations>>>
+    fun getTeamsWithPlayersFlow(ids: List<String>): Flow<Result<List<TeamWithRelations>>>
+    fun getTeamWithPlayersFlow(ids: String): Flow<Result<TeamWithRelations>>
 }

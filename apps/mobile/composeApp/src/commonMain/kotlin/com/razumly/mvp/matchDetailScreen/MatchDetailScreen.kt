@@ -46,34 +46,24 @@ import org.jetbrains.compose.resources.stringResource
 fun MatchDetailScreen(
     component: MatchContentComponent
 ) {
-    val match by component.match.collectAsState()
-    val currentTeams by component.currentTeams.collectAsState()
+    val match by component.matchWithTeams.collectAsState()
     val isRef by component.isRef.collectAsState()
     val refCheckedIn by component.refCheckedIn.collectAsState()
     val showRefCheckInDialog by component.showRefCheckInDialog.collectAsState()
     val showSetConfirmDialog by component.showSetConfirmDialog.collectAsState()
     val currentSet by component.currentSet.collectAsState()
     val matchFinished by component.matchFinished.collectAsState()
+    val team1 = match.team1
+    val team2 = match.team2
 
     val canIncrement = !matchFinished && refCheckedIn && isRef
 
-    val team1 by remember(match.team1?.id, currentTeams) {
-        derivedStateOf {
-            currentTeams[match.team1?.id]
-        }
-    }
-
-    val team2 by remember(match.team2?.id, currentTeams) {
-        derivedStateOf {
-            currentTeams[match.team2?.id]
-        }
-    }
     val team1Text = remember(team1) {
         derivedStateOf {
             when {
                 team1?.team?.name != null -> team1?.team?.name
                 team1?.players != null -> team1?.players?.joinToString(" & ") {
-                    "${it.firstName}.${it.lastName?.first()}"
+                    "${it.firstName}.${it.lastName.first()}"
                 }
 
                 else -> "Team 1"
@@ -86,7 +76,7 @@ fun MatchDetailScreen(
             when {
                 team2?.team?.name != null -> team2?.team?.name
                 team2?.players != null -> team2?.players?.joinToString(" & ") {
-                    "${it.firstName}.${it.lastName?.first()}"
+                    "${it.firstName}.${it.lastName.first()}"
                 }
 
                 else -> "Team 2"

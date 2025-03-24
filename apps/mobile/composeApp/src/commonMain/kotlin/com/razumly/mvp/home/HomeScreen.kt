@@ -30,7 +30,6 @@ import com.razumly.mvp.matchDetailScreen.MatchDetailScreen
 import com.razumly.mvp.profile.ProfileScreen
 import com.razumly.mvp.teamManagement.TeamManagementScreen
 import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
 import io.github.aakira.napier.Napier
 
 val LocalNavBarPadding = compositionLocalOf<PaddingValues> { error("No padding values provided") }
@@ -41,9 +40,7 @@ val LocalAnimatedVisibilityScope =
 val LocalSharedTransitionScope =
     compositionLocalOf<SharedTransitionScope> { error("No Animated Visibility Scope provided") }
 
-@OptIn(ExperimentalSharedTransitionApi::class, ExperimentalDecomposeApi::class,
-    ExperimentalHazeMaterialsApi::class
-)
+@OptIn(ExperimentalSharedTransitionApi::class, ExperimentalDecomposeApi::class)
 @Composable
 fun HomeScreen(component: HomeComponent) {
     val childStack by component.childStack.subscribeAsState()

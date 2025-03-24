@@ -2,7 +2,7 @@ package com.razumly.mvp.core.data.repositories
 
 import com.razumly.mvp.core.data.MVPDatabase
 import com.razumly.mvp.core.data.dataTypes.EventImp
-import com.razumly.mvp.core.data.dataTypes.EventWithRelations
+import com.razumly.mvp.core.data.dataTypes.EventWithPlayers
 import com.razumly.mvp.core.data.dataTypes.dtos.EventDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.toEvent
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResponse
@@ -25,18 +25,18 @@ class EventRepository(
     private val userRepository: IUserRepository,
 ): IEventRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    override fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations?>> {
+    override fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithPlayers>> {
         val localFlow = mvpDatabase.getEventImpDao.getEventWithRelationsFlow(eventId)
             .map { Result.success(it) }
         scope.launch{
             userRepository.getUsersOfEvent(eventId)
-            teamRepository.getTeamsOfEvent(eventId)
+            teamRepository.getTeamsOfEventFlow(eventId)
             getEvent(eventId)
         }
         return localFlow
     }
 
-    override suspend fun getEvent(eventId: String): Result<EventWithRelations> =
+    override suspend fun getEvent(eventId: String): Result<EventWithPlayers> =
         singleResponse(networkCall = {
             database.getDocument(
                 DbConstants.DATABASE_NAME,
@@ -97,7 +97,7 @@ class EventRepository(
             saveData = { mvpDatabase.getEventImpDao.upsertEvents(it) }
         )
 
-    override fun getEventsFlow(query: String): Flow<Result<List<EventWithRelations>>> {
+    override fun getEventsFlow(query: String): Flow<Result<List<EventWithPlayers>>> {
         val localFlow = mvpDatabase.getEventImpDao.getAllCachedEvents()
             .map { Result.success(it) }
 

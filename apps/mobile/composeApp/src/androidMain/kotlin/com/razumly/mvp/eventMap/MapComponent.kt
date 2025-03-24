@@ -12,9 +12,9 @@ import com.google.android.libraries.places.api.net.FindAutocompletePredictionsRe
 import com.google.android.libraries.places.api.net.PlacesClient
 import com.google.android.libraries.places.api.net.SearchByTextRequest
 import com.razumly.mvp.BuildConfig
-import com.razumly.mvp.core.data.repositories.IMVPRepository
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
+import com.razumly.mvp.core.data.repositories.IEventAbsRepository
 import com.razumly.mvp.core.util.calcDistance
 import com.razumly.mvp.core.util.getBounds
 import dev.icerock.moko.geo.LocationTracker
@@ -33,7 +33,7 @@ import kotlin.coroutines.resumeWithException
 
 actual class MapComponent(
     componentContext: ComponentContext,
-    private val mvpRepository: IMVPRepository,
+    private val eventAbsRepository: IEventAbsRepository,
     context: Context,
     val locationTracker: LocationTracker
 ) : ComponentContext by componentContext {
@@ -160,27 +160,25 @@ actual class MapComponent(
         }
 
     suspend fun getEvents() {
-        try {
-            _isLoading.value = true
-            _error.value = null
+        _isLoading.value = true
+        _error.value = null
 
 
-            val currentLocation = _currentLocation.value ?: run {
-                _error.value = "Location not available"
-                return
-            }
-            val currentBounds = getBounds(
-                _currentRadiusMeters.value,
-                currentLocation.latitude,
-                currentLocation.longitude
-            )
-
-            _events.value = mvpRepository.getEvents(currentBounds, null)
-        } catch (e: Exception) {
-            _error.value = "Failed to fetch events: ${e.message}"
-            _events.value = emptyList()
-        } finally {
-            _isLoading.value = false
+        val currentLocation = _currentLocation.value ?: run {
+            _error.value = "Location not available"
+            return
         }
+        val currentBounds = getBounds(
+            _currentRadiusMeters.value,
+            currentLocation.latitude,
+            currentLocation.longitude
+        )
+
+        _events.value = eventAbsRepository.getEventsInBounds(currentBounds, currentLocation).getOrElse {
+            _error.value = "Failed to fetch events: ${it.message}"
+            emptyList()
+        }
+
+        _isLoading.value = false
     }
 }

@@ -9,6 +9,7 @@ import com.arkivanov.decompose.router.stack.replaceAll
 import com.razumly.mvp.Message.DefaultMessagesComponent
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
+import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.eventCreate.DefaultCreateEventComponent
 import com.razumly.mvp.eventDetailScreen.DefaultEventContentComponent
 import com.razumly.mvp.eventMap.MapComponent
@@ -75,7 +76,7 @@ class DefaultHomeComponent(
             is Config.MatchDetail -> {
                 Child.MatchContent(
                     _koin.inject<DefaultMatchContentComponent> {
-                        parametersOf(componentContext, config.match)
+                        parametersOf(componentContext, config.match, config.tournament)
                     }.value
                 )
             }
@@ -113,8 +114,8 @@ class DefaultHomeComponent(
         navigation.pushNew(Config.TournamentDetail(event))
     }
 
-    private fun onMatchSelected(match: MatchWithRelations) {
-        navigation.pushNew(Config.MatchDetail(match))
+    private fun onMatchSelected(match: MatchWithRelations, tournament: Tournament) {
+        navigation.pushNew(Config.MatchDetail(match, tournament))
     }
 
     private fun onEventCreated() {

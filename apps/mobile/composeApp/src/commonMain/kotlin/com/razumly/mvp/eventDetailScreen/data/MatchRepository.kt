@@ -48,6 +48,14 @@ class MatchRepository(
             mvpDatabase.getMatchDao.upsertMatch(match)
         }, onReturn = { it })
 
+    override fun getMatchFlow(matchId: String): Flow<Result<MatchWithRelations>> {
+        val localFlow = mvpDatabase.getMatchDao.getMatchFlowById(matchId).map { Result.success(it) }
+        scope.launch {
+            getMatch(matchId)
+        }
+        return localFlow
+    }
+
     override suspend fun updateMatch(match: MatchMVP): Result<Unit> =
         singleResponse(networkCall = {
             database.updateDocument(
@@ -61,7 +69,7 @@ class MatchRepository(
             mvpDatabase.getMatchDao.upsertMatch(updatedMatch)
         }, onReturn = { })
 
-    override suspend fun getMatchesOfTournamentFlow(tournamentId: String): Flow<Result<List<MatchWithRelations>>> {
+    override fun getMatchesOfTournamentFlow(tournamentId: String): Flow<Result<List<MatchWithRelations>>> {
         val localMatchesFlow = mvpDatabase.getMatchDao.getMatchesFlowOfTournament(tournamentId)
             .map { Result.success(it) }
 

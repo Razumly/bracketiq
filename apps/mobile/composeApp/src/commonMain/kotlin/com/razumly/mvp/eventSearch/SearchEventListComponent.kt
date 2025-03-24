@@ -47,8 +47,8 @@ class SearchEventListComponent(
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
-    private val _locationStateFlow = locationTracker.getLocationsFlow()
-        .stateIn(scope, SharingStarted.Eagerly, null)
+    private val _locationStateFlow =
+        locationTracker.getLocationsFlow().stateIn(scope, SharingStarted.Eagerly, null)
 
     private val _currentLocation = MutableStateFlow<LatLng?>(null)
 
@@ -65,29 +65,22 @@ class SearchEventListComponent(
         _showMapCard.value = false
     }
 
-    val currentUser = userRepository
-        .getCurrentUserFlow()
-        .map { result ->
+    val currentUser = userRepository.getCurrentUserFlow().map { result ->
             result.getOrElse {
                 _error.value = it.message
                 null
             }
-        }
-        .stateIn(scope, SharingStarted.Eagerly, null)
+        }.stateIn(scope, SharingStarted.Eagerly, null)
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    private val _userTeams = currentUser
-        .filterNotNull()
-        .flatMapLatest { user ->
-            teamRepository.getTeamsWithPlayersFlow(user.teamIds)
-                .map { result ->
+    private val _userTeams = currentUser.filterNotNull().flatMapLatest { user ->
+            teamRepository.getTeamsWithPlayersFlow(user.teams.map { it.id }).map { result ->
                     result.getOrElse {
                         _error.value = it.message
                         emptyList()
                     }
                 }
-        }
-        .stateIn(scope, SharingStarted.Eagerly, emptyList())
+        }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     init {
         backHandler.register(backCallback)
@@ -121,8 +114,7 @@ class SearchEventListComponent(
 
         scope.launch {
             try {
-                currentRadius
-                    .collect {
+                currentRadius.collect {
                         if (_locationStateFlow.value != null) {
                             getEvents()
                         }
@@ -131,6 +123,10 @@ class SearchEventListComponent(
                 _error.value = "Failed to update events: ${e.message}"
             }
         }
+    }
+
+    fun selectRadius(radius: Double) {
+        _currentRadius.value = radius
     }
 
     fun onMapClick() {
@@ -153,37 +149,35 @@ class SearchEventListComponent(
     }
 
     fun joinEvent(event: EventAbs?) {
-        if(event == null) return
+        if (event == null) return
         scope.launch {
             eventAbsRepository.addCurrentUserToEvent(event)
         }
     }
 
     fun joinEventAsTeam(team: TeamWithRelations) {
-        if(_selectedEvent.value == null) return
+        if (_selectedEvent.value == null) return
         scope.launch {
             eventAbsRepository.addTeamToEvent(_selectedEvent.value!!, team)
         }
     }
 
     private suspend fun getEvents() {
-        try {
-            _isLoading.value = true
-            _error.value = null
+        _isLoading.value = true
+        _error.value = null
 
-            val radius = _currentRadius.value
-            val currentLocation = _currentLocation.value ?: run {
-                _error.value = "Location not available"
-                return
-            }
-            val currentBounds = getBounds(radius, currentLocation.latitude, currentLocation.longitude)
+        val radius = _currentRadius.value
+        val currentLocation = _currentLocation.value ?: run {
+            _error.value = "Location not available"
+            return
+        }
+        val currentBounds = getBounds(radius, currentLocation.latitude, currentLocation.longitude)
 
-            _events.value = eventAbsRepository.getEvents(currentBounds, null)
-        } catch (e: Exception) {
+        eventAbsRepository.getEventsInBounds(currentBounds, currentLocation).onSuccess {
+            _isLoading.value = false
+        }.onFailure { e ->
             _error.value = "Failed to fetch events: ${e.message}"
             _events.value = emptyList()
-        } finally {
-            _isLoading.value = false
         }
     }
 }

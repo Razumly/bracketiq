@@ -5,6 +5,7 @@ import com.arkivanov.decompose.value.Value
 import com.razumly.mvp.Message.MessagesComponent
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
+import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.eventCreate.CreateEventComponent
 import com.razumly.mvp.eventDetailScreen.EventContentComponent
 import com.razumly.mvp.eventMap.MapComponent
@@ -46,6 +47,7 @@ interface HomeComponent {
         @Serializable
         data class MatchDetail(
             val match: MatchWithRelations,
+            val tournament: Tournament,
         ) : Config()
 
         @Serializable

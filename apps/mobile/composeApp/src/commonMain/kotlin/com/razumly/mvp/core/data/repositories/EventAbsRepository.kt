@@ -2,7 +2,7 @@ package com.razumly.mvp.core.data.repositories
 
 import com.razumly.mvp.core.data.dataTypes.Bounds
 import com.razumly.mvp.core.data.dataTypes.EventAbs
-import com.razumly.mvp.core.data.dataTypes.EventAbsWithRelations
+import com.razumly.mvp.core.data.dataTypes.EventAbsWithPlayers
 import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
 import com.razumly.mvp.core.data.dataTypes.Tournament
@@ -22,7 +22,7 @@ class EventAbsRepository(
     private val userRepository: IUserRepository,
     private val teamRepository: ITeamRepository,
 ): IEventAbsRepository {
-    override suspend fun getEvent(event: EventAbs): Result<EventAbsWithRelations> {
+    override suspend fun getEvent(event: EventAbs): Result<EventAbsWithPlayers> {
         val eventWithRelations = when (event) {
             is EventImp -> eventRepository.getEvent(event.id)
             is Tournament -> tournamentRepository.getTournament(event.id)
@@ -30,7 +30,7 @@ class EventAbsRepository(
         return eventWithRelations
     }
 
-    override fun getEventWithRelationsFlow(event: EventAbs): Flow<Result<EventAbsWithRelations>> {
+    override fun getEventWithRelationsFlow(event: EventAbs): Flow<Result<EventAbsWithPlayers>> {
         val eventWithRelations = when (event) {
             is EventImp -> eventRepository.getEventWithRelationsFlow(event.id)
             is Tournament -> tournamentRepository.getTournamentWithRelationsFlow(event.id)
@@ -38,7 +38,7 @@ class EventAbsRepository(
         return eventWithRelations
     }
 
-    override fun getEventsInBounds(bounds: Bounds, userLocation: LatLng): Flow<Result<List<EventAbsWithRelations>>> {
+    override suspend fun getEventsInBounds(bounds: Bounds, userLocation: LatLng): Result<List<EventAbs>> {
         val query = Query.and(
             listOf(
                 Query.greaterThan(DbConstants.LAT_ATTRIBUTE, bounds.south),
@@ -51,28 +51,64 @@ class EventAbsRepository(
         return getEvents(query, userLocation)
     }
 
-    override fun getEvents(query: String, userLocation: LatLng): Flow<Result<List<EventAbsWithRelations>>> {
+    private suspend fun getEvents(query: String, userLocation: LatLng): Result<List<EventAbs>> {
+        val eventResults = eventRepository.getEvents(query)
+        val tournamentResults = tournamentRepository.getTournaments(query)
 
+        val result = eventResults.onSuccess { events ->
+            tournamentResults.onSuccess { tournaments ->
+                val combinedEvents: List<EventAbs> = events + tournaments
+            }
+        }
+
+        return result.map { events ->
+            events.sortedBy {
+                calcDistance(
+                    userLocation, LatLng(it.lat, it.long)
+                )
+            }
+        }
+    }
+
+    override fun getEventsInBoundsFlow(bounds: Bounds, userLocation: LatLng): Flow<Result<List<EventAbsWithPlayers>>> {
+        val query = Query.and(
+            listOf(
+                Query.greaterThan(DbConstants.LAT_ATTRIBUTE, bounds.south),
+                Query.lessThan(DbConstants.LAT_ATTRIBUTE, bounds.north),
+                Query.greaterThan(DbConstants.LONG_ATTRIBUTE, bounds.west),
+                Query.lessThan(DbConstants.LONG_ATTRIBUTE, bounds.east),
+            )
+        )
+
+        return searchEventsFlow(query, userLocation)
+    }
+
+    private fun getEventsFlow(query: String, userLocation: LatLng): Flow<Result<List<EventAbsWithPlayers>>> {
         val eventsFlow = eventRepository.getEventsFlow(query)
         val tournamentsFlow = tournamentRepository.getTournamentsFlow(query)
 
         return combine(eventsFlow, tournamentsFlow) { events, tournaments ->
             runCatching {
-                val combinedEvents: List<EventAbsWithRelations> = events.getOrDefault(emptyList()) + tournaments.getOrDefault(
+                val combinedEvents: List<EventAbsWithPlayers> = events.getOrDefault(emptyList()) + tournaments.getOrDefault(
                     emptyList())
                 combinedEvents.sortedBy { calcDistance(userLocation, LatLng(it.event.lat, it.event.long)) }
             }
         }
     }
 
-    override suspend fun searchEvents(searchQuery: String, userLocation: LatLng): Flow<Result<List<EventAbsWithRelations>>> {
+    override suspend fun searchEvents(searchQuery: String, userLocation: LatLng): Result<List<EventAbs>> {
         val query = Query.contains("name", searchQuery)
         return getEvents(query, userLocation)
     }
 
+    override fun searchEventsFlow(searchQuery: String, userLocation: LatLng): Flow<Result<List<EventAbsWithPlayers>>> {
+        val query = Query.contains("name", searchQuery)
+        return getEventsFlow(query, userLocation)
+    }
+
 
     override suspend fun addCurrentUserToEvent(event: EventAbs): Result<Unit> {
-        var currentUser = userRepository.getCurrentUserFlow().first().getOrNull()
+        var currentUser = userRepository.getCurrentUserFlow().first().getOrNull()?.user
         if (currentUser == null) {
             Napier.e("No current user")
             return Result.failure(Exception("No Current User"))

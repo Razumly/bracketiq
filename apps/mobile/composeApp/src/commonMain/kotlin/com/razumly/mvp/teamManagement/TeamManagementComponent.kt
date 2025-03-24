@@ -1,9 +1,10 @@
 package com.razumly.mvp.teamManagement
 
 import com.arkivanov.decompose.ComponentContext
-import com.razumly.mvp.core.data.MVPRepository
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.repositories.ITeamRepository
+import com.razumly.mvp.core.data.repositories.IUserRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -19,12 +20,23 @@ import kotlinx.coroutines.launch
 
 class TeamManagementComponent(
     componentContext: ComponentContext,
-    val mvpRepository: MVPRepository,
+    private val teamRepository: ITeamRepository,
+    private val userRepository: IUserRepository,
 ) : ComponentContext by componentContext {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    private val currentUser = mvpRepository.getCurrentUserFlow().stateIn(
-        scope, SharingStarted.Eagerly, null
-    )
+
+    private val _errorState = MutableStateFlow<String?>(null)
+
+    private val currentUser = userRepository.getCurrentUserFlow()
+        .map { user ->
+            user.getOrElse {
+                _errorState.value = it.message
+                null
+            }
+        }
+        .stateIn(
+            scope, SharingStarted.Eagerly, null
+        )
 
     private val _friends = MutableStateFlow<List<UserData>>(listOf())
     val friends = _friends.asStateFlow()
@@ -33,7 +45,12 @@ class TeamManagementComponent(
     val currentTeams = currentUser.map { user ->
         user?.teams?.map { it.id } ?: emptyList()
     }.distinctUntilChanged().flatMapLatest { teamIds ->
-        mvpRepository.getTeamsWithPlayersFlow(teamIds)
+        teamRepository.getTeamsWithPlayersFlow(teamIds).map { team ->
+            team.getOrElse {
+                _errorState.value = it.message
+                emptyList()
+            }
+        }
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     private val _selectedTeam = MutableStateFlow<TeamWithRelations?>(null)
@@ -45,7 +62,12 @@ class TeamManagementComponent(
     init {
         scope.launch {
             currentUser.collect { user ->
-                _friends.value = mvpRepository.getPlayers(user?.user?.friendIds) ?: listOf()
+                _friends.value = user?.user?.friendIds?.let { friends ->
+                    userRepository.getUsers(friends).getOrElse {
+                        _errorState.value = it.message
+                        emptyList()
+                    }
+                }!!
             }
         }
         scope.launch {
@@ -63,7 +85,7 @@ class TeamManagementComponent(
     }
 
     fun createTeam() {
-        scope.launch { mvpRepository.createTeam() }
+        scope.launch { teamRepository.createTeam() }
     }
 
     fun deselectTeam() {
@@ -72,23 +94,28 @@ class TeamManagementComponent(
 
     fun changeTeamName(newName: String) {
         scope.launch {
-            selectedTeam.value?.team?.let { mvpRepository.changeTeamName(it.copy(name = newName)) }
+            selectedTeam.value?.team?.let { teamRepository.updateTeam(it.copy(name = newName)) }
         }
     }
 
     fun addPlayer(player: UserData) {
         scope.launch {
-            selectedTeam.value?.team?.let { mvpRepository.addPlayerToTeam(it, player) }
+            selectedTeam.value?.team?.let { teamRepository.addPlayerToTeam(it, player) }
         }
     }
 
     fun removePlayer(player: UserData) {
         scope.launch {
-            selectedTeam.value?.team?.let { mvpRepository.removePlayerFromTeam(it, player) }
+            selectedTeam.value?.team?.let { teamRepository.removePlayerFromTeam(it, player) }
         }
     }
 
     fun searchPlayers(query: String) {
-        scope.launch { _suggestedPlayers.value = mvpRepository.getPlayers(query = query) ?: listOf() }
+        scope.launch {
+            _suggestedPlayers.value = userRepository.searchPlayers(query = query).getOrElse {
+                _errorState.value = it.message
+                emptyList()
+            }
+        }
     }
 }

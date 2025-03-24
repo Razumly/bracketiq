@@ -4,6 +4,7 @@ import com.arkivanov.decompose.ComponentContext
 import com.razumly.mvp.Message.DefaultMessagesComponent
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
+import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.presentation.RootComponent
 import com.razumly.mvp.eventCreate.DefaultCreateEventComponent
 import com.razumly.mvp.eventDetailScreen.DefaultEventContentComponent
@@ -39,11 +40,15 @@ val componentModule = module {
             )
     }
 
-    factory { (componentContext: ComponentContext, selectedMatch: MatchWithRelations) ->
+    factory { (componentContext: ComponentContext, selectedMatch: MatchWithRelations, selectedTournament: Tournament) ->
         DefaultMatchContentComponent(
             componentContext = componentContext,
-            mvpRepository = get(),
             selectedMatch = selectedMatch,
+            selectedTournament = selectedTournament,
+            tournamentRepository = get(),
+            matchRepository = get(),
+            userRepository = get(),
+            teamRepository = get(),
         )
     }
 
@@ -51,22 +56,27 @@ val componentModule = module {
         (
             componentContext: ComponentContext,
             event: EventAbs,
-            onMatchSelected: (MatchWithRelations) -> Unit,
+            onMatchSelected: (MatchWithRelations, Tournament) -> Unit,
         ) ->
             DefaultEventContentComponent(
                 componentContext = componentContext,
-                mvpRepository = get(),
                 event = event,
                 onMatchSelected = onMatchSelected,
+                eventAbsRepository = get(),
+                userRepository = get(),
+                matchRepository = get(),
+                teamRepository = get(),
             )
     }
 
     factory { (componentContext: ComponentContext, onCreatedEvent: () -> Unit) ->
         DefaultCreateEventComponent(
             componentContext = componentContext,
-            mvpRepository = get(),
             locationTracker = get(),
-            onEventCreated = onCreatedEvent
+            onEventCreated = onCreatedEvent,
+            userRespository = get(),
+            eventRepository = get(),
+            tournamentRepository = get()
         )
     }
 
@@ -77,9 +87,11 @@ val componentModule = module {
         ) ->
             SearchEventListComponent(
                 componentContext = componentContext,
-                mvpRepository = get(),
                 locationTracker = get(),
-                onEventSelected = onEventSelected
+                onEventSelected = onEventSelected,
+                userRepository = get(),
+                teamRepository = get(),
+                eventAbsRepository = get()
             )
     }
 
@@ -90,7 +102,6 @@ val componentModule = module {
         ) ->
         DefaultMessagesComponent(
             componentContext = componentContext,
-            mvpRepository = get(),
             onEventSelected = onEventSelected
         )
     }
@@ -98,16 +109,17 @@ val componentModule = module {
     factory { (componentContext: ComponentContext, onNavigateToLogin: () -> Unit, onNavigateToTeamSettings: () -> Unit) ->
         DefaultProfileComponent(
             componentContext = componentContext,
-            mvpRepository = get(),
             onNavigateToLogin = onNavigateToLogin,
-            onNavigateToTeamSettings = onNavigateToTeamSettings
+            onNavigateToTeamSettings = onNavigateToTeamSettings,
+            userRepository = get()
         )
     }
 
     factory { (componentContext: ComponentContext) ->
         TeamManagementComponent(
             componentContext = componentContext,
-            mvpRepository = get(),
+            teamRepository = get(),
+            userRepository = get(),
         )
     }
 }

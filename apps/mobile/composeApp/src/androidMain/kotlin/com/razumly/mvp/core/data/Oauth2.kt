@@ -1,7 +1,6 @@
 package com.razumly.mvp.core.data
 
 import androidx.activity.ComponentActivity
-import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.dtos.UserDataDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.toUserData
 import com.razumly.mvp.core.data.repositories.IUserRepository
@@ -13,11 +12,11 @@ import io.appwrite.enums.OAuthProvider
 import io.appwrite.extensions.createOAuth2Session
 import kotlinx.coroutines.flow.first
 
-suspend fun IUserRepository.oauth2Login(activity: ComponentActivity): Result<UserData?> {
+suspend fun IUserRepository.oauth2Login(activity: ComponentActivity): Result<Unit> {
     return (this as? UserRepository)?.oauth2Login(activity) ?: Result.failure(Exception("Not Correct Class"))
 }
 
-suspend fun UserRepository.oauth2Login(activity: ComponentActivity): Result<UserData?> {
+suspend fun UserRepository.oauth2Login(activity: ComponentActivity): Result<Unit> {
     account.createOAuth2Session(
         provider = OAuthProvider.GOOGLE, activity = activity
     )
@@ -44,5 +43,5 @@ suspend fun UserRepository.oauth2Login(activity: ComponentActivity): Result<User
                 nestedType = UserDataDTO::class
             ).data.toUserData(id)
         }
-    }
+    }.map { }
 }

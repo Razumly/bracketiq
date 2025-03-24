@@ -1,8 +1,6 @@
 package com.razumly.mvp.core.data.repositories
 
 import com.razumly.mvp.core.data.MVPDatabase
-import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResponse
-import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
 import com.razumly.mvp.core.data.dataTypes.UserData
@@ -10,6 +8,8 @@ import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TournamentTeamCrossRef
 import com.razumly.mvp.core.data.dataTypes.dtos.TeamDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.toTeam
+import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResponse
+import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
 import com.razumly.mvp.core.util.DbConstants
 import com.razumly.mvp.core.util.convert
 import io.appwrite.ID
@@ -24,7 +24,9 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 class TeamRepository(
     private val database: Databases,
@@ -32,6 +34,21 @@ class TeamRepository(
     private val userRepository: IUserRepository
 ) : ITeamRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    override fun getTeamsOfTournamentFlow(tournamentId: String): Flow<Result<List<TeamWithRelations>>> {
+        val localFlow = mvpDatabase.getTeamDao.getTeamsInTournamentFlow(tournamentId).map { Result.success(it) }
+        scope.launch {
+            getTeamsOfTournament(tournamentId)
+        }
+        return localFlow
+    }
+
+    override fun getTeamsOfEventFlow(eventId: String): Flow<Result<List<TeamWithRelations>>> {
+        val localFlow = mvpDatabase.getTeamDao.getTeamsInEventFlow(eventId).map { Result.success(it) }
+        scope.launch {
+            getTeamsOfTournament(eventId)
+        }
+        return localFlow
+    }
 
     override suspend fun getTeamsOfTournament(tournamentId: String): Result<List<Team>> =
         multiResponse(getRemoteData = {
@@ -117,7 +134,7 @@ class TeamRepository(
                     databaseId = DbConstants.DATABASE_NAME,
                     collectionId = DbConstants.VOLLEYBALL_TEAMS_COLLECTION,
                     documentId = id,
-                    data = Team(captainId = currentUser.id).toTeamDTO(),
+                    data = Team(captainId = currentUser.user.id).toTeamDTO(),
                     nestedType = TeamDTO::class,
                 ).data.toTeam(id)
             }, saveCall = { team ->
@@ -144,7 +161,7 @@ class TeamRepository(
             team
         })
 
-    override suspend fun getTeamsWithPlayersFlow(ids: List<String>): Flow<Result<List<TeamWithRelations>>> {
+    override fun getTeamsWithPlayersFlow(ids: List<String>): Flow<Result<List<TeamWithRelations>>> {
         val localTeamsFlow = mvpDatabase.getTeamDao.getTeamsWithPlayersFlowByIds(ids)
 
         val remoteFetchFlow = flow {
@@ -172,5 +189,27 @@ class TeamRepository(
         return combine(localTeamsFlow, remoteFetchFlow) { localTeams, remoteResult ->
             remoteResult ?: Result.success(localTeams)
         }
+    }
+
+    override suspend fun getTeam(teamId: String): Result<Team> =
+        singleResponse(
+            networkCall = {
+                database.getDocument(
+                    DbConstants.DATABASE_NAME,
+                    DbConstants.VOLLEYBALL_TEAMS_COLLECTION,
+                    teamId,
+                    nestedType = TeamDTO::class,
+                ).data.toTeam(teamId)
+            },
+            saveCall = { team -> mvpDatabase.getTeamDao.upsertTeam(team) },
+            onReturn = { team -> team },
+        )
+
+    override fun getTeamWithPlayersFlow(id: String): Flow<Result<TeamWithRelations>> {
+        val localFlow = mvpDatabase.getTeamDao.getTeamWithPlayersFlow(id).map { Result.success(it) }
+        scope.launch {
+            getTeam(id)
+        }
+        return localFlow
     }
 }

@@ -6,7 +6,7 @@ import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Upsert
 import com.razumly.mvp.core.data.dataTypes.Tournament
-import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
+import com.razumly.mvp.core.data.dataTypes.TournamentWithPlayers
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -27,21 +27,21 @@ interface TournamentDao {
     suspend fun deleteTournamentsById(ids: List<String>)
 
     @Query("SELECT * FROM Tournament WHERE id = :id")
-    fun getTournamentFlowById(id: String): Flow<Tournament?>
+    fun getTournamentFlowById(id: String): Flow<Tournament>
 
     @Query("SELECT * FROM Tournament WHERE id = :id")
     suspend fun getTournamentById(id: String): Tournament
 
     @Query("SELECT * FROM Tournament")
-    fun getAllCachedTournamentsFlow(): Flow<List<TournamentWithRelations>>
+    fun getAllCachedTournamentsFlow(): Flow<List<TournamentWithPlayers>>
 
     @Transaction
     @Query("SELECT * FROM Tournament WHERE id = :id")
-    fun getTournamentWithRelationsFlow(id: String): Flow<TournamentWithRelations>
+    fun getTournamentWithRelationsFlow(id: String): Flow<TournamentWithPlayers>
 
     @Transaction
     @Query("SELECT * FROM Tournament WHERE id = :id")
-    suspend fun getTournamentWithRelations(id: String): TournamentWithRelations
+    suspend fun getTournamentWithRelations(id: String): TournamentWithPlayers
 
     @Transaction
     suspend fun upsertTournamentWithRelations(tournament: Tournament) {
@@ -57,12 +57,12 @@ interface TournamentDao {
         deleteTournamentById(tournamentId)
     }
 
-    @Query("DELETE FROM TournamentUserCrossRef WHERE tournamentId = :tournamentId")
+    @Query("DELETE FROM user_tournament_cross_ref WHERE tournamentId = :tournamentId")
     suspend fun deleteTournamentUserCrossRefs(tournamentId: String)
 
-    @Query("DELETE FROM TournamentMatchCrossRef WHERE tournamentId = :tournamentId")
+    @Query("DELETE FROM tournament_match_cross_ref WHERE tournamentId = :tournamentId")
     suspend fun deleteTournamentMatchCrossRefs(tournamentId: String)
 
-    @Query("DELETE FROM TournamentTeamCrossRef WHERE tournamentId = :tournamentId")
+    @Query("DELETE FROM tournament_team_cross_ref WHERE tournamentId = :tournamentId")
     suspend fun deleteTournamentTeamCrossRefs(tournamentId: String)
 }

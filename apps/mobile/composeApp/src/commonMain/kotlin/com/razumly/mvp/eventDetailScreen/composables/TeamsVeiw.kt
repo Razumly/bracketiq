@@ -4,7 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -20,7 +20,7 @@ import com.razumly.mvp.home.LocalNavBarPadding
 @Composable
 fun ParticipantsView() {
     val component = LocalTournamentComponent.current
-    val teams by component.divisionTeams.collectAsState()
+    val divisionTeams by component.divisionTeams.collectAsState()
     val selectedEvent by component.selectedEvent.collectAsState()
     val participants = selectedEvent.players
     val teamSignup = selectedEvent.event.teamSignup
@@ -39,11 +39,15 @@ fun ParticipantsView() {
             CollapsableHeader(component)
         }
         if (teamSignup) {
-            itemsIndexed(teams, key = { _, team -> team.team.id }) { _, team ->
+            items(
+                divisionTeams.values.toList(),
+                key = { it.team.id },
+            ) { team ->
                 TeamCard(team)
             }
+
         } else {
-            itemsIndexed(participants, key = { _, participant -> participant.id }) { _, participant ->
+            items(participants, key = { it.id }) { participant ->
                 PlayerCard(participant)
             }
         }

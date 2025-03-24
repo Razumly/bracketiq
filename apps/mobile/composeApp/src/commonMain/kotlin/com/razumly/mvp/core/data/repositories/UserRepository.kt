@@ -3,6 +3,7 @@ package com.razumly.mvp.core.data.repositories
 import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.MVPDatabase
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.UserWithRelations
 import com.razumly.mvp.core.data.dataTypes.crossRef.TournamentUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.dtos.UserDataDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.toUserData
@@ -53,39 +54,45 @@ class UserRepository(
         account.deleteSession("current")
     }
 
-    override fun getCurrentUserFlow(): Flow<Result<UserData>> {
+    override fun getCurrentUserFlow(): Flow<Result<UserWithRelations>> {
         return currentUserDataSource.getUserId().flatMapLatest { userId ->
             if (userId.isBlank()) {
+                singleResponse(networkCall = {
+                    val fetchedUserId = account.get().id
+                    currentUserDataSource.saveUserId(fetchedUserId)
+                    database.getDocument(
+                        DbConstants.DATABASE_NAME,
+                        DbConstants.USER_DATA_COLLECTION,
+                        fetchedUserId,
+                        nestedType = UserDataDTO::class,
+                    ).data.toUserData(fetchedUserId)
+                }, saveCall = { userData ->
+                    mvpDatabase.getUserDataDao.upsertUserWithRelations(userData)
+                    currentUserDataSource.saveUserId(userData.id)
+                }, onReturn = { data ->
+                    data
+                })
                 flow {
                     emit(
-                        singleResponse(networkCall = {
-                            val fetchedUserId = account.get().id
-                            currentUserDataSource.saveUserId(fetchedUserId)
-                            database.getDocument(
-                                DbConstants.DATABASE_NAME,
-                                DbConstants.USER_DATA_COLLECTION,
-                                fetchedUserId,
-                                nestedType = UserDataDTO::class,
-                            ).data.toUserData(fetchedUserId)
-                        }, saveCall = { userData ->
-                            mvpDatabase.getUserDataDao.upsertUserWithRelations(userData)
-                            currentUserDataSource.saveUserId(userData.id)
-                        }, onReturn = { data ->
-                            data
-                        })
+                        Result.success(
+                            mvpDatabase.getUserDataDao.getUserWithRelationsById(
+                                userId
+                            )
+                        )
                     )
                 }
             } else {
-                mvpDatabase.getUserDataDao.getUserFlowById(userId).flatMapLatest { user ->
-                    flow {
-                        if (user != null) {
-                            emit(Result.success(user))
-                        } else {
-                            currentUserDataSource.saveUserId("")
-                            emit(Result.failure<UserData>(Exception("User id not found locally")))
+                mvpDatabase.getUserDataDao.getUserWithRelationsFlowById(userId)
+                    .flatMapLatest { user ->
+                        flow {
+                            if (user != null) {
+                                emit(Result.success(user))
+                            } else {
+                                currentUserDataSource.saveUserId("")
+                                emit(Result.failure<UserWithRelations>(Exception("User id not found locally")))
+                            }
                         }
                     }
-                }
             }
         }
     }
@@ -112,13 +119,29 @@ class UserRepository(
             getLocalData = { mvpDatabase.getUserDataDao.getUsersInTournament(tournamentId) },
         )
 
-    override suspend fun getUsersOfEvent(eventId: String): Result<List<UserData>> =
+    override suspend fun getUsersOfEvent(eventId: String): Result<List<UserData>> = multiResponse(
+        getRemoteData = {
+            val docs = database.listDocuments(
+                DbConstants.DATABASE_NAME,
+                DbConstants.USER_DATA_COLLECTION,
+                listOf(Query.contains(DbConstants.TOURNAMENTS_ATTRIBUTE, eventId)),
+                nestedType = UserDataDTO::class,
+            )
+            docs.documents.map { it.data.toUserData(it.id) }
+        },
+        saveData = { usersData ->
+            mvpDatabase.getUserDataDao.upsertUsersData(usersData)
+        },
+        getLocalData = { mvpDatabase.getUserDataDao.getUsersInTournament(eventId) },
+    )
+
+    override suspend fun getUsers(userIds: List<String>): Result<List<UserData>> =
         multiResponse(
             getRemoteData = {
                 val docs = database.listDocuments(
                     DbConstants.DATABASE_NAME,
                     DbConstants.USER_DATA_COLLECTION,
-                    listOf(Query.contains(DbConstants.TOURNAMENTS_ATTRIBUTE, eventId)),
+                    listOf(Query.equal("\$id", userIds)),
                     nestedType = UserDataDTO::class,
                 )
                 docs.documents.map { it.data.toUserData(it.id) }
@@ -126,8 +149,9 @@ class UserRepository(
             saveData = { usersData ->
                 mvpDatabase.getUserDataDao.upsertUsersData(usersData)
             },
-            getLocalData = { mvpDatabase.getUserDataDao.getUsersInTournament(eventId) },
+            getLocalData = { mvpDatabase.getUserDataDao.getUserDatasById(userIds) },
         )
+
 
     override fun getUsersOfTournamentFlow(tournamentId: String): Flow<Result<List<UserData>>> {
         val localUsersFlow = mvpDatabase.getUserDataDao.getUsersInTournamentFlow(tournamentId)
@@ -140,9 +164,13 @@ class UserRepository(
         return localUsersFlow
     }
 
+    override suspend fun searchPlayers(query: String): Result<List<UserData>> {
+        TODO("Not yet implemented")
+    }
+
     override fun getUsersOfEventFlow(eventId: String): Flow<Result<List<UserData>>> {
-        val localUsersFlow = mvpDatabase.getUserDataDao.getUsersInEventFlow(eventId)
-            .map { Result.success(it) }
+        val localUsersFlow =
+            mvpDatabase.getUserDataDao.getUsersInEventFlow(eventId).map { Result.success(it) }
 
         scope.launch {
             getUsersOfTournament(eventId)

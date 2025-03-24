@@ -23,7 +23,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
+import com.razumly.mvp.core.data.dataTypes.TournamentWithPlayers
 import com.razumly.mvp.icons.MVPIcons
 import com.razumly.mvp.icons.TournamentBracket
 import com.razumly.mvp.eventDetailScreen.EventContentComponent
@@ -59,7 +59,7 @@ fun CollapsableHeader(
             }
         }
 
-        if (selectedEvent is TournamentWithRelations) {
+        if (selectedEvent is TournamentWithPlayers) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()

@@ -11,10 +11,13 @@ import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.crossRef.EventTeamCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
+import com.razumly.mvp.core.data.dataTypes.crossRef.FieldMatchCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.MatchTeamCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TournamentMatchCrossRef
+import com.razumly.mvp.core.data.dataTypes.crossRef.TournamentTeamCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TournamentUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.daos.EventImpDao
 import com.razumly.mvp.core.data.dataTypes.daos.FieldDao
@@ -35,8 +38,11 @@ import com.razumly.mvp.core.data.util.Converters
         TeamPlayerCrossRef::class,
         TournamentUserCrossRef::class,
         EventUserCrossRef::class,
+        TournamentTeamCrossRef::class,
+        EventTeamCrossRef::class,
         TournamentMatchCrossRef::class,
         MatchTeamCrossRef::class,
+        FieldMatchCrossRef::class,
     ], version = 39
 )
 @TypeConverters(Converters::class)
