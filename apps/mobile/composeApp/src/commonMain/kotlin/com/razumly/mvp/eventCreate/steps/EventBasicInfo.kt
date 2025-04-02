@@ -1,5 +1,6 @@
 package com.razumly.mvp.eventCreate.steps
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
@@ -74,6 +75,9 @@ fun EventBasicInfo(modifier: Modifier, component: CreateEventComponent, isComple
     var startDateSelected by remember { mutableStateOf(false) }
     var endDateSelected by remember { mutableStateOf(false) }
     var selectedDivisions by remember { mutableStateOf(emptyList<Division>()) }
+    var addSelfToEvent by remember { mutableStateOf(false) }
+    var singleDivision by remember { mutableStateOf(false) }
+    var teamSignup by remember { mutableStateOf(false) }
 
     val formValid by remember(eventState, price, showPriceError) {
         mutableStateOf(
@@ -178,7 +182,6 @@ fun EventBasicInfo(modifier: Modifier, component: CreateEventComponent, isComple
                         )
                     }
                 }
-
                 MultiSelectDropdownField(
                     selectedItems = selectedDivisions,
                     label = "Skill levels",
@@ -285,6 +288,47 @@ fun EventBasicInfo(modifier: Modifier, component: CreateEventComponent, isComple
                         },
                     singleLine = true
                 )
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(top = 8.dp)
+            ) {
+                Checkbox(
+                    checked = singleDivision,
+                    onCheckedChange = {
+                        singleDivision = it
+                        component.updateEventField { copy(singleDivision = it) }
+                    }
+                )
+                Text(text = "Split Into Divisions")
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(top = 8.dp)
+            ) {
+                Checkbox(
+                    checked = teamSignup,
+                    onCheckedChange = {
+                        teamSignup = it
+                        component.updateEventField { copy(teamSignup = it) }
+                    }
+                )
+                Text(text = "Team Event")
+            }
+            AnimatedVisibility(!teamSignup) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(top = 8.dp)
+                ) {
+                    Checkbox(
+                        checked = addSelfToEvent,
+                        onCheckedChange = {
+                            addSelfToEvent = it
+                            component.addUserToEvent(it) // you'll define this in the component
+                        }
+                    )
+                    Text(text = "Join as participant")
+                }
             }
         }
     }

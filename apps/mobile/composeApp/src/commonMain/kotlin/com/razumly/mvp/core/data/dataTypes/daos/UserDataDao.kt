@@ -74,6 +74,7 @@ interface UserDataDao {
         deleteTournamentCrossRefById(listOf(userData.id))
         deleteEventCrossRefById(listOf(userData.id))
         deleteTeamCrossRefById(listOf(userData.id))
+        upsertUserData(userData)
         try {
             upsertUserTournamentCrossRefs(userData.tournamentIds.map {
                 TournamentUserCrossRef(
@@ -105,7 +106,7 @@ interface UserDataDao {
 
     @Transaction
     @Query("SELECT * FROM UserData WHERE id = :id")
-    suspend fun getUserWithRelationsById(id: String): UserWithRelations
+    suspend fun getUserWithRelationsById(id: String): UserWithRelations?
 
     @Transaction
     @Query("SELECT * FROM UserData WHERE id = :id")

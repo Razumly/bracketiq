@@ -28,24 +28,6 @@ fun Header(
             .background(MaterialTheme.colorScheme.background),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        tournament?.event?.let {
-            EventDetails(
-                it,
-                true,
-                {},
-                Modifier.padding(top = 32.dp, end = 8.dp),
-                onMapClick = {}
-            ){}
-        }
 
-//        Icon(
-//            if (showDetails) {
-//                MVPIcons.ArrowDown
-//            } else {
-//                MVPIcons.ArrowUp
-//            },
-//            contentDescription = "Expand",
-//            modifier = Modifier.clickable(onClick = { component.toggleDetails() })
-//        )
     }
 }

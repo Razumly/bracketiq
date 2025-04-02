@@ -2,12 +2,12 @@ package com.razumly.mvp.eventDetailScreen
 
 import com.arkivanov.decompose.ComponentContext
 import com.razumly.mvp.core.data.dataTypes.EventAbs
-import com.razumly.mvp.core.data.dataTypes.EventAbsWithPlayers
-import com.razumly.mvp.core.data.dataTypes.EventWithPlayers
+import com.razumly.mvp.core.data.dataTypes.EventAbsWithRelations
+import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
-import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
+import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.Tournament
-import com.razumly.mvp.core.data.dataTypes.TournamentWithPlayers
+import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.Division
 import com.razumly.mvp.core.data.repositories.IEventAbsRepository
@@ -32,35 +32,41 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 
 interface EventContentComponent : ComponentContext {
-    val selectedEvent: StateFlow<EventAbsWithPlayers>
+    val selectedEvent: StateFlow<EventAbsWithRelations>
     val divisionMatches: StateFlow<Map<String, MatchWithRelations>>
-    val divisionTeams: StateFlow<Map<String, TeamWithRelations>>
+    val divisionTeams: StateFlow<Map<String, TeamWithPlayers>>
     val selectedDivision: StateFlow<Division?>
     val isBracketView: StateFlow<Boolean>
     val rounds: StateFlow<List<List<MatchWithRelations?>>>
     val losersBracket: StateFlow<Boolean>
     val showDetails: StateFlow<Boolean>
     val errorState: StateFlow<String?>
-    val eventWithRelations: StateFlow<EventWithRelations>
+    val eventWithRelations: StateFlow<EventWithFullRelations>
+    val currentUser: StateFlow<UserData?>
+    val validTeams: StateFlow<List<TeamWithPlayers>>
 
     fun matchSelected(selectedMatch: MatchWithRelations)
     fun selectDivision(division: Division)
     fun toggleBracketView()
     fun toggleLosersBracket()
     fun toggleDetails()
+    fun joinEvent()
+    fun joinEventAsTeam(team: TeamWithPlayers)
+    fun viewEvent()
+    fun leaveEvent()
 }
 
 @Serializable
-data class EventWithRelations(
+data class EventWithFullRelations(
     val event: EventAbs,
     val players: List<UserData>,
     val matches: List<MatchWithRelations>,
-    val teams: List<TeamWithRelations>
+    val teams: List<TeamWithPlayers>
 )
 
-fun EventAbsWithPlayers.toEventWithRelations(
-    matches: List<MatchWithRelations>, teams: List<TeamWithRelations>
-): EventWithRelations = EventWithRelations(
+fun EventAbsWithRelations.toEventWithFullRelations(
+    matches: List<MatchWithRelations>, teams: List<TeamWithPlayers>
+): EventWithFullRelations = EventWithFullRelations(
     event = this.event, players = this.players, matches = matches, teams = teams
 )
 
@@ -68,58 +74,58 @@ fun EventAbsWithPlayers.toEventWithRelations(
 @OptIn(ExperimentalCoroutinesApi::class)
 class DefaultEventContentComponent(
     componentContext: ComponentContext,
-    eventAbsRepository: IEventAbsRepository,
     userRepository: IUserRepository,
     event: EventAbs,
+    private val eventAbsRepository: IEventAbsRepository,
     private val matchRepository: IMatchRepository,
     private val teamRepository: ITeamRepository,
     private val onMatchSelected: (MatchWithRelations, Tournament) -> Unit,
 ) : EventContentComponent, ComponentContext by componentContext {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    override val currentUser = userRepository.currentUserFlow
 
     private val _errorState = MutableStateFlow<String?>(null)
     override val errorState = _errorState.asStateFlow()
 
-    override val selectedEvent: StateFlow<EventAbsWithPlayers> =
+    override val selectedEvent: StateFlow<EventAbsWithRelations> =
         eventAbsRepository.getEventWithRelationsFlow(event).map { result ->
                 result.getOrElse {
                     _errorState.value = it.message
-                    EventAbsWithPlayers.getEmptyEvent(event)
+                    EventAbsWithRelations.getEmptyEvent(event)
                 }
-            }.stateIn(scope, SharingStarted.Eagerly, EventAbsWithPlayers.getEmptyEvent(event))
+            }.stateIn(scope, SharingStarted.Eagerly, EventAbsWithRelations.getEmptyEvent(event))
 
     override val eventWithRelations = selectedEvent.flatMapLatest { eventWithPlayers ->
-            combine(matchRepository.getMatchesOfTournamentFlow(eventWithPlayers.event.id)
-                .map { result ->
-                    result.getOrElse {
-                        _errorState.value = "Failed to load matches: ${it.message}"; emptyList()
-                    }
-                }, when (eventWithPlayers) {
-                is EventWithPlayers -> teamRepository.getTeamsOfEventFlow(eventWithPlayers.event.id)
-                is TournamentWithPlayers -> teamRepository.getTeamsOfTournamentFlow(
-                    eventWithPlayers.event.id
-                )
-            }.map { result ->
+        combine(matchRepository.getMatchesOfTournamentFlow(eventWithPlayers.event.id)
+            .map { result ->
                 result.getOrElse {
-                    _errorState.value = "Failed to load teams: ${it.message}"; emptyList()
+                    _errorState.value = "Failed to load matches: ${it.message}"; emptyList()
                 }
-            }) { matches, teams ->
-                eventWithPlayers.toEventWithRelations(matches, teams)
-            }
-        }.stateIn(
-            scope, SharingStarted.Eagerly, EventWithRelations(
-                Tournament(), emptyList(), emptyList(), emptyList()
+            }, when (eventWithPlayers) {
+            is TournamentWithRelations -> teamRepository.getTeamsOfTournamentFlow(
+                eventWithPlayers.event.id
             )
-        )
 
-    private val _currentUser = userRepository.getCurrentUserFlow().stateIn(
-        scope, SharingStarted.Eagerly, Result.success(null)
+            is EventWithRelations -> teamRepository.getTeamsOfEventFlow(eventWithPlayers.event.id)
+        }.map { result ->
+            result.getOrElse {
+                _errorState.value = "Failed to load teams: ${it.message}"; emptyList()
+            }
+        }) { matches, teams ->
+            eventWithPlayers.toEventWithFullRelations(matches, teams)
+        }
+    }.stateIn(
+        scope, SharingStarted.Eagerly, EventWithFullRelations(
+            Tournament(), emptyList(), emptyList(), emptyList()
+        )
     )
+
+    private val _currentUser = userRepository.currentUserFlow
 
     private val _divisionMatches = MutableStateFlow<Map<String, MatchWithRelations>>(emptyMap())
     override val divisionMatches = _divisionMatches.asStateFlow()
 
-    private val _divisionTeams = MutableStateFlow<Map<String, TeamWithRelations>>(emptyMap())
+    private val _divisionTeams = MutableStateFlow<Map<String, TeamWithPlayers>>(emptyMap())
     override val divisionTeams = _divisionTeams.asStateFlow()
 
     private val _selectedDivision = MutableStateFlow<Division?>(null)
@@ -137,23 +143,33 @@ class DefaultEventContentComponent(
     private val _showDetails = MutableStateFlow(false)
     override val showDetails = _showDetails.asStateFlow()
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val _userTeams = currentUser.filterNotNull().flatMapLatest { user ->
+        teamRepository.getTeamsWithPlayersFlow(user.teamIds).map { result ->
+            result.getOrElse {
+                emptyList()
+            }
+        }
+    }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    private val _validTeams = MutableStateFlow<List<TeamWithPlayers>>(listOf())
+    override val validTeams = _validTeams.asStateFlow()
+
     private val _userInTournament = MutableStateFlow(false)
 
     init {
         scope.launch {
             matchRepository.setIgnoreMatch(null)
-            selectedEvent.distinctUntilChanged { old, new -> old == new }.filterNotNull()
+            eventWithRelations.distinctUntilChanged { old, new -> old == new }.filterNotNull()
                 .collect { event ->
                     matchRepository.subscribeToMatches()
                     _userInTournament.value =
-                        event.players.contains(_currentUser.value.getOrElse { _errorState.value = it.message }) == true
+                        _currentUser.value?.let{ event.players.contains(it) } == true
                     if (_userInTournament.value) {
                         _showDetails.value = true
                     }
-                    if (selectedDivision.value == null) {
-                        event.event.divisions.firstOrNull()
-                            ?.let { selectDivision(it) }
-                    }
+                    event.event.divisions.firstOrNull()
+                        ?.let { selectDivision(it) }
                 }
         }
         scope.launch {
@@ -164,6 +180,13 @@ class DefaultEventContentComponent(
         }
         scope.launch {
             _divisionMatches.collect { generateRounds() }
+        }
+        scope.launch {
+            _userTeams.collect {
+                _validTeams.value = it.filter { team ->
+                    team.players.size == event.teamSizeLimit
+                }
+            }
         }
     }
 
@@ -176,9 +199,11 @@ class DefaultEventContentComponent(
 
     override fun selectDivision(division: Division) {
         _selectedDivision.value = division
-        _divisionTeams.value =
+        _divisionTeams.value = if (!selectedEvent.value.event.singleDivision) {
             eventWithRelations.value.teams.filter { it.team.division == division }
-                .associateBy { it.team.id }
+        } else {
+            eventWithRelations.value.teams
+        }.associateBy { it.team.id }
         _divisionMatches.value =
             eventWithRelations.value.matches.filter { it.match.division == division }
                 .associateBy { it.match.id }
@@ -191,6 +216,26 @@ class DefaultEventContentComponent(
     override fun toggleLosersBracket() {
         _losersBracket.value = !_losersBracket.value
         generateRounds()
+    }
+
+    override fun joinEvent() {
+        scope.launch {
+            eventAbsRepository.addCurrentUserToEvent(selectedEvent.value.event)
+        }
+    }
+
+    override fun joinEventAsTeam(team: TeamWithPlayers) {
+        scope.launch {
+            eventAbsRepository.addTeamToEvent(selectedEvent.value.event, team)
+        }
+    }
+
+    override fun leaveEvent() {
+        TODO("Not yet implemented")
+    }
+
+    override fun viewEvent() {
+        _showDetails.value = true
     }
 
     override fun toggleDetails() {

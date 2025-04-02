@@ -9,10 +9,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
+import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 
 @Composable
-fun TeamCard(team: TeamWithRelations, modifier: Modifier = Modifier) {
+fun TeamCard(team: TeamWithPlayers, modifier: Modifier = Modifier) {
     Card(modifier.padding(vertical = 4.dp, horizontal = 8.dp)) {
         Row(modifier = Modifier.padding(4.dp)) {
             if (!team.team.name.isNullOrBlank()) {

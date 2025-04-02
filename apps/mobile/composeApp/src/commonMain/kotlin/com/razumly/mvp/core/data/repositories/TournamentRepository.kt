@@ -2,7 +2,7 @@ package com.razumly.mvp.core.data.repositories
 
 import com.razumly.mvp.core.data.MVPDatabase
 import com.razumly.mvp.core.data.dataTypes.Tournament
-import com.razumly.mvp.core.data.dataTypes.TournamentWithPlayers
+import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
 import com.razumly.mvp.core.data.dataTypes.dtos.TournamentDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.toTournament
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResponse
@@ -29,7 +29,7 @@ class TournamentRepository(
 ) : ITournamentRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    override fun getTournamentWithRelationsFlow(tournamentId: String): Flow<Result<TournamentWithPlayers>> {
+    override fun getTournamentWithRelationsFlow(tournamentId: String): Flow<Result<TournamentWithRelations>> {
         val localFlow = mvpDatabase.getTournamentDao.getTournamentWithRelationsFlow(tournamentId)
             .map { Result.success(it) }
         scope.launch {
@@ -56,9 +56,14 @@ class TournamentRepository(
             ).documents.map { dtoDoc -> dtoDoc.convert { it.toTournament(dtoDoc.id) }.data }
         }, getLocalData = {
             listOf()
-        }, saveData = { mvpDatabase.getTournamentDao.upsertTournaments(it) })
+        }, saveData = { mvpDatabase.getTournamentDao.upsertTournaments(it) },
+            deleteData = { tournaments ->
+                mvpDatabase.getTournamentDao.deleteTournamentsById(
+                    tournaments
+                )
+            })
 
-    override fun getTournamentsFlow(query: String): Flow<Result<List<TournamentWithPlayers>>> {
+    override fun getTournamentsFlow(query: String): Flow<Result<List<TournamentWithRelations>>> {
         val localFlow =
             mvpDatabase.getTournamentDao.getAllCachedTournamentsFlow().map { Result.success(it) }
         scope.launch {
@@ -67,7 +72,7 @@ class TournamentRepository(
         return localFlow
     }
 
-    override suspend fun getTournament(tournamentId: String): Result<TournamentWithPlayers> =
+    override suspend fun getTournament(tournamentId: String): Result<TournamentWithRelations> =
         singleResponse(networkCall = {
             database.getDocument(
                 DbConstants.DATABASE_NAME,
@@ -77,7 +82,7 @@ class TournamentRepository(
                 queries = null
             ).data.toTournament(tournamentId)
         }, saveCall = { tournament ->
-            mvpDatabase.getTournamentDao.upsertTournamentWithRelations(tournament)
+            mvpDatabase.getTournamentDao.upsertTournament(tournament)
         }, onReturn = {
             mvpDatabase.getTournamentDao.getTournamentWithRelations(tournamentId)
         })

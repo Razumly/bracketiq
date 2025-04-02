@@ -6,7 +6,7 @@ import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Upsert
 import com.razumly.mvp.core.data.dataTypes.Tournament
-import com.razumly.mvp.core.data.dataTypes.TournamentWithPlayers
+import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -33,15 +33,15 @@ interface TournamentDao {
     suspend fun getTournamentById(id: String): Tournament
 
     @Query("SELECT * FROM Tournament")
-    fun getAllCachedTournamentsFlow(): Flow<List<TournamentWithPlayers>>
+    fun getAllCachedTournamentsFlow(): Flow<List<TournamentWithRelations>>
 
     @Transaction
     @Query("SELECT * FROM Tournament WHERE id = :id")
-    fun getTournamentWithRelationsFlow(id: String): Flow<TournamentWithPlayers>
+    fun getTournamentWithRelationsFlow(id: String): Flow<TournamentWithRelations>
 
     @Transaction
     @Query("SELECT * FROM Tournament WHERE id = :id")
-    suspend fun getTournamentWithRelations(id: String): TournamentWithPlayers
+    suspend fun getTournamentWithRelations(id: String): TournamentWithRelations
 
     @Transaction
     suspend fun upsertTournamentWithRelations(tournament: Tournament) {

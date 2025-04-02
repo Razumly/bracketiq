@@ -1,5 +1,7 @@
 package com.razumly.mvp.eventCreate
 
+import androidx.compose.animation.AnimatedVisibilityScope
+import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
@@ -61,15 +63,15 @@ import mvp.composeapp.generated.resources.next
 import mvp.composeapp.generated.resources.previous
 import org.jetbrains.compose.resources.stringResource
 
-@OptIn(ExperimentalHazeMaterialsApi::class)
+@OptIn(ExperimentalHazeMaterialsApi::class, ExperimentalSharedTransitionApi::class)
 @Composable
 fun CreateEventScreen(
-    component: CreateEventComponent
+    component: CreateEventComponent,
+    animatedVisibilityScope: AnimatedVisibilityScope,
 ) {
     val childStack by component.childStack.subscribeAsState()
     val currentStep = childStack.active.instance.step
     val stepsTotal = CreateEventComponent.Child.STEPS
-    val contentPadding = remember { mutableStateOf(16.dp) }
     val canProceed = remember { mutableStateOf(false) }
     val hazeState = remember { HazeState() }
 
@@ -170,7 +172,7 @@ fun CreateEventScreen(
                                 .statusBarsPadding()
                                 .padding(innerPadding)
                                 .padding(horizontal = 16.dp),
-                            component
+                            component,
                         )
                     }
                 }

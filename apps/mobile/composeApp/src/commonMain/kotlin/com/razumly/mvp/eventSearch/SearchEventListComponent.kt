@@ -3,7 +3,6 @@ package com.razumly.mvp.eventSearch
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.backhandler.BackCallback
 import com.razumly.mvp.core.data.dataTypes.EventAbs
-import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
 import com.razumly.mvp.core.data.repositories.IEventAbsRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
@@ -11,6 +10,7 @@ import com.razumly.mvp.core.util.calcDistance
 import com.razumly.mvp.core.util.getBounds
 import dev.icerock.moko.geo.LatLng
 import dev.icerock.moko.geo.LocationTracker
+import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
@@ -31,12 +32,9 @@ class SearchEventListComponent(
     private val teamRepository: ITeamRepository,
     private val eventAbsRepository: IEventAbsRepository,
     val locationTracker: LocationTracker,
-    private val onEventSelected: (event: EventAbs) -> Unit,
+    val onEventSelected: (event: EventAbs) -> Unit,
 ) : ComponentContext by componentContext {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-
-    private val _events = MutableStateFlow<List<EventAbs>>(emptyList())
-    val events: StateFlow<List<EventAbs>> = _events.asStateFlow()
 
     private val _currentRadius = MutableStateFlow(50.0)
     val currentRadius: StateFlow<Double> = _currentRadius.asStateFlow()
@@ -52,35 +50,31 @@ class SearchEventListComponent(
 
     private val _currentLocation = MutableStateFlow<LatLng?>(null)
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val events = combine(_currentLocation.filterNotNull(), _currentRadius) { location, radius ->
+        getBounds(radius, location.latitude, location.longitude)
+    }.flatMapLatest { bounds ->
+            eventAbsRepository.getEventsInBoundsFlow(bounds).map { result ->
+                    result.getOrElse {
+                        _error.value = "Failed to fetch events: ${it.message}"
+                        Napier.e("Failed to fetch events: ${it.message}")
+                        emptyList()
+                    }
+                }
+        }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+
     private val _selectedEvent = MutableStateFlow<EventAbs?>(null)
     val selectedEvent: StateFlow<EventAbs?> = _selectedEvent.asStateFlow()
 
     private val _showMapCard = MutableStateFlow(false)
     val showMapCard: StateFlow<Boolean> = _showMapCard.asStateFlow()
 
-    private val _validTeams = MutableStateFlow<List<TeamWithRelations>>(listOf())
-    val validTeams = _validTeams.asStateFlow()
-
     private val backCallback = BackCallback(false) {
         _showMapCard.value = false
     }
 
-    val currentUser = userRepository.getCurrentUserFlow().map { result ->
-            result.getOrElse {
-                _error.value = it.message
-                null
-            }
-        }.stateIn(scope, SharingStarted.Eagerly, null)
+    private val currentUser = userRepository.currentUserFlow
 
-    @OptIn(ExperimentalCoroutinesApi::class)
-    private val _userTeams = currentUser.filterNotNull().flatMapLatest { user ->
-            teamRepository.getTeamsWithPlayersFlow(user.teams.map { it.id }).map { result ->
-                    result.getOrElse {
-                        _error.value = it.message
-                        emptyList()
-                    }
-                }
-        }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     init {
         backHandler.register(backCallback)
@@ -129,37 +123,13 @@ class SearchEventListComponent(
         _currentRadius.value = radius
     }
 
-    fun onMapClick() {
-        _showMapCard.value = !_showMapCard.value
-    }
-
-    fun clearSelectedEvent() {
-        _selectedEvent.value = null
-    }
-
-    fun selectEvent(event: EventAbs) {
+    fun onMapClick(event: EventAbs? = null) {
         _selectedEvent.value = event
-        _validTeams.value = _userTeams.value.filter { team ->
-            team.players.size == event.teamSizeLimit
-        }
+        _showMapCard.value = !_showMapCard.value
     }
 
     fun viewEvent(event: EventAbs) {
         onEventSelected(event)
-    }
-
-    fun joinEvent(event: EventAbs?) {
-        if (event == null) return
-        scope.launch {
-            eventAbsRepository.addCurrentUserToEvent(event)
-        }
-    }
-
-    fun joinEventAsTeam(team: TeamWithRelations) {
-        if (_selectedEvent.value == null) return
-        scope.launch {
-            eventAbsRepository.addTeamToEvent(_selectedEvent.value!!, team)
-        }
     }
 
     private suspend fun getEvents() {
@@ -173,11 +143,10 @@ class SearchEventListComponent(
         }
         val currentBounds = getBounds(radius, currentLocation.latitude, currentLocation.longitude)
 
-        eventAbsRepository.getEventsInBounds(currentBounds, currentLocation).onSuccess {
+        eventAbsRepository.getEventsInBounds(currentBounds).onSuccess {
             _isLoading.value = false
         }.onFailure { e ->
             _error.value = "Failed to fetch events: ${e.message}"
-            _events.value = emptyList()
         }
     }
 }

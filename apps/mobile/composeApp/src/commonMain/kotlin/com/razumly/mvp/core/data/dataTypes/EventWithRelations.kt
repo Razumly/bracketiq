@@ -6,7 +6,7 @@ import androidx.room.Relation
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventTeamCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
 
-class EventWithPlayers(
+class EventWithRelations(
     @Embedded override val event: EventImp,
 
     @Relation(
@@ -19,4 +19,15 @@ class EventWithPlayers(
         )
     )
     override val players: List<UserData> = listOf(),
-) : EventAbsWithPlayers
+
+    @Relation(
+        parentColumn = "id",
+        entityColumn = "id",
+        associateBy = Junction(
+            value = EventTeamCrossRef::class,
+            parentColumn = "eventId",
+            entityColumn = "teamId"
+        )
+    )
+    override val teams: List<Team> = listOf(),
+) : EventAbsWithRelations

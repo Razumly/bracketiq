@@ -58,13 +58,12 @@ fun HomeScreen(component: HomeComponent) {
         CompositionLocalProvider(LocalNavBarPadding provides paddingValues) {
             SharedTransitionLayout {
                 ChildStack(
-                    stack = childStack,
-                    animation = stackAnimation(fade())
+                    stack = childStack, animation = stackAnimation(fade())
                 ) { child ->
                     CompositionLocalProvider(LocalAnimatedVisibilityScope provides this) {
                         CompositionLocalProvider(LocalSharedTransitionScope provides this@SharedTransitionLayout) {
-                            Box(modifier = Modifier
-                                .fillMaxSize()
+                            Box(
+                                modifier = Modifier.fillMaxSize()
                             ) {
                                 // Only show back button if we have screens to go back to
                                 if (childStack.backStack.isNotEmpty()) {
@@ -77,11 +76,14 @@ fun HomeScreen(component: HomeComponent) {
                                 when (val instance = child.instance) {
                                     is HomeComponent.Child.Search -> {
                                         Napier.d(tag = "Navigation") { "Navigating to Search Screen" }
-                                        EventSearchScreen(instance.component, instance.mapComponent)
+                                        EventSearchScreen(
+                                            instance.component,
+                                            instance.mapComponent
+                                        )
                                     }
 
-                                    is HomeComponent.Child.TournamentContent -> {
-                                        Napier.d(tag = "Navigation") { "Navigating to Tournament Detail Screen" }
+                                    is HomeComponent.Child.EventContent -> {
+                                        Napier.d(tag = "Navigation") { "Navigating to Event Detail Screen" }
                                         EventDetailScreen(instance.component)
                                     }
 
@@ -97,7 +99,7 @@ fun HomeScreen(component: HomeComponent) {
 
                                     is HomeComponent.Child.Create -> {
                                         Napier.d(tag = "Navigation") { "Navigating to Create Event Screen" }
-                                        CreateEventScreen(instance.component)
+                                        CreateEventScreen(instance.component, this@ChildStack)
                                     }
 
                                     is HomeComponent.Child.Profile -> {
@@ -106,7 +108,7 @@ fun HomeScreen(component: HomeComponent) {
                                     }
 
                                     is HomeComponent.Child.Teams -> {
-                                        Napier.d(tag = "Navigation") { "Navigating to Team Management Screen"}
+                                        Napier.d(tag = "Navigation") { "Navigating to Team Management Screen" }
                                         TeamManagementScreen(instance.component)
                                     }
                                 }

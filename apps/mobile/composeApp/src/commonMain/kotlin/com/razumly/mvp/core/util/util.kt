@@ -29,6 +29,7 @@ fun getBounds(radius: Double, latitude: Double, longitude: Double): Bounds {
         south = latitude - deltaLatitude,
         west = longitude - deltaLongitude,
         east = longitude + deltaLongitude,
+        center = LatLng(latitude, longitude)
     )
 }
 

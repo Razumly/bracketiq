@@ -32,5 +32,6 @@ class FieldRepository(
                 mvpDatabase.getFieldDao.upsertFields(fields)
             },
             getLocalData = { mvpDatabase.getFieldDao.getFields(tournamentId) },
+            deleteData = { mvpDatabase.getFieldDao.deleteFieldsById(it) }
         )
 }

@@ -28,7 +28,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
-import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
+import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.presentation.matchCard
 import com.razumly.mvp.core.presentation.matchCardBottom
 import com.razumly.mvp.core.presentation.matchCardTop
@@ -153,8 +153,8 @@ private fun MatchInfoSection(match: MatchWithRelations) {
 
 @Composable
 private fun TeamsSection(
-    team1: TeamWithRelations?,
-    team2: TeamWithRelations?,
+    team1: TeamWithPlayers?,
+    team2: TeamWithPlayers?,
     match: MatchWithRelations,
     matches: Map<String, MatchWithRelations>,
     textModifier: Modifier
@@ -175,7 +175,7 @@ private fun TeamsSection(
 
 @Composable
 private fun TeamRow(
-    team: TeamWithRelations?,
+    team: TeamWithPlayers?,
     points: List<Int>,
     previousMatch: MatchWithRelations?,
     isLosersBracket: Boolean,

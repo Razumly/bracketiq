@@ -1,6 +1,7 @@
 package com.razumly.mvp.eventSearch
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -53,9 +54,12 @@ import dev.chrisbanes.haze.materials.HazeMaterials
 import dev.icerock.moko.geo.LatLng
 import dev.icerock.moko.geo.compose.BindLocationTrackerEffect
 
-@OptIn(ExperimentalHazeMaterialsApi::class)
+@OptIn(ExperimentalHazeMaterialsApi::class, ExperimentalSharedTransitionApi::class)
 @Composable
-fun EventSearchScreen(component: SearchEventListComponent, mapComponent: MapComponent) {
+fun EventSearchScreen(
+    component: SearchEventListComponent,
+    mapComponent: MapComponent,
+) {
     val events by component.events.collectAsState()
     val showMapCard by component.showMapCard.collectAsState()
     val selectedEvent by component.selectedEvent.collectAsState()
@@ -67,8 +71,7 @@ fun EventSearchScreen(component: SearchEventListComponent, mapComponent: MapComp
     var revealCenter by remember { mutableStateOf(Offset.Zero) }
 
     val animationProgress by animateFloatAsState(
-        targetValue = if (showMapCard) 1f else 0f,
-        animationSpec = tween(durationMillis = 1000)
+        targetValue = if (showMapCard) 1f else 0f, animationSpec = tween(durationMillis = 1000)
     )
 
     Box {
@@ -76,48 +79,38 @@ fun EventSearchScreen(component: SearchEventListComponent, mapComponent: MapComp
         Scaffold(
             topBar = {
                 Column(
-                    modifier = Modifier
-                        .wrapContentSize()
-                        .hazeEffect(
-                            hazeState,
-                            HazeMaterials.ultraThin(NavigationBarDefaults.containerColor)
-                        )
-                        .statusBarsPadding()
+                    modifier = Modifier.wrapContentSize().hazeEffect(
+                        hazeState, HazeMaterials.ultraThin(NavigationBarDefaults.containerColor)
+                    ).statusBarsPadding()
                 ) {
-                    SearchBox(
-                        placeholder = "Search for Events",
+                    SearchBox(placeholder = "Search for Events",
                         filter = true,
-                        onChange = {  },
-                        onSearch = {  },
-                        initialList = {  },
-                        suggestions = { }
-                    )
+                        onChange = { },
+                        onSearch = { },
+                        initialList = { },
+                        suggestions = { })
                 }
             },
             floatingActionButton = {
-                AnimatedVisibility(
-                    visible = lazyListState.isScrollingUp().value || showMapCard,
+                AnimatedVisibility(visible = lazyListState.isScrollingUp().value || showMapCard,
                     enter = (slideInVertically { it / 2 } + fadeIn()),
-                    exit = (slideOutVertically { it / 2 } + fadeOut())
-                ) {
-                    Button(
-                        onClick = {
-                            revealCenter = fabOffset
-                            component.onMapClick()
-                        },
-                        modifier = Modifier
-                            .padding(offsetNavPadding)
+                    exit = (slideOutVertically { it / 2 } + fadeOut())) {
+                    Button(onClick = {
+                        revealCenter = fabOffset
+                        component.onMapClick()
+                    },
+                        modifier = Modifier.padding(offsetNavPadding)
                             .onGloballyPositioned { layoutCoordinates ->
                                 val boundsInWindow = layoutCoordinates.boundsInWindow()
                                 fabOffset = boundsInWindow.center
                             },
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color.Black,
-                            contentColor = Color.White
+                            containerColor = Color.Black, contentColor = Color.White
                         )
                     ) {
                         val text = if (showMapCard) "List" else "Map"
-                        val icon = if (showMapCard) Icons.AutoMirrored.Filled.List else Icons.Default.Place
+                        val icon =
+                            if (showMapCard) Icons.AutoMirrored.Filled.List else Icons.Default.Place
                         Text(text)
                         Icon(icon, contentDescription = "$text Button")
                     }
@@ -127,34 +120,30 @@ fun EventSearchScreen(component: SearchEventListComponent, mapComponent: MapComp
         ) { paddingValues ->
             val firstElementPadding = PaddingValues(top = paddingValues.calculateTopPadding())
             Box(
-                Modifier
-                .hazeSource(hazeState)
-                .fillMaxSize()
+                Modifier.hazeSource(hazeState).fillMaxSize()
             ) {
                 EventList(
                     component,
-                    events,
+                    events.map { it.event },
                     firstElementPadding,
                     offsetNavPadding,
-                    lazyListState
+                    lazyListState,
                 ) { offset ->
                     revealCenter = offset
                 }
-                EventMap(
-                    component = mapComponent,
+                EventMap(component = mapComponent,
                     onEventSelected = { event ->
-                        component.joinEvent(event)
+                        component.viewEvent(event)
                     },
                     onPlaceSelected = {},
                     canClickPOI = false,
-                    modifier = Modifier
-                        .graphicsLayer { alpha = if (animationProgress > 0f) 1f else 0f }
-                        .clip(CircularRevealShape(animationProgress, revealCenter)),
+                    modifier = Modifier.graphicsLayer {
+                        alpha = if (animationProgress > 0f) 1f else 0f
+                    }.clip(CircularRevealShape(animationProgress, revealCenter)),
                     searchBarPadding = PaddingValues(),
                     focusLocation = selectedEvent?.let {
                         LatLng(it.lat, it.long)
-                    }
-                )
+                    })
             }
         }
     }

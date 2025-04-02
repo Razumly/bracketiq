@@ -3,15 +3,17 @@ package com.razumly.mvp.core.presentation.composables
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.LocationOn
@@ -57,7 +59,9 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.format
 import kotlinx.datetime.toLocalDateTime
 
-@OptIn(ExperimentalSharedTransitionApi::class, ExperimentalHazeMaterialsApi::class,
+@OptIn(
+    ExperimentalSharedTransitionApi::class,
+    ExperimentalHazeMaterialsApi::class,
     ExperimentalHazeApi::class
 )
 @Composable
@@ -66,6 +70,7 @@ fun EventDetails(
     expanded: Boolean,
     onFavoriteClick: () -> Unit,
     favoritesModifier: Modifier,
+    navPadding: PaddingValues = PaddingValues(),
     onMapClick: (Offset) -> Unit,
     joinButton: @Composable () -> Unit
 ) {
@@ -73,6 +78,8 @@ fun EventDetails(
     val patterns = TextPatterns(event.name)
     val hazeState = remember { HazeState() }
     var mapButtonOffset by remember { mutableStateOf(Offset.Zero) }
+    val startIntensityAnim = animateFloatAsState(if (expanded) 1f else 0f)
+    val startYAnim = animateFloatAsState(if (expanded) 0f else 200f)
 
     val dateRangeText = remember(event.start, event.end) {
         val startDate = event.start.toLocalDateTime(TimeZone.currentSystemDefault()).date
@@ -87,32 +94,27 @@ fun EventDetails(
             startStr
         }
     }
-    Box {
-        AsyncImage(
-            model = event.imageUrl,
+
+
+    Box(Modifier.fillMaxSize()) {
+        AsyncImage(model = event.imageUrl,
             contentDescription = "Event Image",
-            modifier = Modifier
-                .matchParentSize()
-                .hazeSource(hazeState),
+            modifier = Modifier.matchParentSize().hazeSource(hazeState),
             contentScale = ContentScale.Crop,
             onState = { state ->
                 imageStateText = when (state) {
                     is AsyncImagePainter.State.Loading -> "Loading"
-                    is AsyncImagePainter.State.Error ->
-                        "Error loading image: ${state.result.throwable}"
+                    is AsyncImagePainter.State.Error -> "Error loading image: ${state.result.throwable}"
 
                     is AsyncImagePainter.State.Success -> "success"
                     is AsyncImagePainter.State.Empty -> "Image is Empty"
                 }
-            }
-        )
+            })
         if (imageStateText != "success") {
             Text(imageStateText)
         }
         IconButton(
-            onClick = onFavoriteClick,
-            modifier = favoritesModifier
-                .align(Alignment.TopEnd)
+            onClick = onFavoriteClick, modifier = favoritesModifier.align(Alignment.TopEnd)
         ) {
             Icon(
                 painter = rememberVectorPainter(Icons.Default.AddCircle),
@@ -121,112 +123,98 @@ fun EventDetails(
         }
 
         // Event Details Section
-        Column {
-            Spacer(modifier = Modifier.height(200.dp))
-            Column(
-                modifier = Modifier
-                    .hazeEffect(
-                    hazeState,
-                    HazeMaterials.ultraThin(MaterialTheme.colorScheme.onBackground)
-                    ) {
-                        inputScale = HazeInputScale.Fixed(0.5f)
-                        progressive = HazeProgressive.verticalGradient(
-                            easing = FastOutSlowInEasing,
-                            startIntensity = 0f,
-                            endIntensity = 1f
-                        )
-                    }
-                    .padding(16.dp)
-                    .wrapContentSize(),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+        Column(
+            modifier = Modifier.hazeEffect(
+                hazeState, HazeMaterials.ultraThin(MaterialTheme.colorScheme.onBackground)
             ) {
-                Spacer(modifier = Modifier.height(32.dp))
-                AnimatedVisibility(
-                    expanded,
-                    modifier = Modifier
-                        .align(Alignment.CenterHorizontally)
-                        .fillMaxWidth()
+                inputScale = HazeInputScale.Fixed(0.8f)
+                progressive = HazeProgressive.verticalGradient(
+                    easing = FastOutSlowInEasing,
+                    startIntensity = startIntensityAnim.value,
+                    endIntensity = 1f,
+                    startY = startYAnim.value
+                )
+            }.padding(navPadding).padding(16.dp).fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(4.dp, alignment = Alignment.Bottom)
+        ) {
+            Spacer(modifier = Modifier.height(232.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Button(
+                    modifier = Modifier.onGloballyPositioned { layoutCoordinates ->
+                        val boundsInWindow = layoutCoordinates.boundsInWindow()
+                        mapButtonOffset = boundsInWindow.center
+                    },
+                    onClick = { onMapClick(mapButtonOffset) },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color.Black, contentColor = Color.White
+                    )
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ){
-                        Button(
-                            modifier = Modifier
-                                .onGloballyPositioned { layoutCoordinates ->
-                                    val boundsInWindow = layoutCoordinates.boundsInWindow()
-                                    mapButtonOffset = boundsInWindow.center
-                                },
-                            onClick = { onMapClick(mapButtonOffset) },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Color.Black,
-                                contentColor = Color.White
-                            )
-                        ) {
-                            Text("View on Map")
-                            Icon(Icons.Default.Place, contentDescription = "View on Map Button")
-                        }
-                        joinButton()
-                    }
+                    Text("View on Map")
+                    Icon(Icons.Default.Place, contentDescription = "View on Map Button")
                 }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = event.name,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.background
-                    )
-                    Text(
-                        text = event.rating.toString(),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.background
-                    )
+                if (expanded){
+                    joinButton()
                 }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = event.name,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.background
+                )
+                Text(
+                    text = event.rating.toString(),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.background
+                )
+            }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Start,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        painter = rememberVectorPainter(Icons.Default.LocationOn),
-                        contentDescription = "Location",
-                        tint = MaterialTheme.colorScheme.background
-                    )
-                    Text(
-                        text = event.location,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.background
-                    )
-                }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Start,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    painter = rememberVectorPainter(Icons.Default.LocationOn),
+                    contentDescription = "Location",
+                    tint = MaterialTheme.colorScheme.background
+                )
+                Text(
+                    text = event.location,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.background
+                )
+            }
 
-                AnimatedVisibility(expanded) {
-                    StylizedText(event.description, patterns)
-                }
+            AnimatedVisibility(expanded) {
+                StylizedText(event.description, patterns)
+            }
 
-                StylizedText("${event.fieldType} ${event.eventType}".toTitleCase(), patterns)
-                StylizedText("Divisions: ${event.divisions.joinToString(", ")}", patterns)
-                androidx.compose.material3.HorizontalDivider(thickness = 2.dp)
+            StylizedText("${event.fieldType} ${event.eventType}".toTitleCase(), patterns)
+            StylizedText("Divisions: ${event.divisions.joinToString(", ")}", patterns)
+            androidx.compose.material3.HorizontalDivider(thickness = 2.dp)
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = dateRangeText,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.background
-                    )
-                    Text(
-                        text = "$" + cleanup("${event.price}"),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.background
-                    )
-                }
+            Row(
+                modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = dateRangeText,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.background
+                )
+                Text(
+                    text = "$" + cleanup("${event.price}"),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.background
+                )
             }
         }
     }

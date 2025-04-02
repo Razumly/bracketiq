@@ -23,32 +23,32 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.razumly.mvp.core.data.dataTypes.TournamentWithPlayers
+import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
+import com.razumly.mvp.eventDetailScreen.EventContentComponent
 import com.razumly.mvp.icons.MVPIcons
 import com.razumly.mvp.icons.TournamentBracket
-import com.razumly.mvp.eventDetailScreen.EventContentComponent
 
 @Composable
 fun CollapsableHeader(
     component: EventContentComponent
 ) {
     val selectedDivision by component.selectedDivision.collectAsState()
-    val tournament by component.selectedEvent.collectAsState()
+    val event by component.selectedEvent.collectAsState()
     val losersBracket by component.losersBracket.collectAsState()
     val isBracketView by component.isBracketView.collectAsState()
     val selectedEvent by component.selectedEvent.collectAsState()
-    val singleDivision = selectedEvent?.event?.singleDivision
+    val singleDivision = selectedEvent.event.singleDivision
 
-    Column {
-        if (singleDivision == false) {
-            tournament?.event?.divisions?.indexOf(selectedDivision)?.let {
+    Column(Modifier.fillMaxWidth()) {
+        if (!singleDivision) {
+            event.event.divisions.indexOf(selectedDivision).let {
                 ScrollableTabRow(
                     selectedTabIndex = it.coerceAtLeast(0),
                     modifier = Modifier
                         .fillMaxWidth(),
                     edgePadding = 0.dp
                 ) {
-                    tournament!!.event.divisions.forEach { division ->
+                    event.event.divisions.forEach { division ->
                         Tab(
                             selected = division == selectedDivision,
                             onClick = { component.selectDivision(division) },
@@ -59,7 +59,7 @@ fun CollapsableHeader(
             }
         }
 
-        if (selectedEvent is TournamentWithPlayers) {
+        if (selectedEvent is TournamentWithRelations) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()

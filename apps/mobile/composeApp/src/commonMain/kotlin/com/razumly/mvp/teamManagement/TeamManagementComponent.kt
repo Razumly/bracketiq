@@ -1,7 +1,7 @@
 package com.razumly.mvp.teamManagement
 
 import com.arkivanov.decompose.ComponentContext
-import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
+import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
@@ -12,7 +12,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -27,24 +26,15 @@ class TeamManagementComponent(
 
     private val _errorState = MutableStateFlow<String?>(null)
 
-    private val currentUser = userRepository.getCurrentUserFlow()
-        .map { user ->
-            user.getOrElse {
-                _errorState.value = it.message
-                null
-            }
-        }
-        .stateIn(
-            scope, SharingStarted.Eagerly, null
-        )
+    private val currentUser = userRepository.currentUserFlow
 
     private val _friends = MutableStateFlow<List<UserData>>(listOf())
     val friends = _friends.asStateFlow()
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val currentTeams = currentUser.map { user ->
-        user?.teams?.map { it.id } ?: emptyList()
-    }.distinctUntilChanged().flatMapLatest { teamIds ->
+        user?.teamIds ?: emptyList()
+    }.flatMapLatest { teamIds ->
         teamRepository.getTeamsWithPlayersFlow(teamIds).map { team ->
             team.getOrElse {
                 _errorState.value = it.message
@@ -53,7 +43,7 @@ class TeamManagementComponent(
         }
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
-    private val _selectedTeam = MutableStateFlow<TeamWithRelations?>(null)
+    private val _selectedTeam = MutableStateFlow<TeamWithPlayers?>(null)
     val selectedTeam = _selectedTeam.asStateFlow()
 
     private val _suggestedPlayers = MutableStateFlow<List<UserData>>(listOf())
@@ -62,12 +52,12 @@ class TeamManagementComponent(
     init {
         scope.launch {
             currentUser.collect { user ->
-                _friends.value = user?.user?.friendIds?.let { friends ->
+                _friends.value = user?.friendIds?.let { friends ->
                     userRepository.getUsers(friends).getOrElse {
                         _errorState.value = it.message
                         emptyList()
                     }
-                }!!
+                } ?: emptyList()
             }
         }
         scope.launch {
@@ -80,7 +70,7 @@ class TeamManagementComponent(
         }
     }
 
-    fun selectTeam(team: TeamWithRelations) {
+    fun selectTeam(team: TeamWithPlayers) {
         _selectedTeam.value = team
     }
 
@@ -112,7 +102,7 @@ class TeamManagementComponent(
 
     fun searchPlayers(query: String) {
         scope.launch {
-            _suggestedPlayers.value = userRepository.searchPlayers(query = query).getOrElse {
+            _suggestedPlayers.value = userRepository.searchPlayers(search = query).getOrElse {
                 _errorState.value = it.message
                 emptyList()
             }

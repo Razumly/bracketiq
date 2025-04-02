@@ -10,10 +10,10 @@ import com.razumly.mvp.userAuth.util.getGoogleUserInfo
 import io.appwrite.ID
 import io.appwrite.enums.OAuthProvider
 import io.appwrite.extensions.createOAuth2Session
-import kotlinx.coroutines.flow.first
 
 suspend fun IUserRepository.oauth2Login(activity: ComponentActivity): Result<Unit> {
-    return (this as? UserRepository)?.oauth2Login(activity) ?: Result.failure(Exception("Not Correct Class"))
+    return (this as? UserRepository)?.oauth2Login(activity)
+        ?: Result.failure(Exception("Not Correct Class"))
 }
 
 suspend fun UserRepository.oauth2Login(activity: ComponentActivity): Result<Unit> {
@@ -23,25 +23,27 @@ suspend fun UserRepository.oauth2Login(activity: ComponentActivity): Result<Unit
     val session = account.getSession("current")
     val id = session.userId
 
-    return getCurrentUserFlow().first().onFailure {
-        val userInfo = getGoogleUserInfo(session.providerAccessToken)
-        return kotlin.runCatching {
-            database.createDocument(
-                databaseId = DbConstants.DATABASE_NAME,
-                collectionId = DbConstants.USER_DATA_COLLECTION,
-                documentId = id,
-                data = UserDataDTO(
-                    firstName = userInfo.givenName,
-                    lastName = userInfo.familyName,
-                    userName = "${userInfo.givenName}${ID.unique()}",
-                    id = id,
-                    tournamentIds = listOf(),
-                    eventIds = listOf(),
-                    teamIds = listOf(),
-                    friendIds = listOf()
-                ),
-                nestedType = UserDataDTO::class
-            ).data.toUserData(id)
+    return kotlin.runCatching {
+        currentUserFlow.value?.let {
+            val userInfo = getGoogleUserInfo(session.providerAccessToken)
+            return kotlin.runCatching {
+                database.createDocument(
+                    databaseId = DbConstants.DATABASE_NAME,
+                    collectionId = DbConstants.USER_DATA_COLLECTION,
+                    documentId = id,
+                    data = UserDataDTO(
+                        firstName = userInfo.givenName,
+                        lastName = userInfo.familyName,
+                        userName = "${userInfo.givenName}${ID.unique()}",
+                        id = id,
+                        tournamentIds = listOf(),
+                        eventIds = listOf(),
+                        teamIds = listOf(),
+                        friendIds = listOf()
+                    ),
+                    nestedType = UserDataDTO::class
+                ).data.toUserData(id)
+            }
         }
-    }.map { }
+    }
 }

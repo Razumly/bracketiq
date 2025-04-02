@@ -19,18 +19,21 @@ interface IMVPRepository {
             getRemoteData: suspend () -> List<T>,
             getLocalData: suspend () -> List<T>,
             saveData: suspend (List<T>) -> Unit,
+            deleteData: suspend(List<String>) -> Unit,
         ): Result<List<T>> {
             return runCatching {
                 // Get remote data
                 val remoteData = getRemoteData()
+                val localData = getLocalData()
+                deleteData((localData.map { it.id }.toSet() - remoteData.map { it.id }
+                    .toSet()).toList())
 
                 // Save new/updated items
                 if (remoteData.isNotEmpty()) {
-                    val dataToSave = remoteData + getLocalData()
-                    saveData(dataToSave)
-                    dataToSave
+                    saveData(remoteData)
+                    remoteData
                 } else {
-                    throw Exception("Remote data came back empty")
+                    localData
                 }
             }
         }

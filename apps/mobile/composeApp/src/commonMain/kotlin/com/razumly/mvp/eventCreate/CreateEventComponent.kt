@@ -32,6 +32,7 @@ interface CreateEventComponent {
     fun validateAndUpdatePrice(input: String, onError: (Boolean) -> Unit)
     fun validateAndUpdateTeamSize(input: String, onError: (Boolean) -> Unit)
     fun validateAndUpdateMaxPlayers(input: String, onError: (Boolean) -> Unit)
+    fun addUserToEvent(add: Boolean)
 
     sealed class Child(val nextStep: Config?, val step: Int, val title: String) {
         companion object {

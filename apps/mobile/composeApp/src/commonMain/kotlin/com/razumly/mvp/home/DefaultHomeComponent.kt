@@ -67,7 +67,7 @@ class DefaultHomeComponent(
                 )
             }
             is Config.TournamentDetail -> {
-                Child.TournamentContent(
+                Child.EventContent(
                     _koin.inject<DefaultEventContentComponent> {
                         parametersOf(componentContext, config.event, ::onMatchSelected)
                     }.value

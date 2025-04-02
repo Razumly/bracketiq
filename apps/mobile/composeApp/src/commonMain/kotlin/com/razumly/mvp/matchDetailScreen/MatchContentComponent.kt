@@ -48,7 +48,6 @@ interface MatchContentComponent {
 }
 
 
-
 @Serializable
 data class MatchWithTeams(
     val match: MatchMVP,
@@ -63,9 +62,7 @@ data class MatchWithTeams(
 )
 
 fun MatchWithRelations.toMatchWithTeams(
-    team1: TeamWithRelations?,
-    team2: TeamWithRelations?,
-    ref: TeamWithRelations?
+    team1: TeamWithRelations?, team2: TeamWithRelations?, ref: TeamWithRelations?
 ) = MatchWithTeams(
     match = this.match,
     field = this.field,
@@ -94,16 +91,14 @@ class DefaultMatchContentComponent(
     private val _errorState = MutableStateFlow<String?>(null)
     override val errorState = _errorState.asStateFlow()
 
-    override val tournament = tournamentRepository
-        .getTournamentFlow(selectedMatch.match.tournamentId)
-        .distinctUntilChanged()
-        .map { tournament ->
-            tournament.getOrElse {
-                _errorState.value = it.message
-                selectedTournament
-            }
-        }
-        .stateIn(scope, SharingStarted.Eagerly, selectedTournament)
+    override val tournament =
+        tournamentRepository.getTournamentFlow(selectedMatch.match.tournamentId)
+            .distinctUntilChanged().map { tournament ->
+                tournament.getOrElse {
+                    _errorState.value = it.message
+                    selectedTournament
+                }
+            }.stateIn(scope, SharingStarted.Eagerly, selectedTournament)
 
     override val matchWithTeams =
         matchRepository.getMatchFlow(selectedMatch.match.id).distinctUntilChanged()
@@ -116,15 +111,11 @@ class DefaultMatchContentComponent(
                     teamRepository.getTeamWithPlayersFlow(
                         it
                     )
-                } ?: flowOf(Result.success(null)),
-                    matchWithRelations.match.team2?.let {
-                        teamRepository.getTeamWithPlayersFlow(it)
-                    }
-                        ?: flowOf(Result.success(null)),
-                    matchWithRelations.match.refId?.let {
-                        teamRepository.getTeamWithPlayersFlow(it)
-                    }
-                        ?: flowOf(Result.success(null))) { team1Result, team2Result, refResult ->
+                } ?: flowOf(Result.success(null)), matchWithRelations.match.team2?.let {
+                    teamRepository.getTeamWithPlayersFlow(it)
+                } ?: flowOf(Result.success(null)), matchWithRelations.match.refId?.let {
+                    teamRepository.getTeamWithPlayersFlow(it)
+                } ?: flowOf(Result.success(null))) { team1Result, team2Result, refResult ->
                     matchWithRelations.toMatchWithTeams(
                         team1 = team1Result.getOrElse {
                             _errorState.value = "Failed to load team1: ${it.message}"
@@ -142,15 +133,7 @@ class DefaultMatchContentComponent(
                 }
             }.stateIn(
                 scope, SharingStarted.Eagerly, MatchWithTeams(
-                    selectedMatch.match,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null
+                    selectedMatch.match, null, null, null, null, null, null, null, null
                 )
             )
 
@@ -172,21 +155,20 @@ class DefaultMatchContentComponent(
     private val _showSetConfirmDialog = MutableStateFlow(false)
     override val showSetConfirmDialog = _showSetConfirmDialog.asStateFlow()
 
-    private val _currentUser = userRepository.getCurrentUserFlow().map { user ->
-        user.getOrElse { e ->
-            _errorState.value = "${e.message}"
-            null
-        }
-    }.stateIn(scope, SharingStarted.Eagerly, null)
+    private val _currentUser = userRepository.currentUserFlow
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    private val _currentUserTeam = _currentUser.flatMapLatest { user ->
-        tournament.map { tournament ->
-            user?.teams?.find { team ->
-                team.tournamentIds.contains(tournament?.id)
-            }
-        }
-    }.stateIn(scope, SharingStarted.Eagerly, null)
+    private val _currentUserTeam =
+        _currentUser.map { user -> user?.teamIds ?: emptyList() }.flatMapLatest { teamIds ->
+                teamRepository.getTeamsWithPlayersFlow(teamIds).map { teamResults ->
+                    teamResults.getOrElse {
+                        _errorState.value = it.message
+                        emptyList()
+                    }.find { team ->
+                        tournament.value?.id != null && team.team.tournamentIds.contains(tournament.value?.id)
+                    }
+                }
+            }.stateIn(scope, SharingStarted.Eagerly, null)
 
     private var maxSets = 0
 
@@ -222,8 +204,8 @@ class DefaultMatchContentComponent(
     }
 
     override fun checkRefStatus() {
-        _isRef.value =
-            _currentUser.value?.teams?.map { it.id }?.contains(matchWithTeams.value.ref?.team?.id) == true
+        _isRef.value = _currentUser.value?.teamIds
+            ?.contains(matchWithTeams.value.ref?.team?.id) == true
         _showRefCheckInDialog.value = refCheckedIn.value != true
     }
 
@@ -231,8 +213,7 @@ class DefaultMatchContentComponent(
         scope.launch {
             val updatedMatch = matchWithTeams.value.copy(
                 match = matchWithTeams.value.match.copy(
-                    refCheckedIn = true,
-                    refId = _currentUserTeam.value?.id
+                    refCheckedIn = true, refId = _currentUserTeam.value?.team?.id
                 ),
             )
             _refCheckedIn.value = true
@@ -283,8 +264,8 @@ class DefaultMatchContentComponent(
 
         scope.launch {
             val setResults = matchWithTeams.value.match.setResults.toMutableList()
-            val team1Won = matchWithTeams.value.match.team1Points[currentSet.value] >
-                    matchWithTeams.value.match.team2Points[currentSet.value]
+            val team1Won =
+                matchWithTeams.value.match.team1Points[currentSet.value] > matchWithTeams.value.match.team2Points[currentSet.value]
             setResults[currentSet.value] = if (team1Won) 1 else 2
 
             val updatedMatch = matchWithTeams.value.copy(
@@ -294,8 +275,8 @@ class DefaultMatchContentComponent(
             if (isMatchOver(updatedMatch.match)) {
                 _matchFinished.value = true
                 updatedMatch.match.end?.let {
-                    matchRepository.updateMatchFinished(updatedMatch.match,
-                        it
+                    matchRepository.updateMatchFinished(
+                        updatedMatch.match, it
                     )
                 }
             }

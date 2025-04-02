@@ -13,12 +13,14 @@ import com.razumly.mvp.core.data.dataTypes.Tournament
         ForeignKey(
             entity = Tournament::class,
             parentColumns = ["id"],
-            childColumns = ["tournamentId"]
+            childColumns = ["tournamentId"],
+            onDelete = ForeignKey.CASCADE
         ),
         ForeignKey(
             entity = MatchMVP::class,
             parentColumns = ["id"],
-            childColumns = ["matchId"]
+            childColumns = ["matchId"],
+            onDelete = ForeignKey.CASCADE
         )
     ],
     indices = [

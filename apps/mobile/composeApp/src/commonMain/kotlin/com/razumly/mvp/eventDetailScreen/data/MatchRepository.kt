@@ -87,7 +87,7 @@ class MatchRepository(
                 mvpDatabase.getMatchDao.getMatchesOfTournament(tournamentId)
             }, saveData = { matches ->
                 mvpDatabase.getMatchDao.upsertMatches(matches)
-            })
+            }, deleteData = { mvpDatabase.getMatchDao.deleteMatchesById(it) })
         }
 
         return localMatchesFlow
@@ -121,7 +121,7 @@ class MatchRepository(
             mvpDatabase.getMatchDao.upsertFieldMatchCrossRefs(matches.mapNotNull { match ->
                 match.field?.let { FieldMatchCrossRef(match.field, match.id) }
             })
-        })
+        }, deleteData = { mvpDatabase.getMatchDao.deleteMatchesById(it) })
 
     override suspend fun subscribeToMatches(): Result<Unit> {
         matchSubscription?.close()

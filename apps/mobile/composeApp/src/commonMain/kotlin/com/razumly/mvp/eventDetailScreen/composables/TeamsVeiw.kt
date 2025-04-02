@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -34,9 +35,8 @@ fun ParticipantsView() {
         verticalArrangement = Arrangement.spacedBy(16.dp),
         contentPadding = navPadding
     ) {
-        item {
-            Header(component)
-            CollapsableHeader(component)
+        item(key = "header") {
+            Text("Participants", style = MaterialTheme.typography.titleLarge)
         }
         if (teamSignup) {
             items(

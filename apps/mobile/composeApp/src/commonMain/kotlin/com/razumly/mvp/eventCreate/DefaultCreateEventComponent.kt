@@ -22,7 +22,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.koin.core.parameter.parametersOf
 import org.koin.mp.KoinPlatform.getKoin
@@ -30,7 +29,7 @@ import org.koin.mp.KoinPlatform.getKoin
 
 class DefaultCreateEventComponent(
     componentContext: ComponentContext,
-    private val userRespository: IUserRepository,
+    private val userRepository: IUserRepository,
     private val eventRepository: IEventRepository,
     private val tournamentRepository: TournamentRepository,
     val locationTracker: LocationTracker,
@@ -61,6 +60,8 @@ class DefaultCreateEventComponent(
     private val _errorMessage = MutableStateFlow<String?>(null)
     override val errorMessage = _errorMessage.asStateFlow()
 
+    private val _addUserToEvent = MutableStateFlow(false)
+
     override val childStack = childStack(
         source = navigation,
         initialConfiguration = Config.Step1,
@@ -72,11 +73,11 @@ class DefaultCreateEventComponent(
     init {
         childStack.subscribe {}
         scope.launch {
-            userRespository.getCurrentUserFlow().first().onSuccess { currentUser ->
-                updateEventField { copy(hostId = currentUser.user.id) }
-                updateTournamentField { copy(hostId = currentUser.user.id) }
-            }.onFailure {
-                _errorMessage.value = it.message
+            userRepository.currentUserFlow.collect { currentUser ->
+                if (currentUser != null) {
+                    updateEventField { copy(hostId = currentUser.id) }
+                    updateTournamentField { copy(hostId = currentUser.id) }
+                }
             }
         }
     }
@@ -96,6 +97,18 @@ class DefaultCreateEventComponent(
                 EventType.EVENT -> eventRepository.createEvent(_newEventState.value)
             }.onSuccess {
                 onEventCreated()
+                if (_addUserToEvent.value) {
+                    userRepository.currentUserFlow.value?.let { it1 ->
+                        when (currentEventType.value) {
+                            EventType.TOURNAMENT -> userRepository.updateUser(
+                                it1.copy(tournamentIds = listOf(_newTournamentState.value.id))
+                            )
+                            EventType.EVENT -> userRepository.updateUser(
+                                it1.copy(eventIds = listOf(_newEventState.value.id))
+                            )
+                        }
+                    }
+                }
             }.onFailure {
                 _errorMessage.value = it.message
             }
@@ -126,8 +139,7 @@ class DefaultCreateEventComponent(
         updateEventField { copy(lat = place.lat, long = place.long, location = place.name) }
     }
 
-    override fun selectTournamentEvent(
-    ) {
+    override fun selectTournamentEvent() {
         _newTournamentState.value = _newTournamentState.value.updateTournamentFromEvent(_newEventState.value)
     }
 
@@ -136,11 +148,13 @@ class DefaultCreateEventComponent(
         if (amount == null || amount < 0) {
             onError(true)
         } else {
-            // Update the event field. For money, you may want to store cents or
-            // use appropriate conversion.
             updateEventField { copy(price = amount) }
             onError(false)
         }
+    }
+
+    override fun addUserToEvent(add: Boolean) {
+        _addUserToEvent.value = add
     }
 
     override fun validateAndUpdateTeamSize(input: String, onError: (Boolean) -> Unit) {

@@ -95,8 +95,6 @@ fun TournamentBracketView(
             .verticalScroll(columnScrollState)
             .background(MaterialTheme.colorScheme.background)
     ) {
-        Header(component)
-        CollapsableHeader(component)
         Column(Modifier.fillMaxWidth()) {
             LazyRow(
                 state = lazyRowState,

@@ -2,7 +2,7 @@ package com.razumly.mvp.core.data.repositories
 
 import com.razumly.mvp.core.data.MVPDatabase
 import com.razumly.mvp.core.data.dataTypes.EventImp
-import com.razumly.mvp.core.data.dataTypes.EventWithPlayers
+import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.dtos.EventDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.toEvent
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResponse
@@ -25,18 +25,18 @@ class EventRepository(
     private val userRepository: IUserRepository,
 ): IEventRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    override fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithPlayers>> {
+    override fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>> {
         val localFlow = mvpDatabase.getEventImpDao.getEventWithRelationsFlow(eventId)
             .map { Result.success(it) }
         scope.launch{
+            getEvent(eventId)
             userRepository.getUsersOfEvent(eventId)
             teamRepository.getTeamsOfEventFlow(eventId)
-            getEvent(eventId)
         }
         return localFlow
     }
 
-    override suspend fun getEvent(eventId: String): Result<EventWithPlayers> =
+    override suspend fun getEvent(eventId: String): Result<EventWithRelations> =
         singleResponse(networkCall = {
             database.getDocument(
                 DbConstants.DATABASE_NAME,
@@ -94,10 +94,11 @@ class EventRepository(
             getLocalData = {
                 listOf()
             },
-            saveData = { mvpDatabase.getEventImpDao.upsertEvents(it) }
+            saveData = { mvpDatabase.getEventImpDao.upsertEvents(it) },
+            deleteData = { events -> mvpDatabase.getEventImpDao.deleteEventsById(events) }
         )
 
-    override fun getEventsFlow(query: String): Flow<Result<List<EventWithPlayers>>> {
+    override fun getEventsFlow(query: String): Flow<Result<List<EventWithRelations>>> {
         val localFlow = mvpDatabase.getEventImpDao.getAllCachedEvents()
             .map { Result.success(it) }
 

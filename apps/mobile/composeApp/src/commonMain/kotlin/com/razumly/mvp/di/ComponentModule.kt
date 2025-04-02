@@ -74,7 +74,7 @@ val componentModule = module {
             componentContext = componentContext,
             locationTracker = get(),
             onEventCreated = onCreatedEvent,
-            userRespository = get(),
+            userRepository = get(),
             eventRepository = get(),
             tournamentRepository = get()
         )

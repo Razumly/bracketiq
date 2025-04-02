@@ -29,7 +29,7 @@ interface HomeComponent {
             val component: SearchEventListComponent,
             val mapComponent: MapComponent
         ) : Child()
-        data class TournamentContent(val component: EventContentComponent) : Child()
+        data class EventContent(val component: EventContentComponent) : Child()
         data class MatchContent(val component: MatchContentComponent) : Child()
         data class Messages(val component: MessagesComponent) : Child()
         data class Create(val component: CreateEventComponent) : Child()

@@ -24,7 +24,7 @@ class AuthComponent(
     internal val _loginState = MutableStateFlow<LoginState>(LoginState.Initial)
     val loginState: StateFlow<LoginState> = _loginState.asStateFlow()
 
-    internal val _currentUser = userRepository.getCurrentUserFlow()
+    internal val _currentUser = userRepository.currentUserFlow
         .stateIn(scope, SharingStarted.Eagerly, null)
 
     internal val _isSignup = MutableStateFlow(false)
@@ -42,10 +42,12 @@ class AuthComponent(
             }
         }
         scope.launch {
-            if (_currentUser.value == null) {
-                _loginState.value = LoginState.Initial
-            } else {
-                _loginState.value = LoginState.Success
+            _currentUser.collect { user ->
+                if (user == null) {
+                    _loginState.value = LoginState.Initial
+                } else {
+                    _loginState.value = LoginState.Success
+                }
             }
         }
     }

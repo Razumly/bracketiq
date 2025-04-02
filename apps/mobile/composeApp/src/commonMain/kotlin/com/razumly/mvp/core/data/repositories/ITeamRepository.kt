@@ -1,13 +1,14 @@
 package com.razumly.mvp.core.data.repositories
 
 import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
 import com.razumly.mvp.core.data.dataTypes.UserData
 import kotlinx.coroutines.flow.Flow
 
 interface ITeamRepository : IMVPRepository {
-    fun getTeamsOfTournamentFlow(tournamentId: String): Flow<Result<List<TeamWithRelations>>>
-    fun getTeamsOfEventFlow(eventId: String): Flow<Result<List<TeamWithRelations>>>
+    fun getTeamsOfTournamentFlow(tournamentId: String): Flow<Result<List<TeamWithPlayers>>>
+    fun getTeamsOfEventFlow(eventId: String): Flow<Result<List<TeamWithPlayers>>>
     suspend fun getTeam(teamId: String): Result<Team>
     suspend fun getTeamsOfTournament(tournamentId: String): Result<List<Team>>
     suspend fun getTeamsOfEvent(eventId: String): Result<List<Team>>
@@ -15,6 +16,6 @@ interface ITeamRepository : IMVPRepository {
     suspend fun removePlayerFromTeam(team: Team, player: UserData): Result<Unit>
     suspend fun createTeam(): Result<Team>
     suspend fun updateTeam(newTeam: Team): Result<Team>
-    fun getTeamsWithPlayersFlow(ids: List<String>): Flow<Result<List<TeamWithRelations>>>
-    fun getTeamWithPlayersFlow(ids: String): Flow<Result<TeamWithRelations>>
+    fun getTeamsWithPlayersFlow(ids: List<String>): Flow<Result<List<TeamWithPlayers>>>
+    fun getTeamWithPlayersFlow(id: String): Flow<Result<TeamWithRelations>>
 }

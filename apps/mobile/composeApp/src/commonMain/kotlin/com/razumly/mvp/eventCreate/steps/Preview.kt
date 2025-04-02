@@ -1,5 +1,7 @@
 package com.razumly.mvp.eventCreate.steps
 
+import androidx.compose.animation.AnimatedVisibilityScope
+import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
@@ -20,17 +22,18 @@ import com.razumly.mvp.core.presentation.composables.EventDetails
 import com.razumly.mvp.eventCreate.CreateEventComponent
 
 @Composable
-fun Preview(modifier: Modifier, component: CreateEventComponent) {
+fun Preview(
+    modifier: Modifier,
+    component: CreateEventComponent,
+) {
     val previewEvent by component.newEventState.collectAsState()
     Column(
         modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
-        ) {
+    ) {
         Card(
-            modifier = Modifier
-                .padding(horizontal = 16.dp, vertical = 8.dp)
-                .wrapContentSize(),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).wrapContentSize(),
             elevation = CardDefaults.cardElevation(4.dp),
             shape = RoundedCornerShape(
                 12.dp
@@ -42,8 +45,8 @@ fun Preview(modifier: Modifier, component: CreateEventComponent) {
                     expanded = true,
                     onFavoriteClick = {},
                     favoritesModifier = Modifier.alpha(0f),
-                    onMapClick = {}
-                ) {
+                    onMapClick = {},
+                    ) {
                     Button(onClick = {}) {
                         Text("Join")
                     }
