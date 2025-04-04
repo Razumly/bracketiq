@@ -31,7 +31,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
@@ -89,29 +88,22 @@ fun EventDetailScreen(
                         Modifier.padding(top = 64.dp, end = 8.dp),
                         onMapClick = {},
                     ) {
-                        if (isUserInEvent) {
-                            Button(onClick = {
-                                component.viewEvent()
-                            }) {
-                                Text("View")
+                        Row {
+                            Button(
+                                onClick = { showDropdownMenu = !showDropdownMenu },
+                                modifier = Modifier.padding(8.dp)
+                            ) {
+                                Text("More Options")
                             }
-                        } else {
-                            Row {
-                                Button(
-                                    onClick = { showDropdownMenu = !showDropdownMenu },
-                                    modifier = Modifier.padding(8.dp)
-                                ) {
-                                    Text("Join Event")
-                                }
-                                // Dropdown menu with "Join as Individual" and "Join as Team"
-                                DropdownMenu(expanded = showDropdownMenu,
-                                    onDismissRequest = { showDropdownMenu = false }) {
+                            DropdownMenu(expanded = showDropdownMenu,
+                                onDismissRequest = { showDropdownMenu = false }) {
+                                DropdownMenuItem(text = { Text("View") }, onClick = {
+                                    component.viewEvent()
+                                    showDropdownMenu = false
+                                })
+                                if (!isUserInEvent) {
                                     val individual =
                                         if (teamSignup) "Join as Free Agent" else "Join"
-                                    DropdownMenuItem(text = { Text("View") }, onClick = {
-                                        component.viewEvent()
-                                        showDropdownMenu = false
-                                    })
                                     DropdownMenuItem(text = { Text(individual) }, onClick = {
                                         // Join as individual logic
                                         component.joinEvent()
@@ -124,6 +116,11 @@ fun EventDetailScreen(
                                                 showDropdownMenu = false
                                             })
                                     }
+                                } else {
+                                    DropdownMenuItem(text = { Text("Leave") }, onClick = {
+                                        component.leaveEvent()
+                                        showDropdownMenu = false
+                                    })
                                 }
                             }
                         }
@@ -136,7 +133,7 @@ fun EventDetailScreen(
                 ) {
                     Column(Modifier.padding(innerPadding)) {
                         CollapsableHeader(component)
-                        Box(Modifier.fillMaxSize().background(Color.Red)) {
+                        Box(Modifier.fillMaxSize()) {
                             when (selectedEvent) {
                                 is TournamentWithRelations -> {
                                     if (isBracketView) {
@@ -170,7 +167,7 @@ fun EventDetailScreen(
                     component.joinEventAsTeam(selectedTeam)
                 }, onDismiss = {
                     showTeamSelectionDialog = false
-                })
+                }, onCreateTeam = { component.createNewTeam() })
             }
         }
     }
@@ -179,7 +176,10 @@ fun EventDetailScreen(
 
 @Composable
 fun TeamSelectionDialog(
-    teams: List<TeamWithPlayers>, onTeamSelected: (TeamWithPlayers) -> Unit, onDismiss: () -> Unit
+    teams: List<TeamWithPlayers>,
+    onTeamSelected: (TeamWithPlayers) -> Unit,
+    onDismiss: () -> Unit,
+    onCreateTeam: () -> Unit
 ) {
     AlertDialog(onDismissRequest = onDismiss, title = { Text("Select a Team") }, text = {
         // List only valid teams
@@ -191,5 +191,9 @@ fun TeamSelectionDialog(
                 }
             }
         }
-    }, confirmButton = {})
+    }, confirmButton = {
+        Button(onClick = onCreateTeam) {
+            Text("Manage Teams")
+        }
+    })
 }

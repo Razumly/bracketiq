@@ -57,6 +57,7 @@ val componentModule = module {
             componentContext: ComponentContext,
             event: EventAbs,
             onMatchSelected: (MatchWithRelations, Tournament) -> Unit,
+            onNavigateToTeamSettings: (freeAgents: List<String>, event: EventAbs?) -> Unit
         ) ->
             DefaultEventContentComponent(
                 componentContext = componentContext,
@@ -66,6 +67,7 @@ val componentModule = module {
                 userRepository = get(),
                 matchRepository = get(),
                 teamRepository = get(),
+                onNavigateToTeamSettings = onNavigateToTeamSettings
             )
     }
 
@@ -106,7 +108,7 @@ val componentModule = module {
         )
     }
 
-    factory { (componentContext: ComponentContext, onNavigateToLogin: () -> Unit, onNavigateToTeamSettings: () -> Unit) ->
+    factory { (componentContext: ComponentContext, onNavigateToLogin: () -> Unit, onNavigateToTeamSettings: (List<String>, EventAbs?) -> Unit) ->
         DefaultProfileComponent(
             componentContext = componentContext,
             onNavigateToLogin = onNavigateToLogin,
@@ -115,11 +117,13 @@ val componentModule = module {
         )
     }
 
-    factory { (componentContext: ComponentContext) ->
+    factory { (componentContext: ComponentContext, freeAgents: List<String>, selectedEvent: EventAbs?) ->
         TeamManagementComponent(
             componentContext = componentContext,
             teamRepository = get(),
             userRepository = get(),
+            freeAgents = freeAgents,
+            selectedEvent = selectedEvent
         )
     }
 }

@@ -15,7 +15,6 @@ import com.razumly.mvp.core.util.convert
 import io.appwrite.ID
 import io.appwrite.Query
 import io.appwrite.services.Databases
-import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO

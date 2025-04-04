@@ -40,7 +40,7 @@ interface HomeComponent {
     @Serializable
     sealed class Config{
         @Serializable
-        data class TournamentDetail(
+        data class EventDetail(
             val event: EventAbs,
         ) : Config()
 
@@ -63,6 +63,6 @@ interface HomeComponent {
         data object Search : Config()
 
         @Serializable
-        data object Teams : Config()
+        data class Teams(val freeAgents: List<String>, val event: EventAbs?) : Config()
     }
 }

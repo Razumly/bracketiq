@@ -66,10 +66,15 @@ class DefaultHomeComponent(
                     }.value
                 )
             }
-            is Config.TournamentDetail -> {
+            is Config.EventDetail -> {
                 Child.EventContent(
                     _koin.inject<DefaultEventContentComponent> {
-                        parametersOf(componentContext, config.event, ::onMatchSelected)
+                        parametersOf(
+                            componentContext,
+                            config.event,
+                            ::onMatchSelected,
+                            ::onNavigateToTeamSettings
+                        )
                     }.value
                 )
             }
@@ -103,7 +108,9 @@ class DefaultHomeComponent(
             is Config.Teams -> Child.Teams(
                 _koin.inject<TeamManagementComponent> {
                     parametersOf(
-                        componentContext
+                        componentContext,
+                        config.freeAgents,
+                        config.event
                     )
                 }.value
             )
@@ -111,7 +118,7 @@ class DefaultHomeComponent(
     }
 
     private fun onEventSelected(event: EventAbs) {
-        navigation.pushNew(Config.TournamentDetail(event))
+        navigation.pushNew(Config.EventDetail(event))
     }
 
     private fun onMatchSelected(match: MatchWithRelations, tournament: Tournament) {
@@ -123,8 +130,8 @@ class DefaultHomeComponent(
         _selectedPage.value = Config.Search
     }
 
-    private fun onNavigateToTeamSettings() {
-        navigation.pushNew(Config.Teams)
+    private fun onNavigateToTeamSettings(freeAgents: List<String>, event: EventAbs?) {
+        navigation.pushNew(Config.Teams(freeAgents, event))
     }
 
     override fun onTabSelected(page: Config) {

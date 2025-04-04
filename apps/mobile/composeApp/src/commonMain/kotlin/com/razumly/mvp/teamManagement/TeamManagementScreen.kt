@@ -26,6 +26,8 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
     val selectedTeam by component.selectedTeam.collectAsState()
     val friends by component.friends.collectAsState()
     val suggestions by component.suggestedPlayers.collectAsState()
+    val freeAgents by component.freeAgentsFiltered.collectAsState()
+    val selectedEvent = component.selectedEvent
 
     Scaffold { paddingValues ->
         LazyColumn(
@@ -65,10 +67,12 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
                 },
                 onDismiss = { component.deselectTeam() },
                 friends = friends,
+                freeAgents = freeAgents,
                 searchPlayers = { query ->
                     component.searchPlayers(query)
                 },
-                suggestions = suggestions
+                suggestions = suggestions,
+                eventName = selectedEvent?.name
             )
         }
     }

@@ -6,6 +6,7 @@ import com.razumly.mvp.core.data.dataTypes.EventAbsWithRelations
 import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.Tournament
+import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.util.DbConstants
 import com.razumly.mvp.core.util.calcDistance
@@ -105,6 +106,76 @@ class EventAbsRepository(
         return getEventsFlow(query, userLocation)
     }
 
+    override suspend fun removeTeamFromEvent(event: EventAbs, teamWithPlayers: TeamWithPlayers): Result<Unit> {
+        val team = teamWithPlayers.team
+        return when(event) {
+            is EventImp -> {
+                if (event.waitList.contains(team.id)) {
+                    eventRepository.updateEvent(event.copy(waitList = event.waitList - team.id))
+                } else {
+                    teamRepository.updateTeam(team.copy(eventIds = team.eventIds - event.id))
+                }
+            }
+            is Tournament -> {
+                if (event.waitList.contains(team.id)) {
+                    tournamentRepository.updateTournament(event.copy(waitList = event.waitList - team.id))
+                } else {
+                    teamRepository.updateTeam(team.copy(tournamentIds = team.tournamentIds - event.id))
+                }
+            }
+        }.onSuccess {
+            teamWithPlayers.players.forEach { player ->
+                when (event) {
+                    is EventImp -> {
+                        userRepository.updateUser(player.copy(eventIds = player.eventIds - event.id))
+                    }
+                    is Tournament -> {
+                        userRepository.updateUser(player.copy(tournamentIds = player.tournamentIds - event.id))
+                    }
+                }.onFailure {
+                    Napier.e("Failed to remove player from event: player-${player.id}, ${event.eventType}-${event.id}")
+                    return Result.failure(it)
+                }
+            }
+        }.map {}
+    }
+
+    private suspend fun removePlayerFromEvent(event: EventAbs, player: UserData): Result<Unit> {
+        return when (event) {
+            is EventImp -> {
+                if (event.waitList.contains(player.id)) {
+                    eventRepository.updateEvent(event.copy(waitList = event.waitList - player.id))
+                } else if (event.freeAgents.contains(player.id)) {
+                    eventRepository.updateEvent(event.copy(freeAgents = event.freeAgents - player.id))
+                } else if (player.eventIds.contains(event.id)){
+                    userRepository.updateUser(player.copy(eventIds = player.eventIds - event.id))
+                } else {
+                    Result.failure(Exception("Player not in event"))
+                }
+            }
+            is Tournament -> {
+                if (event.waitList.contains(player.id)) {
+                    tournamentRepository.updateTournament(event.copy(waitList = event.waitList - player.id))
+                } else if (event.freeAgents.contains(player.id)) {
+                    tournamentRepository.updateTournament(event.copy(freeAgents = event.freeAgents - player.id))
+                } else if (player.tournamentIds.contains(event.id)){
+                    userRepository.updateUser(player.copy(tournamentIds = player.tournamentIds - event.id))
+                } else {
+                    Result.failure(Exception("Player not in tournament"))
+                }
+            }
+        }.map {}
+    }
+
+    override suspend fun removeCurrentUserFromEvent(event: EventAbs): Result<Unit> {
+        val currentUser = userRepository.currentUserFlow.value
+        if (currentUser == null) {
+            Napier.e("No current user")
+            return Result.failure(Exception("No Current User"))
+        }
+
+        return removePlayerFromEvent(event, currentUser)
+    }
 
     override suspend fun addCurrentUserToEvent(event: EventAbs): Result<Unit> {
         val currentUser = userRepository.currentUserFlow.value

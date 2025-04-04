@@ -8,11 +8,13 @@ import dev.icerock.moko.geo.LatLng
 import kotlinx.coroutines.flow.Flow
 
 interface IEventAbsRepository : IMVPRepository {
-    suspend fun getEvent(event: EventAbs): Result<EventAbsWithRelations>
     fun getEventWithRelationsFlow(event: EventAbs): Flow<Result<EventAbsWithRelations>>
     fun getEventsInBoundsFlow(bounds: Bounds): Flow<Result<List<EventAbsWithRelations>>>
-    suspend fun getEventsInBounds(bounds: Bounds): Result<List<EventAbs>>
     fun searchEventsFlow(searchQuery: String, userLocation: LatLng): Flow<Result<List<EventAbsWithRelations>>>
+    suspend fun removeTeamFromEvent(event: EventAbs, teamWithPlayers: TeamWithPlayers): Result<Unit>
+    suspend fun removeCurrentUserFromEvent(event: EventAbs): Result<Unit>
+    suspend fun getEvent(event: EventAbs): Result<EventAbsWithRelations>
+    suspend fun getEventsInBounds(bounds: Bounds): Result<List<EventAbs>>
     suspend fun searchEvents(searchQuery: String, userLocation: LatLng): Result<List<EventAbs>>
     suspend fun addCurrentUserToEvent(event: EventAbs): Result<Unit>
     suspend fun addTeamToEvent(event: EventAbs, team: TeamWithPlayers): Result<Unit>

@@ -31,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.presentation.composables.PlayerCard
@@ -43,16 +44,14 @@ fun TeamEdit(
     onAddPlayer: (UserData) -> Unit,
     onRemovePlayer: (UserData) -> Unit,
     onDismiss: () -> Unit,
-    // Extra parameters for the search dialog:
     friends: List<UserData>,
+    freeAgents: List<UserData>,
     searchPlayers: (String) -> Unit,
-    suggestions: List<UserData>
+    suggestions: List<UserData>,
+    eventName: String?,
 ) {
-    // Track an edited version of the team name locally.
     var teamName by remember { mutableStateOf(team.team.name) }
-    // Remember which player's removal is being confirmed.
     var playerPendingRemovalId by remember { mutableStateOf<String?>(null) }
-    // State to show/hide the search dialog.
     var showSearchDialog by remember { mutableStateOf(false) }
 
     Card(
@@ -61,7 +60,6 @@ fun TeamEdit(
         modifier = Modifier.fillMaxWidth().padding(16.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            // Editable team name at the top.
             OutlinedTextField(value = teamName ?: "", onValueChange = { newName ->
                 teamName = newName
                 onTeamNameChange(newName)
@@ -70,16 +68,13 @@ fun TeamEdit(
             Spacer(modifier = Modifier.height(12.dp))
             Text("Players", style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.height(8.dp))
-            // List of players.
             LazyColumn {
                 items(team.players) { player ->
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
                     ) {
-                        // PlayerCard displays user info.
                         PlayerCard(player = player, modifier = Modifier.weight(1f).clickable {
-                                // Toggle confirmation for removal.
                                 playerPendingRemovalId =
                                     if (playerPendingRemovalId == player.id) null else player.id
                             })
@@ -111,6 +106,7 @@ fun TeamEdit(
     // Show the search dialog when requested.
     if (showSearchDialog) {
         SearchPlayerDialog(
+            freeAgents = freeAgents,
             friends = friends,
             onSearch = searchPlayers,
             onPlayerSelected = { selectedPlayer ->
@@ -119,6 +115,7 @@ fun TeamEdit(
             },
             onDismiss = { showSearchDialog = false },
             suggestions = suggestions,
+            eventName = eventName ?: ""
         )
     }
 }
@@ -126,34 +123,33 @@ fun TeamEdit(
 
 @Composable
 fun SearchPlayerDialog(
+    freeAgents: List<UserData>,
     friends: List<UserData>,
     onSearch: (query: String) -> Unit,
     onPlayerSelected: (UserData) -> Unit,
     onDismiss: () -> Unit,
-    suggestions: List<UserData>
+    suggestions: List<UserData>,
+    eventName: String
 ) {
-    // Local state for the search query.
     var searchQuery by remember { mutableStateOf("") }
 
-    Dialog(onDismissRequest = onDismiss) {
-        // A Box to fill the screen with a grey overlay.
+    Dialog(
+        onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
         Box(
             modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f))
                 .padding(16.dp)
         ) {
-            // The dialog card content.
             Card(
                 modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter),
                 shape = RoundedCornerShape(8.dp)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    // Title of the dialog.
                     Text(
                         text = "Add Player", style = MaterialTheme.typography.titleLarge
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    // The search box.
-                    SearchBox(placeholder = "Search friends",
+                    SearchBox(placeholder = "Search Players",
                         filter = false,
                         onChange = { newQuery ->
                             searchQuery = newQuery
@@ -161,8 +157,23 @@ fun SearchPlayerDialog(
                         },
                         onSearch = { searchQuery = it },
                         initialList = {
-                            // Show initial list of friends.
                             LazyColumn {
+                                if (freeAgents.isNotEmpty()) {
+                                    item {
+                                        Text("Free Agents of $eventName")
+                                    }
+                                    items(freeAgents) { player ->
+                                        Row(modifier = Modifier.fillMaxWidth().clickable {
+                                            onPlayerSelected(player)
+                                            onDismiss()
+                                        }.padding(8.dp)) {
+                                            PlayerCard(player)
+                                        }
+                                    }
+                                }
+                                item {
+                                    Text("Friends")
+                                }
                                 items(friends) { friend ->
                                     Row(modifier = Modifier.fillMaxWidth().clickable {
                                             onPlayerSelected(friend)
@@ -174,7 +185,6 @@ fun SearchPlayerDialog(
                             }
                         },
                         suggestions = {
-                            // Show search suggestions.
                             LazyColumn {
                                 items(suggestions) { player ->
                                     Row(modifier = Modifier.fillMaxWidth().clickable {

@@ -1,6 +1,7 @@
 package com.razumly.mvp.profile
 
 import com.arkivanov.decompose.ComponentContext
+import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -16,7 +17,7 @@ class DefaultProfileComponent(
     private val componentContext: ComponentContext,
     private val userRepository: IUserRepository,
     private val onNavigateToLogin: () -> Unit,
-    private val onNavigateToTeamSettings: () -> Unit,
+    private val onNavigateToTeamSettings: (freeAgents: List<String>, event: EventAbs?) -> Unit,
 ) : ProfileComponent, ComponentContext by componentContext {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     override fun onLogout() {
@@ -27,6 +28,6 @@ class DefaultProfileComponent(
     }
 
     override fun manageTeams() {
-        onNavigateToTeamSettings()
+        onNavigateToTeamSettings(listOf(), null)
     }
 }

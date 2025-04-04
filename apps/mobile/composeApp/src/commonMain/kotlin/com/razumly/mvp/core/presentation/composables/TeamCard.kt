@@ -14,7 +14,7 @@ import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 @Composable
 fun TeamCard(team: TeamWithPlayers, modifier: Modifier = Modifier) {
     Card(modifier.padding(vertical = 4.dp, horizontal = 8.dp)) {
-        Row(modifier = Modifier.padding(4.dp)) {
+        Row(modifier = Modifier.padding(8.dp)) {
             if (!team.team.name.isNullOrBlank()) {
                 Text(
                     team.team.name.toString(),
@@ -25,7 +25,7 @@ fun TeamCard(team: TeamWithPlayers, modifier: Modifier = Modifier) {
             } else {
                 team.players.forEachIndexed { index, player ->
                     Text(
-                        "${player.firstName}.${player.lastName?.first()}",
+                        "${player.firstName}.${player.lastName.first()}",
                         overflow = TextOverflow.Ellipsis,
                         maxLines = 1,
                         style = MaterialTheme.typography.bodyLarge

@@ -1,6 +1,7 @@
 package com.razumly.mvp.teamManagement
 
 import com.arkivanov.decompose.ComponentContext
+import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.ITeamRepository
@@ -12,6 +13,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -21,6 +23,8 @@ class TeamManagementComponent(
     componentContext: ComponentContext,
     private val teamRepository: ITeamRepository,
     private val userRepository: IUserRepository,
+    private val freeAgents: List<String>,
+    val selectedEvent: EventAbs?
 ) : ComponentContext by componentContext {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
@@ -49,6 +53,17 @@ class TeamManagementComponent(
     private val _suggestedPlayers = MutableStateFlow<List<UserData>>(listOf())
     val suggestedPlayers = _suggestedPlayers.asStateFlow()
 
+    val freeAgentsFiltered = combine(currentUser, selectedTeam) { user, team ->
+        val playerIdsToExclude = buildSet {
+            user?.id?.let { add(it) }
+            team?.players?.forEach { add(it.id) }
+        }
+        userRepository.getUsers(freeAgents.filterNot { it in playerIdsToExclude }).getOrElse {
+            _errorState.value = it.message
+            emptyList()
+        }
+    }.stateIn(scope, SharingStarted.Eagerly, listOf())
+
     init {
         scope.launch {
             currentUser.collect { user ->
@@ -61,7 +76,7 @@ class TeamManagementComponent(
             }
         }
         scope.launch {
-            currentTeams.collect{ teams ->
+            currentTeams.collect { teams ->
                 if (_selectedTeam.value != null) {
                     _selectedTeam.value =
                         teams.find { team -> team.team.id == _selectedTeam.value!!.team.id }

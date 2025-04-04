@@ -12,9 +12,10 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 
 @Composable
 fun PlayerCard(player: UserData, modifier: Modifier = Modifier) {
-    Card(modifier.padding(vertical = 4.dp, horizontal = 8.dp)) {
+    Card(modifier.padding(vertical = 4.dp, horizontal = 64.dp)) {
         Text(
-            "${player.firstName} ${player.lastName}",
+            text = "${player.firstName} ${player.lastName}",
+            modifier = Modifier.padding(8.dp),
             overflow = TextOverflow.Ellipsis,
             maxLines = 1,
             style = MaterialTheme.typography.bodyLarge

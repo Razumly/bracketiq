@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -54,6 +55,7 @@ interface EventContentComponent : ComponentContext {
     fun joinEventAsTeam(team: TeamWithPlayers)
     fun viewEvent()
     fun leaveEvent()
+    fun createNewTeam()
 }
 
 @Serializable
@@ -80,6 +82,7 @@ class DefaultEventContentComponent(
     private val matchRepository: IMatchRepository,
     private val teamRepository: ITeamRepository,
     private val onMatchSelected: (MatchWithRelations, Tournament) -> Unit,
+    private val onNavigateToTeamSettings: (freeAgents: List<String>, event: EventAbs?) -> Unit
 ) : EventContentComponent, ComponentContext by componentContext {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     override val currentUser = userRepository.currentUserFlow
@@ -152,8 +155,11 @@ class DefaultEventContentComponent(
         }
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
-    private val _validTeams = MutableStateFlow<List<TeamWithPlayers>>(listOf())
-    override val validTeams = _validTeams.asStateFlow()
+    private val _usersTeam = MutableStateFlow<TeamWithPlayers?>(null)
+
+    override val validTeams = _userTeams.flatMapLatest { teams ->
+        flowOf(teams.filter { it.players.size == event.teamSizeLimit })
+    }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     private val _userInTournament = MutableStateFlow(false)
 
@@ -167,6 +173,7 @@ class DefaultEventContentComponent(
                         _currentUser.value?.let{ event.players.contains(it) } == true
                     if (_userInTournament.value) {
                         _showDetails.value = true
+                        _usersTeam.value = event.teams.find { it.team.players.contains(_currentUser.value?.id) }
                     }
                     event.event.divisions.firstOrNull()
                         ?.let { selectDivision(it) }
@@ -180,13 +187,6 @@ class DefaultEventContentComponent(
         }
         scope.launch {
             _divisionMatches.collect { generateRounds() }
-        }
-        scope.launch {
-            _userTeams.collect {
-                _validTeams.value = it.filter { team ->
-                    team.players.size == event.teamSizeLimit
-                }
-            }
         }
     }
 
@@ -231,7 +231,24 @@ class DefaultEventContentComponent(
     }
 
     override fun leaveEvent() {
-        TODO("Not yet implemented")
+        scope.launch {
+            val userInFreeAgents =
+                selectedEvent.value.event.freeAgents.contains(_currentUser.value?.id)
+            if (currentUser.value == null) {
+                return@launch
+            }
+            val userInEvent =
+                (currentUser.value!!.eventIds + currentUser.value!!.tournamentIds).contains(
+                    selectedEvent.value.event.id
+                )
+            if (!selectedEvent.value.event.teamSignup || userInFreeAgents || (userInEvent && _usersTeam.value == null)) {
+                eventAbsRepository.removeCurrentUserFromEvent(selectedEvent.value.event)
+            } else if (_usersTeam.value != null) {
+                eventAbsRepository.removeTeamFromEvent(
+                    selectedEvent.value.event, _usersTeam.value!!
+                )
+            }
+        }
     }
 
     override fun viewEvent() {
@@ -240,6 +257,10 @@ class DefaultEventContentComponent(
 
     override fun toggleDetails() {
         _showDetails.value = !_showDetails.value
+    }
+
+    override fun createNewTeam() {
+        onNavigateToTeamSettings(selectedEvent.value.event.freeAgents, selectedEvent.value.event)
     }
 
     private fun generateRounds() {
