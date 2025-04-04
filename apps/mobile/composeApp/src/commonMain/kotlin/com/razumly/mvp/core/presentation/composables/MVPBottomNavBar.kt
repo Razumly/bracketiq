@@ -2,9 +2,7 @@ package com.razumly.mvp.core.presentation.composables
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -16,13 +14,16 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
-import com.razumly.mvp.core.presentation.MVPTransparency
-import com.razumly.mvp.core.presentation.navBarGradientStart
 import com.razumly.mvp.home.HomeComponent
 
 data class NavigationItem(
@@ -43,21 +44,23 @@ fun MVPBottomNavBar(
         NavigationItem(HomeComponent.Config.Create, "add", "Create"),
         NavigationItem(HomeComponent.Config.Profile, "person", "Profile")
     )
-    val colorStops = arrayOf(
-        0.0f to MVPTransparency,
-        0.25f to navBarGradientStart,
-        1f to navBarGradientStart,
-    )
-    val navigationBarHeight = WindowInsets.navigationBars.getBottom(LocalDensity.current).dp + 32.dp
+
+    var navBarHeight by remember { mutableStateOf(0.dp) }
+    val localDensity = LocalDensity.current
 
     Box(modifier = Modifier.fillMaxSize()) {
         // Main content
-        content(PaddingValues(bottom = navigationBarHeight))
+        content(PaddingValues(bottom = navBarHeight))
 
         // Navigation bar overlay
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
+                .onGloballyPositioned { layoutCoordinates ->
+                    navBarHeight = with(localDensity) {
+                        layoutCoordinates.size.height.toDp()
+                    }
+                }
         ) {
             NavigationBar(
                 modifier = Modifier

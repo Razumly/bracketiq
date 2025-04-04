@@ -134,7 +134,7 @@ fun EventDetails(
                     endIntensity = 1f,
                     startY = startYAnim.value
                 )
-            }.padding(navPadding).padding(16.dp).fillMaxSize(),
+            }.padding(navPadding).padding(horizontal = 16.dp).fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(4.dp, alignment = Alignment.Bottom)
         ) {
             Spacer(modifier = Modifier.height(232.dp))

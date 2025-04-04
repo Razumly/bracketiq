@@ -45,7 +45,7 @@ val LocalSharedTransitionScope =
 fun HomeScreen(component: HomeComponent) {
     val childStack by component.childStack.subscribeAsState()
     val selectedPage by component.selectedPage.collectAsState()
-    val hazeState = remember { HazeState() }
+
     Napier.d(tag = "HomeScreen") { "Current tab: ${childStack.active.configuration}" }
 
     MVPBottomNavBar(

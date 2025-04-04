@@ -74,9 +74,7 @@ fun EventDetailScreen(
     CompositionLocalProvider(LocalTournamentComponent provides component) {
         Scaffold(Modifier.fillMaxSize()) { innerPadding ->
             Column(
-                Modifier.background(MaterialTheme.colorScheme.background).fillMaxSize().padding(
-                    LocalNavBarPadding.current
-                )
+                Modifier.background(MaterialTheme.colorScheme.background).fillMaxSize()
             ) {
                 AnimatedVisibility(
                     !showDetails, enter = expandVertically(), exit = shrinkVertically()
@@ -86,6 +84,7 @@ fun EventDetailScreen(
                         animateExpanded,
                         {},
                         Modifier.padding(top = 64.dp, end = 8.dp),
+                        LocalNavBarPadding.current,
                         onMapClick = {},
                     ) {
                         Row {
@@ -151,7 +150,7 @@ fun EventDetailScreen(
                             }
                             Button(
                                 { component.toggleDetails() },
-                                Modifier.align(Alignment.BottomCenter).padding(bottom = 64.dp)
+                                Modifier.align(Alignment.BottomCenter).padding(LocalNavBarPadding.current).padding(bottom = 64.dp)
                             ) {
                                 Text("Show Details")
                             }

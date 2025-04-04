@@ -65,6 +65,7 @@ fun EventList(
                     isExpanded,
                     {},
                     Modifier.padding(8.dp),
+                    navPadding = PaddingValues(bottom = 16.dp),
                     onMapClick = { offset ->
                         onMapClick(offset)
                         component.onMapClick(event)
