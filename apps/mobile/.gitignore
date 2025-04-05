@@ -17,4 +17,3 @@ captures
 !*.xcworkspace/contents.xcworkspacedata
 **/xcshareddata/WorkspaceSettings.xcsettings
 /secrets.properties
-/composeApp/google-services.json
