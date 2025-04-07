@@ -73,7 +73,7 @@ class DefaultCreateEventComponent(
     init {
         childStack.subscribe {}
         scope.launch {
-            userRepository.currentUserFlow.collect { currentUser ->
+            userRepository.currentUser.collect { currentUser ->
                 if (currentUser != null) {
                     updateEventField { copy(hostId = currentUser.id) }
                     updateTournamentField { copy(hostId = currentUser.id) }
@@ -98,7 +98,7 @@ class DefaultCreateEventComponent(
             }.onSuccess {
                 onEventCreated()
                 if (_addUserToEvent.value) {
-                    userRepository.currentUserFlow.value?.let { it1 ->
+                    userRepository.currentUser.value?.let { it1 ->
                         when (currentEventType.value) {
                             EventType.TOURNAMENT -> userRepository.updateUser(
                                 it1.copy(tournamentIds = listOf(_newTournamentState.value.id))

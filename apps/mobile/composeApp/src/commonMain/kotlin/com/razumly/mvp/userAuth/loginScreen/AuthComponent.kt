@@ -24,7 +24,7 @@ class AuthComponent(
     internal val _loginState = MutableStateFlow<LoginState>(LoginState.Initial)
     val loginState: StateFlow<LoginState> = _loginState.asStateFlow()
 
-    internal val _currentUser = userRepository.currentUserFlow
+    internal val _currentUser = userRepository.currentUser
         .stateIn(scope, SharingStarted.Eagerly, null)
 
     internal val _isSignup = MutableStateFlow(false)

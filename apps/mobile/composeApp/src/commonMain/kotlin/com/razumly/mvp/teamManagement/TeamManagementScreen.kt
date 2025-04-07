@@ -13,6 +13,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -28,6 +31,9 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
     val freeAgents by component.freeAgentsFiltered.collectAsState()
     val selectedEvent = component.selectedEvent
     val selectedTeam by component.selectedTeam.collectAsState()
+    val currentUser by component.currentUser.collectAsState()
+    val isCaptain = selectedTeam?.team?.captainId == currentUser?.id
+    var createTeam by remember { mutableStateOf(false) }
 
     Scaffold { paddingValues ->
         LazyColumn(
@@ -46,13 +52,16 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
                 )
             }
             item {
-                Button(onClick = { component.selectTeam(null) }) {
+                Button(onClick = {
+                    createTeam = true
+                    component.selectTeam(null)
+                }) {
                     Text("Create New Team")
                 }
             }
         }
     }
-    if (selectedTeam != null) {
+    if (selectedTeam != null && currentUser != null) {
         Dialog(onDismissRequest = { component.deselectTeam() }) {
             CreateOrEditTeamDialog(
                 team = selectedTeam!!,
@@ -61,14 +70,17 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
                 onSearch = { query -> component.searchPlayers(query) },
                 suggestions = suggestions,
                 onFinish = { newTeam ->
-                    if (selectedTeam != null) {
-                        component.updateTeam(newTeam)
-                    } else {
+                    if (createTeam) {
                         component.createTeam(newTeam)
+                    } else {
+                        component.updateTeam(newTeam)
                     }
+                    createTeam = false
                 },
                 onDismiss = { component.deselectTeam() },
-                selectedEvent = selectedEvent
+                selectedEvent = selectedEvent,
+                isCaptain = isCaptain,
+                currentUser = currentUser!!
             )
         }
     }

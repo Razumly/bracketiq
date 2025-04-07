@@ -30,7 +30,8 @@ import kotlinx.coroutines.launch
 class TeamRepository(
     private val database: Databases,
     private val mvpDatabase: MVPDatabase,
-    private val userRepository: IUserRepository
+    private val userRepository: IUserRepository,
+    private val pushNotificationRepository: PushNotificationsRepository
 ) : ITeamRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     override fun getTeamsOfTournamentFlow(tournamentId: String): Flow<Result<List<TeamWithPlayers>>> =
@@ -125,6 +126,7 @@ class TeamRepository(
             }
         }
 
+        pushNotificationRepository.subscribeUserToTeamNotifications(player, team)
         return addResult
     }
 
@@ -155,12 +157,20 @@ class TeamRepository(
             }
         }
 
+        pushNotificationRepository.unsubscribeUserFromTeamNotifications(player, team)
+        if (player.id != userRepository.currentUser.value?.id) {
+            pushNotificationRepository.sendUserNotification(
+                player,
+                team.name ?: "Team Update",
+                "You have been removed from a team"
+            )
+        }
         return deleteResult
     }
 
-    override suspend fun createTeam(team: Team): Result<Team> {
+    override suspend fun createTeam(newTeam: Team): Result<Team> {
         val id = ID.unique()
-        val currentUser = userRepository.currentUserFlow.value
+        val currentUser = userRepository.currentUser.value
             ?: return Result.failure(Exception("No current user"))
 
         return singleResponse(networkCall = {
@@ -168,7 +178,7 @@ class TeamRepository(
                 databaseId = DbConstants.DATABASE_NAME,
                 collectionId = DbConstants.VOLLEYBALL_TEAMS_COLLECTION,
                 documentId = id,
-                data = team,
+                data = newTeam.toTeamDTO(),
                 nestedType = TeamDTO::class,
             ).data.toTeam(id)
             remoteTeam
@@ -176,10 +186,14 @@ class TeamRepository(
             mvpDatabase.getTeamDao.upsertTeamWithRelations(remoteTeam)
             userRepository.updateUser(currentUser.copy(teamIds = currentUser.teamIds + id))
                 .getOrThrow()
-            userRepository.getUsers(team.pending).onSuccess { players ->
+            userRepository.getUsers(newTeam.pending).onSuccess { players ->
                 players.forEach { player ->
                     userRepository.updateUser(
-                        player.copy(teamInvites = player.teamInvites + team.id)
+                        player.copy(teamInvites = player.teamInvites + newTeam.id)
+                    )
+                    pushNotificationRepository.sendUserNotification(player,
+                        "Team Invite",
+                        "You have been invited to a team"
                     )
                 }
             }
@@ -208,6 +222,10 @@ class TeamRepository(
             players.forEach { player ->
                 userRepository.updateUser(
                     player.copy(teamInvites = player.teamInvites + newData.id)
+                )
+                pushNotificationRepository.sendUserNotification(player,
+                    "Team Invite",
+                    "You have been invited to a team"
                 )
             }
         }

@@ -73,7 +73,7 @@ class SearchEventListComponent(
         _showMapCard.value = false
     }
 
-    private val currentUser = userRepository.currentUserFlow
+    private val currentUser = userRepository.currentUser
 
 
     init {

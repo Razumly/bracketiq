@@ -155,7 +155,7 @@ class DefaultMatchContentComponent(
     private val _showSetConfirmDialog = MutableStateFlow(false)
     override val showSetConfirmDialog = _showSetConfirmDialog.asStateFlow()
 
-    private val _currentUser = userRepository.currentUserFlow
+    private val _currentUser = userRepository.currentUser
 
     @OptIn(ExperimentalCoroutinesApi::class)
     private val _currentUserTeam =

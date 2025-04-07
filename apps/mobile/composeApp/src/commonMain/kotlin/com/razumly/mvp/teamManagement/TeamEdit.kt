@@ -51,12 +51,15 @@ fun CreateOrEditTeamDialog(
     onFinish: (Team) -> Unit,
     onDismiss: () -> Unit,
     selectedEvent: EventAbs?,
+    isCaptain: Boolean,
+    currentUser: UserData
 ) {
     var teamName by remember { mutableStateOf(team.team.name ?: "") }
     var teamSize by remember { mutableStateOf(team.team.teamSize) }
     var showSearchDialog by remember { mutableStateOf(false) }
     var invitedPlayers by remember { mutableStateOf(team.pendingPlayers) }
     var playersInTeam by remember { mutableStateOf(team.players) }
+    var showLeaveTeamDialog by remember { mutableStateOf(false) }
 
     Card(
         modifier = Modifier.fillMaxWidth().padding(16.dp),
@@ -73,7 +76,8 @@ fun CreateOrEditTeamDialog(
                     teamName = it
                 },
                 label = { Text("Team Name") },
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                readOnly = !isCaptain
             )
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -81,6 +85,7 @@ fun CreateOrEditTeamDialog(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(2, 3, 4, 5, 6, 7).forEach { size ->
                     FilterChip(
+                        enabled = isCaptain,
                         selected = size == teamSize,
                         onClick = {
                             teamSize = size
@@ -96,24 +101,28 @@ fun CreateOrEditTeamDialog(
                 items(playersInTeam) { player ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         PlayerCard(player = player)
-                        Button(onClick = {
-                            playersInTeam = playersInTeam - player
-                        }) {
-                            Text("Remove")
+                        if (isCaptain) {
+                            Button(onClick = {
+                                playersInTeam = playersInTeam - player
+                            }) {
+                                Text("Remove")
+                            }
                         }
                     }
                 }
                 items(invitedPlayers) { player ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         PlayerCard(player = player, isPending = true)
-                        Button(onClick = {
-                            playersInTeam = playersInTeam - player
-                        }) {
-                            Text("Remove")
+                        if (isCaptain) {
+                            Button(onClick = {
+                                playersInTeam = invitedPlayers - player
+                            }) {
+                                Text("Remove")
+                            }
                         }
                     }
                 }
-                if (team.players.size < teamSize || teamSize == 7) {
+                if (playersInTeam.size + invitedPlayers.size < teamSize || teamSize == 7 && isCaptain) {
                     item {
                         InvitePlayerCard { showSearchDialog = true }
                     }
@@ -128,17 +137,46 @@ fun CreateOrEditTeamDialog(
                 OutlinedButton(onClick = onDismiss) {
                     Text("Cancel")
                 }
+                if (isCaptain) {
+                    Button(onClick = {
+                        onFinish(
+                            team.team.copy(
+                                players = playersInTeam.map { it.id },
+                                pending = invitedPlayers.map { it.id },
+                                name = teamName,
+                                teamSize = teamSize
+                            )
+                        )
+                    }) {
+                        Text("Finish")
+                    }
+                } else {
+                    Button(onClick = { showLeaveTeamDialog = true }) {
+                        Text("Leave Team")
+                    }
+                }
+            }
+        }
+    }
+
+    if (showLeaveTeamDialog) {
+        Dialog(onDismissRequest = { showLeaveTeamDialog = false }) {
+            Box(Modifier.fillMaxSize()){
+                Text("Are you sure you want to leave this team?")
                 Button(onClick = {
                     onFinish(
                         team.team.copy(
-                            players = playersInTeam.map { it.id },
+                            players = (playersInTeam - currentUser).map { it.id },
                             pending = invitedPlayers.map { it.id },
                             name = teamName,
                             teamSize = teamSize
-                        )
-                    )
+                        ))
+                    showLeaveTeamDialog = false
                 }) {
-                    Text("Finish")
+                    Text("Yes")
+                }
+                Button(onClick = { showLeaveTeamDialog = false }) {
+                    Text("Cancel")
                 }
             }
         }

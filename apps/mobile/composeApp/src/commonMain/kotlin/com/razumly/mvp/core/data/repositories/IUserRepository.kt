@@ -5,7 +5,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 
 interface IUserRepository : IMVPRepository {
-    val currentUserFlow: StateFlow<UserData?>
+    val currentUser: StateFlow<UserData?>
     suspend fun login(email: String, password: String): Result<UserData>
     suspend fun logout(): Result<Unit>
     suspend fun getUsersOfTournament(tournamentId: String): Result<List<UserData>>

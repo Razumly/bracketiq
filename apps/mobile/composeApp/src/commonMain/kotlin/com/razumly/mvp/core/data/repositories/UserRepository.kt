@@ -42,7 +42,7 @@ class UserRepository(
     private val _pushToken = currentUserDataSource.getPushToken().stateIn(scope, SharingStarted.Lazily, "")
     private val _pushTarget = currentUserDataSource.getPushTarget().stateIn(scope, SharingStarted.Lazily, "")
 
-    override val currentUserFlow: StateFlow<UserData?> =
+    override val currentUser: StateFlow<UserData?> =
         getCurrentUserFlow().distinctUntilChanged().map { user ->
             user.getOrThrow()
         }.stateIn(

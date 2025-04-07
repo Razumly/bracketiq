@@ -31,7 +31,7 @@ class TeamManagementComponent(
 
     private val _errorState = MutableStateFlow<String?>(null)
 
-    private val currentUser = userRepository.currentUserFlow
+    val currentUser = userRepository.currentUser
 
     private val _friends = MutableStateFlow<List<UserData>>(listOf())
     val friends = _friends.asStateFlow()
@@ -94,14 +94,20 @@ class TeamManagementComponent(
 
     fun createTeam(team: Team) {
         scope.launch {
-            teamRepository.createTeam(team)
+            teamRepository.createTeam(team).onFailure {
+                _errorState.value = it.message
+            }
         }
+        deselectTeam()
     }
 
     fun updateTeam(team: Team) {
         scope.launch {
-            teamRepository.updateTeam(team)
+            teamRepository.updateTeam(team).onFailure {
+                _errorState.value = it.message
+            }
         }
+        deselectTeam()
     }
 
     fun deselectTeam() {

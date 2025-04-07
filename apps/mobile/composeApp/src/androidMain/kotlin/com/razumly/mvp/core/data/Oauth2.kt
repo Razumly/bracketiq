@@ -24,7 +24,7 @@ suspend fun UserRepository.oauth2Login(activity: ComponentActivity): Result<Unit
     val id = session.userId
 
     return kotlin.runCatching {
-        currentUserFlow.value?.let {
+        currentUser.value?.let {
             val userInfo = getGoogleUserInfo(session.providerAccessToken)
             return kotlin.runCatching {
                 database.createDocument(
@@ -39,7 +39,10 @@ suspend fun UserRepository.oauth2Login(activity: ComponentActivity): Result<Unit
                         tournamentIds = listOf(),
                         eventIds = listOf(),
                         teamIds = listOf(),
-                        friendIds = listOf()
+                        friendIds = listOf(),
+                        teamInvites = listOf(),
+                        eventInvites = listOf(),
+                        tournamentInvites = listOf(),
                     ),
                     nestedType = UserDataDTO::class
                 ).data.toUserData(id)

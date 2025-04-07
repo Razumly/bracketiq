@@ -29,7 +29,7 @@ val MVPRepositoryModule = module {
         FieldRepository(get(), get())
     } bind IFieldRepository::class
     single {
-        TeamRepository(get(), get(), get())
+        TeamRepository(get(), get(), get(), get())
     } bind ITeamRepository::class
     single {
         TournamentRepository(get(), get(), get(), get(), get(), get())

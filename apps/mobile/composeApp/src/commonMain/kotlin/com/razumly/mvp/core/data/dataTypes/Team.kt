@@ -4,6 +4,7 @@ import androidx.room.Entity
 import androidx.room.PrimaryKey
 import com.razumly.mvp.core.data.dataTypes.dtos.TeamDTO
 import com.razumly.mvp.core.data.dataTypes.enums.Division
+import io.appwrite.ID
 import kotlinx.serialization.Serializable
 
 @Entity
@@ -35,7 +36,7 @@ data class Team(
                 name = null,
                 players = listOf(captainId),
                 teamSize = 2,
-                id = "",
+                id = ID.unique(),
                 captainId = captainId
             )
         }

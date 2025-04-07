@@ -15,6 +15,7 @@ import com.razumly.mvp.core.data.dataTypes.crossRef.EventTeamCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.FieldMatchCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.MatchTeamCrossRef
+import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPendingPlayerCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TournamentMatchCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TournamentTeamCrossRef
@@ -43,7 +44,8 @@ import com.razumly.mvp.core.data.util.Converters
         TournamentMatchCrossRef::class,
         MatchTeamCrossRef::class,
         FieldMatchCrossRef::class,
-    ], version = 41
+        TeamPendingPlayerCrossRef::class
+    ], version = 42
 )
 @TypeConverters(Converters::class)
 @ConstructedBy(MVPDatabaseCtor::class)

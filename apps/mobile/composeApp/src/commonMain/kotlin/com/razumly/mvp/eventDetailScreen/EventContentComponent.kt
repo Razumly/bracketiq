@@ -85,7 +85,7 @@ class DefaultEventContentComponent(
     private val onNavigateToTeamSettings: (freeAgents: List<String>, event: EventAbs?) -> Unit
 ) : EventContentComponent, ComponentContext by componentContext {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    override val currentUser = userRepository.currentUserFlow
+    override val currentUser = userRepository.currentUser
 
     private val _errorState = MutableStateFlow<String?>(null)
     override val errorState = _errorState.asStateFlow()
@@ -123,7 +123,7 @@ class DefaultEventContentComponent(
         )
     )
 
-    private val _currentUser = userRepository.currentUserFlow
+    private val _currentUser = userRepository.currentUser
 
     private val _divisionMatches = MutableStateFlow<Map<String, MatchWithRelations>>(emptyMap())
     override val divisionMatches = _divisionMatches.asStateFlow()
