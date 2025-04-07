@@ -38,8 +38,8 @@ class TeamRepository(
         channelFlow {
             val localJob = launch {
                 mvpDatabase.getTeamDao.getTeamsInTournamentFlow(tournamentId).collect { teams ->
-                        send(Result.success(teams))
-                    }
+                    send(Result.success(teams))
+                }
             }
 
             getTeamsOfTournament(tournamentId).onFailure { remoteResult ->
@@ -102,7 +102,7 @@ class TeamRepository(
             )
         }
 
-        if (!team.players.contains(player.id) && team.pending.contains(player.id)) {
+        if (!team.players.contains(player.id) || team.pending.contains(player.id)) {
             val updatedTeam =
                 team.copy(players = team.players + player.id, pending = team.pending - player.id)
             updateTeam(updatedTeam).onFailure {
@@ -114,8 +114,11 @@ class TeamRepository(
                 return Result.failure(it)
             }
         }
-        if (!player.teamIds.contains(team.id)) {
-            val updatedUserData = player.copy(teamIds = player.teamIds + team.id)
+        if (!player.teamIds.contains(team.id) || player.teamInvites.contains(team.id)) {
+            val updatedUserData = player.copy(
+                teamIds = player.teamIds + team.id,
+                teamInvites = player.teamInvites - team.id
+            )
             userRepository.updateUser(updatedUserData).onFailure {
                 mvpDatabase.getTeamDao.deleteTeamPlayerCrossRef(
                     TeamPlayerCrossRef(
@@ -191,7 +194,8 @@ class TeamRepository(
                     userRepository.updateUser(
                         player.copy(teamInvites = player.teamInvites + newTeam.id)
                     )
-                    pushNotificationRepository.sendUserNotification(player,
+                    pushNotificationRepository.sendUserNotification(
+                        player,
                         "Team Invite",
                         "You have been invited to a team"
                     )
@@ -223,7 +227,8 @@ class TeamRepository(
                 userRepository.updateUser(
                     player.copy(teamInvites = player.teamInvites + newData.id)
                 )
-                pushNotificationRepository.sendUserNotification(player,
+                pushNotificationRepository.sendUserNotification(
+                    player,
                     "Team Invite",
                     "You have been invited to a team"
                 )

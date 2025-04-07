@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+@OptIn(ExperimentalCoroutinesApi::class)
 
 class TeamManagementComponent(
     componentContext: ComponentContext,
@@ -36,9 +37,19 @@ class TeamManagementComponent(
     private val _friends = MutableStateFlow<List<UserData>>(listOf())
     val friends = _friends.asStateFlow()
 
-    @OptIn(ExperimentalCoroutinesApi::class)
     val currentTeams = currentUser.map { user ->
         user?.teamIds ?: emptyList()
+    }.flatMapLatest { teamIds ->
+        teamRepository.getTeamsWithPlayersFlow(teamIds).map { team ->
+            team.getOrElse {
+                _errorState.value = it.message
+                emptyList()
+            }
+        }
+    }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    val teamInvites = currentUser.map { user ->
+        user?.teamInvites ?: emptyList()
     }.flatMapLatest { teamIds ->
         teamRepository.getTeamsWithPlayersFlow(teamIds).map { team ->
             team.getOrElse {
@@ -99,6 +110,14 @@ class TeamManagementComponent(
             }
         }
         deselectTeam()
+    }
+
+    fun joinTeam(team: Team) {
+        scope.launch {
+            teamRepository.addPlayerToTeam(team, currentUser.value!!).onFailure {
+                _errorState.value = it.message
+            }
+        }
     }
 
     fun updateTeam(team: Team) {

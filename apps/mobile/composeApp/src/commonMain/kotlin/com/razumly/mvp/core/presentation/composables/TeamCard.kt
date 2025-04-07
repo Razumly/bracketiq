@@ -10,6 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
+import com.razumly.mvp.core.presentation.util.toTitleCase
 
 @Composable
 fun TeamCard(team: TeamWithPlayers, modifier: Modifier = Modifier) {
@@ -25,7 +26,7 @@ fun TeamCard(team: TeamWithPlayers, modifier: Modifier = Modifier) {
             } else {
                 team.players.forEachIndexed { index, player ->
                     Text(
-                        "${player.firstName}.${player.lastName.first()}",
+                        "${player.firstName}.${player.lastName.first()}".toTitleCase(),
                         overflow = TextOverflow.Ellipsis,
                         maxLines = 1,
                         style = MaterialTheme.typography.bodyLarge

@@ -9,6 +9,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.presentation.util.toTitleCase
 
 @Composable
 fun PlayerCard(player: UserData, isPending: Boolean = false, modifier: Modifier = Modifier) {
@@ -21,7 +22,7 @@ fun PlayerCard(player: UserData, isPending: Boolean = false, modifier: Modifier 
             )
         }
         Text(
-            text = "${player.firstName} ${player.lastName}",
+            text = "${player.firstName} ${player.lastName}".toTitleCase(),
             modifier = Modifier.padding(8.dp),
             overflow = TextOverflow.Ellipsis,
             maxLines = 1,
