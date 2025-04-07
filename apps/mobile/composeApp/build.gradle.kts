@@ -15,6 +15,7 @@ plugins {
     alias(libs.plugins.compose.vectorize)
     alias(libs.plugins.secrets)
     id("kotlin-parcelize")
+    id("com.google.gms.google-services") version "4.4.2" apply false
 }
 
 kotlin {
@@ -30,6 +31,7 @@ kotlin {
         iosSimulatorArm64()
     ).forEach { iosTarget ->
         iosTarget.binaries.framework {
+            export(libs.kmpnotifier)
             baseName = "ComposeApp"
             isStatic = true
             linkerOpts.add("-lsqlite3")
@@ -63,6 +65,7 @@ kotlin {
                 implementation(libs.datastore.preferences)
                 implementation( libs.accompanist.pager)
                 implementation(libs.materialKolor)
+                api(libs.kmpnotifier)
                 api(libs.decompose.decompose)
                 api(libs.decompose.extensions)
                 api(libs.decompose.extentions.experimental)
@@ -74,7 +77,7 @@ kotlin {
                 api(libs.napier)
                 api(libs.permissions)
                 api(libs.geo)
-                api("io.github.camka14.appwrite:sdk-for-kmp:0.1.0")
+                api("io.github.camka14.appwrite:sdk-for-kmp:1.0.0-SNAPSHOT")
             }
         }
 

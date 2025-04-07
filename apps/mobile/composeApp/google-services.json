@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "49655448987",
+    "project_id": "razumly-mvp",
+    "storage_bucket": "razumly-mvp.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:49655448987:android:c8690f29f68660b4460d3e",
+        "android_client_info": {
+          "package_name": "com.razumly.mvp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCp0Tvdi2_v18BNNfON0fuMCz_C3KK8vFg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

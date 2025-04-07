@@ -9,6 +9,7 @@ import com.razumly.mvp.core.data.repositories.IFieldRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.ITournamentRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.data.repositories.PushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.TeamRepository
 import com.razumly.mvp.core.data.repositories.TournamentRepository
 import com.razumly.mvp.core.data.repositories.UserRepository
@@ -34,9 +35,12 @@ val MVPRepositoryModule = module {
         TournamentRepository(get(), get(), get(), get(), get(), get())
     } bind ITournamentRepository::class
     single {
-        UserRepository(get(), get(), get(), get())
+        UserRepository(get(), get(), get(), get(), get())
     } bind IUserRepository::class
     single {
         MatchRepository(get(), get(), get())
     } bind IMatchRepository::class
+    single {
+        PushNotificationsRepository(get(), get(), get())
+    }
 }

@@ -18,6 +18,8 @@ data class Team(
     val name: String?,
     val captainId: String,
     val players: List<String> = emptyList(),
+    val pending: List<String> = emptyList(),
+    val teamSize: Int,
     @PrimaryKey override val id: String
 ) : MVPDocument {
 
@@ -32,6 +34,7 @@ data class Team(
                 losses = 0,
                 name = null,
                 players = listOf(captainId),
+                teamSize = 2,
                 id = "",
                 captainId = captainId
             )
@@ -49,7 +52,9 @@ data class Team(
             losses = losses,
             players = players,
             captainId = captainId,
-            id = id
+            teamSize = teamSize,
+            id = id,
+            pending = pending
         )
     }
 }

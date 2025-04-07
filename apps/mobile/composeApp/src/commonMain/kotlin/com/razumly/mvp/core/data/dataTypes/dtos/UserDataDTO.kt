@@ -13,12 +13,28 @@ data class UserDataDTO(
     val teamIds: List<String>,
     val friendIds: List<String>,
     val userName: String,
-    @Transient
-    val id: String = "",
+    val teamInvites: List<String>,
+    val eventInvites: List<String>,
+    val tournamentInvites: List<String>,
+    @Transient val id: String = "",
 ) {
     companion object {
-        operator fun invoke(firstName: String, lastName: String, userName: String, userId: String): UserDataDTO {
-            return UserDataDTO(firstName, lastName, listOf(), listOf(), listOf(), listOf(), userName, userId)
+        operator fun invoke(
+            firstName: String, lastName: String, userName: String, userId: String
+        ): UserDataDTO {
+            return UserDataDTO(
+                firstName,
+                lastName,
+                listOf(),
+                listOf(),
+                listOf(),
+                listOf(),
+                userName,
+                listOf(),
+                listOf(),
+                listOf(),
+                userId
+            )
         }
     }
 }
@@ -32,6 +48,9 @@ fun UserDataDTO.toUserData(id: String): UserData {
         teamIds,
         friendIds,
         userName,
+        teamInvites,
+        eventInvites,
+        tournamentInvites,
         id
     )
 }

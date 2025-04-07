@@ -36,8 +36,11 @@ class UserRepository(
     internal val account: Account,
     internal val database: Databases,
     private val currentUserDataSource: CurrentUserDataSource,
+    private val pushNotificationsRepository: PushNotificationsRepository
 ) : IUserRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val _pushToken = currentUserDataSource.getPushToken().stateIn(scope, SharingStarted.Lazily, "")
+    private val _pushTarget = currentUserDataSource.getPushTarget().stateIn(scope, SharingStarted.Lazily, "")
 
     override val currentUserFlow: StateFlow<UserData?> =
         getCurrentUserFlow().distinctUntilChanged().map { user ->
@@ -56,6 +59,9 @@ class UserRepository(
             id,
             nestedType = UserDataDTO::class
         ).data.copy(id = id).toUserData(id)
+        if (_pushToken.value.isNotBlank() && _pushTarget.value.isBlank()) {
+            pushNotificationsRepository.addDeviceAsTarget()
+        }
         mvpDatabase.getUserDataDao.upsertUserData(currentUser)
 
         return Result.success(currentUser)

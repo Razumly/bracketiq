@@ -9,6 +9,8 @@ import kotlinx.coroutines.flow.map
 
 class CurrentUserDataSource(private val dataStore: DataStore<Preferences>) {
     private val idKey = stringPreferencesKey("id")
+    private val pushToken = stringPreferencesKey("token")
+    private val pushTarget = stringPreferencesKey("target")
 
     suspend fun saveUserId(userId: String) {
         dataStore.edit { dataStore ->
@@ -19,6 +21,30 @@ class CurrentUserDataSource(private val dataStore: DataStore<Preferences>) {
     fun getUserId(): Flow<String> {
         return dataStore.data.map {
             it[idKey] ?: ""
+        }
+    }
+
+    suspend fun savePushToken(token: String) {
+        dataStore.edit { dataStore ->
+            dataStore[pushToken] = token
+        }
+    }
+
+    fun getPushToken(): Flow<String> {
+        return dataStore.data.map {
+            it[pushToken] ?: ""
+        }
+    }
+
+    suspend fun savePushTarget(target: String) {
+        dataStore.edit { dataStore ->
+            dataStore[pushTarget] = target
+        }
+    }
+
+    fun getPushTarget(): Flow<String> {
+        return dataStore.data.map {
+            it[pushTarget] ?: ""
         }
     }
 }

@@ -21,6 +21,7 @@ googleAuthLibraryOauth2Http = "1.23.0"
 googleHttpClientGson = "1.44.1"
 hazeMaterials = "1.5.0"
 kmpDateTimePicker = "1.0.5"
+kmpnotifier = "1.5.1"
 koin = "4.0.1"
 kotlin = "2.1.0"
 kotlinTest = "2.1.0"
@@ -50,6 +51,7 @@ animationAndroid = "1.7.7"
 
 
 [libraries]
+kmpnotifier = { module = "io.github.mirzemehdi:kmpnotifier", version.ref = "kmpnotifier" }
 materialKolor = { module = "com.materialkolor:material-kolor", version.ref = "materialKolor" }
 accompanist-pager = { module = "com.google.accompanist:accompanist-pager", version.ref = "accompanistPager" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activityCompose" }

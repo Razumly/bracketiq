@@ -3,6 +3,7 @@ package com.razumly.mvp.di
 import io.appwrite.services.Account
 import io.appwrite.services.Databases
 import io.appwrite.services.Functions
+import io.appwrite.services.Messaging
 import io.appwrite.services.Realtime
 import org.koin.core.module.Module
 import org.koin.dsl.module
@@ -21,5 +22,8 @@ val appwriteModule = module {
     }
     single {
         Functions(get())
+    }
+    single {
+        Messaging(get())
     }
 }
