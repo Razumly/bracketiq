@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -32,94 +33,138 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.razumly.mvp.core.data.dataTypes.EventAbs
+import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.SearchBox
+import com.razumly.mvp.teamManagement.composables.InvitePlayerCard
 
 @Composable
-fun TeamEdit(
+fun CreateOrEditTeamDialog(
     team: TeamWithPlayers,
-    onTeamNameChange: (String) -> Unit,
-    onAddPlayer: (UserData) -> Unit,
-    onRemovePlayer: (UserData) -> Unit,
-    onDismiss: () -> Unit,
     friends: List<UserData>,
     freeAgents: List<UserData>,
-    searchPlayers: (String) -> Unit,
     suggestions: List<UserData>,
-    eventName: String?,
+    onSearch: (String) -> Unit,
+    onFinish: (Team) -> Unit,
+    onDismiss: () -> Unit,
+    selectedEvent: EventAbs?,
 ) {
-    var teamName by remember { mutableStateOf(team.team.name) }
-    var playerPendingRemovalId by remember { mutableStateOf<String?>(null) }
+    var teamName by remember { mutableStateOf(team.team.name ?: "") }
+    var teamSize by remember { mutableStateOf(team.team.teamSize) }
     var showSearchDialog by remember { mutableStateOf(false) }
+    var invitedPlayers by remember { mutableStateOf(team.pendingPlayers) }
+    var playersInTeam by remember { mutableStateOf(team.players) }
 
     Card(
-        shape = RoundedCornerShape(8.dp),
-        elevation = CardDefaults.cardElevation(8.dp),
-        modifier = Modifier.fillMaxWidth().padding(16.dp)
+        modifier = Modifier.fillMaxWidth().padding(16.dp),
+        shape = RoundedCornerShape(12.dp),
+        elevation = CardDefaults.cardElevation(12.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            OutlinedTextField(value = teamName ?: "", onValueChange = { newName ->
-                teamName = newName
-                onTeamNameChange(newName)
-            }, label = { Text("Team Name") }, modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            Text("Players", style = MaterialTheme.typography.titleMedium)
+            Text("Team Setup", style = MaterialTheme.typography.titleLarge)
             Spacer(modifier = Modifier.height(8.dp))
-            LazyColumn {
-                items(team.players) { player ->
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-                    ) {
-                        PlayerCard(player = player, modifier = Modifier.weight(1f).clickable {
-                                playerPendingRemovalId =
-                                    if (playerPendingRemovalId == player.id) null else player.id
-                            })
-                        if (playerPendingRemovalId == player.id) {
-                            Button(onClick = {
-                                onRemovePlayer(player)
-                                playerPendingRemovalId = null
-                            }) {
-                                Text("Remove")
-                            }
+
+            OutlinedTextField(
+                value = teamName,
+                onValueChange = {
+                    teamName = it
+                },
+                label = { Text("Team Name") },
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Text("Select Team Size")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(2, 3, 4, 5, 6, 7).forEach { size ->
+                    FilterChip(
+                        selected = size == teamSize,
+                        onClick = {
+                            teamSize = size
+                        },
+                        label = { if (size < 7) Text("$size") else Text("6+") }
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Text("Players")
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(playersInTeam) { player ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        PlayerCard(player = player)
+                        Button(onClick = {
+                            playersInTeam = playersInTeam - player
+                        }) {
+                            Text("Remove")
                         }
                     }
                 }
-            }
-            Spacer(modifier = Modifier.height(12.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Button(onClick = { showSearchDialog = true }) {
-                    Text("Add Player")
+                items(invitedPlayers) { player ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        PlayerCard(player = player, isPending = true)
+                        Button(onClick = {
+                            playersInTeam = playersInTeam - player
+                        }) {
+                            Text("Remove")
+                        }
+                    }
                 }
+                if (team.players.size < teamSize || teamSize == 7) {
+                    item {
+                        InvitePlayerCard { showSearchDialog = true }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
                 OutlinedButton(onClick = onDismiss) {
-                    Text("Close")
+                    Text("Cancel")
+                }
+                Button(onClick = {
+                    onFinish(
+                        team.team.copy(
+                            players = playersInTeam.map { it.id },
+                            pending = invitedPlayers.map { it.id },
+                            name = teamName,
+                            teamSize = teamSize
+                        )
+                    )
+                }) {
+                    Text("Finish")
                 }
             }
         }
     }
 
-    // Show the search dialog when requested.
     if (showSearchDialog) {
         SearchPlayerDialog(
             freeAgents = freeAgents,
             friends = friends,
-            onSearch = searchPlayers,
-            onPlayerSelected = { selectedPlayer ->
-                onAddPlayer(selectedPlayer)
+            suggestions = suggestions.filterNot {
+                playersInTeam.contains(it) || invitedPlayers.contains(it)
+            },
+            onSearch = onSearch,
+            onPlayerSelected = {
+                if (team.players.contains(it)) {
+                    playersInTeam = playersInTeam + it
+                } else {
+                    invitedPlayers = invitedPlayers + it
+                }
                 showSearchDialog = false
             },
             onDismiss = { showSearchDialog = false },
-            suggestions = suggestions,
-            eventName = eventName ?: ""
+            eventName = selectedEvent?.name ?: ""
         )
     }
 }
-
 
 @Composable
 fun SearchPlayerDialog(
@@ -176,9 +221,9 @@ fun SearchPlayerDialog(
                                 }
                                 items(friends) { friend ->
                                     Row(modifier = Modifier.fillMaxWidth().clickable {
-                                            onPlayerSelected(friend)
-                                            onDismiss()
-                                        }.padding(8.dp)) {
+                                        onPlayerSelected(friend)
+                                        onDismiss()
+                                    }.padding(8.dp)) {
                                         PlayerCard(friend)
                                     }
                                 }
@@ -188,9 +233,9 @@ fun SearchPlayerDialog(
                             LazyColumn {
                                 items(suggestions) { player ->
                                     Row(modifier = Modifier.fillMaxWidth().clickable {
-                                            onPlayerSelected(player)
-                                            onDismiss()
-                                        }.padding(8.dp)) {
+                                        onPlayerSelected(player)
+                                        onDismiss()
+                                    }.padding(8.dp)) {
                                         PlayerCard(player)
                                     }
                                 }

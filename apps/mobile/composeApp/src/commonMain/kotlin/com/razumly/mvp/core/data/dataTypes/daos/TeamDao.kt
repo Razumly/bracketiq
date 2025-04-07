@@ -10,6 +10,7 @@ import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventTeamCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.MatchTeamCrossRef
+import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPendingPlayerCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TournamentTeamCrossRef
 import io.github.aakira.napier.Napier
@@ -56,7 +57,13 @@ interface TeamDao {
     suspend fun upsertTeamPlayerCrossRef(crossRef: TeamPlayerCrossRef)
 
     @Upsert
+    suspend fun upsertTeamPendingPlayerCrossRef(crossRef: TeamPendingPlayerCrossRef)
+
+    @Upsert
     suspend fun upsertTeamPlayerCrossRefs(crossRefs: List<TeamPlayerCrossRef>)
+
+    @Upsert
+    suspend fun upsertTeamPendingPlayerCrossRefs(crossRefs: List<TeamPendingPlayerCrossRef>)
 
     @Upsert
     suspend fun upsertMatchTeamCrossRefs(crossRefs: List<MatchTeamCrossRef>)
@@ -69,6 +76,9 @@ interface TeamDao {
 
     @Delete
     suspend fun deleteTeamPlayerCrossRef(crossRef: TeamPlayerCrossRef)
+
+    @Delete
+    suspend fun deleteTeamPendingPlayerCrossRef(crossRef: TeamPendingPlayerCrossRef)
 
     @Transaction
     @Query("SELECT * FROM Team WHERE id = :teamId")
@@ -113,6 +123,7 @@ interface TeamDao {
         deleteUsersFromTeam(team)
         deleteTeamFromEvents(team)
         deleteTeamFromTournaments(team)
+        deletePendingUsersFromTeam(team)
         upsertTeam(team)
         try {
             upsertTeamPlayerCrossRefs(team.players.map { playerId ->
@@ -136,6 +147,13 @@ interface TeamDao {
             })
         } catch (e: Exception) {
             Napier.d("Failed to add tournament team crossRef for team: ${team.id}\n${e.message}")
+        }
+        try {
+            upsertTeamPendingPlayerCrossRefs(team.pending.map { playerId ->
+                TeamPendingPlayerCrossRef(team.id, playerId)
+            })
+        } catch (e: Exception) {
+            Napier.d("Failed to add pending user team crossRef for team: ${team.id}\n${e.message}")
         }
     }
 
@@ -164,7 +182,14 @@ interface TeamDao {
     @Transaction
     suspend fun deleteUsersFromTeam(team: Team) {
         team.players.forEach { playerId ->
-            removePlayerFromTeam(TeamPlayerCrossRef(team.id, playerId))
+            deleteTeamPlayerCrossRef(TeamPlayerCrossRef(team.id, playerId))
+        }
+    }
+
+    @Transaction
+    suspend fun deletePendingUsersFromTeam(team: Team) {
+        team.pending.forEach { playerId ->
+            deleteTeamPendingPlayerCrossRef(TeamPendingPlayerCrossRef(team.id, playerId))
         }
     }
 
@@ -173,7 +198,4 @@ interface TeamDao {
 
     @Delete
     suspend fun deleteTournamentTeamCrossRef(crossRef: TournamentTeamCrossRef)
-
-    @Delete
-    suspend fun removePlayerFromTeam(crossRef: TeamPlayerCrossRef)
 }

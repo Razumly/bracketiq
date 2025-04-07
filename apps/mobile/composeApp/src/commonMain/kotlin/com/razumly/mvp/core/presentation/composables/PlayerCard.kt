@@ -11,8 +11,15 @@ import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.UserData
 
 @Composable
-fun PlayerCard(player: UserData, modifier: Modifier = Modifier) {
+fun PlayerCard(player: UserData, isPending: Boolean = false, modifier: Modifier = Modifier) {
     Card(modifier.padding(vertical = 4.dp, horizontal = 8.dp)) {
+        if (isPending) {
+            Text(
+                text = "Invite Sent",
+                modifier = Modifier.padding(8.dp),
+                style = MaterialTheme.typography.labelSmall
+            )
+        }
         Text(
             text = "${player.firstName} ${player.lastName}",
             modifier = Modifier.padding(8.dp),

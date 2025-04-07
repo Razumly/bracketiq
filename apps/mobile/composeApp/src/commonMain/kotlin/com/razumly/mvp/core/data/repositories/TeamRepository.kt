@@ -33,26 +33,26 @@ class TeamRepository(
     private val userRepository: IUserRepository
 ) : ITeamRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    override fun getTeamsOfTournamentFlow(tournamentId: String): Flow<Result<List<TeamWithPlayers>>> = channelFlow {
-        val localJob = launch {
-            mvpDatabase.getTeamDao.getTeamsInTournamentFlow(tournamentId)
-                .collect { teams ->
-                    send(Result.success(teams))
-                }
-        }
+    override fun getTeamsOfTournamentFlow(tournamentId: String): Flow<Result<List<TeamWithPlayers>>> =
+        channelFlow {
+            val localJob = launch {
+                mvpDatabase.getTeamDao.getTeamsInTournamentFlow(tournamentId).collect { teams ->
+                        send(Result.success(teams))
+                    }
+            }
 
-        getTeamsOfTournament(tournamentId).onFailure { remoteResult ->
-            send(Result.failure(remoteResult))
-        }
+            getTeamsOfTournament(tournamentId).onFailure { remoteResult ->
+                send(Result.failure(remoteResult))
+            }
 
-        awaitClose { localJob.cancel() }
-    }
+            awaitClose { localJob.cancel() }
+        }
 
     override fun getTeamsOfEventFlow(eventId: String): Flow<Result<List<TeamWithPlayers>>> {
         val localFlow =
             mvpDatabase.getTeamDao.getTeamsInEventFlow(eventId).map { Result.success(it) }
         scope.launch {
-            getTeamsOfTournament(eventId)
+            getTeamsOfEvent(eventId)
         }
         return localFlow
     }
@@ -101,17 +101,26 @@ class TeamRepository(
             )
         }
 
-        if (!team.players.contains(player.id)) {
-            val updatedTeam = team.copy(players = team.players + player.id)
+        if (!team.players.contains(player.id) && team.pending.contains(player.id)) {
+            val updatedTeam =
+                team.copy(players = team.players + player.id, pending = team.pending - player.id)
             updateTeam(updatedTeam).onFailure {
-                mvpDatabase.getTeamDao.deleteTeamPlayerCrossRef(TeamPlayerCrossRef(team.id, player.id))
+                mvpDatabase.getTeamDao.deleteTeamPlayerCrossRef(
+                    TeamPlayerCrossRef(
+                        team.id, player.id
+                    )
+                )
                 return Result.failure(it)
             }
         }
         if (!player.teamIds.contains(team.id)) {
             val updatedUserData = player.copy(teamIds = player.teamIds + team.id)
             userRepository.updateUser(updatedUserData).onFailure {
-                mvpDatabase.getTeamDao.deleteTeamPlayerCrossRef(TeamPlayerCrossRef(team.id, player.id))
+                mvpDatabase.getTeamDao.deleteTeamPlayerCrossRef(
+                    TeamPlayerCrossRef(
+                        team.id, player.id
+                    )
+                )
                 return Result.failure(it)
             }
         }
@@ -149,25 +158,32 @@ class TeamRepository(
         return deleteResult
     }
 
-    override suspend fun createTeam(): Result<Team> {
+    override suspend fun createTeam(team: Team): Result<Team> {
         val id = ID.unique()
         val currentUser = userRepository.currentUserFlow.value
             ?: return Result.failure(Exception("No current user"))
 
         return singleResponse(networkCall = {
-                val team = database.createDocument(
-                    databaseId = DbConstants.DATABASE_NAME,
-                    collectionId = DbConstants.VOLLEYBALL_TEAMS_COLLECTION,
-                    documentId = id,
-                    data = Team(captainId = currentUser.id).toTeamDTO(),
-                    nestedType = TeamDTO::class,
-                ).data.toTeam(id)
-                team
-            }, saveCall = { team ->
-                mvpDatabase.getTeamDao.upsertTeamWithRelations(team)
-                userRepository.updateUser(currentUser.copy(teamIds = currentUser.teamIds + id))
-                    .getOrThrow()
-            }, onReturn = { it })
+            val remoteTeam = database.createDocument(
+                databaseId = DbConstants.DATABASE_NAME,
+                collectionId = DbConstants.VOLLEYBALL_TEAMS_COLLECTION,
+                documentId = id,
+                data = team,
+                nestedType = TeamDTO::class,
+            ).data.toTeam(id)
+            remoteTeam
+        }, saveCall = { remoteTeam ->
+            mvpDatabase.getTeamDao.upsertTeamWithRelations(remoteTeam)
+            userRepository.updateUser(currentUser.copy(teamIds = currentUser.teamIds + id))
+                .getOrThrow()
+            userRepository.getUsers(team.pending).onSuccess { players ->
+                players.forEach { player ->
+                    userRepository.updateUser(
+                        player.copy(teamInvites = player.teamInvites + team.id)
+                    )
+                }
+            }
+        }, onReturn = { it })
     }
 
     override suspend fun updateTeam(newTeam: Team): Result<Team> = singleResponse(networkCall = {
@@ -179,7 +195,22 @@ class TeamRepository(
             nestedType = TeamDTO::class
         ).data.toTeam(newTeam.id)
     }, saveCall = { newData ->
+        val oldTeam = mvpDatabase.getTeamDao.getTeam(newData.id)
         mvpDatabase.getTeamDao.upsertTeamWithRelations(newData)
+        userRepository.getUsers(oldTeam.players.filterNot {
+            newTeam.players.contains(it)
+        }).onSuccess { removedPlayers ->
+            removedPlayers.forEach { player ->
+                removePlayerFromTeam(newData, player)
+            }
+        }
+        userRepository.getUsers(newData.pending).onSuccess { players ->
+            players.forEach { player ->
+                userRepository.updateUser(
+                    player.copy(teamInvites = player.teamInvites + newData.id)
+                )
+            }
+        }
     }, onReturn = { team ->
         team
     })

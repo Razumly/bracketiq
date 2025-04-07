@@ -23,11 +23,11 @@ import com.razumly.mvp.core.presentation.composables.TeamCard
 fun TeamManagementScreen(component: TeamManagementComponent) {
     val currentTeams by component.currentTeams.collectAsState()
     val lazyListState = rememberLazyListState()
-    val selectedTeam by component.selectedTeam.collectAsState()
     val friends by component.friends.collectAsState()
     val suggestions by component.suggestedPlayers.collectAsState()
     val freeAgents by component.freeAgentsFiltered.collectAsState()
     val selectedEvent = component.selectedEvent
+    val selectedTeam by component.selectedTeam.collectAsState()
 
     Scaffold { paddingValues ->
         LazyColumn(
@@ -45,8 +45,8 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
                         }), team = team
                 )
             }
-            item() {
-                Button(onClick = { component.createTeam() }) {
+            item {
+                Button(onClick = { component.selectTeam(null) }) {
                     Text("Create New Team")
                 }
             }
@@ -54,25 +54,21 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
     }
     if (selectedTeam != null) {
         Dialog(onDismissRequest = { component.deselectTeam() }) {
-            TeamEdit(
+            CreateOrEditTeamDialog(
                 team = selectedTeam!!,
-                onTeamNameChange = { newName ->
-                    component.changeTeamName(newName)
-                },
-                onAddPlayer = { player ->
-                    component.addPlayer(player)
-                },
-                onRemovePlayer = { player ->
-                    component.removePlayer(player)
-                },
-                onDismiss = { component.deselectTeam() },
                 friends = friends,
                 freeAgents = freeAgents,
-                searchPlayers = { query ->
-                    component.searchPlayers(query)
-                },
+                onSearch = { query -> component.searchPlayers(query) },
                 suggestions = suggestions,
-                eventName = selectedEvent?.name
+                onFinish = { newTeam ->
+                    if (selectedTeam != null) {
+                        component.updateTeam(newTeam)
+                    } else {
+                        component.createTeam(newTeam)
+                    }
+                },
+                onDismiss = { component.deselectTeam() },
+                selectedEvent = selectedEvent
             )
         }
     }

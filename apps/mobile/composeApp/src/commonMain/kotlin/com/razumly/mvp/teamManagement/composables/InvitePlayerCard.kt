@@ -14,7 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
 @Composable
-fun InvitePlayerCard(modifier: Modifier, onClick: () -> Unit) {
+fun InvitePlayerCard(modifier: Modifier = Modifier, onClick: () -> Unit) {
     Card(modifier.padding(vertical = 4.dp, horizontal = 64.dp).clickable { onClick() }) {
         Row(Modifier.padding(8.dp), horizontalArrangement = Arrangement.Start) {
             Icon(

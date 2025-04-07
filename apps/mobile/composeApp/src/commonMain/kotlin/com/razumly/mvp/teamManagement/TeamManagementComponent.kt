@@ -2,6 +2,7 @@ package com.razumly.mvp.teamManagement
 
 import com.arkivanov.decompose.ComponentContext
 import com.razumly.mvp.core.data.dataTypes.EventAbs
+import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.ITeamRepository
@@ -85,34 +86,26 @@ class TeamManagementComponent(
         }
     }
 
-    fun selectTeam(team: TeamWithPlayers) {
-        _selectedTeam.value = team
+    fun selectTeam(team: TeamWithPlayers?) {
+        _selectedTeam.value = team ?: TeamWithPlayers(
+            Team(currentUser.value!!.id), listOf(currentUser.value!!), listOf()
+        )
     }
 
-    fun createTeam() {
-        scope.launch { teamRepository.createTeam() }
+    fun createTeam(team: Team) {
+        scope.launch {
+            teamRepository.createTeam(team)
+        }
+    }
+
+    fun updateTeam(team: Team) {
+        scope.launch {
+            teamRepository.updateTeam(team)
+        }
     }
 
     fun deselectTeam() {
         _selectedTeam.value = null
-    }
-
-    fun changeTeamName(newName: String) {
-        scope.launch {
-            selectedTeam.value?.team?.let { teamRepository.updateTeam(it.copy(name = newName)) }
-        }
-    }
-
-    fun addPlayer(player: UserData) {
-        scope.launch {
-            selectedTeam.value?.team?.let { teamRepository.addPlayerToTeam(it, player) }
-        }
-    }
-
-    fun removePlayer(player: UserData) {
-        scope.launch {
-            selectedTeam.value?.team?.let { teamRepository.removePlayerFromTeam(it, player) }
-        }
     }
 
     fun searchPlayers(query: String) {
@@ -120,6 +113,8 @@ class TeamManagementComponent(
             _suggestedPlayers.value = userRepository.searchPlayers(search = query).getOrElse {
                 _errorState.value = it.message
                 emptyList()
+            }.filterNot { user ->
+                currentUser.value?.id == user.id
             }
         }
     }
