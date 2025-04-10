@@ -54,7 +54,6 @@ class RootComponent(
         scope.launch {
             try {
                 permissionsController.providePermission(Permission.LOCATION)
-                permissionsController.providePermission(Permission.REMOTE_NOTIFICATION)
                 locationTracker.startTracking()
             } catch (deniedAlways: DeniedAlwaysException) {
                 // Permission is always denied

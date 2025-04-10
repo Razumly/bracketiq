@@ -15,8 +15,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -27,13 +27,14 @@ class PushNotificationsRepository(
     private val messaging: Messaging,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val _pushToken = userDataSource.getPushToken().stateIn(scope, SharingStarted.Lazily, "")
+    private val _pushToken = userDataSource.getPushToken().stateIn(scope, SharingStarted.Eagerly, "")
     private val _pushTarget =
-        userDataSource.getPushTarget().stateIn(scope, SharingStarted.Lazily, "")
+        userDataSource.getPushTarget().stateIn(scope, SharingStarted.Eagerly, "")
 
     init {
         if (_pushToken.value.isBlank()) {
             scope.launch {
+                delay(1000)
                 val newToken = NotifierManager.getPushNotifier().getToken()
                 if (newToken != null) {
                     userDataSource.savePushToken(newToken)
@@ -43,8 +44,10 @@ class PushNotificationsRepository(
         val managerListener = object : NotifierManager.Listener {
             override fun onNewToken(token: String) {
                 runBlocking {
-                    account.updatePushTarget(userDataSource.getPushToken().first(), token)
-                    userDataSource.savePushToken(token)
+                    if (_pushTarget.value.isNotBlank()) {
+                        account.updatePushTarget(_pushTarget.value, token)
+                        userDataSource.savePushToken(token)
+                    }
                 }
             }
 

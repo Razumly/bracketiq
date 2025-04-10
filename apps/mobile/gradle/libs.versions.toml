@@ -14,6 +14,7 @@ concurrentFuturesKtx = "1.2.0"
 coroutines = "1.10.1"
 datastore = "1.1.3"
 decompose = "3.3.0-alpha02"
+firebaseMessaging = "24.1.1"
 foundationLayout = "1.8.0-alpha08"
 geo = "0.7.0"
 googleApiServicesOauth2 = "v2-rev157-1.25.0"
@@ -51,6 +52,7 @@ animationAndroid = "1.7.7"
 
 
 [libraries]
+firebase-messaging = { module = "com.google.firebase:firebase-messaging", version.ref = "firebaseMessaging" }
 kmpnotifier = { module = "io.github.mirzemehdi:kmpnotifier", version.ref = "kmpnotifier" }
 materialKolor = { module = "com.materialkolor:material-kolor", version.ref = "materialKolor" }
 accompanist-pager = { module = "com.google.accompanist:accompanist-pager", version.ref = "accompanistPager" }

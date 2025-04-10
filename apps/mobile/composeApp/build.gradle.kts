@@ -15,7 +15,7 @@ plugins {
     alias(libs.plugins.compose.vectorize)
     alias(libs.plugins.secrets)
     id("kotlin-parcelize")
-    id("com.google.gms.google-services") version "4.4.2" apply false
+    id("com.google.gms.google-services") version "4.4.2"
 }
 
 kotlin {
@@ -99,6 +99,7 @@ kotlin {
                 implementation(libs.google.auth.library.oauth2.http)
                 implementation(libs.google.http.client.gson)
                 implementation(libs.google.api.services.oauth2)
+                implementation(libs.firebase.messaging)
             }
         }
 

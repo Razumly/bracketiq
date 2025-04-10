@@ -39,8 +39,8 @@ class UserRepository(
     private val pushNotificationsRepository: PushNotificationsRepository
 ) : IUserRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val _pushToken = currentUserDataSource.getPushToken().stateIn(scope, SharingStarted.Lazily, "")
-    private val _pushTarget = currentUserDataSource.getPushTarget().stateIn(scope, SharingStarted.Lazily, "")
+    private val _pushToken = currentUserDataSource.getPushToken().stateIn(scope, SharingStarted.Eagerly, "")
+    private val _pushTarget = currentUserDataSource.getPushTarget().stateIn(scope, SharingStarted.Eagerly, "")
 
     override val currentUser: StateFlow<UserData?> =
         getCurrentUserFlow().distinctUntilChanged().map { user ->
@@ -70,6 +70,7 @@ class UserRepository(
     override suspend fun logout(): Result<Unit> = kotlin.runCatching {
         currentUserDataSource.saveUserId("")
         account.deleteSession("current")
+        pushNotificationsRepository.removeDeviceAsTarget()
     }
 
     private fun getCurrentUserFlow(): Flow<Result<UserData>> = flow {
@@ -79,12 +80,19 @@ class UserRepository(
             val fetchedUserId = runCatching {
                 account.get().id
             }.getOrElse {
-                emit(Result.failure<UserData>(Exception("Failed to fetch user ID", it)))
+                emit(Result.failure(Exception("Failed to fetch user ID", it)))
                 return@flow
             }
             currentUserDataSource.saveUserId(fetchedUserId)
             fetchedUserId
         }
+
+        if (_pushToken.value.isNotBlank() && _pushTarget.value.isBlank()) {
+            pushNotificationsRepository.addDeviceAsTarget().onFailure {
+                Napier.e("Failed to add device as target", it, "UserRepository")
+            }
+        }
+
         val userDataResult = singleResponse(networkCall = {
             database.getDocument(
                 DbConstants.DATABASE_NAME,
