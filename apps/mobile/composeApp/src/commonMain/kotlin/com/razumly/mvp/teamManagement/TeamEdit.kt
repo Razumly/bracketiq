@@ -5,6 +5,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -41,6 +43,7 @@ import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.SearchBox
 import com.razumly.mvp.teamManagement.composables.InvitePlayerCard
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun CreateOrEditTeamDialog(
     team: TeamWithPlayers,
@@ -70,8 +73,7 @@ fun CreateOrEditTeamDialog(
             Text("Team Setup", style = MaterialTheme.typography.titleLarge)
             Spacer(modifier = Modifier.height(8.dp))
 
-            OutlinedTextField(
-                value = teamName,
+            OutlinedTextField(value = teamName,
                 onValueChange = {
                     teamName = it
                 },
@@ -82,16 +84,11 @@ fun CreateOrEditTeamDialog(
 
             Spacer(modifier = Modifier.height(12.dp))
             Text("Select Team Size")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(2, 3, 4, 5, 6, 7).forEach { size ->
-                    FilterChip(
-                        enabled = isCaptain,
-                        selected = size == teamSize,
-                        onClick = {
-                            teamSize = size
-                        },
-                        label = { if (size < 7) Text("$size") else Text("6+") }
-                    )
+                    FilterChip(enabled = isCaptain, selected = size == teamSize, onClick = {
+                        teamSize = size
+                    }, label = { if (size < 7) Text("$size") else Text("6+") })
                 }
             }
 
@@ -99,8 +96,12 @@ fun CreateOrEditTeamDialog(
             Text("Players")
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(playersInTeam) { player ->
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        PlayerCard(player = player)
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        PlayerCard(player = player, modifier = Modifier.weight(1f))
                         if (isCaptain) {
                             Button(onClick = {
                                 playersInTeam = playersInTeam - player
@@ -111,11 +112,15 @@ fun CreateOrEditTeamDialog(
                     }
                 }
                 items(invitedPlayers) { player ->
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        PlayerCard(player = player, isPending = true)
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        PlayerCard(player = player, isPending = true, Modifier.weight(1f))
                         if (isCaptain) {
                             Button(onClick = {
-                                playersInTeam = invitedPlayers - player
+                                invitedPlayers = invitedPlayers - player
                             }) {
                                 Text("Remove")
                             }
@@ -131,8 +136,7 @@ fun CreateOrEditTeamDialog(
 
             Spacer(modifier = Modifier.height(16.dp))
             Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 OutlinedButton(onClick = onDismiss) {
                     Text("Cancel")
@@ -140,8 +144,7 @@ fun CreateOrEditTeamDialog(
                 if (isCaptain) {
                     Button(onClick = {
                         onFinish(
-                            team.team.copy(
-                                players = playersInTeam.map { it.id },
+                            team.team.copy(players = playersInTeam.map { it.id },
                                 pending = invitedPlayers.map { it.id },
                                 name = teamName,
                                 teamSize = teamSize
@@ -161,16 +164,16 @@ fun CreateOrEditTeamDialog(
 
     if (showLeaveTeamDialog) {
         Dialog(onDismissRequest = { showLeaveTeamDialog = false }) {
-            Box(Modifier.fillMaxSize()){
+            Box(Modifier.fillMaxSize()) {
                 Text("Are you sure you want to leave this team?")
                 Button(onClick = {
                     onFinish(
-                        team.team.copy(
-                            players = (playersInTeam - currentUser).map { it.id },
+                        team.team.copy(players = (playersInTeam - currentUser).map { it.id },
                             pending = invitedPlayers.map { it.id },
                             name = teamName,
                             teamSize = teamSize
-                        ))
+                        )
+                    )
                     showLeaveTeamDialog = false
                 }) {
                     Text("Yes")
@@ -183,8 +186,7 @@ fun CreateOrEditTeamDialog(
     }
 
     if (showSearchDialog) {
-        SearchPlayerDialog(
-            freeAgents = freeAgents,
+        SearchPlayerDialog(freeAgents = freeAgents,
             friends = friends,
             suggestions = suggestions.filterNot {
                 playersInTeam.contains(it) || invitedPlayers.contains(it)

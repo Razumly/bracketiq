@@ -26,13 +26,15 @@ fun TeamCard(team: TeamWithPlayers, modifier: Modifier = Modifier) {
             } else {
                 team.players.forEachIndexed { index, player ->
                     Text(
-                        "${player.firstName}.${player.lastName.first()}".toTitleCase(),
+                        "${player.firstName.toTitleCase()}.${
+                            player.lastName.first().uppercaseChar()
+                        }",
                         overflow = TextOverflow.Ellipsis,
                         maxLines = 1,
                         style = MaterialTheme.typography.bodyLarge
                     )
-                    if (index != team.players.size-1) {
-                        Text("-", style = MaterialTheme.typography.bodyLarge)
+                    if (index != team.players.size - 1) {
+                        Text(" - ", style = MaterialTheme.typography.bodyLarge)
                     }
                 }
             }
