@@ -55,10 +55,10 @@ class EventAbsRepository(
         val eventResults = eventRepository.getEvents(query)
         val tournamentResults = tournamentRepository.getTournaments(query)
 
-        val result = eventResults.onSuccess { events ->
-            tournamentResults.onSuccess { tournaments ->
-                val combinedEvents: List<EventAbs> = events + tournaments
-            }
+        val result = runCatching {
+            val events = eventResults.getOrThrow()
+            val tournaments = tournamentResults.getOrThrow()
+            events + tournaments
         }
 
         return result.map { events ->
