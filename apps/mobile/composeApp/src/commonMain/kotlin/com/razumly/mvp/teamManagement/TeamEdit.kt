@@ -52,7 +52,9 @@ fun CreateOrEditTeamDialog(
     suggestions: List<UserData>,
     onSearch: (String) -> Unit,
     onFinish: (Team) -> Unit,
+    onDelete: (TeamWithPlayers) -> Unit,
     onDismiss: () -> Unit,
+    deleteEnabled: Boolean,
     selectedEvent: EventAbs?,
     isCaptain: Boolean,
     currentUser: UserData
@@ -142,6 +144,9 @@ fun CreateOrEditTeamDialog(
                     Text("Cancel")
                 }
                 if (isCaptain) {
+                    Button(onClick = { onDelete(team) }, enabled = deleteEnabled) {
+                        Text("Delete")
+                    }
                     Button(onClick = {
                         onFinish(
                             team.team.copy(players = playersInTeam.map { it.id },

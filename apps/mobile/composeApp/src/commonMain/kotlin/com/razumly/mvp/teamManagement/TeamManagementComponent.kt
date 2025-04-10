@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+
 @OptIn(ExperimentalCoroutinesApi::class)
 
 class TeamManagementComponent(
@@ -76,6 +77,11 @@ class TeamManagementComponent(
         }
     }.stateIn(scope, SharingStarted.Eagerly, listOf())
 
+    val enableDeleteTeam = selectedTeam.map { team ->
+        team?.team?.eventIds?.isEmpty() == true && team.team.tournamentIds.isEmpty()
+    }.stateIn(scope, SharingStarted.Eagerly, false)
+
+
     init {
         scope.launch {
             currentUser.collect { user ->
@@ -131,6 +137,14 @@ class TeamManagementComponent(
 
     fun deselectTeam() {
         _selectedTeam.value = null
+    }
+
+    fun deleteTeam(team: TeamWithPlayers) {
+        scope.launch {
+            teamRepository.deleteTeam(team).onFailure {
+                _errorState.value = it.message
+            }
+        }
     }
 
     fun searchPlayers(query: String) {

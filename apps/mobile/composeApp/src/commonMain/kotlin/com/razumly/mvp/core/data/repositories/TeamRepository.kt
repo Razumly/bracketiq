@@ -21,10 +21,8 @@ import kotlinx.coroutines.IO
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class TeamRepository(
@@ -238,10 +236,35 @@ class TeamRepository(
         team
     })
 
+    override suspend fun deleteTeam(team: TeamWithPlayers): Result<Unit> = runCatching {
+        database.deleteDocument(
+            databaseId = DbConstants.DATABASE_NAME,
+            collectionId = DbConstants.VOLLEYBALL_TEAMS_COLLECTION,
+            documentId = team.team.id
+        )
+        team.players.forEach { player ->
+            userRepository.updateUser(
+                player.copy(
+                    teamIds = player.teamIds - team.team.id,
+                    eventIds = player.eventIds - team.team.eventIds.toSet(),
+                    tournamentIds = player.tournamentIds - team.team.tournamentIds.toSet()
+                )
+            )
+        }
+        team.pendingPlayers.forEach { player ->
+            userRepository.updateUser(
+                player.copy(
+                    teamInvites = player.teamInvites - team.team.id
+                )
+            )
+        }
+        mvpDatabase.getTeamDao.deleteTeamWithRelations(team.team)
+    }
+
     override fun getTeamsWithPlayersFlow(ids: List<String>): Flow<Result<List<TeamWithPlayers>>> {
         val localTeamsFlow = mvpDatabase.getTeamDao.getTeamsWithPlayersFlowByIds(ids).map {
             Result.success(it)
-        }.stateIn(scope, SharingStarted.Eagerly, Result.success(emptyList()))
+        }
 
         scope.launch {
             multiResponse(getRemoteData = {

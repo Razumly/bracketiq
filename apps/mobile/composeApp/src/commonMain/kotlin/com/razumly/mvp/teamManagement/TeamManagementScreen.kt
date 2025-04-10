@@ -37,6 +37,7 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
     val isCaptain = selectedTeam?.team?.captainId == currentUser?.id
     var createTeam by remember { mutableStateOf(false) }
     val teamInvites by component.teamInvites.collectAsState()
+    val deleteEnabled by component.enableDeleteTeam.collectAsState()
 
     Scaffold { paddingValues ->
         LazyColumn(
@@ -71,6 +72,7 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
             }
         }
     }
+
     if (selectedTeam != null && currentUser != null) {
         Dialog(onDismissRequest = { component.deselectTeam() }) {
             CreateOrEditTeamDialog(
@@ -88,6 +90,10 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
                     createTeam = false
                 },
                 onDismiss = { component.deselectTeam() },
+                onDelete = { team ->
+                    component.deleteTeam(team)
+                },
+                deleteEnabled = deleteEnabled,
                 selectedEvent = selectedEvent,
                 isCaptain = isCaptain,
                 currentUser = currentUser!!

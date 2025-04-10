@@ -16,6 +16,7 @@ interface ITeamRepository : IMVPRepository {
     suspend fun removePlayerFromTeam(team: Team, player: UserData): Result<Unit>
     suspend fun createTeam(newTeam: Team): Result<Team>
     suspend fun updateTeam(newTeam: Team): Result<Team>
+    suspend fun deleteTeam(team: TeamWithPlayers): Result<Unit>
     fun getTeamsWithPlayersFlow(ids: List<String>): Flow<Result<List<TeamWithPlayers>>>
     fun getTeamWithPlayersFlow(id: String): Flow<Result<TeamWithRelations>>
 }
