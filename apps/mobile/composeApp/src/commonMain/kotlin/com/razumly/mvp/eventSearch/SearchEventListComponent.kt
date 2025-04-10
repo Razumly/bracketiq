@@ -14,12 +14,14 @@ import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
@@ -50,10 +52,10 @@ class SearchEventListComponent(
 
     private val _currentLocation = MutableStateFlow<LatLng?>(null)
 
-    @OptIn(ExperimentalCoroutinesApi::class)
+    @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
     val events = combine(_currentLocation.filterNotNull(), _currentRadius) { location, radius ->
         getBounds(radius, location.latitude, location.longitude)
-    }.flatMapLatest { bounds ->
+    }.debounce(200L).flatMapLatest { bounds ->
             eventAbsRepository.getEventsInBoundsFlow(bounds).map { result ->
                     result.getOrElse {
                         _error.value = "Failed to fetch events: ${it.message}"
