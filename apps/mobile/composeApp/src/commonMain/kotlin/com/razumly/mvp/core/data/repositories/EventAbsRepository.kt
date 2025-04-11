@@ -25,7 +25,7 @@ class EventAbsRepository(
     override suspend fun getEvent(event: EventAbs): Result<EventAbsWithRelations> {
         val eventWithRelations = when (event) {
             is EventImp -> eventRepository.getEvent(event.id)
-            is Tournament -> tournamentRepository.getTournament(event.id)
+            is Tournament -> tournamentRepository.getTournamentWithRelations(event.id)
         }
         return eventWithRelations
     }
@@ -70,7 +70,7 @@ class EventAbsRepository(
         }
     }
 
-    override fun getEventsInBoundsFlow(bounds: Bounds): Flow<Result<List<EventAbsWithRelations>>> {
+    override fun getEventsInBoundsFlow(bounds: Bounds): Flow<Result<List<EventAbs>>> {
         val query = Query.and(
             listOf(
                 Query.greaterThan(DbConstants.LAT_ATTRIBUTE, bounds.south),
@@ -80,18 +80,18 @@ class EventAbsRepository(
             )
         )
 
-        return searchEventsFlow(query, bounds.center)
+        return getEventsFlow(query, bounds.center)
     }
 
-    private fun getEventsFlow(query: String, userLocation: LatLng): Flow<Result<List<EventAbsWithRelations>>> {
+    private fun getEventsFlow(query: String, userLocation: LatLng): Flow<Result<List<EventAbs>>> {
         val eventsFlow = eventRepository.getEventsFlow(query)
         val tournamentsFlow = tournamentRepository.getTournamentsFlow(query)
 
         return combine(eventsFlow, tournamentsFlow) { events, tournaments ->
             runCatching {
-                val combinedEvents: List<EventAbsWithRelations> = events.getOrDefault(emptyList()) + tournaments.getOrDefault(
+                val combinedEvents: List<EventAbs> = events.getOrDefault(emptyList()) + tournaments.getOrDefault(
                     emptyList())
-                combinedEvents.sortedBy { calcDistance(userLocation, LatLng(it.event.lat, it.event.long)) }
+                combinedEvents.sortedBy { calcDistance(userLocation, LatLng(it.lat, it.long)) }
             }
         }
     }
@@ -101,7 +101,7 @@ class EventAbsRepository(
         return getEvents(query, userLocation)
     }
 
-    override fun searchEventsFlow(searchQuery: String, userLocation: LatLng): Flow<Result<List<EventAbsWithRelations>>> {
+    override fun searchEventsFlow(searchQuery: String, userLocation: LatLng): Flow<Result<List<EventAbs>>> {
         val query = Query.contains("name", searchQuery)
         return getEventsFlow(query, userLocation)
     }
@@ -196,7 +196,7 @@ class EventAbsRepository(
             }
 
             is Tournament -> {
-                tournamentRepository.getTournament(event.id).onSuccess { tournamentWithPlayers ->
+                tournamentRepository.getTournamentWithRelations(event.id).onSuccess { tournamentWithPlayers ->
                     if (tournamentWithPlayers.players.size >= tournamentWithPlayers.event.maxPlayers) {
                         tournamentRepository.updateTournament(event.copy(waitList = event.waitList + currentUser.id))
                     }

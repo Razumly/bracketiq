@@ -33,7 +33,7 @@ interface TournamentDao {
     suspend fun getTournamentById(id: String): Tournament
 
     @Query("SELECT * FROM Tournament")
-    fun getAllCachedTournamentsFlow(): Flow<List<TournamentWithRelations>>
+    fun getAllCachedTournamentsFlow(): Flow<List<Tournament>>
 
     @Transaction
     @Query("SELECT * FROM Tournament WHERE id = :id")

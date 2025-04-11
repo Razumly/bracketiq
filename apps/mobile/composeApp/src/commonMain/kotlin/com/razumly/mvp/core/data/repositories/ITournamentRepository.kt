@@ -7,8 +7,9 @@ import kotlinx.coroutines.flow.Flow
 interface ITournamentRepository : IMVPRepository {
     fun getTournamentWithRelationsFlow(tournamentId: String): Flow<Result<TournamentWithRelations>>
     fun getTournamentFlow(tournamentId: String): Flow<Result<Tournament>>
-    suspend fun getTournament(tournamentId: String): Result<TournamentWithRelations>
-    fun getTournamentsFlow(query: String): Flow<Result<List<TournamentWithRelations>>>
+    suspend fun getTournamentWithRelations(tournamentId: String): Result<TournamentWithRelations>
+    fun getTournamentsFlow(query: String): Flow<Result<List<Tournament>>>
+    suspend fun getTournament(tournamentId: String): Result<Tournament>
     suspend fun getTournaments(query: String): Result<List<Tournament>>
     suspend fun createTournament(newTournament: Tournament): Result<Tournament>
     suspend fun updateTournament(newTournament: Tournament): Result<Tournament>

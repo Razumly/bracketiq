@@ -33,11 +33,13 @@ class TournamentRepository(
         val localFlow = mvpDatabase.getTournamentDao.getTournamentWithRelationsFlow(tournamentId)
             .map { Result.success(it) }
         scope.launch {
-            getTournament(tournamentId)
-            fieldRepository.getFieldsInTournament(tournamentId)
-            userRepository.getUsersOfTournament(tournamentId)
-            teamRepository.getTeamsOfTournament(tournamentId)
-            matchRepository.getMatchesOfTournament(tournamentId)
+            getTournament(tournamentId).onSuccess {
+                fieldRepository.getFieldsInTournament(tournamentId)
+                userRepository.getUsersOfTournament(tournamentId)
+                userRepository.getUsers(listOf(it.hostId))
+                teamRepository.getTeamsOfTournament(tournamentId)
+                matchRepository.getMatchesOfTournament(tournamentId)
+            }
         }
         return localFlow
     }
@@ -63,7 +65,7 @@ class TournamentRepository(
                 )
             })
 
-    override fun getTournamentsFlow(query: String): Flow<Result<List<TournamentWithRelations>>> {
+    override fun getTournamentsFlow(query: String): Flow<Result<List<Tournament>>> {
         val localFlow =
             mvpDatabase.getTournamentDao.getAllCachedTournamentsFlow().map { Result.success(it) }
         scope.launch {
@@ -72,7 +74,22 @@ class TournamentRepository(
         return localFlow
     }
 
-    override suspend fun getTournament(tournamentId: String): Result<TournamentWithRelations> =
+    override suspend fun getTournament(tournamentId: String): Result<Tournament> =
+        singleResponse(networkCall = {
+            database.getDocument(
+                DbConstants.DATABASE_NAME,
+                DbConstants.TOURNAMENT_COLLECTION,
+                tournamentId,
+                nestedType = TournamentDTO::class,
+                queries = null
+            ).data.toTournament(tournamentId)
+        }, saveCall = { tournament ->
+            mvpDatabase.getTournamentDao.upsertTournamentWithRelations(tournament)
+        }, onReturn = {
+            mvpDatabase.getTournamentDao.getTournamentById(tournamentId)
+        })
+
+    override suspend fun getTournamentWithRelations(tournamentId: String): Result<TournamentWithRelations> =
         singleResponse(networkCall = {
             database.getDocument(
                 DbConstants.DATABASE_NAME,

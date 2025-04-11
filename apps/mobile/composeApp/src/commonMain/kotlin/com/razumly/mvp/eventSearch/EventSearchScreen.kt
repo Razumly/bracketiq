@@ -124,7 +124,7 @@ fun EventSearchScreen(
             ) {
                 EventList(
                     component,
-                    events.map { it.event },
+                    events.map { it },
                     firstElementPadding,
                     offsetNavPadding,
                     lazyListState,

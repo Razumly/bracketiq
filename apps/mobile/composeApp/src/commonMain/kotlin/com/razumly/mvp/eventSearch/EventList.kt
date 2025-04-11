@@ -21,7 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.EventAbs
-import com.razumly.mvp.core.presentation.composables.EventDetails
+import com.razumly.mvp.core.presentation.composables.EventCard
 
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
@@ -61,8 +61,7 @@ fun EventList(
                 elevation = CardDefaults.cardElevation(4.dp),
                 shape = RoundedCornerShape(12.dp),
             ) {
-                EventDetails(event,
-                    isExpanded,
+                EventCard(event,
                     {},
                     Modifier.padding(8.dp),
                     navPadding = PaddingValues(bottom = 16.dp),
@@ -70,8 +69,7 @@ fun EventList(
                         onMapClick(offset)
                         component.onMapClick(event)
                     },
-                ) {
-                }
+                )
             }
         }
     }

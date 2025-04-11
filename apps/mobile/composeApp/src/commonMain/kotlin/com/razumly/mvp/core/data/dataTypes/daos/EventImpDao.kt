@@ -24,7 +24,7 @@ interface EventImpDao {
     suspend fun deleteEventsById(ids: List<String>)
 
     @Query("SELECT * FROM EventImp")
-    fun getAllCachedEvents(): Flow<List<EventWithRelations>>
+    fun getAllCachedEvents(): Flow<List<EventImp>>
 
     @Query("DELETE FROM EventImp WHERE id = :id")
     suspend fun deleteEventById(id: String)

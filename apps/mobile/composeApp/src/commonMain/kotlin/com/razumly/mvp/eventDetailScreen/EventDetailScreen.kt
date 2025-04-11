@@ -80,8 +80,7 @@ fun EventDetailScreen(
                     !showDetails, enter = expandVertically(), exit = shrinkVertically()
                 ) {
                     EventDetails(
-                        selectedEvent.event,
-                        animateExpanded,
+                        selectedEvent,
                         {},
                         Modifier.padding(top = 64.dp, end = 8.dp),
                         LocalNavBarPadding.current,

@@ -98,7 +98,7 @@ class EventRepository(
             deleteData = { events -> mvpDatabase.getEventImpDao.deleteEventsById(events) }
         )
 
-    override fun getEventsFlow(query: String): Flow<Result<List<EventWithRelations>>> {
+    override fun getEventsFlow(query: String): Flow<Result<List<EventImp>>> {
         val localFlow = mvpDatabase.getEventImpDao.getAllCachedEvents()
             .map { Result.success(it) }
 

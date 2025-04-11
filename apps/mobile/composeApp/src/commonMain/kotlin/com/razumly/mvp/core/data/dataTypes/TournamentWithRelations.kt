@@ -10,6 +10,13 @@ import com.razumly.mvp.core.data.dataTypes.crossRef.TournamentUserCrossRef
 
 data class TournamentWithRelations (
     @Embedded override val event: Tournament,
+
+    @Relation(
+        parentColumn = "hostId",
+        entityColumn = "id",
+    )
+    override val host: UserData,
+
     @Relation(
         parentColumn = "id",
         entityColumn = "id",

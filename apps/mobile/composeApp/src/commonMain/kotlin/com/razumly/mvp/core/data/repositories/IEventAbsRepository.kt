@@ -9,8 +9,8 @@ import kotlinx.coroutines.flow.Flow
 
 interface IEventAbsRepository : IMVPRepository {
     fun getEventWithRelationsFlow(event: EventAbs): Flow<Result<EventAbsWithRelations>>
-    fun getEventsInBoundsFlow(bounds: Bounds): Flow<Result<List<EventAbsWithRelations>>>
-    fun searchEventsFlow(searchQuery: String, userLocation: LatLng): Flow<Result<List<EventAbsWithRelations>>>
+    fun getEventsInBoundsFlow(bounds: Bounds): Flow<Result<List<EventAbs>>>
+    fun searchEventsFlow(searchQuery: String, userLocation: LatLng): Flow<Result<List<EventAbs>>>
     suspend fun removeTeamFromEvent(event: EventAbs, teamWithPlayers: TeamWithPlayers): Result<Unit>
     suspend fun removeCurrentUserFromEvent(event: EventAbs): Result<Unit>
     suspend fun getEvent(event: EventAbs): Result<EventAbsWithRelations>

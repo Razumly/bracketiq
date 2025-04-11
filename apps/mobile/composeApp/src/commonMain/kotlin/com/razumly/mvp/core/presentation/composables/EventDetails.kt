@@ -1,9 +1,6 @@
 package com.razumly.mvp.core.presentation.composables
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,15 +11,18 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddCircle
-import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -33,6 +33,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInWindow
@@ -40,13 +41,10 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
-import coil3.compose.AsyncImagePainter
-import com.razumly.mvp.core.data.dataTypes.EventAbs
+import com.razumly.mvp.core.data.dataTypes.EventAbsWithRelations
 import com.razumly.mvp.core.presentation.util.cleanup
 import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.toTitleCase
-import com.razumly.mvp.eventSearch.composables.StylizedText
-import com.razumly.mvp.eventSearch.util.TextPatterns
 import dev.chrisbanes.haze.ExperimentalHazeApi
 import dev.chrisbanes.haze.HazeInputScale
 import dev.chrisbanes.haze.HazeProgressive
@@ -59,27 +57,21 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.format
 import kotlinx.datetime.toLocalDateTime
 
-@OptIn(
-    ExperimentalSharedTransitionApi::class,
-    ExperimentalHazeMaterialsApi::class,
-    ExperimentalHazeApi::class
-)
+@OptIn(ExperimentalHazeMaterialsApi::class, ExperimentalHazeApi::class)
 @Composable
 fun EventDetails(
-    event: EventAbs,
-    expanded: Boolean,
+    eventWithRelations: EventAbsWithRelations,
     onFavoriteClick: () -> Unit,
     favoritesModifier: Modifier,
     navPadding: PaddingValues = PaddingValues(),
     onMapClick: (Offset) -> Unit,
     joinButton: @Composable () -> Unit
 ) {
-    var imageStateText by remember { mutableStateOf("initial") }
-    val patterns = TextPatterns(event.name)
+    val imageStateText by remember { mutableStateOf("initial") }
+    val event = eventWithRelations.event
+    val host = eventWithRelations.host
     val hazeState = remember { HazeState() }
     var mapButtonOffset by remember { mutableStateOf(Offset.Zero) }
-    val startIntensityAnim = animateFloatAsState(if (expanded) 1f else 0f)
-    val startYAnim = animateFloatAsState(if (expanded) 0f else 200f)
 
     val dateRangeText = remember(event.start, event.end) {
         val startDate = event.start.toLocalDateTime(TimeZone.currentSystemDefault()).date
@@ -97,19 +89,9 @@ fun EventDetails(
 
 
     Box(Modifier.fillMaxSize()) {
-        AsyncImage(model = event.imageUrl,
-            contentDescription = "Event Image",
-            modifier = Modifier.matchParentSize().hazeSource(hazeState),
-            contentScale = ContentScale.Crop,
-            onState = { state ->
-                imageStateText = when (state) {
-                    is AsyncImagePainter.State.Loading -> "Loading"
-                    is AsyncImagePainter.State.Error -> "Error loading image: ${state.result.throwable}"
 
-                    is AsyncImagePainter.State.Success -> "success"
-                    is AsyncImagePainter.State.Empty -> "Image is Empty"
-                }
-            })
+        BackgroundImage(event.imageUrl, hazeState)
+
         if (imageStateText != "success") {
             Text(imageStateText)
         }
@@ -122,100 +104,143 @@ fun EventDetails(
             )
         }
 
-        // Event Details Section
+        val scrollState = rememberScrollState()
+
         Column(
-            modifier = Modifier.hazeEffect(
-                hazeState, HazeMaterials.ultraThin(MaterialTheme.colorScheme.onBackground)
-            ) {
-                inputScale = HazeInputScale.Fixed(0.8f)
-                progressive = HazeProgressive.verticalGradient(
-                    easing = FastOutSlowInEasing,
-                    startIntensity = startIntensityAnim.value,
-                    endIntensity = 1f,
-                    startY = startYAnim.value
-                )
-            }.padding(navPadding).padding(horizontal = 16.dp).fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(4.dp, alignment = Alignment.Bottom)
-        ) {
-            Spacer(modifier = Modifier.height(232.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Button(
-                    modifier = Modifier.onGloballyPositioned { layoutCoordinates ->
-                        val boundsInWindow = layoutCoordinates.boundsInWindow()
-                        mapButtonOffset = boundsInWindow.center
-                    },
-                    onClick = { onMapClick(mapButtonOffset) },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color.Black, contentColor = Color.White
-                    )
+            modifier = Modifier
+                .hazeEffect(
+                    hazeState,
+                    HazeMaterials.ultraThin(MaterialTheme.colorScheme.onBackground)
                 ) {
-                    Text("View on Map")
-                    Icon(Icons.Default.Place, contentDescription = "View on Map Button")
+                    inputScale = HazeInputScale.Fixed(0.8f)
+                    progressive = HazeProgressive.verticalGradient(
+                        easing = FastOutSlowInEasing,
+                        startIntensity = 0f,
+                        endIntensity = 1f,
+                        startY = 200f
+                    )
                 }
-                if (expanded){
-                    joinButton()
+                .padding(navPadding)
+                .padding(horizontal = 16.dp)
+                .fillMaxSize()
+                .verticalScroll(scrollState),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Spacer(Modifier.height(232.dp))
+
+            // Title and Rating
+            Text(
+                text = event.name,
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.background
+            )
+
+            Text(
+                text = event.location,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.background
+            )
+
+            // View on Map Button
+            Button(
+                onClick = { onMapClick(mapButtonOffset) },
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .onGloballyPositioned {
+                        mapButtonOffset = it.boundsInWindow().center
+                    },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color.Black,
+                    contentColor = Color.White
+                )
+            ) {
+                Icon(Icons.Default.Place, contentDescription = null)
+                Text("View on Map")
+            }
+
+            // Host info
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("Hosted by ${host.firstName} ${host.lastName}".toTitleCase(), style = MaterialTheme.typography.titleMedium)
+                    Text(event.description, style = MaterialTheme.typography.bodySmall)
                 }
             }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+
+            // Price and Date
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Text(
-                    text = event.name,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.background
-                )
-                Text(
-                    text = event.rating.toString(),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.background
-                )
+                Row(
+                    Modifier.padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = dateRangeText,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Text(
+                        text = "$${cleanup("${event.price}")}",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Start,
-                verticalAlignment = Alignment.CenterVertically,
+            // Type and Division
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Icon(
-                    painter = rememberVectorPainter(Icons.Default.LocationOn),
-                    contentDescription = "Location",
-                    tint = MaterialTheme.colorScheme.background
-                )
-                Text(
-                    text = event.location,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.background
-                )
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "${event.fieldType} • ${event.eventType}".toTitleCase(),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Text(
+                        text = "Divisions: ${event.divisions.joinToString()}",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
             }
 
-            AnimatedVisibility(expanded) {
-                StylizedText(event.description, patterns)
+            // Join Button (if applicable)
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                joinButton()
             }
 
-            StylizedText("${event.fieldType} ${event.eventType}".toTitleCase(), patterns)
-            StylizedText("Divisions: ${event.divisions.joinToString(", ")}", patterns)
-            androidx.compose.material3.HorizontalDivider(thickness = 2.dp)
-
-            Row(
-                modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = dateRangeText,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.background
-                )
-                Text(
-                    text = "$" + cleanup("${event.price}"),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.background
-                )
-            }
+            Spacer(modifier = Modifier.height(64.dp))
         }
+    }
+}
+
+@Composable
+fun BackgroundImage(imageUrl: String, hazeState: HazeState) {
+    Column(Modifier.fillMaxSize()) {
+        AsyncImage(
+            model = imageUrl,
+            contentDescription = "Event Image",
+            modifier = Modifier
+                .fillMaxWidth()
+                .graphicsLayer { rotationX = 0f }
+                .hazeSource(hazeState),
+            contentScale = ContentScale.Crop,
+        )
+
+        AsyncImage(
+            model = imageUrl,
+            contentDescription = "Flipped Hazy Background",
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer { rotationX = 180f }
+                .hazeSource(hazeState),
+            contentScale = ContentScale.Crop,
+        )
     }
 }

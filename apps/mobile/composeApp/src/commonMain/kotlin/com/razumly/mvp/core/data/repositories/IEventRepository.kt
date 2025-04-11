@@ -10,5 +10,5 @@ interface IEventRepository : IMVPRepository {
     suspend fun createEvent(newEvent: EventImp): Result<EventImp>
     suspend fun updateEvent(newEvent: EventImp): Result<EventImp>
     suspend fun getEvents(query: String): Result<List<EventImp>>
-    fun getEventsFlow(query: String): Flow<Result<List<EventWithRelations>>>
+    fun getEventsFlow(query: String): Flow<Result<List<EventImp>>>
 }
