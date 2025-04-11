@@ -40,8 +40,8 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import com.razumly.mvp.core.data.dataTypes.EventAbs
-import com.razumly.mvp.core.presentation.util.cleanup
 import com.razumly.mvp.core.presentation.util.dateFormat
+import com.razumly.mvp.core.presentation.util.moneyFormat
 import com.razumly.mvp.core.presentation.util.toTitleCase
 import com.razumly.mvp.eventSearch.composables.StylizedText
 import com.razumly.mvp.eventSearch.util.TextPatterns
@@ -198,7 +198,7 @@ fun EventCard(
                     color = MaterialTheme.colorScheme.background
                 )
                 Text(
-                    text = "$" + cleanup("${event.price}"),
+                    text = event.price.moneyFormat(),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.background
                 )

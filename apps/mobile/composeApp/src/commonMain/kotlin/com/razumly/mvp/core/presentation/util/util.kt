@@ -1,6 +1,5 @@
 package com.razumly.mvp.core.presentation.util
 
-import androidx.compose.animation.core.Easing
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
@@ -56,6 +55,10 @@ val dateTimeFormat = LocalDateTime.Format {
 
 }
 
+fun Int.teamSizeFormat(): String {
+    return if (this < 7) "$this" else "6+"
+}
+
 @Composable
 fun LazyListState.isScrollingUp(): State<Boolean> {
     return produceState(initialValue = true) {
@@ -85,13 +88,24 @@ fun String.toTitleCase(): String {
         }
 }
 
-fun cleanup(input: String): String {
-    val number = input.toDoubleOrNull() ?: return "0.00"
-    // Multiply by 100 and round to get the nearest hundredth as an integer.
-    val rounded = (number * 100).roundToInt()
+fun String.toDivisionCase(): String {
+    return this
+        .lowercase()
+        .split(" ")
+        .joinToString(" ") { word ->
+            if (word.length > 3) {
+                word.replaceFirstChar { char ->
+                    char.uppercase()
+                }
+            } else {
+                word.uppercase()
+            }
+        }
+}
+
+fun Double.moneyFormat(): String {
+    val rounded = (this * 100).roundToInt()
     val whole = rounded / 100
-    // Use absolute value for the fractional part to handle negatives properly.
     val fraction = abs(rounded % 100)
-    // Format the fractional part to always have two digits.
-    return "$whole.${if (fraction < 10) "0" else ""}$fraction"
+    return "$$whole.${if (fraction < 10) "0" else ""}$fraction"
 }

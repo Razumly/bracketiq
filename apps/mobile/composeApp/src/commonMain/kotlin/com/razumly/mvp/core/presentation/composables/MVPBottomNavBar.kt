@@ -3,7 +3,6 @@ package com.razumly.mvp.core.presentation.composables
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.MailOutline
@@ -64,8 +63,7 @@ fun MVPBottomNavBar(
         ) {
             NavigationBar(
                 modifier = Modifier
-                    .zIndex(1f)
-                    .padding(top = 16.dp),
+                    .zIndex(1f),
             ) {
                 items.forEach { item ->
                     NavigationBarItem(

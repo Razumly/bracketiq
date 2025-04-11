@@ -41,6 +41,7 @@ import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.SearchBox
+import com.razumly.mvp.core.presentation.util.teamSizeFormat
 import com.razumly.mvp.teamManagement.composables.InvitePlayerCard
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -90,7 +91,7 @@ fun CreateOrEditTeamDialog(
                 listOf(2, 3, 4, 5, 6, 7).forEach { size ->
                     FilterChip(enabled = isCaptain, selected = size == teamSize, onClick = {
                         teamSize = size
-                    }, label = { if (size < 7) Text("$size") else Text("6+") })
+                    }, label = { Text(size.teamSizeFormat()) })
                 }
             }
 
