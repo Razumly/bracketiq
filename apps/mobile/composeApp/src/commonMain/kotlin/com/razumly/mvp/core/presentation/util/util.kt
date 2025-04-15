@@ -5,6 +5,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.unit.Dp
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
@@ -22,6 +23,9 @@ fun instantToDateTimeString(instant: Instant): String {
 
 @Composable
 expect fun getScreenWidth(): Int
+
+@Composable
+expect fun getScreenHeight(): Int
 
 val timeFormat = LocalTime.Format {
     amPmHour()

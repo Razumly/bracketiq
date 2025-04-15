@@ -65,6 +65,8 @@ kotlin {
                 implementation(libs.datastore.preferences)
                 implementation( libs.accompanist.pager)
                 implementation(libs.materialKolor)
+                implementation(libs.kmpalette.extensions.network)
+                implementation(libs.kmpalette.core)
                 api(libs.kmpnotifier)
                 api(libs.decompose.decompose)
                 api(libs.decompose.extensions)

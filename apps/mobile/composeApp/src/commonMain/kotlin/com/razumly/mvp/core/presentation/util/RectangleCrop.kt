@@ -18,9 +18,9 @@ class RectangleCrop(
         val croppedHeight = size.height * heightPercent
         val rect = Rect(
             left = 0f,
-            top = size.height - croppedHeight,
+            top = 0f,
             right = size.width,
-            bottom = size.height
+            bottom = size.height - croppedHeight
         )
         return Outline.Rectangle(rect)
     }

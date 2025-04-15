@@ -21,6 +21,7 @@ googleApiServicesOauth2 = "v2-rev157-1.25.0"
 googleAuthLibraryOauth2Http = "1.23.0"
 googleHttpClientGson = "1.44.1"
 hazeMaterials = "1.5.0"
+kmpalette = "3.1.0"
 kmpDateTimePicker = "1.0.5"
 kmpnotifier = "1.5.1"
 koin = "4.0.1"
@@ -86,6 +87,8 @@ google-auth-library-oauth2-http = { module = "com.google.auth:google-auth-librar
 google-http-client-gson = { module = "com.google.http-client:google-http-client-gson", version.ref = "googleHttpClientGson" }
 haze = { module = "dev.chrisbanes.haze:haze", version.ref = "hazeMaterials" }
 haze-materials = { module = "dev.chrisbanes.haze:haze-materials", version.ref = "hazeMaterials" }
+kmpalette-extensions-network = { module = "com.kmpalette:extensions-network", version.ref = "kmpalette" }
+kmpalette-core = { module = "com.kmpalette:kmpalette-core", version.ref = "kmpalette" }
 kmp-date-time-picker = { module = "network.chaintech:kmp-date-time-picker", version.ref = "kmpDateTimePicker" }
 koin-android = { module = "io.insert-koin:koin-android", version.ref = "koin" }
 koin-androidx-compose = { module = "io.insert-koin:koin-androidx-compose-navigation", version.ref = "koin" }

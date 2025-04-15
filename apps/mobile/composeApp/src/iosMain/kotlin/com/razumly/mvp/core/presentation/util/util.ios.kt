@@ -14,4 +14,11 @@ actual fun getScreenWidth(): Int {
     }
 }
 
-
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+actual fun getScreenHeight(): Int {
+    val windowInfo = LocalWindowInfo.current
+    return with(LocalDensity.current) {
+        windowInfo.containerSize.height.toDp().value.toInt()
+    }
+}
