@@ -1,5 +1,6 @@
 package com.razumly.mvp.core.presentation.composables
 
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,8 +32,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInWindow
@@ -54,6 +58,7 @@ import com.razumly.mvp.core.presentation.util.teamSizeFormat
 import com.razumly.mvp.core.presentation.util.toDivisionCase
 import com.razumly.mvp.core.presentation.util.toTitleCase
 import dev.chrisbanes.haze.ExperimentalHazeApi
+import dev.chrisbanes.haze.HazeInputScale
 import dev.chrisbanes.haze.HazeProgressive
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.HazeStyle
@@ -80,7 +85,6 @@ fun EventDetails(
     val hazeState = remember { HazeState() }
     var mapButtonOffset by remember { mutableStateOf(Offset.Zero) }
     val scrollState = rememberScrollState()
-    var contentHeightPx by remember { mutableStateOf(0) }
 
     val painter = rememberAsyncImagePainter(event.imageUrl)
     val painterLoader = rememberPainterLoader()
@@ -94,7 +98,7 @@ fun EventDetails(
     val secondary =
         colorState.result?.paletteOrNull?.mutedSwatch?.color ?: MaterialTheme.colorScheme.secondary
     val onBackground = colorState.result?.paletteOrNull?.vibrantSwatch?.onColor
-        ?: MaterialTheme.colorScheme.onBackground
+        ?: MaterialTheme.colorScheme.background
 
     val dateRangeText = remember(event.start, event.end) {
         val startDate = event.start.toLocalDateTime(TimeZone.currentSystemDefault()).date
@@ -112,11 +116,9 @@ fun EventDetails(
 
     Column(Modifier.fillMaxSize().verticalScroll(scrollState)) {
         Box(Modifier.fillMaxSize()) {
-            AsyncImage(
-                model = event.imageUrl,
-                contentDescription = "Event Image",
-                modifier = Modifier.matchParentSize().hazeSource(hazeState),
-                contentScale = ContentScale.Crop,
+            BackgroundImage(
+                Modifier.matchParentSize().hazeSource(hazeState, key = "BackGround"),
+                event.imageUrl,
             )
 
             IconButton(
@@ -129,23 +131,25 @@ fun EventDetails(
             }
 
             Column(
-                modifier = Modifier.onGloballyPositioned {
-                    contentHeightPx = it.size.height
-                }.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Spacer(Modifier.height(getScreenHeight().dp / 2))
                 Column(
                     Modifier.fillMaxWidth().hazeEffect(hazeState) {
+
+                        inputScale = HazeInputScale.Fixed(0.5f)
                         style = HazeStyle(
                             backgroundColor = primary,
                             tint = null,
-                            blurRadius = 32.dp,
+                            blurRadius = 64.dp,
                             noiseFactor = 0f
                         )
                         progressive = HazeProgressive.verticalGradient(
-                            startIntensity = 0f, endIntensity = 1f, startY = 0f, endY = 200f
+                            easing = LinearOutSlowInEasing,
+                            startIntensity = 0f, endIntensity = 1f, startY = 0f, endY = 300f
                         )
-                    }.padding(navPadding).padding(horizontal = 16.dp).padding(top = 16.dp),
+                    }.padding(navPadding).padding(horizontal = 16.dp).padding(top = 32.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
@@ -262,5 +266,34 @@ fun CardSection(title: String, content: String, hazeState: HazeState) {
             Text(title, style = MaterialTheme.typography.titleMedium)
             Text(content, style = MaterialTheme.typography.bodyMedium)
         }
+    }
+}
+
+@Composable
+fun BackgroundImage(modifier: Modifier, imageUrl: String) {
+    val imageHeight = (getScreenHeight() * 0.75f)
+    Column(
+        modifier
+    ) {
+        AsyncImage(
+            model = imageUrl,
+            contentDescription = "Event Image",
+            modifier = Modifier.height(imageHeight.dp),
+            contentScale = ContentScale.Crop,
+        )
+
+        AsyncImage(
+            model = imageUrl,
+            contentDescription = "Flipped Hazy Background",
+            modifier = Modifier.fillMaxSize().graphicsLayer {
+                clip = true
+                rotationX = 180f
+            }.graphicsLayer {
+                transformOrigin = TransformOrigin(0.5f, 1f)
+                scaleY = 50f
+            }.blur(32.dp),
+            contentScale = ContentScale.Crop,
+            clipToBounds = true
+        )
     }
 }

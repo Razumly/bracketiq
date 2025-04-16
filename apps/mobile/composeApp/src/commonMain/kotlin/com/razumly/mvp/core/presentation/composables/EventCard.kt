@@ -121,7 +121,7 @@ fun EventCard(
             modifier = Modifier.hazeEffect(
                 hazeState, HazeMaterials.ultraThin(MaterialTheme.colorScheme.onBackground)
             ) {
-                inputScale = HazeInputScale.Fixed(0.8f)
+                inputScale = HazeInputScale.Fixed(0.5f)
                 progressive = HazeProgressive.verticalGradient(
                     easing = FastOutSlowInEasing,
                     startIntensity = 0f,
