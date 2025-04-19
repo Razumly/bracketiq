@@ -1,4 +1,4 @@
-package com.razumly.mvp.matchDetailScreen
+package com.razumly.mvp.matchDetail
 
 import com.arkivanov.decompose.ComponentContext
 import com.razumly.mvp.core.data.dataTypes.Field
@@ -9,7 +9,7 @@ import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.ITournamentRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
-import com.razumly.mvp.eventDetailScreen.data.IMatchRepository
+import com.razumly.mvp.eventDetail.data.IMatchRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi

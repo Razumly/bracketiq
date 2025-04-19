@@ -13,8 +13,8 @@ import com.razumly.mvp.core.data.repositories.PushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.TeamRepository
 import com.razumly.mvp.core.data.repositories.TournamentRepository
 import com.razumly.mvp.core.data.repositories.UserRepository
-import com.razumly.mvp.eventDetailScreen.data.IMatchRepository
-import com.razumly.mvp.eventDetailScreen.data.MatchRepository
+import com.razumly.mvp.eventDetail.data.IMatchRepository
+import com.razumly.mvp.eventDetail.data.MatchRepository
 import org.koin.dsl.bind
 import org.koin.dsl.module
 

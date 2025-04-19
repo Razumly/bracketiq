@@ -9,7 +9,7 @@ import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResp
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
 import com.razumly.mvp.core.util.DbConstants
 import com.razumly.mvp.core.util.convert
-import com.razumly.mvp.eventDetailScreen.data.IMatchRepository
+import com.razumly.mvp.eventDetail.data.IMatchRepository
 import io.appwrite.services.Databases
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers

@@ -7,10 +7,10 @@ import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.presentation.RootComponent
 import com.razumly.mvp.eventCreate.DefaultCreateEventComponent
-import com.razumly.mvp.eventDetailScreen.DefaultEventContentComponent
+import com.razumly.mvp.eventDetail.DefaultEventContentComponent
 import com.razumly.mvp.eventSearch.SearchEventListComponent
 import com.razumly.mvp.home.DefaultHomeComponent
-import com.razumly.mvp.matchDetailScreen.DefaultMatchContentComponent
+import com.razumly.mvp.matchDetail.DefaultMatchContentComponent
 import com.razumly.mvp.profile.DefaultProfileComponent
 import com.razumly.mvp.teamManagement.TeamManagementComponent
 import com.razumly.mvp.userAuth.loginScreen.AuthComponent

@@ -47,7 +47,8 @@ actual fun EventMap(
     canClickPOI: Boolean,
     modifier: Modifier,
     searchBarPadding: PaddingValues,
-    focusLocation: dev.icerock.moko.geo.LatLng?,
+    focusedLocation: dev.icerock.moko.geo.LatLng?,
+    focusedEvent: EventAbs?,
 ) {
     val selectedPlace = remember { mutableStateOf<PointOfInterest?>(null) }
     val scope = rememberCoroutineScope()
@@ -56,7 +57,7 @@ actual fun EventMap(
     val events by component.events.collectAsState()
     val defaultZoom = 12f
     val defaultDurationMs = 1000
-    val initCameraState = focusLocation?.toGoogle()
+    val initCameraState = focusedLocation?.toGoogle()
     val cameraPositionState = rememberCameraPositionState()
 
     LaunchedEffect(initCameraState, currentLocation) {
@@ -162,6 +163,17 @@ actual fun EventMap(
                         }
                         true
                     }
+                )
+            }
+
+            focusedEvent?.let { event ->
+                val eventPosition = LatLng(event.lat, event.long)
+                val state = rememberUpdatedMarkerState(eventPosition)
+                Marker(
+                    state = state,
+                    title = event.name,
+                    snippet = "${event.fieldType} - $${event.price}",
+                    onInfoWindowClick = { onEventSelected(event) }
                 )
             }
         }

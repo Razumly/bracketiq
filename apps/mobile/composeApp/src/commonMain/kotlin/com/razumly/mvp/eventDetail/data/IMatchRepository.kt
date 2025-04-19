@@ -1,4 +1,4 @@
-package com.razumly.mvp.eventDetailScreen.data
+package com.razumly.mvp.eventDetail.data
 
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations

@@ -96,6 +96,17 @@ class EventAbsRepository(
         }
     }
 
+    override suspend fun updateEvent(event: EventAbs): Result<Unit> {
+        return when (event) {
+            is EventImp -> {
+                eventRepository.updateEvent(event)
+            }
+            is Tournament -> {
+                tournamentRepository.updateTournament(event)
+            }
+        }.map{}
+    }
+
     override suspend fun searchEvents(searchQuery: String, userLocation: LatLng): Result<List<EventAbs>> {
         val query = Query.contains("name", searchQuery)
         return getEvents(query, userLocation)
@@ -186,7 +197,8 @@ class EventAbsRepository(
         when (event) {
             is EventImp -> {
                 eventRepository.getEvent(event.id).onSuccess { eventWithRelations ->
-                    if (eventWithRelations.players.size >= eventWithRelations.event.maxPlayers) {
+                    val participants = if (event.teamSignup) eventWithRelations.teams.size else eventWithRelations.players.size
+                    if (participants >= eventWithRelations.event.maxParticipants) {
                         eventRepository.updateEvent(event.copy(waitList = event.waitList + currentUser.id))
                     }
                     if (event.teamSignup) {
@@ -197,7 +209,8 @@ class EventAbsRepository(
 
             is Tournament -> {
                 tournamentRepository.getTournamentWithRelations(event.id).onSuccess { tournamentWithPlayers ->
-                    if (tournamentWithPlayers.players.size >= tournamentWithPlayers.event.maxPlayers) {
+                    val participants = if (event.teamSignup) tournamentWithPlayers.teams.size else tournamentWithPlayers.players.size
+                    if (participants >= tournamentWithPlayers.event.maxParticipants) {
                         tournamentRepository.updateTournament(event.copy(waitList = event.waitList + currentUser.id))
                     }
                     if (event.teamSignup) {
@@ -226,7 +239,7 @@ class EventAbsRepository(
             return Result.failure(Exception("Team already in waitlist"))
         }
         return getEvent(event).onSuccess { eventWithPlayers ->
-            if (eventWithPlayers.players.size >= eventWithPlayers.event.maxPlayers) {
+            if (eventWithPlayers.players.size >= eventWithPlayers.event.maxParticipants) {
                 val waitlist = event.waitList + team.team.id
                 val result = when (event) {
                     is EventImp -> {

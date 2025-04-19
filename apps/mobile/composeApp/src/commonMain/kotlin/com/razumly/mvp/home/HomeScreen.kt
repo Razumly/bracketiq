@@ -12,7 +12,6 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.zIndex
 import com.arkivanov.decompose.ExperimentalDecomposeApi
@@ -24,12 +23,11 @@ import com.razumly.mvp.Message.MessagesScreen
 import com.razumly.mvp.core.presentation.composables.MVPBottomNavBar
 import com.razumly.mvp.core.presentation.composables.PlatformBackButton
 import com.razumly.mvp.eventCreate.CreateEventScreen
-import com.razumly.mvp.eventDetailScreen.EventDetailScreen
+import com.razumly.mvp.eventDetail.EventDetailScreen
 import com.razumly.mvp.eventSearch.EventSearchScreen
-import com.razumly.mvp.matchDetailScreen.MatchDetailScreen
+import com.razumly.mvp.matchDetail.MatchDetailScreen
 import com.razumly.mvp.profile.ProfileScreen
 import com.razumly.mvp.teamManagement.TeamManagementScreen
-import dev.chrisbanes.haze.HazeState
 import io.github.aakira.napier.Napier
 
 val LocalNavBarPadding = compositionLocalOf<PaddingValues> { error("No padding values provided") }
@@ -84,7 +82,7 @@ fun HomeScreen(component: HomeComponent) {
 
                                     is HomeComponent.Child.EventContent -> {
                                         Napier.d(tag = "Navigation") { "Navigating to Event Detail Screen" }
-                                        EventDetailScreen(instance.component)
+                                        EventDetailScreen(instance.component, instance.mapComponent)
                                     }
 
                                     is HomeComponent.Child.MatchContent -> {

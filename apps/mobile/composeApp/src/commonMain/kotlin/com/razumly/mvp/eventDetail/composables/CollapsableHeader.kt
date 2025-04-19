@@ -1,4 +1,4 @@
-package com.razumly.mvp.eventDetailScreen.composables
+package com.razumly.mvp.eventDetail.composables
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -24,7 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
-import com.razumly.mvp.eventDetailScreen.EventContentComponent
+import com.razumly.mvp.eventDetail.EventContentComponent
 import com.razumly.mvp.icons.MVPIcons
 import com.razumly.mvp.icons.TournamentBracket
 

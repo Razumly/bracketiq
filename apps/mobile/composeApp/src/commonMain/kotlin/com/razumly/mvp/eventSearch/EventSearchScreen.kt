@@ -131,19 +131,22 @@ fun EventSearchScreen(
                 ) { offset ->
                     revealCenter = offset
                 }
-                EventMap(component = mapComponent,
+                EventMap(
+                    component = mapComponent,
                     onEventSelected = { event ->
                         component.viewEvent(event)
                     },
                     onPlaceSelected = {},
-                    canClickPOI = false,
+                    canClickPOI = true,
                     modifier = Modifier.graphicsLayer {
                         alpha = if (animationProgress > 0f) 1f else 0f
                     }.clip(CircularRevealShape(animationProgress, revealCenter)),
                     searchBarPadding = PaddingValues(),
-                    focusLocation = selectedEvent?.let {
+                    focusedLocation = selectedEvent?.let {
                         LatLng(it.lat, it.long)
-                    })
+                    },
+                    focusedEvent = null
+                )
             }
         }
     }

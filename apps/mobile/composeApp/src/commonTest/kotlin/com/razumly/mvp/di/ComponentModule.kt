@@ -9,12 +9,12 @@ import com.razumly.mvp.eventCreate.DefaultCreateEventComponent
 import com.razumly.mvp.eventFollowing.FollowingEventListComponent
 import com.razumly.mvp.eventSearch.SearchEventListComponent
 import com.razumly.mvp.home.DefaultHomeComponent
-import com.razumly.mvp.matchDetailScreen.DefaultMatchContentComponent
-import com.razumly.mvp.matchDetailScreen.MatchContentComponent
+import com.razumly.mvp.matchDetail.DefaultMatchContentComponent
+import com.razumly.mvp.matchDetail.MatchContentComponent
 import com.razumly.mvp.profile.DefaultProfileComponent
 import com.razumly.mvp.profile.ProfileComponent
-import com.razumly.mvp.eventDetailScreen.DefaultEventContentComponent
-import com.razumly.mvp.eventDetailScreen.EventContentComponent
+import com.razumly.mvp.eventDetail.DefaultEventContentComponent
+import com.razumly.mvp.eventDetail.EventContentComponent
 import com.razumly.mvp.userAuth.loginScreen.AuthComponent
 import org.koin.dsl.bind
 import org.koin.dsl.module

@@ -1,19 +1,22 @@
-package com.razumly.mvp.eventDetailScreen
+package com.razumly.mvp.eventDetail
 
 import com.arkivanov.decompose.ComponentContext
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.EventAbsWithRelations
+import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
+import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.Division
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.IEventAbsRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
-import com.razumly.mvp.eventDetailScreen.data.IMatchRepository
+import com.razumly.mvp.eventDetail.data.IMatchRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -45,17 +48,25 @@ interface EventContentComponent : ComponentContext {
     val eventWithRelations: StateFlow<EventWithFullRelations>
     val currentUser: StateFlow<UserData?>
     val validTeams: StateFlow<List<TeamWithPlayers>>
+    val isHost: StateFlow<Boolean>
+    val editedEvent: StateFlow<EventAbs>
 
     fun matchSelected(selectedMatch: MatchWithRelations)
     fun selectDivision(division: Division)
     fun toggleBracketView()
     fun toggleLosersBracket()
     fun toggleDetails()
+    fun toggleEdit()
     fun joinEvent()
     fun joinEventAsTeam(team: TeamWithPlayers)
     fun viewEvent()
     fun leaveEvent()
+    fun editEventField(update: EventImp.() -> EventImp)
+    fun editTournamentField(update: Tournament.() -> Tournament)
+    fun updateEvent()
     fun createNewTeam()
+    fun selectPlace(place: MVPPlace)
+    fun onTypeSelected(type: EventType)
 }
 
 @Serializable
@@ -90,13 +101,19 @@ class DefaultEventContentComponent(
     private val _errorState = MutableStateFlow<String?>(null)
     override val errorState = _errorState.asStateFlow()
 
+    private val _editedEvent = MutableStateFlow(event)
+    override var editedEvent = _editedEvent.asStateFlow()
+
     override val selectedEvent: StateFlow<EventAbsWithRelations> =
         eventAbsRepository.getEventWithRelationsFlow(event).map { result ->
-                result.getOrElse {
-                    _errorState.value = it.message
-                    EventAbsWithRelations.getEmptyEvent(event)
-                }
-            }.stateIn(scope, SharingStarted.Eagerly, EventAbsWithRelations.getEmptyEvent(event))
+            result.getOrElse {
+                _errorState.value = it.message
+                EventAbsWithRelations.getEmptyEvent(event)
+            }
+        }.stateIn(scope, SharingStarted.Eagerly, EventAbsWithRelations.getEmptyEvent(event))
+
+    override val isHost = selectedEvent.map { it.event.hostId == currentUser.value?.id }
+        .stateIn(scope, SharingStarted.Eagerly, false)
 
     override val eventWithRelations = selectedEvent.flatMapLatest { eventWithPlayers ->
         combine(matchRepository.getMatchesOfTournamentFlow(eventWithPlayers.event.id)
@@ -170,18 +187,17 @@ class DefaultEventContentComponent(
                 .collect { event ->
                     matchRepository.subscribeToMatches()
                     _userInTournament.value =
-                        _currentUser.value?.let{ event.players.contains(it) } == true
+                        _currentUser.value?.let { event.players.contains(it) } == true
                     if (_userInTournament.value) {
                         _showDetails.value = true
-                        _usersTeam.value = event.teams.find { it.team.players.contains(_currentUser.value?.id) }
+                        _usersTeam.value =
+                            event.teams.find { it.team.players.contains(_currentUser.value?.id) }
                     }
-                    event.event.divisions.firstOrNull()
-                        ?.let { selectDivision(it) }
+                    event.event.divisions.firstOrNull()?.let { selectDivision(it) }
                 }
         }
         scope.launch {
-            selectedDivision
-                .collect { _ ->
+            selectedDivision.collect { _ ->
                     _selectedDivision.value?.let { selectDivision(it) }
                 }
         }
@@ -258,9 +274,43 @@ class DefaultEventContentComponent(
     override fun toggleDetails() {
         _showDetails.value = !_showDetails.value
     }
+    override fun toggleEdit() {
+        _editedEvent.value = selectedEvent.value.event
+    }
+
+    override fun editEventField(update: EventImp.() -> EventImp) {
+        if (_editedEvent.value is EventImp) {
+            _editedEvent.value = (_editedEvent.value as EventImp).update()
+        }
+    }
+
+    override fun editTournamentField(update: Tournament.() -> Tournament) {
+        if (_editedEvent.value is Tournament) {
+            _editedEvent.value = (_editedEvent.value as Tournament).update()
+        }
+    }
+
+    override fun updateEvent() {
+        scope.launch {
+            eventAbsRepository.updateEvent(_editedEvent.value).onFailure {
+                _errorState.value = it.message
+            }
+        }
+    }
 
     override fun createNewTeam() {
         onNavigateToTeamSettings(selectedEvent.value.event.freeAgents, selectedEvent.value.event)
+    }
+
+    override fun selectPlace(place: MVPPlace) {
+        editEventField { copy(lat = place.lat, long = place.long, location = place.name) }
+    }
+
+    override fun onTypeSelected(type: EventType) {
+        _editedEvent.value = when(type) {
+            EventType.TOURNAMENT -> Tournament().updateTournamentFromEvent(_editedEvent.value as EventImp)
+            EventType.EVENT -> (_editedEvent.value as Tournament).toEvent()
+        }
     }
 
     private fun generateRounds() {
@@ -326,8 +376,7 @@ class DefaultEventContentComponent(
             val mergeMatch =
                 match.previousLeftMatch != null && match.previousLeftMatch.losersBracket != match.previousRightMatch?.losersBracket
             val opposite = match.match.losersBracket != losersBracket.value
-            val firstRound =
-                match.previousLeftMatch == null && match.previousRightMatch == null
+            val firstRound = match.previousLeftMatch == null && match.previousRightMatch == null
 
             finalsMatch || mergeMatch || !opposite || firstRound
         } else {

@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resumeWithException
 
 
@@ -86,7 +87,7 @@ actual class MapComponent(
     }
 
     suspend fun getPlace(placeId: String): MVPPlace =
-        kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+        suspendCancellableCoroutine { cont ->
             val fields = listOf(
                 Place.Field.ID,
                 Place.Field.DISPLAY_NAME,
@@ -106,7 +107,7 @@ actual class MapComponent(
         }
 
     suspend fun suggestPlaces(query: String, latLng: LatLng): List<Place> =
-        kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+        suspendCancellableCoroutine { cont ->
             val currentBounds =
                 getBounds(_currentRadiusMeters.value, latLng.latitude, latLng.longitude)
 
@@ -133,7 +134,7 @@ actual class MapComponent(
         }
 
     suspend fun searchPlaces(query: String, latLng: LatLng, bounds: LatLngBounds): List<Place> =
-        kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+        suspendCancellableCoroutine { cont ->
             val center = LatLng(latLng.latitude, latLng.longitude)
             val fields = listOf(
                 Place.Field.ID,

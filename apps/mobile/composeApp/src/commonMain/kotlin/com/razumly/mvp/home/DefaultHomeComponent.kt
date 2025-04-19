@@ -11,12 +11,12 @@ import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.eventCreate.DefaultCreateEventComponent
-import com.razumly.mvp.eventDetailScreen.DefaultEventContentComponent
+import com.razumly.mvp.eventDetail.DefaultEventContentComponent
 import com.razumly.mvp.eventMap.MapComponent
 import com.razumly.mvp.eventSearch.SearchEventListComponent
 import com.razumly.mvp.home.HomeComponent.Child
 import com.razumly.mvp.home.HomeComponent.Config
-import com.razumly.mvp.matchDetailScreen.DefaultMatchContentComponent
+import com.razumly.mvp.matchDetail.DefaultMatchContentComponent
 import com.razumly.mvp.profile.DefaultProfileComponent
 import com.razumly.mvp.teamManagement.TeamManagementComponent
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -75,6 +75,9 @@ class DefaultHomeComponent(
                             ::onMatchSelected,
                             ::onNavigateToTeamSettings
                         )
+                    }.value,
+                    _koin.inject<MapComponent> {
+                        parametersOf(componentContext)
                     }.value
                 )
             }

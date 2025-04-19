@@ -7,10 +7,10 @@ import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.eventCreate.CreateEventComponent
-import com.razumly.mvp.eventDetailScreen.EventContentComponent
+import com.razumly.mvp.eventDetail.EventContentComponent
 import com.razumly.mvp.eventMap.MapComponent
 import com.razumly.mvp.eventSearch.SearchEventListComponent
-import com.razumly.mvp.matchDetailScreen.MatchContentComponent
+import com.razumly.mvp.matchDetail.MatchContentComponent
 import com.razumly.mvp.profile.ProfileComponent
 import com.razumly.mvp.teamManagement.TeamManagementComponent
 import kotlinx.coroutines.flow.StateFlow
@@ -29,7 +29,12 @@ interface HomeComponent {
             val component: SearchEventListComponent,
             val mapComponent: MapComponent
         ) : Child()
-        data class EventContent(val component: EventContentComponent) : Child()
+
+        data class EventContent(
+            val component: EventContentComponent,
+            val mapComponent: MapComponent
+        ) : Child()
+
         data class MatchContent(val component: MatchContentComponent) : Child()
         data class Messages(val component: MessagesComponent) : Child()
         data class Create(val component: CreateEventComponent) : Child()
@@ -38,7 +43,7 @@ interface HomeComponent {
     }
 
     @Serializable
-    sealed class Config{
+    sealed class Config {
         @Serializable
         data class EventDetail(
             val event: EventAbs,

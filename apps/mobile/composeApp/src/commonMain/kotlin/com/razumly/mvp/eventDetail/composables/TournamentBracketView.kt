@@ -1,4 +1,4 @@
-package com.razumly.mvp.eventDetailScreen.composables
+package com.razumly.mvp.eventDetail.composables
 
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.core.animateDpAsState
@@ -35,7 +35,7 @@ import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.presentation.util.getScreenWidth
 import com.razumly.mvp.core.util.ceilDiv
-import com.razumly.mvp.eventDetailScreen.LocalTournamentComponent
+import com.razumly.mvp.eventDetail.LocalTournamentComponent
 import com.razumly.mvp.home.LocalNavBarPadding
 
 @OptIn(ExperimentalSharedTransitionApi::class)

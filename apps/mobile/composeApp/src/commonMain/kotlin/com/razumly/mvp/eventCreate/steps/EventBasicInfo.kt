@@ -87,7 +87,7 @@ fun EventBasicInfo(modifier: Modifier, component: CreateEventComponent, isComple
                         && startDateSelected
                         && endDateSelected
                         && event.teamSizeLimit != 0
-                        && event.maxPlayers != 0
+                        && event.maxParticipants != 0
                         && (event.price >= 0
                         && !showPriceError)
             } ?: false

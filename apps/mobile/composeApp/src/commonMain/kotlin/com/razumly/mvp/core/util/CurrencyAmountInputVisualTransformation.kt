@@ -11,7 +11,6 @@ class CurrencyAmountInputVisualTransformation(
     private val numberOfDecimals: Int = 2
 ) : VisualTransformation {
 
-
     override fun filter(text: AnnotatedString): TransformedText {
         val thousandsSeparator = ','
         val decimalSeparator = '.'

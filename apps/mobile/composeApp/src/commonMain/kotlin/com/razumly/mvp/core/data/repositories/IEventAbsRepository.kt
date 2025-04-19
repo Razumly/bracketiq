@@ -11,6 +11,7 @@ interface IEventAbsRepository : IMVPRepository {
     fun getEventWithRelationsFlow(event: EventAbs): Flow<Result<EventAbsWithRelations>>
     fun getEventsInBoundsFlow(bounds: Bounds): Flow<Result<List<EventAbs>>>
     fun searchEventsFlow(searchQuery: String, userLocation: LatLng): Flow<Result<List<EventAbs>>>
+    suspend fun updateEvent(event: EventAbs): Result<Unit>
     suspend fun removeTeamFromEvent(event: EventAbs, teamWithPlayers: TeamWithPlayers): Result<Unit>
     suspend fun removeCurrentUserFromEvent(event: EventAbs): Result<Unit>
     suspend fun getEvent(event: EventAbs): Result<EventAbsWithRelations>

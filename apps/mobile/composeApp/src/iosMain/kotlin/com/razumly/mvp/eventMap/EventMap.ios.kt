@@ -15,6 +15,7 @@ actual fun EventMap(
     canClickPOI: Boolean,
     modifier: Modifier,
     searchBarPadding: PaddingValues,
-    focusLocation: LatLng?
+    focusedLocation: LatLng?,
+    focusedEvent: EventAbs?
 ) {
 }

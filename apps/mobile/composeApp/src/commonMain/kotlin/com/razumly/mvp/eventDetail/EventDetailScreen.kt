@@ -1,4 +1,4 @@
-package com.razumly.mvp.eventDetailScreen
+package com.razumly.mvp.eventDetail
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
@@ -37,9 +37,10 @@ import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
 import com.razumly.mvp.core.presentation.composables.EventDetails
 import com.razumly.mvp.core.presentation.composables.TeamCard
-import com.razumly.mvp.eventDetailScreen.composables.CollapsableHeader
-import com.razumly.mvp.eventDetailScreen.composables.ParticipantsView
-import com.razumly.mvp.eventDetailScreen.composables.TournamentBracketView
+import com.razumly.mvp.eventDetail.composables.CollapsableHeader
+import com.razumly.mvp.eventDetail.composables.ParticipantsView
+import com.razumly.mvp.eventDetail.composables.TournamentBracketView
+import com.razumly.mvp.eventMap.MapComponent
 import com.razumly.mvp.home.LocalNavBarPadding
 import kotlinx.coroutines.delay
 
@@ -49,6 +50,7 @@ val LocalTournamentComponent =
 @Composable
 fun EventDetailScreen(
     component: EventContentComponent,
+    mapComponent: MapComponent
 ) {
     val isBracketView by component.isBracketView.collectAsState()
     var showDropdownMenu by remember { mutableStateOf(false) }
@@ -59,10 +61,11 @@ fun EventDetailScreen(
     val validTeams by component.validTeams.collectAsState()
     val showDetails by component.showDetails.collectAsState()
     var animateExpanded by remember { mutableStateOf(false) }
+    val isHost by component.isHost.collectAsState()
+    val editedEvent by component.editedEvent.collectAsState()
 
     val isUserInEvent =
-        (currentUser!!.eventIds + currentUser!!.tournamentIds).contains(selectedEvent.event.id)
-                || (selectedEvent.event.waitList + selectedEvent.event.freeAgents).contains(
+        (currentUser!!.eventIds + currentUser!!.tournamentIds).contains(selectedEvent.event.id) || (selectedEvent.event.waitList + selectedEvent.event.freeAgents).contains(
             currentUser!!.id
         )
 
@@ -80,11 +83,20 @@ fun EventDetailScreen(
                     !showDetails, enter = expandVertically(), exit = shrinkVertically()
                 ) {
                     EventDetails(
-                        selectedEvent,
-                        {},
-                        Modifier.padding(top = 64.dp, end = 8.dp),
-                        LocalNavBarPadding.current,
-                        onMapClick = {},
+                        mapComponent = mapComponent,
+                        eventWithRelations = selectedEvent,
+                        editEvent = editedEvent,
+                        onFavoriteClick = {},
+                        favoritesModifier = Modifier.padding(top = 64.dp, end = 8.dp),
+                        navPadding = LocalNavBarPadding.current,
+                        onPlaceSelected = {component.selectPlace(it)},
+                        editView = isHost,
+                        onEditEvent = { update -> component.editEventField(update) },
+                        onEditTournament = { update -> component.editTournamentField(update) },
+                        onEditEventComplete = { component.updateEvent() },
+                        isNewEvent = false,
+                        onEventTypeSelected = {},
+                        onAddCurrentUser = {}
                     ) {
                         Row {
                             Button(
@@ -149,7 +161,8 @@ fun EventDetailScreen(
                             }
                             Button(
                                 { component.toggleDetails() },
-                                Modifier.align(Alignment.BottomCenter).padding(LocalNavBarPadding.current).padding(bottom = 64.dp)
+                                Modifier.align(Alignment.BottomCenter)
+                                    .padding(LocalNavBarPadding.current).padding(bottom = 64.dp)
                             ) {
                                 Text("Show Details")
                             }

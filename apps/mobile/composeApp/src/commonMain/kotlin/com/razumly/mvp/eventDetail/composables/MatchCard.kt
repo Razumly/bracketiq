@@ -1,4 +1,4 @@
-package com.razumly.mvp.eventDetailScreen.composables
+package com.razumly.mvp.eventDetail.composables
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -33,7 +33,7 @@ import com.razumly.mvp.core.presentation.matchCard
 import com.razumly.mvp.core.presentation.matchCardBottom
 import com.razumly.mvp.core.presentation.matchCardTop
 import com.razumly.mvp.core.presentation.util.timeFormat
-import com.razumly.mvp.eventDetailScreen.LocalTournamentComponent
+import com.razumly.mvp.eventDetail.LocalTournamentComponent
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 

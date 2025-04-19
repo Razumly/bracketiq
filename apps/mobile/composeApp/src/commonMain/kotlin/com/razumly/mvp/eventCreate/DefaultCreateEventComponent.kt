@@ -172,7 +172,7 @@ class DefaultCreateEventComponent(
         if (players == null || players <= 0) {
             onError(true)
         } else {
-            updateEventField { copy(maxPlayers = players) }
+            updateEventField { copy(maxParticipants = players) }
             onError(false)
         }
     }

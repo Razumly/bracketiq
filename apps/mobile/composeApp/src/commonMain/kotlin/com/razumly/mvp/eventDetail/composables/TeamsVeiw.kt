@@ -1,4 +1,4 @@
-package com.razumly.mvp.eventDetailScreen.composables
+package com.razumly.mvp.eventDetail.composables
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -15,7 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.TeamCard
-import com.razumly.mvp.eventDetailScreen.LocalTournamentComponent
+import com.razumly.mvp.eventDetail.LocalTournamentComponent
 import com.razumly.mvp.home.LocalNavBarPadding
 
 @Composable

@@ -42,7 +42,7 @@ data class Tournament(
     override val waitList: List<String>,
     @Transient override val eventType: EventType = EventType.TOURNAMENT,
     @Transient override val lastUpdated: Instant = Clock.System.now(),
-    override val maxPlayers: Int,
+    override val maxParticipants: Int,
     override val teamSizeLimit: Int,
 ) : EventAbs {
     companion object {
@@ -69,7 +69,7 @@ data class Tournament(
                 imageUrl = "",
                 lat = 0.0,
                 long = 0.0,
-                maxPlayers = 0,
+                maxParticipants = 0,
                 teamSizeLimit = 0,
                 singleDivision = false,
                 teamSignup = true,
@@ -93,12 +93,12 @@ data class Tournament(
             imageUrl = event.imageUrl,
             lat = event.lat,
             long = event.long,
-            maxPlayers = event.maxPlayers,
+            maxParticipants = event.maxParticipants,
             teamSizeLimit = event.teamSizeLimit,
             hostId = event.hostId
         )
     }
-    fun toEvent(id: String): EventImp {
+    fun toEvent(): EventImp {
         return EventImp(
             id = id,
             location = location,
@@ -116,7 +116,7 @@ data class Tournament(
             lastUpdated = Clock.System.now(),
             hostId = hostId,
             teamSizeLimit = teamSizeLimit,
-            maxPlayers = maxPlayers,
+            maxParticipants = maxParticipants,
             singleDivision = singleDivision,
             teamSignup = teamSignup,
             waitList = waitList,
@@ -146,7 +146,7 @@ data class Tournament(
             hostId = hostId,
             lat = lat,
             long = long,
-            maxPlayers = maxPlayers,
+            maxParticipants = maxParticipants,
             teamSizeLimit = teamSizeLimit,
             singleDivision = singleDivision,
             teamSignup = teamSignup,

@@ -20,7 +20,7 @@ sealed interface EventAbs : MVPDocument {
     val price: Double
     val rating: Float?
     val imageUrl: String
-    val maxPlayers: Int
+    val maxParticipants: Int
     val teamSizeLimit: Int
     val lastUpdated: Instant
     val hostId: String

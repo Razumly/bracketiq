@@ -1,4 +1,4 @@
-package com.razumly.mvp.matchDetailScreen
+package com.razumly.mvp.matchDetail
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable

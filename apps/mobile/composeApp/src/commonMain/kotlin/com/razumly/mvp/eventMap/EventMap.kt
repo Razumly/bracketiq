@@ -15,5 +15,6 @@ expect fun EventMap(
     canClickPOI: Boolean,
     modifier: Modifier = Modifier,
     searchBarPadding: PaddingValues,
-    focusLocation: LatLng?,
+    focusedLocation: LatLng?,
+    focusedEvent: EventAbs?,
 )
