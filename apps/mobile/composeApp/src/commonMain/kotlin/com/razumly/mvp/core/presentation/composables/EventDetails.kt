@@ -34,6 +34,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,6 +50,7 @@ import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import coil3.compose.AsyncImage
 import coil3.compose.rememberAsyncImagePainter
 import com.kmpalette.color
@@ -71,6 +73,7 @@ import com.razumly.mvp.core.presentation.util.toDivisionCase
 import com.razumly.mvp.core.presentation.util.toTitleCase
 import com.razumly.mvp.eventCreate.steps.DateTimePickerDialog
 import com.razumly.mvp.eventDetail.EditDetails
+import com.razumly.mvp.eventDetail.composables.SelectEventImage
 import com.razumly.mvp.eventMap.EventMap
 import com.razumly.mvp.eventMap.MapComponent
 import dev.chrisbanes.haze.ExperimentalHazeApi
@@ -116,6 +119,8 @@ fun EventDetails(
     var showEndPicker by remember { mutableStateOf(false) }
     var revealCenter by remember { mutableStateOf(Offset.Zero) }
     var showMapCard by remember { mutableStateOf(false) }
+    var showImageSelector by rememberSaveable { mutableStateOf(false) }
+    var selectedPlace by remember { mutableStateOf<MVPPlace?>(null) }
 
     val animationProgress by animateFloatAsState(
         targetValue = if (showMapCard) 1f else 0f, animationSpec = tween(durationMillis = 1000)
@@ -154,7 +159,7 @@ fun EventDetails(
             Box(Modifier.fillMaxSize()) {
                 BackgroundImage(
                     Modifier.matchParentSize().hazeSource(hazeState, key = "BackGround"),
-                    event.imageUrl,
+                    if (!isEditing) event.imageUrl else editEvent.imageUrl,
                 )
 
                 IconButton(
@@ -292,11 +297,15 @@ fun EventDetails(
         }
         EventMap(
             component = mapComponent,
-            onEventSelected = {},
-            onPlaceSelected = { place ->
-                if (isEditing) onPlaceSelected(place)
-            },
-            canClickPOI = isEditing,
+            onEventSelected = {
+                showImageSelector = true
+            }, onPlaceSelected = { place ->
+                if (isEditing) {
+                    onPlaceSelected(place)
+                    selectedPlace = place
+                    showImageSelector = true
+                }
+            }, canClickPOI = isEditing,
             modifier = Modifier.graphicsLayer {
                 alpha = if (animationProgress > 0f) 1f else 0f
             }.clip(CircularRevealShape(animationProgress, revealCenter)),
@@ -306,6 +315,35 @@ fun EventDetails(
             },
             focusedEvent = editEvent
         )
+
+        if (showImageSelector && selectedPlace != null) {
+            Dialog(onDismissRequest = {
+                showImageSelector = false
+                selectedPlace = null
+            }) {
+                SelectEventImage(
+                    selectedPlace = selectedPlace!!,
+                    onSelectedImage = { onEditEvent(it) }
+                )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    Button(
+                        enabled = editEvent.imageUrl.isNotEmpty(),
+                        onClick = {
+                            showImageSelector = false
+                            showMapCard = false
+                            selectedPlace = null
+                        }
+                    ) {
+                        Text("Confirm")
+                    }
+                    Button(onClick = {
+                        showImageSelector = false
+                    }) {
+                        Text("Cancel")
+                    }
+                }
+            }
+        }
     }
 }
 

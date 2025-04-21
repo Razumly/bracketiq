@@ -189,7 +189,6 @@ class DefaultEventContentComponent(
                     _userInTournament.value =
                         _currentUser.value?.let { event.players.contains(it) } == true
                     if (_userInTournament.value) {
-                        _showDetails.value = true
                         _usersTeam.value =
                             event.teams.find { it.team.players.contains(_currentUser.value?.id) }
                     }

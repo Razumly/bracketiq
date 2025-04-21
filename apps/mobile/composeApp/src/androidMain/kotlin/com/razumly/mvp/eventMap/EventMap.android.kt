@@ -131,6 +131,7 @@ actual fun EventMap(
                 state.showInfoWindow()
                 scope.launch {
                     onPlaceSelected(component.getPlace(poi.placeId))
+                    selectedPlace.value = null
                 }
                 Marker(
                     state = state,
