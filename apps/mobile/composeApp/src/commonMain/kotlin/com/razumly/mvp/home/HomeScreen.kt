@@ -97,7 +97,7 @@ fun HomeScreen(component: HomeComponent) {
 
                                     is HomeComponent.Child.Create -> {
                                         Napier.d(tag = "Navigation") { "Navigating to Create Event Screen" }
-                                        CreateEventScreen(instance.component, this@ChildStack)
+                                        CreateEventScreen(instance.component, instance.mapComponent)
                                     }
 
                                     is HomeComponent.Child.Profile -> {

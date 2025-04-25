@@ -26,18 +26,18 @@ interface HomeComponent {
 
     sealed class Child {
         data class Search(
-            val component: SearchEventListComponent,
-            val mapComponent: MapComponent
+            val component: SearchEventListComponent, val mapComponent: MapComponent
         ) : Child()
 
         data class EventContent(
-            val component: EventContentComponent,
-            val mapComponent: MapComponent
+            val component: EventContentComponent, val mapComponent: MapComponent
         ) : Child()
 
         data class MatchContent(val component: MatchContentComponent) : Child()
         data class Messages(val component: MessagesComponent) : Child()
-        data class Create(val component: CreateEventComponent) : Child()
+        data class Create(val component: CreateEventComponent, val mapComponent: MapComponent) :
+            Child()
+
         data class Profile(val component: ProfileComponent) : Child()
         data class Teams(val component: TeamManagementComponent) : Child()
     }

@@ -96,6 +96,9 @@ class DefaultHomeComponent(
             is Config.Create -> Child.Create(
                 _koin.inject<DefaultCreateEventComponent> {
                     parametersOf(componentContext, ::onEventCreated)
+                }.value,
+                _koin.inject<MapComponent> {
+                    parametersOf(componentContext)
                 }.value
             )
             is Config.Profile -> Child.Profile(

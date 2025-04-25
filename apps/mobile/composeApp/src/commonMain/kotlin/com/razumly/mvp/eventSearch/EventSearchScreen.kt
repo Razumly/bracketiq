@@ -137,7 +137,7 @@ fun EventSearchScreen(
                         component.viewEvent(event)
                     },
                     onPlaceSelected = {},
-                    canClickPOI = true,
+                    canClickPOI = false,
                     modifier = Modifier.graphicsLayer {
                         alpha = if (animationProgress > 0f) 1f else 0f
                     }.clip(CircularRevealShape(animationProgress, revealCenter)),

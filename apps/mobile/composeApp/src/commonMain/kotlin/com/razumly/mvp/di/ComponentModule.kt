@@ -78,7 +78,6 @@ val componentModule = module {
             onEventCreated = onCreatedEvent,
             userRepository = get(),
             eventRepository = get(),
-            tournamentRepository = get()
         )
     }
 

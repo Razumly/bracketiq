@@ -9,10 +9,10 @@ androidx-activityCompose = "1.10.1"
 androidx-lifecycle = "2.8.4"
 assertk = "0.28.1"
 coil3 = "3.0.4"
-compose-multiplatform = "1.7.3"
+compose-multiplatform = "1.8.0-alpha03"
 concurrentFuturesKtx = "1.2.0"
 coroutines = "1.10.1"
-datastore = "1.1.3"
+datastore = "1.1.4"
 decompose = "3.3.0-alpha02"
 firebaseMessaging = "24.1.1"
 foundationLayout = "1.8.0-alpha08"
@@ -24,7 +24,7 @@ hazeMaterials = "1.5.0"
 kmpalette = "3.1.0"
 kmpDateTimePicker = "1.0.5"
 kmpnotifier = "1.5.1"
-koin = "4.0.1"
+koin = "4.0.2"
 kotlin = "2.1.0"
 kotlinTest = "2.1.0"
 kotlinxDatetime = "0.6.1"
@@ -37,18 +37,18 @@ mapsCompose = "6.2.1"
 material = "1.8.0-alpha08"
 materialKolor = "2.0.2"
 napier = "2.7.1"
-navigationCommonKtx = "2.8.5"
+navigationCommonKtx = "2.8.9"
 permissions = "0.18.1"
-places = "4.1.0"
+places = "4.2.0"
 playServicesLocation = "21.3.0"
-playServicesMaps = "19.0.0"
-room = "2.7.0-alpha12"
+playServicesMaps = "19.2.0"
+room = "2.7.0"
 runtimeSaveable = "1.7.3"
 secrets = "2.0.1"
-sqlite = "2.5.0-alpha12"
+sqlite = "2.5.0"
 ui = "1.8.0-alpha08"
 vectorize = "1.0.2"
-animationAndroid = "1.7.7"
+animationAndroid = "1.7.8"
 
 
 
@@ -111,6 +111,7 @@ play-services-location = { module = "com.google.android.gms:play-services-locati
 play-services-maps = { module = "com.google.android.gms:play-services-maps", version.ref = "playServicesMaps" }
 runtime-saveable = { module = "org.jetbrains.compose.runtime:runtime-saveable", version.ref = "runtimeSaveable" }
 androidx-animation-android = { group = "androidx.compose.animation", name = "animation-android", version.ref = "animationAndroid" }
+ui-backhandler = { module = "org.jetbrains.compose.ui:ui-backhandler" }
 
 
 [plugins]

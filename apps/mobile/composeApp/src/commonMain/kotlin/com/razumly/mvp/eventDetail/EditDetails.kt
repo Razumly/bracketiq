@@ -25,10 +25,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.EventImp
-import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.Division
@@ -37,10 +35,10 @@ import com.razumly.mvp.core.data.dataTypes.enums.FieldType
 import com.razumly.mvp.core.presentation.composables.CardSection
 import com.razumly.mvp.core.presentation.composables.EditCardSection
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
-import com.razumly.mvp.eventCreate.steps.DropdownField
-import com.razumly.mvp.eventCreate.steps.MultiSelectDropdownField
-import com.razumly.mvp.eventCreate.steps.PointsTextField
+import com.razumly.mvp.eventDetail.composables.DropdownField
+import com.razumly.mvp.eventDetail.composables.MultiSelectDropdownField
 import com.razumly.mvp.eventDetail.composables.NumberInputField
+import com.razumly.mvp.eventDetail.composables.PointsTextField
 import dev.chrisbanes.haze.HazeState
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.format
@@ -240,7 +238,7 @@ fun EditDetails(
                     onEditEvent { copy(maxParticipants = newValue.toInt()) }
                 }
             },
-            isError = isMaxParticipantsValid,
+            isError = !isMaxParticipantsValid,
             errorMessage = stringResource(Res.string.value_too_low),
             isMoney = false,
         )
@@ -252,7 +250,7 @@ fun EditDetails(
                     onEditEvent { copy(teamSizeLimit = newValue.toInt()) }
                 }
             },
-            isError = isTeamSizeValid,
+            isError = !isTeamSizeValid,
             errorMessage = stringResource(Res.string.team_size_error),
             isMoney = false,
             placeholder = "2-6"

@@ -96,6 +96,13 @@ class EventAbsRepository(
         }
     }
 
+    override suspend fun createEvent(event: EventAbs): Result<Unit> {
+        return when(event.eventType) {
+            EventType.TOURNAMENT -> tournamentRepository.createTournament(event as Tournament)
+            EventType.EVENT -> eventRepository.createEvent(event as EventImp)
+        }.map{}
+    }
+
     override suspend fun updateEvent(event: EventAbs): Result<Unit> {
         return when (event) {
             is EventImp -> {

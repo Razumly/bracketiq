@@ -37,7 +37,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.backhandler.BackHandler
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
@@ -64,6 +66,7 @@ import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.toMVPPlace
 import com.razumly.mvp.core.presentation.util.CircularRevealShape
 import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.getScreenHeight
@@ -71,8 +74,8 @@ import com.razumly.mvp.core.presentation.util.moneyFormat
 import com.razumly.mvp.core.presentation.util.teamSizeFormat
 import com.razumly.mvp.core.presentation.util.toDivisionCase
 import com.razumly.mvp.core.presentation.util.toTitleCase
-import com.razumly.mvp.eventCreate.steps.DateTimePickerDialog
 import com.razumly.mvp.eventDetail.EditDetails
+import com.razumly.mvp.eventDetail.composables.DateTimePickerDialog
 import com.razumly.mvp.eventDetail.composables.SelectEventImage
 import com.razumly.mvp.eventMap.EventMap
 import com.razumly.mvp.eventMap.MapComponent
@@ -90,7 +93,10 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.format
 import kotlinx.datetime.toLocalDateTime
 
-@OptIn(ExperimentalHazeMaterialsApi::class, ExperimentalHazeApi::class)
+@OptIn(
+    ExperimentalHazeMaterialsApi::class, ExperimentalHazeApi::class,
+    ExperimentalComposeUiApi::class
+)
 @Composable
 fun EventDetails(
     mapComponent: MapComponent,
@@ -103,17 +109,15 @@ fun EventDetails(
     editView: Boolean,
     onEditEvent: (EventImp.() -> EventImp) -> Unit,
     onEditTournament: (Tournament.() -> Tournament) -> Unit,
-    onEditEventComplete: () -> Unit,
     isNewEvent: Boolean,
     onAddCurrentUser: (Boolean) -> Unit,
     onEventTypeSelected: (EventType) -> Unit,
-    joinButton: @Composable () -> Unit
+    joinButton: @Composable (isValid: Boolean) -> Unit
 ) {
     val event = eventWithRelations.event
     val host = eventWithRelations.host
     val hazeState = remember { HazeState() }
     val scrollState = rememberScrollState()
-    var isEditing by remember { mutableStateOf(false) }
     var isValid by remember { mutableStateOf(false) }
     var showStartPicker by remember { mutableStateOf(false) }
     var showEndPicker by remember { mutableStateOf(false) }
@@ -131,6 +135,15 @@ fun EventDetails(
     val colorState = rememberDominantColorState(loader = painterLoader)
     LaunchedEffect(painter) {
         colorState.updateFrom(painter)
+    }
+
+    BackHandler(enabled = showMapCard) {
+        if (showImageSelector) {
+            showImageSelector = false
+        } else {
+            showMapCard = false
+            onPlaceSelected(event.toMVPPlace())
+        }
     }
 
     val primary =
@@ -159,7 +172,7 @@ fun EventDetails(
             Box(Modifier.fillMaxSize()) {
                 BackgroundImage(
                     Modifier.matchParentSize().hazeSource(hazeState, key = "BackGround"),
-                    if (!isEditing) event.imageUrl else editEvent.imageUrl,
+                    if (!editView) event.imageUrl else editEvent.imageUrl,
                 )
 
                 IconButton(
@@ -197,7 +210,7 @@ fun EventDetails(
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        if (isEditing) {
+                        if (editView) {
                             OutlinedTextField(value = editEvent.name,
                                 onValueChange = { onEditEvent { (copy(name = it)) } },
                                 label = { Text("Event Name") })
@@ -210,7 +223,7 @@ fun EventDetails(
                             )
                         }
                         Text(
-                            text = if (!isEditing) event.location else editEvent.location,
+                            text = if (!editView) event.location else editEvent.location,
                             style = MaterialTheme.typography.bodyMedium,
                             color = onBackground
                         )
@@ -228,37 +241,15 @@ fun EventDetails(
                             )
                         ) {
                             Icon(Icons.Default.Place, contentDescription = null)
-                            Text(if (!isEditing) "View on Map" else "Edit Location")
+                            Text(if (!editView) "View on Map" else "Edit Location")
                         }
 
-                        if (!isEditing) {
-                            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                                joinButton()
-                            }
+                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            joinButton(isValid)
                         }
+
 
                         if (editView) {
-                            if (isEditing) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Button(onClick = {
-                                        onEditEventComplete()
-                                        isEditing = false
-                                    }, enabled = isValid) {
-                                        Text("Confirm")
-                                    }
-                                    Button(onClick = {
-                                        isEditing = false
-                                    }) {
-                                        Text("Cancel")
-                                    }
-                                }
-                            } else {
-                                Button(onClick = { isEditing = true }) {
-                                    Text("Edit")
-                                }
-                            }
-                        }
-                        if (isEditing) {
                             EditDetails(
                                 host = host,
                                 event = editEvent,
@@ -300,12 +291,12 @@ fun EventDetails(
             onEventSelected = {
                 showImageSelector = true
             }, onPlaceSelected = { place ->
-                if (isEditing) {
+                if (editView) {
                     onPlaceSelected(place)
                     selectedPlace = place
                     showImageSelector = true
                 }
-            }, canClickPOI = isEditing,
+            }, canClickPOI = editView,
             modifier = Modifier.graphicsLayer {
                 alpha = if (animationProgress > 0f) 1f else 0f
             }.clip(CircularRevealShape(animationProgress, revealCenter)),
@@ -321,25 +312,27 @@ fun EventDetails(
                 showImageSelector = false
                 selectedPlace = null
             }) {
-                SelectEventImage(
-                    selectedPlace = selectedPlace!!,
-                    onSelectedImage = { onEditEvent(it) }
-                )
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    Button(
-                        enabled = editEvent.imageUrl.isNotEmpty(),
-                        onClick = {
-                            showImageSelector = false
-                            showMapCard = false
-                            selectedPlace = null
+                Column(Modifier.fillMaxSize()) {
+                    SelectEventImage(
+                        selectedPlace = selectedPlace!!,
+                        onSelectedImage = { onEditEvent(it) }
+                    )
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        Button(
+                            enabled = editEvent.imageUrl.isNotEmpty(),
+                            onClick = {
+                                showImageSelector = false
+                                showMapCard = false
+                                selectedPlace = null
+                            }
+                        ) {
+                            Text("Confirm")
                         }
-                    ) {
-                        Text("Confirm")
-                    }
-                    Button(onClick = {
-                        showImageSelector = false
-                    }) {
-                        Text("Cancel")
+                        Button(onClick = {
+                            showImageSelector = false
+                        }) {
+                            Text("Cancel")
+                        }
                     }
                 }
             }
@@ -373,7 +366,7 @@ fun NormalDetails(host: UserData, event: EventAbs, hazeState: HazeState, dateRan
 
     ) {
         Column(
-            Modifier.hazeEffect(hazeState, CupertinoMaterials.thin()).padding(16.dp),
+            Modifier.hazeEffect(hazeState, CupertinoMaterials.thin()).padding(16.dp).fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text("Specifics", style = MaterialTheme.typography.titleMedium)

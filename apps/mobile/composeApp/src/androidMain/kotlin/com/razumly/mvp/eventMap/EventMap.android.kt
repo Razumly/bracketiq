@@ -98,10 +98,12 @@ actual fun EventMap(
                     component.getEvents()
                 }
 
-                cameraPositionState.animate(
-                    CameraUpdateFactory.newLatLngZoom(target, defaultZoom),
-                    defaultDurationMs // Animation duration
-                )
+                if (focusedEvent == null) {
+                    cameraPositionState.animate(
+                        CameraUpdateFactory.newLatLngZoom(target, defaultZoom),
+                        defaultDurationMs
+                    )
+                }
             }
         }
         GoogleMap(
@@ -142,15 +144,17 @@ actual fun EventMap(
                     }
                 )
             }
-            events.forEach { event ->
-                val eventPosition = LatLng(event.lat, event.long)
-                val state = rememberUpdatedMarkerState(eventPosition)
-                Marker(
-                    state = state,
-                    title = event.name,
-                    snippet = "${event.fieldType} - $${event.price}",
-                    onInfoWindowClick = { onEventSelected(event) }
-                )
+            if (!canClickPOI) {
+                events.forEach { event ->
+                    val eventPosition = LatLng(event.lat, event.long)
+                    val state = rememberUpdatedMarkerState(eventPosition)
+                    Marker(
+                        state = state,
+                        title = event.name,
+                        snippet = "${event.fieldType} - $${event.price}",
+                        onInfoWindowClick = { onEventSelected(event) }
+                    )
+                }
             }
             places.forEach { place ->
                 val state = rememberUpdatedMarkerState(place.location!!)
@@ -179,7 +183,7 @@ actual fun EventMap(
             }
         }
 
-        if (canClickPOI) {
+        if (canClickPOI && focusedEvent == null) {
             currentCameraState.projection?.visibleRegion?.latLngBounds?.let {
                 MapSearchBar(
                     Modifier

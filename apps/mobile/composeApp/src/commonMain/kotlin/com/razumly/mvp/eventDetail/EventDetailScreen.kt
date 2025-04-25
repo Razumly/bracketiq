@@ -5,6 +5,7 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -15,8 +16,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -62,6 +61,7 @@ fun EventDetailScreen(
     val showDetails by component.showDetails.collectAsState()
     var animateExpanded by remember { mutableStateOf(false) }
     val isHost by component.isHost.collectAsState()
+    var isEditing by remember { mutableStateOf(false) }
     val editedEvent by component.editedEvent.collectAsState()
 
     val isUserInEvent =
@@ -89,51 +89,61 @@ fun EventDetailScreen(
                         onFavoriteClick = {},
                         favoritesModifier = Modifier.padding(top = 64.dp, end = 8.dp),
                         navPadding = LocalNavBarPadding.current,
-                        onPlaceSelected = {component.selectPlace(it)},
-                        editView = isHost,
+                        onPlaceSelected = { component.selectPlace(it) },
+                        editView = isEditing,
                         onEditEvent = { update -> component.editEventField(update) },
                         onEditTournament = { update -> component.editTournamentField(update) },
-                        onEditEventComplete = { component.updateEvent() },
                         isNewEvent = false,
-                        onEventTypeSelected = {},
+                        onEventTypeSelected = { component.onTypeSelected(it) },
                         onAddCurrentUser = {}
-                    ) {
+                    ) { isValid ->
                         Row {
-                            Button(
-                                onClick = { showDropdownMenu = !showDropdownMenu },
-                                modifier = Modifier.padding(8.dp)
-                            ) {
-                                Text("More Options")
-                            }
-                            DropdownMenu(expanded = showDropdownMenu,
-                                onDismissRequest = { showDropdownMenu = false }) {
-                                DropdownMenuItem(text = { Text("View") }, onClick = {
+                            if (isEditing) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Button(onClick = {
+                                        component.updateEvent()
+                                        isEditing = false
+                                    }, enabled = isValid) {
+                                        Text("Confirm")
+                                    }
+                                    Button(onClick = {
+                                        isEditing = false
+                                    }) {
+                                        Text("Cancel")
+                                    }
+                                }
+                            } else {
+                                if (isHost) {
+                                    Button(onClick = { isEditing = true }) {
+                                        Text("Edit")
+                                    }
+                                }
+                                Button(onClick = {
                                     component.viewEvent()
                                     showDropdownMenu = false
-                                })
+                                }) { Text("View") }
                                 if (!isUserInEvent) {
                                     val individual =
                                         if (teamSignup) "Join as Free Agent" else "Join"
-                                    DropdownMenuItem(text = { Text(individual) }, onClick = {
-                                        // Join as individual logic
+                                    Button(onClick = {
                                         component.joinEvent()
                                         showDropdownMenu = false
-                                    })
+                                    }) { Text(individual) }
                                     if (teamSignup) {
-                                        DropdownMenuItem(text = { Text("Join as Team") },
-                                            onClick = {
-                                                showTeamSelectionDialog = true
-                                                showDropdownMenu = false
-                                            })
+                                        Button(onClick = {
+                                            showTeamSelectionDialog = true
+                                            showDropdownMenu = false
+                                        }) { Text("Join as Team") }
                                     }
                                 } else {
-                                    DropdownMenuItem(text = { Text("Leave") }, onClick = {
+                                    Button(onClick = {
                                         component.leaveEvent()
                                         showDropdownMenu = false
-                                    })
+                                    }) { Text("Leave") }
                                 }
                             }
                         }
+
                     }
                 }
                 AnimatedVisibility(

@@ -67,6 +67,7 @@ kotlin {
                 implementation(libs.materialKolor)
                 implementation(libs.kmpalette.extensions.network)
                 implementation(libs.kmpalette.core)
+                implementation(libs.ui.backhandler)
                 api(libs.kmpnotifier)
                 api(libs.decompose.decompose)
                 api(libs.decompose.extensions)

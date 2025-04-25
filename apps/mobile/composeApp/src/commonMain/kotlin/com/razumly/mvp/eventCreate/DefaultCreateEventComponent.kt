@@ -5,17 +5,16 @@ import com.arkivanov.decompose.router.stack.StackNavigation
 import com.arkivanov.decompose.router.stack.childStack
 import com.arkivanov.decompose.router.stack.pop
 import com.arkivanov.decompose.router.stack.pushNew
-import com.arkivanov.decompose.router.stack.replaceCurrent
+import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.EventImp
+import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
-import com.razumly.mvp.core.data.repositories.IEventRepository
+import com.razumly.mvp.core.data.repositories.IEventAbsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
-import com.razumly.mvp.core.data.repositories.TournamentRepository
 import com.razumly.mvp.eventCreate.CreateEventComponent.Child
 import com.razumly.mvp.eventCreate.CreateEventComponent.Config
-import com.razumly.mvp.eventMap.MapComponent
 import dev.icerock.moko.geo.LocationTracker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -23,30 +22,23 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import org.koin.core.parameter.parametersOf
-import org.koin.mp.KoinPlatform.getKoin
 
 
 class DefaultCreateEventComponent(
     componentContext: ComponentContext,
     private val userRepository: IUserRepository,
-    private val eventRepository: IEventRepository,
-    private val tournamentRepository: TournamentRepository,
+    private val eventRepository: IEventAbsRepository,
     val locationTracker: LocationTracker,
     val onEventCreated: () -> Unit
 ) : CreateEventComponent, ComponentContext by componentContext {
     private val navigation = StackNavigation<Config>()
-    private val _koin = getKoin()
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-    private val _newEventState = MutableStateFlow(EventImp())
+    private val _newEventState: MutableStateFlow<EventAbs> = MutableStateFlow(EventImp())
     override val newEventState = _newEventState.asStateFlow()
 
-    private val _newTournamentState = MutableStateFlow(Tournament())
-    override val newTournamentState = _newTournamentState.asStateFlow()
-
-    private val _currentStep = MutableStateFlow(0)
-    override val currentStep = _currentStep.asStateFlow()
+    override val defaultEvent =
+        MutableStateFlow(EventWithRelations(EventImp(), userRepository.currentUser.value!!))
 
     private val _currentEventType = MutableStateFlow(EventType.EVENT)
     override val currentEventType = _currentEventType.asStateFlow()
@@ -64,9 +56,9 @@ class DefaultCreateEventComponent(
 
     override val childStack = childStack(
         source = navigation,
-        initialConfiguration = Config.Step1,
+        initialConfiguration = Config.EventInfo,
         serializer = Config.serializer(),
-        handleBackButton = true, // Enable built-in back handling logic
+        handleBackButton = true,
         childFactory = ::createChild
     )
 
@@ -92,19 +84,16 @@ class DefaultCreateEventComponent(
 
     override fun createEvent() {
         scope.launch {
-            when (currentEventType.value) {
-                EventType.TOURNAMENT -> tournamentRepository.createTournament(_newTournamentState.value)
-                EventType.EVENT -> eventRepository.createEvent(_newEventState.value)
-            }.onSuccess {
+            eventRepository.createEvent(newEventState.value).onSuccess {
                 onEventCreated()
                 if (_addUserToEvent.value) {
                     userRepository.currentUser.value?.let { it1 ->
                         when (currentEventType.value) {
                             EventType.TOURNAMENT -> userRepository.updateUser(
-                                it1.copy(tournamentIds = listOf(_newTournamentState.value.id))
+                                it1.copy(tournamentIds = listOf(newEventState.value.id))
                             )
                             EventType.EVENT -> userRepository.updateUser(
-                                it1.copy(eventIds = listOf(_newEventState.value.id))
+                                it1.copy(eventIds = listOf(newEventState.value.id))
                             )
                         }
                     }
@@ -116,31 +105,27 @@ class DefaultCreateEventComponent(
     }
 
     override fun updateEventField(update: EventImp.() -> EventImp) {
-        _newEventState.value = _newEventState.value.update()
-        if (currentEventType.value == EventType.TOURNAMENT) {
-            selectTournamentEvent()
+        if (_newEventState.value is EventImp) {
+            _newEventState.value = (_newEventState.value as EventImp).update()
         }
     }
 
     override fun updateTournamentField(update: Tournament.() -> Tournament) {
-        _newTournamentState.value = _newTournamentState.value.update()
+        if (_newEventState.value is Tournament) {
+            _newEventState.value = (_newEventState.value as Tournament).update()
+        }
     }
 
-    override fun selectEventType(type: EventType) {
-        _currentEventType.value = type
-        when (type) {
-            EventType.TOURNAMENT -> selectTournamentEvent()
-            EventType.EVENT -> {}
+    override fun onTypeSelected(type: EventType) {
+        _newEventState.value = when(type) {
+            EventType.TOURNAMENT -> Tournament().updateTournamentFromEvent(_newEventState.value as EventImp)
+            EventType.EVENT -> (_newEventState.value as Tournament).toEvent()
         }
     }
 
     override fun selectPlace(place: MVPPlace) {
         _selectedPlace.value = place
         updateEventField { copy(lat = place.lat, long = place.long, location = place.name) }
-    }
-
-    override fun selectTournamentEvent() {
-        _newTournamentState.value = _newTournamentState.value.updateTournamentFromEvent(_newEventState.value)
     }
 
     override fun validateAndUpdatePrice(input: String, onError: (Boolean) -> Unit) {
@@ -181,17 +166,7 @@ class DefaultCreateEventComponent(
         config: Config,
         componentContext: ComponentContext
     ): Child = when (config) {
-        is Config.Step1 -> Child.EventBasicInfo
-        is Config.EventLocation -> Child.EventLocation(
-            _koin.inject<MapComponent> {
-                parametersOf(
-                    componentContext,
-                    { navigation.replaceCurrent(Config.TournamentInfo)}
-                )
-            }.value
-        )
-        is Config.EventImage -> Child.EventImage
-        is Config.TournamentInfo -> Child.TournamentInfo
+        is Config.EventInfo -> Child.EventInfo
         is Config.Preview -> Child.Preview
     }
 }
