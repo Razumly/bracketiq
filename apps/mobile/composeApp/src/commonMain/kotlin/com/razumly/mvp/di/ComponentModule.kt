@@ -1,7 +1,7 @@
 package com.razumly.mvp.di
 
 import com.arkivanov.decompose.ComponentContext
-import com.razumly.mvp.Message.DefaultMessagesComponent
+import com.razumly.mvp.messaging.DefaultMessagesComponent
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Tournament

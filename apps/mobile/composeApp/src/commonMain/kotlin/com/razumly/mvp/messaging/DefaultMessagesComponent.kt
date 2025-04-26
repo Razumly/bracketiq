@@ -1,7 +1,6 @@
-package com.razumly.mvp.Message
+package com.razumly.mvp.messaging
 
 import com.arkivanov.decompose.ComponentContext
-import com.razumly.mvp.core.data.dataTypes.EventAbs
 
 class DefaultMessagesComponent(
     componentContext: ComponentContext,

@@ -2,7 +2,7 @@ package com.razumly.mvp.home
 
 import com.arkivanov.decompose.router.stack.ChildStack
 import com.arkivanov.decompose.value.Value
-import com.razumly.mvp.Message.MessagesComponent
+import com.razumly.mvp.messaging.MessagesComponent
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Tournament
