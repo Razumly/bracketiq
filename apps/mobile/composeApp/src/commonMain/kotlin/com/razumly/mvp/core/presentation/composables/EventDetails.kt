@@ -3,6 +3,7 @@ package com.razumly.mvp.core.presentation.composables
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -171,7 +172,8 @@ fun EventDetails(
         Column(Modifier.fillMaxSize().verticalScroll(scrollState)) {
             Box(Modifier.fillMaxSize()) {
                 BackgroundImage(
-                    Modifier.matchParentSize().hazeSource(hazeState, key = "BackGround"),
+                    Modifier.background(MaterialTheme.colorScheme.background).matchParentSize()
+                        .hazeSource(hazeState, key = "BackGround"),
                     if (!editView) event.imageUrl else editEvent.imageUrl,
                 )
 
@@ -301,10 +303,13 @@ fun EventDetails(
                 alpha = if (animationProgress > 0f) 1f else 0f
             }.clip(CircularRevealShape(animationProgress, revealCenter)),
             searchBarPadding = PaddingValues(),
-            focusedLocation = editEvent.let {
-                LatLng(it.lat, it.long)
-            },
-            focusedEvent = editEvent
+            focusedLocation = if (editEvent.location.isNotBlank()) editEvent.let {
+                LatLng(
+                    it.lat,
+                    it.long
+                )
+            } else null,
+            focusedEvent = if (editEvent.location.isNotBlank()) editEvent else null,
         )
 
         if (showImageSelector && selectedPlace != null) {
@@ -344,7 +349,9 @@ fun EventDetails(
 @Composable
 fun NormalDetails(host: UserData, event: EventAbs, hazeState: HazeState, dateRangeText: String) {
     CardSection(
-        "Hosted by ${host.firstName} ${host.lastName}", event.description, hazeState
+        "Hosted by ${host.firstName.toTitleCase()} ${host.lastName.toTitleCase()}",
+        event.description,
+        hazeState
     )
     CardSection(
         "Price", event.price.moneyFormat(), hazeState
@@ -447,16 +454,18 @@ fun BackgroundImage(modifier: Modifier, imageUrl: String) {
         AsyncImage(
             model = imageUrl,
             contentDescription = "Event Image",
-            modifier = Modifier.height(imageHeight.dp),
+            modifier = Modifier.background(MaterialTheme.colorScheme.background)
+                .height(imageHeight.dp),
             contentScale = ContentScale.Crop,
         )
 
         AsyncImage(model = imageUrl,
             contentDescription = "Flipped Hazy Background",
-            modifier = Modifier.fillMaxSize().graphicsLayer {
-                clip = true
-                rotationX = 180f
-            }.graphicsLayer {
+            modifier = Modifier.background(MaterialTheme.colorScheme.background).fillMaxSize()
+                .graphicsLayer {
+                    clip = true
+                    rotationX = 180f
+                }.graphicsLayer {
                 transformOrigin = TransformOrigin(0.5f, 1f)
                 scaleY = 50f
             }.blur(32.dp),

@@ -35,6 +35,7 @@ import com.razumly.mvp.core.data.dataTypes.enums.FieldType
 import com.razumly.mvp.core.presentation.composables.CardSection
 import com.razumly.mvp.core.presentation.composables.EditCardSection
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
+import com.razumly.mvp.core.presentation.util.toTitleCase
 import com.razumly.mvp.eventDetail.composables.DropdownField
 import com.razumly.mvp.eventDetail.composables.MultiSelectDropdownField
 import com.razumly.mvp.eventDetail.composables.NumberInputField
@@ -108,7 +109,7 @@ fun EditDetails(
     }
 
     CardSection(
-        "Hosted by ${host.firstName} ${host.lastName}", event.description, hazeState
+        "Hosted by ${host.firstName.toTitleCase()} ${host.lastName.toTitleCase()}", event.description, hazeState
     )
 
     EditCardSection(
