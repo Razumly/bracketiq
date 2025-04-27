@@ -28,7 +28,7 @@ fun NumberInputField(
 ) {
     Column(modifier = modifier) {
         OutlinedTextField(
-            value = value,
+            value = if (value == "0") "" else value,
             onValueChange = onValueChange,
             label = { Text(label, maxLines = 1) },
             keyboardOptions = KeyboardOptions(

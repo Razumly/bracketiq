@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
@@ -28,7 +27,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.EventImp
@@ -82,12 +80,14 @@ fun EditDetails(
     var isLoserSetCountValid by remember { mutableStateOf(true) }
     var isWinnerPointsValid by remember { mutableStateOf(true) }
     var isLoserPointsValid by remember { mutableStateOf(true) }
+    var isLocationValid by remember { mutableStateOf(event.location.isNotBlank() && event.lat != 0.0 && event.long != 0.0) }
     var selectedDivisions by remember { mutableStateOf(emptyList<Division>()) }
 
     LaunchedEffect(event) {
         isPriceValid = event.price >= 0
         isMaxParticipantsValid = event.maxParticipants > 2
         isTeamSizeValid = event.teamSizeLimit >= 2
+        isLocationValid = event.location.isNotBlank() && event.lat != 0.0 && event.long != 0.0
         if (event is Tournament) {
             isWinnerSetCountValid = event.winnerSetCount > 0
             isWinnerPointsValid = event.winnerBracketPointsToVictory.all { it > 0 }
@@ -105,38 +105,34 @@ fun EditDetails(
             isLoserPointsValid = true
         }
         onIsValid(
-            isPriceValid
-                    && isMaxParticipantsValid
-                    && isTeamSizeValid
-                    && isWinnerSetCountValid
-                    && isWinnerPointsValid
-                    && isLoserSetCountValid
-                    && isLoserPointsValid
+            isPriceValid &&
+                    isMaxParticipantsValid &&
+                    isTeamSizeValid &&
+                    isWinnerSetCountValid &&
+                    isWinnerPointsValid &&
+                    isLoserSetCountValid &&
+                    isLoserPointsValid
         )
     }
 
     CardSection(
-        "Hosted by ${host.firstName.toTitleCase()} ${host.lastName.toTitleCase()}", event.description, hazeState
+        "Hosted by ${host.firstName.toTitleCase()} ${host.lastName.toTitleCase()}",
+        event.description,
+        hazeState
     )
 
-    EditCardSection(
-        hazeState
-    ) {
+    EditCardSection(hazeState) {
         Row(
             modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            if (isNewEvent) {
-                DropdownField(
-                    modifier = Modifier.weight(1.2f),
-                    value = event.eventType.name,
-                    label = "Event Type"
-                ) { dismiss ->
-                    EventType.entries.forEach { eventType ->
-                        DropdownMenuItem(onClick = {
-                            dismiss()
-                            onEventTypeSelected(eventType)
-                        }, text = { Text(text = eventType.name) })
-                    }
+            DropdownField(
+                modifier = Modifier.weight(1.2f), value = event.eventType.name, label = "Event Type"
+            ) { dismiss ->
+                EventType.entries.forEach { eventType ->
+                    DropdownMenuItem(onClick = {
+                        dismiss()
+                        onEventTypeSelected(eventType)
+                    }, text = { Text(text = eventType.name) })
                 }
             }
             DropdownField(
@@ -154,9 +150,7 @@ fun EditDetails(
         }
     }
 
-    EditCardSection(
-        hazeState
-    ) {
+    EditCardSection(hazeState) {
         NumberInputField(
             value = (event.price * 100).toInt().toString(),
             label = "",
@@ -174,9 +168,7 @@ fun EditDetails(
             supportingText = stringResource(Res.string.free_entry_hint),
         )
     }
-    EditCardSection(
-        hazeState
-    ) {
+    EditCardSection(hazeState) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(value = event.start.toLocalDateTime(TimeZone.currentSystemDefault())
                 .format(
@@ -220,9 +212,7 @@ fun EditDetails(
         }
     }
 
-    EditCardSection(
-        hazeState
-    ) {
+    EditCardSection(hazeState) {
         MultiSelectDropdownField(
             selectedItems = selectedDivisions,
             label = "Skill levels",
@@ -232,9 +222,7 @@ fun EditDetails(
         }
     }
 
-    EditCardSection(
-        hazeState
-    ) {
+    EditCardSection(hazeState) {
         Text("Specifics", style = MaterialTheme.typography.titleMedium)
         NumberInputField(
             value = event.maxParticipants.toString(),
@@ -243,7 +231,11 @@ fun EditDetails(
             ),
             onValueChange = { newValue ->
                 if (newValue.all { it.isDigit() }) {
-                    onEditEvent { copy(maxParticipants = newValue.toInt()) }
+                    if (newValue.isBlank()) {
+                        onEditEvent { copy(maxParticipants = 0) }
+                    } else {
+                        onEditEvent { copy(maxParticipants = newValue.toInt()) }
+                    }
                 }
             },
             isError = !isMaxParticipantsValid,
@@ -255,7 +247,11 @@ fun EditDetails(
             label = stringResource(Res.string.team_size_limit),
             onValueChange = { newValue ->
                 if (newValue.all { it.isDigit() }) {
-                    onEditEvent { copy(teamSizeLimit = newValue.toInt()) }
+                    if (newValue.isBlank()) {
+                        onEditEvent { copy(teamSizeLimit = 0) }
+                    } else {
+                        onEditEvent { copy(teamSizeLimit = newValue.toInt()) }
+                    }
                 }
             },
             isError = !isTeamSizeValid,
@@ -299,19 +295,26 @@ fun EditDetails(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Checkbox(checked = event.doubleElimination, onCheckedChange = {
-                    onEditTournament { copy(doubleElimination = doubleElimination) }
+                Checkbox(checked = event.doubleElimination, onCheckedChange = { checked ->
+                    onEditTournament { copy(doubleElimination = checked) }
                 })
                 Text("Double Elimination")
             }
-            OutlinedTextField(
+            NumberInputField(
                 value = event.winnerSetCount.toString(),
-                onValueChange = {
-                    onEditTournament { copy(winnerSetCount = winnerSetCount) }
+                onValueChange = { newValue ->
+                    if (newValue.all { it.isDigit() }) {
+                        if (newValue.isBlank()) {
+                            onEditTournament { copy(winnerSetCount = 0) }
+                        } else {
+                            onEditTournament { copy(winnerSetCount = newValue.toInt()) }
+                        }
+                    }
                 },
-                label = { Text("Winner Set Count") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.fillMaxWidth()
+                label = "Winner Set Count",
+                isError = !isWinnerSetCountValid,
+                isMoney = false,
+                errorMessage = stringResource(Res.string.value_too_low),
             )
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 val winnerPoints by remember { mutableStateOf(event.winnerBracketPointsToVictory.toMutableList()) }
@@ -331,14 +334,21 @@ fun EditDetails(
                 }
             }
             if (event.doubleElimination) {
-                OutlinedTextField(
+                NumberInputField(
                     value = event.loserSetCount.toString(),
-                    onValueChange = {
-                        onEditTournament { copy(loserSetCount = loserSetCount) }
+                    onValueChange = { newValue ->
+                        if (newValue.all { it.isDigit() }) {
+                            if (newValue.isBlank()) {
+                                onEditTournament { copy(loserSetCount = 0) }
+                            } else {
+                                onEditTournament { copy(loserSetCount = newValue.toInt()) }
+                            }
+                        }
                     },
-                    label = { Text("Loser Set Count") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.fillMaxWidth()
+                    label = "Loser Set Count",
+                    isError = !isLoserSetCountValid,
+                    isMoney = false,
+                    errorMessage = stringResource(Res.string.value_too_low),
                 )
                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     val loserPoints by remember { mutableStateOf(event.loserBracketPointsToVictory.toMutableList()) }

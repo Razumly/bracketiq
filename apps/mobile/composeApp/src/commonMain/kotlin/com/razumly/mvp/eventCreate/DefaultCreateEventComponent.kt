@@ -92,6 +92,7 @@ class DefaultCreateEventComponent(
                             EventType.TOURNAMENT -> userRepository.updateUser(
                                 it1.copy(tournamentIds = listOf(newEventState.value.id))
                             )
+
                             EventType.EVENT -> userRepository.updateUser(
                                 it1.copy(eventIds = listOf(newEventState.value.id))
                             )
@@ -105,8 +106,12 @@ class DefaultCreateEventComponent(
     }
 
     override fun updateEventField(update: EventImp.() -> EventImp) {
-        if (_newEventState.value is EventImp) {
-            _newEventState.value = (_newEventState.value as EventImp).update()
+        when (_newEventState.value) {
+            is EventImp -> _newEventState.value = (_newEventState.value as EventImp).update()
+            is Tournament -> _newEventState.value =
+                (_newEventState.value as Tournament).updateTournamentFromEvent(
+                    (_newEventState.value as Tournament).toEvent().update()
+                )
         }
     }
 
@@ -117,9 +122,13 @@ class DefaultCreateEventComponent(
     }
 
     override fun onTypeSelected(type: EventType) {
-        _newEventState.value = when(type) {
-            EventType.TOURNAMENT -> Tournament().updateTournamentFromEvent(_newEventState.value as EventImp)
-            EventType.EVENT -> (_newEventState.value as Tournament).toEvent()
+        _newEventState.value = when (type) {
+            EventType.TOURNAMENT -> {
+                Tournament().updateTournamentFromEvent(_newEventState.value as EventImp)
+            }
+            EventType.EVENT -> {
+                (_newEventState.value as Tournament).toEvent()
+            }
         }
     }
 

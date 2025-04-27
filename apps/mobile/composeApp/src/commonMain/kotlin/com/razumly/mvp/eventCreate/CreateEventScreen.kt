@@ -46,48 +46,50 @@ fun CreateEventScreen(
     val isEditing = true
 
     Scaffold(
+        modifier = Modifier.padding(LocalNavBarPadding.current),
         floatingActionButton = {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            if (childStack.active.instance == CreateEventComponent.Child.EventInfo) {
-                Spacer(Modifier.width(48.dp))
-                FloatingActionButton(
-                    onClick = {
-                        if (canProceed) {
-                            component.nextStep()
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                if (childStack.active.instance == CreateEventComponent.Child.EventInfo) {
+                    Spacer(Modifier.width(48.dp))
+                    FloatingActionButton(
+                        onClick = {
+                            if (canProceed) {
+                                component.nextStep()
+                            }
                         }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = stringResource(Res.string.next)
+                        )
                     }
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Check,
-                        contentDescription = stringResource(Res.string.next)
-                    )
-                }
-            } else {
-                FloatingActionButton(
-                    onClick = {
-                        component.previousStep()
+                } else {
+                    FloatingActionButton(
+                        onClick = {
+                            component.previousStep()
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = stringResource(Res.string.previous)
+                        )
                     }
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Check,
-                        contentDescription = stringResource(Res.string.previous)
-                    )
-                }
-                FloatingActionButton(
-                    onClick = {
-                        component.createEvent()
+                    FloatingActionButton(
+                        onClick = {
+                            component.createEvent()
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = stringResource(Res.string.create_tournament)
+                        )
                     }
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Check,
-                        contentDescription = stringResource(Res.string.create_tournament)
-                    )
                 }
             }
-            }
-
         },
-
         floatingActionButtonPosition = FabPosition.Center,
         content = {
             ChildStack(childStack) { child ->
@@ -103,7 +105,7 @@ fun CreateEventScreen(
                         editView = isEditing,
                         onEditEvent = { update -> component.updateEventField(update) },
                         onEditTournament = { update -> component.updateTournamentField(update) },
-                        isNewEvent = false,
+                        isNewEvent = true,
                         onEventTypeSelected = { component.onTypeSelected(it) },
                         onAddCurrentUser = {}
                     ) { isValid -> canProceed = isValid }

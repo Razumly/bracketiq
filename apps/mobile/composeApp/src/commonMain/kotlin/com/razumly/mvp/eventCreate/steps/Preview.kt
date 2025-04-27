@@ -2,8 +2,8 @@ package com.razumly.mvp.eventCreate.steps
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -29,7 +29,7 @@ fun Preview(
         verticalArrangement = Arrangement.Center
     ) {
         Card(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).wrapContentSize(),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
             elevation = CardDefaults.cardElevation(4.dp),
             shape = RoundedCornerShape(
                 12.dp
