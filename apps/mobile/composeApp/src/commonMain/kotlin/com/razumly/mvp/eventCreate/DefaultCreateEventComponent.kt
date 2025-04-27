@@ -74,8 +74,8 @@ class DefaultCreateEventComponent(
         }
     }
 
-    override fun nextStep(config: Config) {
-        navigation.pushNew(config)
+    override fun nextStep() {
+        navigation.pushNew(Config.Preview)
     }
 
     override fun previousStep() {

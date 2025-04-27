@@ -35,14 +35,12 @@ fun Preview(
                 12.dp
             )
         ) {
-            previewEvent?.let {
-                EventCard(
-                    it,
-                    onFavoriteClick = {},
-                    favoritesModifier = Modifier.alpha(0f),
-                    onMapClick = {},
-                )
-            }
+            EventCard(
+                previewEvent,
+                onFavoriteClick = {},
+                favoritesModifier = Modifier.alpha(0f),
+                onMapClick = {},
+            )
         }
     }
 }

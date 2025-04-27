@@ -23,7 +23,7 @@ interface CreateEventComponent {
     fun updateEventField(update: EventImp.() -> EventImp)
     fun updateTournamentField(update: Tournament.() -> Tournament)
     fun createEvent()
-    fun nextStep(config: Config)
+    fun nextStep()
     fun previousStep()
     fun onTypeSelected(type: EventType)
     fun selectPlace(place: MVPPlace)

@@ -3,11 +3,9 @@ package com.razumly.mvp.core.presentation.composables
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -147,12 +145,13 @@ fun EventDetails(
         }
     }
 
-    val primary =
-        colorState.result?.paletteOrNull?.vibrantSwatch?.color ?: MaterialTheme.colorScheme.primary
+    val backgroundColor =
+        colorState.result?.paletteOrNull?.vibrantSwatch?.color
+            ?: MaterialTheme.colorScheme.background
     val secondary =
         colorState.result?.paletteOrNull?.mutedSwatch?.color ?: MaterialTheme.colorScheme.secondary
-    val onBackground = colorState.result?.paletteOrNull?.vibrantSwatch?.onColor
-        ?: MaterialTheme.colorScheme.background
+    val onBackgroundColor = colorState.result?.paletteOrNull?.vibrantSwatch?.onColor
+        ?: MaterialTheme.colorScheme.onBackground
 
     val dateRangeText = remember(event.start, event.end) {
         val startDate = event.start.toLocalDateTime(TimeZone.currentSystemDefault()).date
@@ -172,7 +171,7 @@ fun EventDetails(
         Column(Modifier.fillMaxSize().verticalScroll(scrollState)) {
             Box(Modifier.fillMaxSize()) {
                 BackgroundImage(
-                    Modifier.background(MaterialTheme.colorScheme.background).matchParentSize()
+                    Modifier.matchParentSize()
                         .hazeSource(hazeState, key = "BackGround"),
                     if (!editView) event.imageUrl else editEvent.imageUrl,
                 )
@@ -196,7 +195,7 @@ fun EventDetails(
 
                             inputScale = HazeInputScale.Fixed(0.5f)
                             style = HazeStyle(
-                                backgroundColor = primary,
+                                backgroundColor = backgroundColor,
                                 tint = null,
                                 blurRadius = 64.dp,
                                 noiseFactor = 0f
@@ -221,13 +220,13 @@ fun EventDetails(
                                 text = event.name,
                                 style = MaterialTheme.typography.headlineMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = onBackground
+                                color = onBackgroundColor
                             )
                         }
                         Text(
                             text = if (!editView) event.location else editEvent.location,
                             style = MaterialTheme.typography.bodyMedium,
-                            color = onBackground
+                            color = onBackgroundColor
                         )
 
                         Button(
@@ -292,13 +291,15 @@ fun EventDetails(
             component = mapComponent,
             onEventSelected = {
                 showImageSelector = true
-            }, onPlaceSelected = { place ->
+            },
+            onPlaceSelected = { place ->
                 if (editView) {
                     onPlaceSelected(place)
                     selectedPlace = place
                     showImageSelector = true
                 }
-            }, canClickPOI = editView,
+            },
+            canClickPOI = editView,
             modifier = Modifier.graphicsLayer {
                 alpha = if (animationProgress > 0f) 1f else 0f
             }.clip(CircularRevealShape(animationProgress, revealCenter)),
@@ -414,22 +415,6 @@ fun NormalDetails(host: UserData, event: EventAbs, hazeState: HazeState, dateRan
 
 @OptIn(ExperimentalHazeMaterialsApi::class)
 @Composable
-fun EditCardSection(hazeState: HazeState, content: @Composable ColumnScope.() -> Unit) {
-    Surface(
-        color = Color.Transparent,
-        shape = RoundedCornerShape(16.dp),
-    ) {
-        Column(
-            modifier = Modifier.fillMaxSize().hazeEffect(hazeState, CupertinoMaterials.thin())
-                .padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            content()
-        }
-    }
-}
-
-@OptIn(ExperimentalHazeMaterialsApi::class)
-@Composable
 fun CardSection(title: String, content: String, hazeState: HazeState) {
     Surface(
         color = Color.Transparent,
@@ -449,26 +434,26 @@ fun CardSection(title: String, content: String, hazeState: HazeState) {
 fun BackgroundImage(modifier: Modifier, imageUrl: String) {
     val imageHeight = (getScreenHeight() * 0.75f)
     Column(
-        modifier
+        modifier,
     ) {
         AsyncImage(
             model = imageUrl,
             contentDescription = "Event Image",
-            modifier = Modifier.background(MaterialTheme.colorScheme.background)
+            modifier = Modifier
                 .height(imageHeight.dp),
             contentScale = ContentScale.Crop,
         )
 
         AsyncImage(model = imageUrl,
             contentDescription = "Flipped Hazy Background",
-            modifier = Modifier.background(MaterialTheme.colorScheme.background).fillMaxSize()
+            modifier = Modifier.fillMaxSize()
                 .graphicsLayer {
                     clip = true
                     rotationX = 180f
                 }.graphicsLayer {
-                transformOrigin = TransformOrigin(0.5f, 1f)
-                scaleY = 50f
-            }.blur(32.dp),
+                    transformOrigin = TransformOrigin(0.5f, 1f)
+                    scaleY = 50f
+                }.blur(32.dp),
             contentScale = ContentScale.Crop,
             clipToBounds = true
         )

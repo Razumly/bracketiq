@@ -19,8 +19,8 @@ suspend fun Place.toMVPPlace(placesClient: PlacesClient): MVPPlace = coroutineSc
             async {
                 suspendCancellableCoroutine<String> { cont ->
                     val photoRequest = FetchResolvedPhotoUriRequest.builder(metadata)
-                        .setMaxWidth(500)
-                        .setMaxHeight(300)
+                        .setMaxWidth(1920)
+                        .setMaxHeight(1080)
                         .build()
                     placesClient.fetchResolvedPhotoUri(photoRequest)
                         .addOnSuccessListener { photoResponse ->
