@@ -2,7 +2,10 @@ package com.razumly.mvp.eventCreate.steps
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
@@ -12,7 +15,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.presentation.composables.EventCard
 import com.razumly.mvp.eventCreate.CreateEventComponent
@@ -29,7 +31,8 @@ fun Preview(
         verticalArrangement = Arrangement.Center
     ) {
         Card(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth().height(
+                IntrinsicSize.Min),
             elevation = CardDefaults.cardElevation(4.dp),
             shape = RoundedCornerShape(
                 12.dp
@@ -38,7 +41,8 @@ fun Preview(
             EventCard(
                 previewEvent,
                 onFavoriteClick = {},
-                favoritesModifier = Modifier.alpha(0f),
+                favoritesModifier = Modifier.padding(8.dp),
+                navPadding = PaddingValues(bottom = 16.dp),
                 onMapClick = {},
             )
         }

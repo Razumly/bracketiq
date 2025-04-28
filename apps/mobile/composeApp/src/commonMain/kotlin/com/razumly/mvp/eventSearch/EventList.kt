@@ -1,6 +1,5 @@
 package com.razumly.mvp.eventSearch
 
-import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -23,7 +22,6 @@ import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.presentation.composables.EventCard
 
-@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 fun EventList(
     component: SearchEventListComponent,

@@ -325,7 +325,11 @@ fun EditDetails(
                         label = "Set ${index + 1} Points to Win",
                         onValueChange = { newValue ->
                             if (newValue.all { it.isDigit() } && newValue.length <= 2) {
-                                winnerPoints[index] = newValue.toIntOrNull() ?: 0
+                                if (newValue.isBlank()) {
+                                    winnerPoints[index] = 0
+                                } else {
+                                    winnerPoints[index] = newValue.toInt()
+                                }
                                 onEditTournament { copy(winnerBracketPointsToVictory = winnerPoints) }
                             }
                         },
@@ -359,7 +363,11 @@ fun EditDetails(
                             label = "Set ${index + 1} Points to Win",
                             onValueChange = { newValue ->
                                 if (newValue.all { it.isDigit() } && newValue.length <= 2) {
-                                    loserPoints[index] = newValue.toIntOrNull() ?: 0
+                                    if (newValue.isBlank()) {
+                                        loserPoints[index] = 0
+                                    } else {
+                                        loserPoints[index] = newValue.toInt()
+                                    }
                                     onEditTournament { copy(loserBracketPointsToVictory = loserPoints) }
                                 }
                             },
