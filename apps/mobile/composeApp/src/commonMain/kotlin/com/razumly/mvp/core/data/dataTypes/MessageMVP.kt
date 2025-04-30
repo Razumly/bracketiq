@@ -6,7 +6,7 @@ import kotlinx.serialization.Serializable
 
 @Entity
 @Serializable
-data class Message (
+data class MessageMVP (
     @PrimaryKey override val id: String,
     val userId: String,
     val body: String,

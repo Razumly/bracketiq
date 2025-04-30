@@ -52,6 +52,9 @@ class SearchEventListComponent(
 
     private val _currentLocation = MutableStateFlow<LatLng?>(null)
 
+    private val _suggestedEvents = MutableStateFlow<List<EventAbs>>(emptyList())
+    val suggestedEvents: StateFlow<List<EventAbs>> = _suggestedEvents.asStateFlow()
+
     @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
     val events = combine(_currentLocation.filterNotNull(), _currentRadius) { location, radius ->
         getBounds(radius, location.latitude, location.longitude)
@@ -74,9 +77,6 @@ class SearchEventListComponent(
     private val backCallback = BackCallback(false) {
         _showMapCard.value = false
     }
-
-    private val currentUser = userRepository.currentUser
-
 
     init {
         backHandler.register(backCallback)
@@ -132,6 +132,30 @@ class SearchEventListComponent(
 
     fun viewEvent(event: EventAbs) {
         onEventSelected(event)
+    }
+
+    fun suggestEvents(searchQuery: String) {
+        scope.launch {
+            eventAbsRepository.searchEvents(searchQuery, _currentLocation.value!!)
+                .onSuccess {
+                    _suggestedEvents.value = it
+                    _isLoading.value = false
+                }.onFailure { e ->
+                    _error.value = "Failed to fetch events: ${e.message}"
+                }
+        }
+    }
+
+    fun filterEvents(searchQuery: String) {
+        scope.launch {
+            eventAbsRepository.searchEvents(searchQuery, _currentLocation.value!!)
+                .onSuccess {
+                    _suggestedEvents.value = it
+                    _isLoading.value = false
+                }.onFailure { e ->
+                    _error.value = "Failed to fetch events: ${e.message}"
+                }
+        }
     }
 
     private suspend fun getEvents() {

@@ -5,9 +5,11 @@ import androidx.room.ConstructedBy
 import androidx.room.Database
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
+import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.dataTypes.MessageMVP
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.UserData
@@ -20,9 +22,11 @@ import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TournamentMatchCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TournamentTeamCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TournamentUserCrossRef
+import com.razumly.mvp.core.data.dataTypes.daos.ChatGroupDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventImpDao
 import com.razumly.mvp.core.data.dataTypes.daos.FieldDao
 import com.razumly.mvp.core.data.dataTypes.daos.MatchDao
+import com.razumly.mvp.core.data.dataTypes.daos.MessageDao
 import com.razumly.mvp.core.data.dataTypes.daos.TeamDao
 import com.razumly.mvp.core.data.dataTypes.daos.TournamentDao
 import com.razumly.mvp.core.data.dataTypes.daos.UserDataDao
@@ -36,6 +40,8 @@ import com.razumly.mvp.core.data.util.Converters
         Field::class,
         EventImp::class,
         Team::class,
+        ChatGroup::class,
+        MessageMVP::class,
         TeamPlayerCrossRef::class,
         TournamentUserCrossRef::class,
         EventUserCrossRef::class,
@@ -44,7 +50,7 @@ import com.razumly.mvp.core.data.util.Converters
         TournamentMatchCrossRef::class,
         MatchTeamCrossRef::class,
         FieldMatchCrossRef::class,
-        TeamPendingPlayerCrossRef::class
+        TeamPendingPlayerCrossRef::class,
     ], version = 43
 )
 @TypeConverters(Converters::class)
@@ -56,4 +62,6 @@ abstract class MVPDatabase : RoomDatabase() {
     abstract val getFieldDao: FieldDao
     abstract val getUserDataDao: UserDataDao
     abstract val getEventImpDao: EventImpDao
+    abstract val getChatGroupDao: ChatGroupDao
+    abstract val getMessageDao: MessageDao
 }

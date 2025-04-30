@@ -4,19 +4,22 @@ import androidx.room.Dao
 import androidx.room.Delete
 import androidx.room.Query
 import androidx.room.Upsert
-import com.razumly.mvp.core.data.dataTypes.Message
+import com.razumly.mvp.core.data.dataTypes.MessageMVP
 
 @Dao
 interface MessageDao {
     @Upsert
-    suspend fun upsertMessage(message: Message)
+    suspend fun upsertMessages(messageMVPs: List<MessageMVP>)
 
     @Delete
-    suspend fun deleteMessage(message: Message)
+    suspend fun deleteMessage(messageMVP: MessageMVP)
 
     @Query("DELETE FROM Message WHERE id = :id")
     suspend fun deleteMessageById(id: String)
 
     @Query("SELECT * FROM Message WHERE id = :id")
-    fun getMessageById(id: String): Message?
+    fun getMessageById(id: String): MessageMVP?
+
+    @Query("SELECT * FROM Message WHERE chatId = :chatGroupId")
+    fun getMessagesInChatGroup(chatGroupId: String): List<MessageMVP>
 }

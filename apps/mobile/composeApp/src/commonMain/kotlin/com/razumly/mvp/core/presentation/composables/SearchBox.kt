@@ -37,7 +37,6 @@ fun SearchBox(
     }
     var searchInput by mutableStateOf("")
 
-
     Row(
         modifier = modifier
             .fillMaxWidth()
