@@ -8,15 +8,15 @@ import com.arkivanov.decompose.router.stack.pop
 import com.arkivanov.decompose.router.stack.pushNew
 import com.arkivanov.decompose.router.stack.replaceAll
 import com.arkivanov.decompose.value.Value
-import com.razumly.mvp.chat.DefaultMessagesComponent
-import com.razumly.mvp.chat.MessagesComponent
+import com.razumly.mvp.chat.DefaultChatListComponent
+import com.razumly.mvp.chat.ChatListComponent
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.eventCreate.CreateEventComponent
 import com.razumly.mvp.eventCreate.DefaultCreateEventComponent
-import com.razumly.mvp.eventDetail.DefaultEventContentComponent
-import com.razumly.mvp.eventDetail.EventContentComponent
+import com.razumly.mvp.eventDetail.DefaultEventDetailComponent
+import com.razumly.mvp.eventDetail.EventDetailComponent
 import com.razumly.mvp.eventMap.MapComponent
 import com.razumly.mvp.eventSearch.DefaultSearchEventListComponent
 import com.razumly.mvp.home.HomeComponent.Child
@@ -46,11 +46,11 @@ interface HomeComponent {
         ) : Child()
 
         data class EventContent(
-            val component: EventContentComponent, val mapComponent: MapComponent
+            val component: EventDetailComponent, val mapComponent: MapComponent
         ) : Child()
 
         data class MatchContent(val component: MatchContentComponent) : Child()
-        data class Messages(val component: MessagesComponent) : Child()
+        data class Messages(val component: ChatListComponent) : Child()
         data class Create(val component: CreateEventComponent, val mapComponent: MapComponent) :
             Child()
 
@@ -132,7 +132,7 @@ class DefaultHomeComponent(
             }
             is Config.EventDetail -> {
                 Child.EventContent(
-                    _koin.inject<DefaultEventContentComponent> {
+                    _koin.inject<DefaultEventDetailComponent> {
                         parametersOf(
                             componentContext,
                             config.event,
@@ -153,7 +153,7 @@ class DefaultHomeComponent(
                 )
             }
             is Config.Messages -> Child.Messages(
-                _koin.inject<DefaultMessagesComponent> {
+                _koin.inject<DefaultChatListComponent> {
                     parametersOf(componentContext, ::onEventSelected)
                 }.value
             )

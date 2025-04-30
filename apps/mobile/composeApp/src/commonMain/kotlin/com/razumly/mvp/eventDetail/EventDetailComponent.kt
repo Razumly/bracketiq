@@ -35,7 +35,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 
-interface EventContentComponent : ComponentContext {
+interface EventDetailComponent : ComponentContext {
     val selectedEvent: StateFlow<EventAbsWithRelations>
     val divisionMatches: StateFlow<Map<String, MatchWithRelations>>
     val divisionTeams: StateFlow<Map<String, TeamWithPlayers>>
@@ -85,7 +85,7 @@ fun EventAbsWithRelations.toEventWithFullRelations(
 
 
 @OptIn(ExperimentalCoroutinesApi::class)
-class DefaultEventContentComponent(
+class DefaultEventDetailComponent(
     componentContext: ComponentContext,
     userRepository: IUserRepository,
     event: EventAbs,
@@ -94,7 +94,7 @@ class DefaultEventContentComponent(
     private val teamRepository: ITeamRepository,
     private val onMatchSelected: (MatchWithRelations, Tournament) -> Unit,
     private val onNavigateToTeamSettings: (freeAgents: List<String>, event: EventAbs?) -> Unit
-) : EventContentComponent, ComponentContext by componentContext {
+) : EventDetailComponent, ComponentContext by componentContext {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     override val currentUser = userRepository.currentUser
 

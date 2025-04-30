@@ -13,8 +13,8 @@ import com.razumly.mvp.matchDetail.DefaultMatchContentComponent
 import com.razumly.mvp.matchDetail.MatchContentComponent
 import com.razumly.mvp.profile.DefaultProfileComponent
 import com.razumly.mvp.profile.ProfileComponent
-import com.razumly.mvp.eventDetail.DefaultEventContentComponent
-import com.razumly.mvp.eventDetail.EventContentComponent
+import com.razumly.mvp.eventDetail.DefaultEventDetailComponent
+import com.razumly.mvp.eventDetail.EventDetailComponent
 import com.razumly.mvp.userAuth.DefaultAuthComponent
 import org.koin.dsl.bind
 import org.koin.dsl.module
@@ -58,13 +58,13 @@ val componentModule = module {
             onMatchSelected: (MatchWithRelations) -> Unit,
             name: String,
         ) ->
-        DefaultEventContentComponent(
+        DefaultEventDetailComponent(
             componentContext = componentContext,
             mvpRepository = get(),
             tournamentId = tournamentId,
             onMatchSelected = onMatchSelected,
         )
-    } bind EventContentComponent::class
+    } bind EventDetailComponent::class
 
     factory { (componentContext: ComponentContext, onEventCreated: () -> Unit) ->
         DefaultCreateEventComponent(

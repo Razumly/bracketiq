@@ -19,7 +19,7 @@ import com.arkivanov.decompose.extensions.compose.experimental.stack.ChildStack
 import com.arkivanov.decompose.extensions.compose.experimental.stack.animation.fade
 import com.arkivanov.decompose.extensions.compose.experimental.stack.animation.stackAnimation
 import com.arkivanov.decompose.extensions.compose.subscribeAsState
-import com.razumly.mvp.chat.MessagesScreen
+import com.razumly.mvp.chat.ChatListScreen
 import com.razumly.mvp.core.presentation.composables.MVPBottomNavBar
 import com.razumly.mvp.core.presentation.composables.PlatformBackButton
 import com.razumly.mvp.eventCreate.CreateEventScreen
@@ -92,7 +92,7 @@ fun HomeScreen(component: HomeComponent) {
 
                                     is HomeComponent.Child.Messages -> {
                                         Napier.d(tag = "Navigation") { "Navigating to Messages Screen" }
-                                        MessagesScreen(instance.component)
+                                        ChatListScreen(instance.component)
                                     }
 
                                     is HomeComponent.Child.Create -> {

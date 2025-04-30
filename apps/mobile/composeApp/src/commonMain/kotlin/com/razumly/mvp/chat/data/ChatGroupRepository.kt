@@ -4,8 +4,11 @@ import com.razumly.mvp.core.data.MVPDatabase
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.data.dataTypes.crossRef.ChatUserCrossRef
+import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResponse
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
+import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.util.DbConstants
+import io.appwrite.Query
 import io.appwrite.services.Databases
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -19,6 +22,7 @@ class ChatGroupRepository(
     private val databases: Databases,
     private val mvpDatabase: MVPDatabase,
     private val messagesRepository: IMessagesRepository,
+    private val userRepository: IUserRepository
 ): IChatGroupRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     override fun getChatGroupFlow(chatGroupId: String): Flow<Result<ChatGroupWithRelations>> {
@@ -41,6 +45,36 @@ class ChatGroupRepository(
                 onReturn = { it }
             )
         }
+        return localFlow
+    }
+
+    override fun getChatGroupsFlow(): Flow<Result<List<ChatGroup>>> {
+        val userId = userRepository.currentUser.value!!.id
+        val localFlow = mvpDatabase.getChatGroupDao.getChatGroupsFlowByUserId(userId)
+            .map { Result.success(it) }
+
+        scope.launch{
+            multiResponse(
+                getRemoteData = {
+                    databases.listDocuments(
+                        DbConstants.DATABASE_NAME,
+                        DbConstants.CHAT_GROUP_COLLECTION,
+                        nestedType = ChatGroup::class,
+                        queries = listOf(Query.contains("userIds", userId))
+                    ).documents.map { it.data }
+                },
+                getLocalData = {
+                    mvpDatabase.getChatGroupDao.getChatGroupsByUserId(userId)
+                },
+                saveData = {
+                    mvpDatabase.getChatGroupDao.upsertChatGroups(it)
+                },
+                deleteData = {
+                    mvpDatabase.getChatGroupDao.deleteChatGroupsByIds(it)
+                }
+            )
+        }
+
         return localFlow
     }
 

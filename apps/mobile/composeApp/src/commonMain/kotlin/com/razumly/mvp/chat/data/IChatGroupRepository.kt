@@ -6,6 +6,7 @@ import com.razumly.mvp.core.data.repositories.IMVPRepository
 import kotlinx.coroutines.flow.Flow
 
 interface IChatGroupRepository : IMVPRepository {
+    fun getChatGroupsFlow(): Flow<Result<List<ChatGroup>>>
     fun getChatGroupFlow(chatGroupId: String): Flow<Result<ChatGroupWithRelations>>
     suspend fun createChatGroup(newChatGroup: ChatGroup): Result<Unit>
     suspend fun updateChatGroup(newChatGroup: ChatGroup): Result<ChatGroup>

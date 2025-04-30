@@ -9,12 +9,12 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import com.razumly.mvp.eventDetail.EventContentComponent
+import com.razumly.mvp.eventDetail.EventDetailComponent
 
 
 @Composable
 fun Header(
-    component: EventContentComponent,
+    component: EventDetailComponent,
 ) {
     val tournament by component.selectedEvent.collectAsState()
     val showDetails by component.showDetails.collectAsState()

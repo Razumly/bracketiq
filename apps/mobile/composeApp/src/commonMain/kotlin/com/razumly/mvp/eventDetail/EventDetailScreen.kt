@@ -44,11 +44,11 @@ import com.razumly.mvp.home.LocalNavBarPadding
 import kotlinx.coroutines.delay
 
 val LocalTournamentComponent =
-    compositionLocalOf<EventContentComponent> { error("No tournament provided") }
+    compositionLocalOf<EventDetailComponent> { error("No tournament provided") }
 
 @Composable
 fun EventDetailScreen(
-    component: EventContentComponent,
+    component: EventDetailComponent,
     mapComponent: MapComponent
 ) {
     val isBracketView by component.isBracketView.collectAsState()

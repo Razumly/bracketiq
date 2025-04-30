@@ -1,13 +1,13 @@
 package com.razumly.mvp.di
 
 import com.arkivanov.decompose.ComponentContext
-import com.razumly.mvp.chat.DefaultMessagesComponent
+import com.razumly.mvp.chat.DefaultChatListComponent
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.presentation.RootComponent
 import com.razumly.mvp.eventCreate.DefaultCreateEventComponent
-import com.razumly.mvp.eventDetail.DefaultEventContentComponent
+import com.razumly.mvp.eventDetail.DefaultEventDetailComponent
 import com.razumly.mvp.eventSearch.DefaultSearchEventListComponent
 import com.razumly.mvp.home.DefaultHomeComponent
 import com.razumly.mvp.matchDetail.DefaultMatchContentComponent
@@ -59,7 +59,7 @@ val componentModule = module {
             onMatchSelected: (MatchWithRelations, Tournament) -> Unit,
             onNavigateToTeamSettings: (freeAgents: List<String>, event: EventAbs?) -> Unit
         ) ->
-            DefaultEventContentComponent(
+            DefaultEventDetailComponent(
                 componentContext = componentContext,
                 event = event,
                 onMatchSelected = onMatchSelected,
@@ -100,7 +100,7 @@ val componentModule = module {
         (
             componentContext: ComponentContext,
         ) ->
-        DefaultMessagesComponent(
+        DefaultChatListComponent(
             componentContext = componentContext,
         )
     }

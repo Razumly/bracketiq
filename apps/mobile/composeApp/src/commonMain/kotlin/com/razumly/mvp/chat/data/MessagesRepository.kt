@@ -10,11 +10,11 @@ import io.appwrite.services.Databases
 
 class MessagesRepository(
     private val mvpDatabase: MVPDatabase,
-    private val database: Databases
+    private val databases: Databases
 ): IMessagesRepository {
     override suspend fun getMessagesInChatGroup(chatGroupId: String): Result<List<MessageMVP>> = multiResponse(
         getRemoteData = {
-            database.listDocuments(
+            databases.listDocuments(
                 DbConstants.DATABASE_NAME,
                 DbConstants.MESSAGES_COLLECTION,
                 nestedType = MessageMVP::class,
@@ -32,7 +32,7 @@ class MessagesRepository(
 
     override suspend fun createMessage(newMessage: MessageMVP): Result<Unit> = singleResponse(
         networkCall = {
-            database.createDocument(
+            databases.createDocument(
                 databaseId = DbConstants.DATABASE_NAME,
                 collectionId = DbConstants.MESSAGES_COLLECTION,
                 documentId = newMessage.id,

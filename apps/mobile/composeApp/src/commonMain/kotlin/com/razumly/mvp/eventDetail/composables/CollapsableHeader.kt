@@ -24,13 +24,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
-import com.razumly.mvp.eventDetail.EventContentComponent
+import com.razumly.mvp.eventDetail.EventDetailComponent
 import com.razumly.mvp.icons.MVPIcons
 import com.razumly.mvp.icons.TournamentBracket
 
 @Composable
 fun CollapsableHeader(
-    component: EventContentComponent
+    component: EventDetailComponent
 ) {
     val selectedDivision by component.selectedDivision.collectAsState()
     val event by component.selectedEvent.collectAsState()

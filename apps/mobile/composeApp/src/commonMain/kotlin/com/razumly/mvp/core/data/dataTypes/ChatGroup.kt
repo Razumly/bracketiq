@@ -8,6 +8,6 @@ import kotlinx.serialization.Serializable
 @Entity
 data class ChatGroup (
     @PrimaryKey override val id: String,
-    val name: String?,
+    val name: String,
     val userIds: List<String>
 ): MVPDocument

@@ -1,4 +1,4 @@
-package com.razumly.mvp.teamManagement.composables
+package com.razumly.mvp.core.presentation.composables
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement

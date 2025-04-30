@@ -1,7 +1,5 @@
 package com.razumly.mvp.teamManagement
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,20 +29,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.presentation.composables.InvitePlayerCard
 import com.razumly.mvp.core.presentation.composables.PlayerCard
-import com.razumly.mvp.core.presentation.composables.SearchBox
+import com.razumly.mvp.core.presentation.composables.SearchPlayerDialog
 import com.razumly.mvp.core.presentation.util.teamSizeFormat
-import com.razumly.mvp.teamManagement.composables.InvitePlayerCard
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun CreateOrEditTeamDialog(
     team: TeamWithPlayers,
@@ -209,86 +204,5 @@ fun CreateOrEditTeamDialog(
             onDismiss = { showSearchDialog = false },
             eventName = selectedEvent?.name ?: ""
         )
-    }
-}
-
-@Composable
-fun SearchPlayerDialog(
-    freeAgents: List<UserData>,
-    friends: List<UserData>,
-    onSearch: (query: String) -> Unit,
-    onPlayerSelected: (UserData) -> Unit,
-    onDismiss: () -> Unit,
-    suggestions: List<UserData>,
-    eventName: String
-) {
-    var searchQuery by remember { mutableStateOf("") }
-
-    Dialog(
-        onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        Box(
-            modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f))
-                .padding(16.dp)
-        ) {
-            Card(
-                modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter),
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "Add Player", style = MaterialTheme.typography.titleLarge
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    SearchBox(placeholder = "Search Players",
-                        filter = false,
-                        onChange = { newQuery ->
-                            searchQuery = newQuery
-                            onSearch(newQuery)
-                        },
-                        onSearch = { searchQuery = it },
-                        initialList = {
-                            LazyColumn {
-                                if (freeAgents.isNotEmpty()) {
-                                    item {
-                                        Text("Free Agents of $eventName")
-                                    }
-                                    items(freeAgents) { player ->
-                                        Row(modifier = Modifier.fillMaxWidth().clickable {
-                                            onPlayerSelected(player)
-                                            onDismiss()
-                                        }.padding(8.dp)) {
-                                            PlayerCard(player)
-                                        }
-                                    }
-                                }
-                                item {
-                                    Text("Friends")
-                                }
-                                items(friends) { friend ->
-                                    Row(modifier = Modifier.fillMaxWidth().clickable {
-                                        onPlayerSelected(friend)
-                                        onDismiss()
-                                    }.padding(8.dp)) {
-                                        PlayerCard(friend)
-                                    }
-                                }
-                            }
-                        },
-                        suggestions = {
-                            LazyColumn {
-                                items(suggestions) { player ->
-                                    Row(modifier = Modifier.fillMaxWidth().clickable {
-                                        onPlayerSelected(player)
-                                        onDismiss()
-                                    }.padding(8.dp)) {
-                                        PlayerCard(player)
-                                    }
-                                }
-                            }
-                        })
-                }
-            }
-        }
     }
 }

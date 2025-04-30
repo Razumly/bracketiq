@@ -25,7 +25,7 @@ import androidx.compose.ui.window.Dialog
 import com.razumly.mvp.core.presentation.composables.TeamCard
 
 @Composable
-fun TeamManagementScreen(component: DefaultTeamManagementComponent) {
+fun TeamManagementScreen(component: TeamManagementComponent) {
     val currentTeams by component.currentTeams.collectAsState()
     val lazyListState = rememberLazyListState()
     val friends by component.friends.collectAsState()

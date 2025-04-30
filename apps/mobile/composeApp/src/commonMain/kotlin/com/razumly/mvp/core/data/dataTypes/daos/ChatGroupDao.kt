@@ -15,6 +15,9 @@ interface ChatGroupDao {
     suspend fun upsertChatGroup(chatGroup: ChatGroup)
 
     @Upsert
+    suspend fun upsertChatGroups(chatGroups: List<ChatGroup>)
+
+    @Upsert
     suspend fun upsertChatGroupUserCrossRef(crossRef: ChatUserCrossRef)
 
     @Delete
@@ -23,8 +26,11 @@ interface ChatGroupDao {
     @Delete
     suspend fun deleteChatGroupUserCrossRef(crossRef: ChatUserCrossRef)
 
-    @Query("DELETE FROM ChatGroup WHERE id = :id")
-    suspend fun deleteChatGroupById(id: String)
+    @Query("DELETE FROM ChatGroup WHERE id IN (:ids)")
+    suspend fun deleteChatGroupsByIds(ids: List<String>)
+
+    @Query("SELECT * FROM ChatGroup WHERE userIds LIKE '%' || :userId || '%'")
+    fun getChatGroupsFlowByUserId(userIid: String): Flow<List<ChatGroup>>
 
     @Query("SELECT * FROM ChatGroup WHERE userIds LIKE '%' || :userId || '%'")
     fun getChatGroupsByUserId(userIid: String): List<ChatGroup>
