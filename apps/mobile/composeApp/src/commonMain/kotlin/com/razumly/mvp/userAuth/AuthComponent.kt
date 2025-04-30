@@ -36,12 +36,12 @@ class DefaultAuthComponent(
     private val onNavigateToHome: () -> Unit
 ) : ComponentContext by componentContext, AuthComponent {
 
-    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    internal val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-    private val _loginState = MutableStateFlow<LoginState>(LoginState.Initial)
+    internal val _loginState = MutableStateFlow<LoginState>(LoginState.Initial)
     override val loginState: StateFlow<LoginState> = _loginState.asStateFlow()
 
-    private val _currentUser = userRepository.currentUser
+    internal val _currentUser = userRepository.currentUser
         .stateIn(scope, SharingStarted.Eagerly, null)
 
     private val _isSignup = MutableStateFlow(false)

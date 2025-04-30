@@ -1,7 +1,9 @@
 package com.razumly.mvp.di
 
 import com.arkivanov.decompose.ComponentContext
+import com.razumly.mvp.chat.DefaultChatGroupComponent
 import com.razumly.mvp.chat.DefaultChatListComponent
+import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Tournament
@@ -90,18 +92,23 @@ val componentModule = module {
                 componentContext = componentContext,
                 locationTracker = get(),
                 onEventSelected = onEventSelected,
-                userRepository = get(),
-                teamRepository = get(),
                 eventAbsRepository = get()
             )
     }
 
-    factory {
-        (
-            componentContext: ComponentContext,
-        ) ->
+    factory { (componentContext: ComponentContext, onNavigateToChat: (chat: ChatGroup) -> Unit) ->
         DefaultChatListComponent(
             componentContext = componentContext,
+            chatGroupRepository = get(),
+            userRepository = get(),
+            onNavigateToChat = onNavigateToChat
+        )
+    }
+
+    factory { (componentContext: ComponentContext, chatGroup : ChatGroup) ->
+        DefaultChatGroupComponent(
+            componentContext = componentContext,
+            chatGroup = chatGroup
         )
     }
 

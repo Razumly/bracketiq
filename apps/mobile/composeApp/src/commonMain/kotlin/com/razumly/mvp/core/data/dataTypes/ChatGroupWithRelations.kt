@@ -15,8 +15,8 @@ class ChatGroupWithRelations (
         entityColumn = "id",
         associateBy = Junction(
             value = ChatUserCrossRef::class,
-            parentColumn = "matchId",
-            entityColumn = "fieldId"
+            parentColumn = "chatId",
+            entityColumn = "userId"
         )
     )
     val users: List<UserData>,

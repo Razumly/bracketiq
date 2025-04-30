@@ -1,5 +1,9 @@
 package com.razumly.mvp.di
 
+import com.razumly.mvp.chat.data.ChatGroupRepository
+import com.razumly.mvp.chat.data.IChatGroupRepository
+import com.razumly.mvp.chat.data.IMessagesRepository
+import com.razumly.mvp.chat.data.MessagesRepository
 import com.razumly.mvp.core.data.repositories.EventAbsRepository
 import com.razumly.mvp.core.data.repositories.EventRepository
 import com.razumly.mvp.core.data.repositories.FieldRepository
@@ -43,4 +47,10 @@ val MVPRepositoryModule = module {
     single {
         PushNotificationsRepository(get(), get(), get())
     }
+    single {
+        MessagesRepository(get(), get())
+    } bind IMessagesRepository::class
+    single {
+        ChatGroupRepository(get(), get(), get(), get())
+    } bind IChatGroupRepository::class
 }

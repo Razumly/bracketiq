@@ -30,10 +30,10 @@ interface ChatGroupDao {
     suspend fun deleteChatGroupsByIds(ids: List<String>)
 
     @Query("SELECT * FROM ChatGroup WHERE userIds LIKE '%' || :userId || '%'")
-    fun getChatGroupsFlowByUserId(userIid: String): Flow<List<ChatGroup>>
+    fun getChatGroupsFlowByUserId(userId: String): Flow<List<ChatGroup>>
 
     @Query("SELECT * FROM ChatGroup WHERE userIds LIKE '%' || :userId || '%'")
-    fun getChatGroupsByUserId(userIid: String): List<ChatGroup>
+    suspend fun getChatGroupsByUserId(userId: String): List<ChatGroup>
 
     @Query("SELECT * FROM ChatGroup WHERE id = :id")
     fun getChatGroupFlowById(id: String): Flow<ChatGroupWithRelations>

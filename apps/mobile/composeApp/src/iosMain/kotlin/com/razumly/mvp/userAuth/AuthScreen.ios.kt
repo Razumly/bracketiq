@@ -1,8 +1,6 @@
-package com.razumly.mvp.userAuth.loginScreen
+package com.razumly.mvp.userAuth
 
 import androidx.compose.runtime.Composable
-import com.razumly.mvp.userAuth.AuthScreenBase
-import com.razumly.mvp.userAuth.DefaultAuthComponent
 
 @Composable
 actual fun AuthScreen(component: DefaultAuthComponent) {

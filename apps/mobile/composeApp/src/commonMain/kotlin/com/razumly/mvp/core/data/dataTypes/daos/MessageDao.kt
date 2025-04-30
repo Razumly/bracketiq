@@ -14,12 +14,12 @@ interface MessageDao {
     @Delete
     suspend fun deleteMessage(messageMVP: MessageMVP)
 
-    @Query("DELETE FROM Message WHERE id = :id")
+    @Query("DELETE FROM MessageMVP WHERE id = :id")
     suspend fun deleteMessageById(id: String)
 
-    @Query("SELECT * FROM Message WHERE id = :id")
+    @Query("SELECT * FROM MessageMVP WHERE id = :id")
     fun getMessageById(id: String): MessageMVP?
 
-    @Query("SELECT * FROM Message WHERE chatId = :chatGroupId")
+    @Query("SELECT * FROM MessageMVP WHERE chatId = :chatGroupId")
     fun getMessagesInChatGroup(chatGroupId: String): List<MessageMVP>
 }

@@ -90,9 +90,13 @@ fun HomeScreen(component: HomeComponent) {
                                         MatchDetailScreen(instance.component)
                                     }
 
-                                    is HomeComponent.Child.Messages -> {
+                                    is HomeComponent.Child.ChatList -> {
                                         Napier.d(tag = "Navigation") { "Navigating to Messages Screen" }
                                         ChatListScreen(instance.component)
+                                    }
+
+                                    is HomeComponent.Child.ChatGroup -> {
+                                        Napier.d(tag = "Navigation") { "Navigating to Chat Screen" }
                                     }
 
                                     is HomeComponent.Child.Create -> {

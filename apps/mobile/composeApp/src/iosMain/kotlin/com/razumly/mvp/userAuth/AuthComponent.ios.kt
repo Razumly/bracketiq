@@ -1,8 +1,7 @@
-package com.razumly.mvp.userAuth.loginScreen
+package com.razumly.mvp.userAuth
 
 import com.razumly.mvp.core.data.dataTypes.LoginState
 import com.razumly.mvp.core.data.oauth2Login
-import com.razumly.mvp.userAuth.DefaultAuthComponent
 import kotlinx.coroutines.launch
 
 fun DefaultAuthComponent.oauth2Login() {

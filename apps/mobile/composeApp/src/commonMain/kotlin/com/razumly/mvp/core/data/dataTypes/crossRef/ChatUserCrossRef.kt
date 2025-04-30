@@ -3,7 +3,7 @@ package com.razumly.mvp.core.data.dataTypes.crossRef
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
-import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.UserData
 
 @Entity(
@@ -11,7 +11,7 @@ import com.razumly.mvp.core.data.dataTypes.UserData
     primaryKeys = ["chatId", "userId"],
     foreignKeys = [
         ForeignKey(
-            entity = Team::class,
+            entity = ChatGroup::class,
             parentColumns = ["id"],
             childColumns = ["chatId"],
             onDelete = ForeignKey.CASCADE

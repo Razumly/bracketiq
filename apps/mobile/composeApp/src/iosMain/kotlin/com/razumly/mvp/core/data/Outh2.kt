@@ -3,12 +3,14 @@ package com.razumly.mvp.core.data
 import com.razumly.mvp.core.data.dataTypes.UserWithRelations
 import com.razumly.mvp.core.data.dataTypes.dtos.UserDataDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.toUserData
+import com.razumly.mvp.core.data.repositories.IMVPRepository
+import com.razumly.mvp.core.data.repositories.UserRepository
 import com.razumly.mvp.core.util.DbConstants
 import io.appwrite.enums.OAuthProvider
 import io.appwrite.extensions.createOAuth2Session
 import io.github.aakira.napier.Napier
 
-suspend fun MVPRepository.oauth2Login(): UserWithRelations? {
+suspend fun UserRepository.oauth2Login(): UserWithRelations? {
     try {
         account.createOAuth2Session(
             provider = OAuthProvider.GOOGLE,

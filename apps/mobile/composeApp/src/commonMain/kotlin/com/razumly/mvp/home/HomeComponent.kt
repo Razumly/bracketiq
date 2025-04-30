@@ -8,8 +8,11 @@ import com.arkivanov.decompose.router.stack.pop
 import com.arkivanov.decompose.router.stack.pushNew
 import com.arkivanov.decompose.router.stack.replaceAll
 import com.arkivanov.decompose.value.Value
-import com.razumly.mvp.chat.DefaultChatListComponent
+import com.razumly.mvp.chat.ChatGroupComponent
 import com.razumly.mvp.chat.ChatListComponent
+import com.razumly.mvp.chat.DefaultChatGroupComponent
+import com.razumly.mvp.chat.DefaultChatListComponent
+import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Tournament
@@ -50,7 +53,8 @@ interface HomeComponent {
         ) : Child()
 
         data class MatchContent(val component: MatchContentComponent) : Child()
-        data class Messages(val component: ChatListComponent) : Child()
+        data class ChatList(val component: ChatListComponent) : Child()
+        data class ChatGroup(val component: ChatGroupComponent) : Child()
         data class Create(val component: CreateEventComponent, val mapComponent: MapComponent) :
             Child()
 
@@ -72,7 +76,12 @@ interface HomeComponent {
         ) : Config()
 
         @Serializable
-        data object Messages : Config()
+        data object ChatList : Config()
+
+        @Serializable
+        data class Chat(
+            val chatGroup: ChatGroup
+        ) : Config()
 
         @Serializable
         data object Create : Config()
@@ -145,18 +154,23 @@ class DefaultHomeComponent(
                     }.value
                 )
             }
-            is Config.MatchDetail -> {
-                Child.MatchContent(
-                    _koin.inject<DefaultMatchContentComponent> {
-                        parametersOf(componentContext, config.match, config.tournament)
-                    }.value
-                )
-            }
-            is Config.Messages -> Child.Messages(
-                _koin.inject<DefaultChatListComponent> {
-                    parametersOf(componentContext, ::onEventSelected)
+            is Config.MatchDetail -> Child.MatchContent(
+                _koin.inject<DefaultMatchContentComponent> {
+                    parametersOf(componentContext, config.match, config.tournament)
                 }.value
             )
+            is Config.ChatList -> Child.ChatList(
+                _koin.inject<DefaultChatListComponent> {
+                    parametersOf(componentContext, ::onNavigateToChat)
+                }.value
+            )
+
+            is Config.Chat -> Child.ChatGroup(
+                _koin.inject<DefaultChatGroupComponent> {
+                    parametersOf(componentContext, config.chatGroup)
+                }.value
+            )
+
             is Config.Create -> Child.Create(
                 _koin.inject<DefaultCreateEventComponent> {
                     parametersOf(componentContext, ::onEventCreated)
@@ -204,11 +218,15 @@ class DefaultHomeComponent(
         navigation.pushNew(Config.Teams(freeAgents, event))
     }
 
+    private fun onNavigateToChat(chatGroup: ChatGroup) {
+        navigation.pushNew(Config.Chat(chatGroup))
+    }
+
     override fun onTabSelected(page: Config) {
         _selectedPage.value = page
         when (page) {
             Config.Search -> navigation.replaceAll(Config.Search)
-            Config.Messages -> navigation.replaceAll(Config.Messages)
+            Config.ChatList -> navigation.replaceAll(Config.ChatList)
             Config.Create -> navigation.replaceAll(Config.Create)
             Config.Profile -> navigation.replaceAll(Config.Profile)
             else -> {}
