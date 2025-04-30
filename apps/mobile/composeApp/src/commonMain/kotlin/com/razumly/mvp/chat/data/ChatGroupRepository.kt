@@ -1,8 +1,9 @@
-package com.razumly.mvp.messaging.data
+package com.razumly.mvp.chat.data
 
 import com.razumly.mvp.core.data.MVPDatabase
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
+import com.razumly.mvp.core.data.dataTypes.crossRef.ChatUserCrossRef
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
 import com.razumly.mvp.core.util.DbConstants
 import io.appwrite.services.Databases
@@ -77,11 +78,13 @@ class ChatGroupRepository(
 
     override suspend fun deleteUserFromChatGroup(chatGroup: ChatGroup, userId: String): Result<Unit> {
         val newChatGroup = chatGroup.copy(userIds = chatGroup.userIds.filter { it != userId })
+        mvpDatabase.getChatGroupDao.deleteChatGroupUserCrossRef(ChatUserCrossRef(chatGroup.id, userId))
         return updateChatGroup(newChatGroup).map {}
     }
 
     override suspend fun addUserToChatGroup(chatGroup: ChatGroup, userId: String): Result<Unit> {
         val newChatGroup = chatGroup.copy(userIds = chatGroup.userIds + userId)
+        mvpDatabase.getChatGroupDao.upsertChatGroupUserCrossRef(ChatUserCrossRef(chatGroup.id, userId))
         return updateChatGroup(newChatGroup).map {}
     }
 

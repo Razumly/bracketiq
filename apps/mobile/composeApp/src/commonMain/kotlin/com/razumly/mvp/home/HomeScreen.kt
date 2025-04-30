@@ -19,13 +19,13 @@ import com.arkivanov.decompose.extensions.compose.experimental.stack.ChildStack
 import com.arkivanov.decompose.extensions.compose.experimental.stack.animation.fade
 import com.arkivanov.decompose.extensions.compose.experimental.stack.animation.stackAnimation
 import com.arkivanov.decompose.extensions.compose.subscribeAsState
+import com.razumly.mvp.chat.MessagesScreen
 import com.razumly.mvp.core.presentation.composables.MVPBottomNavBar
 import com.razumly.mvp.core.presentation.composables.PlatformBackButton
 import com.razumly.mvp.eventCreate.CreateEventScreen
 import com.razumly.mvp.eventDetail.EventDetailScreen
 import com.razumly.mvp.eventSearch.EventSearchScreen
 import com.razumly.mvp.matchDetail.MatchDetailScreen
-import com.razumly.mvp.messaging.MessagesScreen
 import com.razumly.mvp.profile.ProfileScreen
 import com.razumly.mvp.teamManagement.TeamManagementScreen
 import io.github.aakira.napier.Napier

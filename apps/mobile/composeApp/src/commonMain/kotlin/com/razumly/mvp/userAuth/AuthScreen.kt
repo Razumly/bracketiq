@@ -1,4 +1,4 @@
-package com.razumly.mvp.userAuth.loginScreen
+package com.razumly.mvp.userAuth
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -34,7 +34,7 @@ import com.razumly.mvp.icons.BaselineVisibilityOff24
 import com.razumly.mvp.icons.MVPIcons
 
 @Composable
-fun AuthScreenBase(component: AuthComponent, onOauth2: () -> Unit?) {
+fun AuthScreenBase(component: DefaultAuthComponent, onOauth2: () -> Unit?) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
@@ -230,4 +230,4 @@ fun AuthScreenBase(component: AuthComponent, onOauth2: () -> Unit?) {
 }
 
 @Composable
-expect fun AuthScreen(component: AuthComponent)
+expect fun AuthScreen(component: DefaultAuthComponent)

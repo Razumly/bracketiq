@@ -24,7 +24,7 @@ import com.razumly.mvp.core.presentation.composables.EventCard
 
 @Composable
 fun EventList(
-    component: SearchEventListComponent,
+    component: DefaultSearchEventListComponent,
     events: List<EventAbs>,
     firstElementPadding: PaddingValues,
     lastElementPadding: PaddingValues,

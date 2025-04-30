@@ -13,6 +13,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
@@ -20,25 +21,43 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalCoroutinesApi::class)
+interface TeamManagementComponent {
+    val selectedEvent: EventAbs?
+    val currentUser: StateFlow<UserData?>
+    val friends: StateFlow<List<UserData>>
+    val currentTeams: StateFlow<List<TeamWithPlayers>>
+    val teamInvites: StateFlow<List<TeamWithPlayers>>
+    val selectedTeam: StateFlow<TeamWithPlayers?>
+    val suggestedPlayers: StateFlow<List<UserData>>
+    val freeAgentsFiltered: StateFlow<List<UserData>>
+    val enableDeleteTeam: StateFlow<Boolean>
+    fun selectTeam(team: TeamWithPlayers?)
+    fun createTeam(team: Team)
+    fun joinTeam(team: Team)
+    fun updateTeam(team: Team)
+    fun deselectTeam()
+    fun deleteTeam(team: TeamWithPlayers)
+    fun searchPlayers(query: String)
+}
 
-class TeamManagementComponent(
+@OptIn(ExperimentalCoroutinesApi::class)
+class DefaultTeamManagementComponent(
     componentContext: ComponentContext,
     private val teamRepository: ITeamRepository,
     private val userRepository: IUserRepository,
     private val freeAgents: List<String>,
-    val selectedEvent: EventAbs?
-) : ComponentContext by componentContext {
+    override val selectedEvent: EventAbs?
+) : ComponentContext by componentContext, TeamManagementComponent {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     private val _errorState = MutableStateFlow<String?>(null)
 
-    val currentUser = userRepository.currentUser
+    override val currentUser = userRepository.currentUser
 
     private val _friends = MutableStateFlow<List<UserData>>(listOf())
-    val friends = _friends.asStateFlow()
+    override val friends = _friends.asStateFlow()
 
-    val currentTeams = currentUser.map { user ->
+    override val currentTeams = currentUser.map { user ->
         user?.teamIds ?: emptyList()
     }.flatMapLatest { teamIds ->
         teamRepository.getTeamsWithPlayersFlow(teamIds).map { team ->
@@ -49,7 +68,7 @@ class TeamManagementComponent(
         }
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
-    val teamInvites = currentUser.map { user ->
+    override val teamInvites = currentUser.map { user ->
         user?.teamInvites ?: emptyList()
     }.flatMapLatest { teamIds ->
         teamRepository.getTeamsWithPlayersFlow(teamIds).map { team ->
@@ -61,12 +80,12 @@ class TeamManagementComponent(
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     private val _selectedTeam = MutableStateFlow<TeamWithPlayers?>(null)
-    val selectedTeam = _selectedTeam.asStateFlow()
+    override val selectedTeam = _selectedTeam.asStateFlow()
 
     private val _suggestedPlayers = MutableStateFlow<List<UserData>>(listOf())
-    val suggestedPlayers = _suggestedPlayers.asStateFlow()
+    override val suggestedPlayers = _suggestedPlayers.asStateFlow()
 
-    val freeAgentsFiltered = combine(currentUser, selectedTeam) { user, team ->
+    override val freeAgentsFiltered = combine(currentUser, selectedTeam) { user, team ->
         val playerIdsToExclude = buildSet {
             user?.id?.let { add(it) }
             team?.players?.forEach { add(it.id) }
@@ -77,7 +96,7 @@ class TeamManagementComponent(
         }
     }.stateIn(scope, SharingStarted.Eagerly, listOf())
 
-    val enableDeleteTeam = selectedTeam.map { team ->
+    override val enableDeleteTeam = selectedTeam.map { team ->
         team?.team?.eventIds?.isEmpty() == true && team.team.tournamentIds.isEmpty()
     }.stateIn(scope, SharingStarted.Eagerly, false)
 
@@ -103,13 +122,13 @@ class TeamManagementComponent(
         }
     }
 
-    fun selectTeam(team: TeamWithPlayers?) {
+    override fun selectTeam(team: TeamWithPlayers?) {
         _selectedTeam.value = team ?: TeamWithPlayers(
             Team(currentUser.value!!.id), listOf(currentUser.value!!), listOf()
         )
     }
 
-    fun createTeam(team: Team) {
+    override fun createTeam(team: Team) {
         scope.launch {
             teamRepository.createTeam(team).onFailure {
                 _errorState.value = it.message
@@ -118,7 +137,7 @@ class TeamManagementComponent(
         deselectTeam()
     }
 
-    fun joinTeam(team: Team) {
+    override fun joinTeam(team: Team) {
         scope.launch {
             teamRepository.addPlayerToTeam(team, currentUser.value!!).onFailure {
                 _errorState.value = it.message
@@ -126,7 +145,7 @@ class TeamManagementComponent(
         }
     }
 
-    fun updateTeam(team: Team) {
+    override fun updateTeam(team: Team) {
         scope.launch {
             teamRepository.updateTeam(team).onFailure {
                 _errorState.value = it.message
@@ -135,11 +154,11 @@ class TeamManagementComponent(
         deselectTeam()
     }
 
-    fun deselectTeam() {
+    override fun deselectTeam() {
         _selectedTeam.value = null
     }
 
-    fun deleteTeam(team: TeamWithPlayers) {
+    override fun deleteTeam(team: TeamWithPlayers) {
         scope.launch {
             teamRepository.deleteTeam(team).onFailure {
                 _errorState.value = it.message
@@ -147,7 +166,7 @@ class TeamManagementComponent(
         }
     }
 
-    fun searchPlayers(query: String) {
+    override fun searchPlayers(query: String) {
         scope.launch {
             _suggestedPlayers.value = userRepository.searchPlayers(search = query).getOrElse {
                 _errorState.value = it.message

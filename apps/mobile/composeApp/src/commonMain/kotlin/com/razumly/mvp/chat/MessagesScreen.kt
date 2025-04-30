@@ -1,4 +1,4 @@
-package com.razumly.mvp.messaging
+package com.razumly.mvp.chat
 
 import androidx.compose.runtime.Composable
 

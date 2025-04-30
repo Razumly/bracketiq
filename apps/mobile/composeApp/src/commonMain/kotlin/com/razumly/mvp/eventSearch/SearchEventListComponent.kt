@@ -4,8 +4,6 @@ import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.backhandler.BackCallback
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.repositories.IEventAbsRepository
-import com.razumly.mvp.core.data.repositories.ITeamRepository
-import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.util.calcDistance
 import com.razumly.mvp.core.util.getBounds
 import dev.icerock.moko.geo.LatLng
@@ -28,24 +26,40 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-class SearchEventListComponent(
+interface SearchEventListComponent {
+    val locationTracker: LocationTracker
+    val onEventSelected: (event: EventAbs) -> Unit
+    val currentRadius: StateFlow<Double>
+    val error: StateFlow<String?>
+    val isLoading: StateFlow<Boolean>
+    val suggestedEvents: StateFlow<List<EventAbs>>
+
+    val events: StateFlow<List<EventAbs>>
+    val selectedEvent: StateFlow<EventAbs?>
+    val showMapCard: StateFlow<Boolean>
+    fun selectRadius(radius: Double)
+    fun onMapClick(event: EventAbs? = null)
+    fun viewEvent(event: EventAbs)
+    fun suggestEvents(searchQuery: String)
+    fun filterEvents(searchQuery: String)
+}
+
+class DefaultSearchEventListComponent(
     componentContext: ComponentContext,
-    userRepository: IUserRepository,
-    private val teamRepository: ITeamRepository,
     private val eventAbsRepository: IEventAbsRepository,
-    val locationTracker: LocationTracker,
-    val onEventSelected: (event: EventAbs) -> Unit,
-) : ComponentContext by componentContext {
+    override val locationTracker: LocationTracker,
+    override val onEventSelected: (event: EventAbs) -> Unit,
+) : ComponentContext by componentContext, SearchEventListComponent {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     private val _currentRadius = MutableStateFlow(50.0)
-    val currentRadius: StateFlow<Double> = _currentRadius.asStateFlow()
+    override val currentRadius: StateFlow<Double> = _currentRadius.asStateFlow()
 
     private val _error = MutableStateFlow<String?>(null)
-    val error: StateFlow<String?> = _error.asStateFlow()
+    override val error: StateFlow<String?> = _error.asStateFlow()
 
     private val _isLoading = MutableStateFlow(false)
-    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+    override val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
     private val _locationStateFlow =
         locationTracker.getLocationsFlow().stateIn(scope, SharingStarted.Eagerly, null)
@@ -53,10 +67,10 @@ class SearchEventListComponent(
     private val _currentLocation = MutableStateFlow<LatLng?>(null)
 
     private val _suggestedEvents = MutableStateFlow<List<EventAbs>>(emptyList())
-    val suggestedEvents: StateFlow<List<EventAbs>> = _suggestedEvents.asStateFlow()
+    override val suggestedEvents: StateFlow<List<EventAbs>> = _suggestedEvents.asStateFlow()
 
     @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
-    val events = combine(_currentLocation.filterNotNull(), _currentRadius) { location, radius ->
+    override val events = combine(_currentLocation.filterNotNull(), _currentRadius) { location, radius ->
         getBounds(radius, location.latitude, location.longitude)
     }.debounce(200L).flatMapLatest { bounds ->
             eventAbsRepository.getEventsInBoundsFlow(bounds).map { result ->
@@ -69,10 +83,10 @@ class SearchEventListComponent(
         }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     private val _selectedEvent = MutableStateFlow<EventAbs?>(null)
-    val selectedEvent: StateFlow<EventAbs?> = _selectedEvent.asStateFlow()
+    override val selectedEvent: StateFlow<EventAbs?> = _selectedEvent.asStateFlow()
 
     private val _showMapCard = MutableStateFlow(false)
-    val showMapCard: StateFlow<Boolean> = _showMapCard.asStateFlow()
+    override val showMapCard: StateFlow<Boolean> = _showMapCard.asStateFlow()
 
     private val backCallback = BackCallback(false) {
         _showMapCard.value = false
@@ -121,20 +135,20 @@ class SearchEventListComponent(
         }
     }
 
-    fun selectRadius(radius: Double) {
+    override fun selectRadius(radius: Double) {
         _currentRadius.value = radius
     }
 
-    fun onMapClick(event: EventAbs? = null) {
+    override fun onMapClick(event: EventAbs?) {
         _selectedEvent.value = event
         _showMapCard.value = !_showMapCard.value
     }
 
-    fun viewEvent(event: EventAbs) {
+    override fun viewEvent(event: EventAbs) {
         onEventSelected(event)
     }
 
-    fun suggestEvents(searchQuery: String) {
+    override fun suggestEvents(searchQuery: String) {
         scope.launch {
             eventAbsRepository.searchEvents(searchQuery, _currentLocation.value!!)
                 .onSuccess {
@@ -146,7 +160,7 @@ class SearchEventListComponent(
         }
     }
 
-    fun filterEvents(searchQuery: String) {
+    override fun filterEvents(searchQuery: String) {
         scope.launch {
             eventAbsRepository.searchEvents(searchQuery, _currentLocation.value!!)
                 .onSuccess {

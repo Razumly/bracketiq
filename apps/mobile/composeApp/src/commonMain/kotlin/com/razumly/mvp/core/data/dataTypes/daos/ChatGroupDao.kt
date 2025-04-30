@@ -6,6 +6,7 @@ import androidx.room.Query
 import androidx.room.Upsert
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
+import com.razumly.mvp.core.data.dataTypes.crossRef.ChatUserCrossRef
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -13,8 +14,14 @@ interface ChatGroupDao {
     @Upsert
     suspend fun upsertChatGroup(chatGroup: ChatGroup)
 
+    @Upsert
+    suspend fun upsertChatGroupUserCrossRef(crossRef: ChatUserCrossRef)
+
     @Delete
     suspend fun deleteChatGroup(chatGroup: ChatGroup)
+
+    @Delete
+    suspend fun deleteChatGroupUserCrossRef(crossRef: ChatUserCrossRef)
 
     @Query("DELETE FROM ChatGroup WHERE id = :id")
     suspend fun deleteChatGroupById(id: String)

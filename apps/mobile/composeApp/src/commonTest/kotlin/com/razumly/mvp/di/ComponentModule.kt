@@ -7,7 +7,7 @@ import com.razumly.mvp.core.presentation.RootComponent
 import com.razumly.mvp.eventCreate.CreateEventComponent
 import com.razumly.mvp.eventCreate.DefaultCreateEventComponent
 import com.razumly.mvp.eventFollowing.FollowingEventListComponent
-import com.razumly.mvp.eventSearch.SearchEventListComponent
+import com.razumly.mvp.eventSearch.DefaultSearchEventListComponent
 import com.razumly.mvp.home.DefaultHomeComponent
 import com.razumly.mvp.matchDetail.DefaultMatchContentComponent
 import com.razumly.mvp.matchDetail.MatchContentComponent
@@ -15,7 +15,7 @@ import com.razumly.mvp.profile.DefaultProfileComponent
 import com.razumly.mvp.profile.ProfileComponent
 import com.razumly.mvp.eventDetail.DefaultEventContentComponent
 import com.razumly.mvp.eventDetail.EventContentComponent
-import com.razumly.mvp.userAuth.loginScreen.AuthComponent
+import com.razumly.mvp.userAuth.DefaultAuthComponent
 import org.koin.dsl.bind
 import org.koin.dsl.module
 
@@ -29,12 +29,12 @@ val componentModule = module {
     }
 
     factory { (componentContext: ComponentContext, onNavigateToHome: () -> Unit) ->
-        AuthComponent(
+        DefaultAuthComponent(
             componentContext = componentContext,
             userRepository = get(),
             onNavigateToHome = onNavigateToHome
         )
-    } bind AuthComponent::class
+    } bind DefaultAuthComponent::class
 
     factory { (componentContext: ComponentContext, onNavigateToLogin: () -> Unit) ->
         DefaultHomeComponent(
@@ -76,7 +76,7 @@ val componentModule = module {
     } bind CreateEventComponent::class
 
     factory { (componentContext: ComponentContext, onTournamentSelected: (String) -> Unit) ->
-        SearchEventListComponent(
+        DefaultSearchEventListComponent(
             componentContext = componentContext,
             mvpRepository = get(),
             locationTracker = get(),

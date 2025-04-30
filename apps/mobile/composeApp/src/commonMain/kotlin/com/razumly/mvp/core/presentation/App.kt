@@ -13,7 +13,7 @@ import com.arkivanov.decompose.extensions.compose.stack.Children
 import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import com.razumly.mvp.core.presentation.util.backAnimation
 import com.razumly.mvp.home.HomeScreen
-import com.razumly.mvp.userAuth.loginScreen.AuthScreen
+import com.razumly.mvp.userAuth.AuthScreen
 import dev.icerock.moko.geo.compose.BindLocationTrackerEffect
 import dev.icerock.moko.permissions.compose.BindEffect
 import io.github.aakira.napier.DebugAntilog

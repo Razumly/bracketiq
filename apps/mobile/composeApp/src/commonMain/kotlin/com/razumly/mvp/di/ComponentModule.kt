@@ -1,19 +1,19 @@
 package com.razumly.mvp.di
 
 import com.arkivanov.decompose.ComponentContext
-import com.razumly.mvp.messaging.DefaultMessagesComponent
+import com.razumly.mvp.chat.DefaultMessagesComponent
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.presentation.RootComponent
 import com.razumly.mvp.eventCreate.DefaultCreateEventComponent
 import com.razumly.mvp.eventDetail.DefaultEventContentComponent
-import com.razumly.mvp.eventSearch.SearchEventListComponent
+import com.razumly.mvp.eventSearch.DefaultSearchEventListComponent
 import com.razumly.mvp.home.DefaultHomeComponent
 import com.razumly.mvp.matchDetail.DefaultMatchContentComponent
 import com.razumly.mvp.profile.DefaultProfileComponent
-import com.razumly.mvp.teamManagement.TeamManagementComponent
-import com.razumly.mvp.userAuth.loginScreen.AuthComponent
+import com.razumly.mvp.teamManagement.DefaultTeamManagementComponent
+import com.razumly.mvp.userAuth.DefaultAuthComponent
 import org.koin.dsl.module
 
 val componentModule = module {
@@ -26,7 +26,7 @@ val componentModule = module {
     }
 
     factory { (componentContext: ComponentContext, onNavigateToHome: () -> Unit) ->
-        AuthComponent(
+        DefaultAuthComponent(
             componentContext = componentContext,
             userRepository = get(),
             onNavigateToHome = onNavigateToHome
@@ -86,7 +86,7 @@ val componentModule = module {
             componentContext: ComponentContext,
             onEventSelected: (event: EventAbs) -> Unit,
         ) ->
-            SearchEventListComponent(
+            DefaultSearchEventListComponent(
                 componentContext = componentContext,
                 locationTracker = get(),
                 onEventSelected = onEventSelected,
@@ -99,11 +99,9 @@ val componentModule = module {
     factory {
         (
             componentContext: ComponentContext,
-            onEventSelected: (tournamentId: String) -> Unit
         ) ->
         DefaultMessagesComponent(
             componentContext = componentContext,
-            onEventSelected = onEventSelected
         )
     }
 
@@ -117,7 +115,7 @@ val componentModule = module {
     }
 
     factory { (componentContext: ComponentContext, freeAgents: List<String>, selectedEvent: EventAbs?) ->
-        TeamManagementComponent(
+        DefaultTeamManagementComponent(
             componentContext = componentContext,
             teamRepository = get(),
             userRepository = get(),

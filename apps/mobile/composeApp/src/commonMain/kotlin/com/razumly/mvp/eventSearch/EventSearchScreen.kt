@@ -64,7 +64,7 @@ import dev.icerock.moko.geo.compose.BindLocationTrackerEffect
 @OptIn(ExperimentalHazeMaterialsApi::class)
 @Composable
 fun EventSearchScreen(
-    component: SearchEventListComponent,
+    component: DefaultSearchEventListComponent,
     mapComponent: MapComponent,
 ) {
     val events by component.events.collectAsState()

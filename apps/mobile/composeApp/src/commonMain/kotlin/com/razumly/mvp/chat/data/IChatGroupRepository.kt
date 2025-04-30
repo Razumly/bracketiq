@@ -1,4 +1,4 @@
-package com.razumly.mvp.messaging.data
+package com.razumly.mvp.chat.data
 
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations

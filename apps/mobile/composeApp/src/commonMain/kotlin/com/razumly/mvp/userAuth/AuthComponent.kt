@@ -1,4 +1,4 @@
-package com.razumly.mvp.userAuth.loginScreen
+package com.razumly.mvp.userAuth
 
 import com.arkivanov.decompose.ComponentContext
 import com.razumly.mvp.core.data.dataTypes.LoginState
@@ -13,25 +13,42 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-class AuthComponent(
+interface AuthComponent {
+    val loginState: StateFlow<LoginState>
+    val isSignup: StateFlow<Boolean>
+    val passwordError: StateFlow<String>
+    fun onLogin(email: String, password: String)
+    fun onLogout()
+    fun toggleIsSignup()
+    fun onSignup(
+        email: String,
+        password: String,
+        confirmPassword: String,
+        firstName: String,
+        lastName: String,
+        userName: String
+    )
+}
+
+class DefaultAuthComponent(
     internal val userRepository: IUserRepository,
     internal val componentContext: ComponentContext,
     private val onNavigateToHome: () -> Unit
-) : ComponentContext by componentContext {
+) : ComponentContext by componentContext, AuthComponent {
 
-    internal val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-    internal val _loginState = MutableStateFlow<LoginState>(LoginState.Initial)
-    val loginState: StateFlow<LoginState> = _loginState.asStateFlow()
+    private val _loginState = MutableStateFlow<LoginState>(LoginState.Initial)
+    override val loginState: StateFlow<LoginState> = _loginState.asStateFlow()
 
-    internal val _currentUser = userRepository.currentUser
+    private val _currentUser = userRepository.currentUser
         .stateIn(scope, SharingStarted.Eagerly, null)
 
-    internal val _isSignup = MutableStateFlow(false)
-    val isSignup: StateFlow<Boolean> = _isSignup.asStateFlow()
+    private val _isSignup = MutableStateFlow(false)
+    override val isSignup: StateFlow<Boolean> = _isSignup.asStateFlow()
 
-    internal val _passwordError = MutableStateFlow("")
-    val passwordError = _passwordError.asStateFlow()
+    private val _passwordError = MutableStateFlow("")
+    override val passwordError = _passwordError.asStateFlow()
 
     init {
         scope.launch {
@@ -52,7 +69,7 @@ class AuthComponent(
         }
     }
 
-    fun onLogin(email: String, password: String) {
+    override fun onLogin(email: String, password: String) {
         scope.launch {
             _loginState.value = LoginState.Loading
 
@@ -68,7 +85,7 @@ class AuthComponent(
         }
     }
 
-    fun onLogout() {
+    override fun onLogout() {
         scope.launch {
             userRepository.logout()
                 .onSuccess {
@@ -79,11 +96,11 @@ class AuthComponent(
         }
     }
 
-    fun toggleIsSignup() {
+    override fun toggleIsSignup() {
         _isSignup.value = !_isSignup.value
     }
 
-    fun onSignup(
+    override fun onSignup(
         email: String,
         password: String,
         confirmPassword: String,
