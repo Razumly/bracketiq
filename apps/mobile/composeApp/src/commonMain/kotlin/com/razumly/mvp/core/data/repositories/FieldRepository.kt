@@ -9,6 +9,12 @@ import io.appwrite.Query
 import io.appwrite.services.Databases
 import kotlinx.coroutines.flow.Flow
 
+interface IFieldRepository : IMVPRepository {
+    suspend fun getFieldsInTournamentWithMatchesFlow(tournamentId: String): Flow<List<FieldWithMatches>>
+
+    suspend fun getFieldsInTournament(tournamentId: String): Result<List<Field>>
+}
+
 class FieldRepository(
     private val database: Databases,
     private val mvpDatabase: MVPDatabase

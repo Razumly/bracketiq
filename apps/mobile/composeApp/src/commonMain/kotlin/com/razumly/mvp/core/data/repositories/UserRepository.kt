@@ -31,6 +31,23 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
+interface IUserRepository : IMVPRepository {
+    val currentUser: StateFlow<UserData?>
+    suspend fun login(email: String, password: String): Result<UserData>
+    suspend fun logout(): Result<Unit>
+    suspend fun getUsersOfTournament(tournamentId: String): Result<List<UserData>>
+    suspend fun getUsersOfEvent(eventId: String): Result<List<UserData>>
+    suspend fun getUsers(userIds: List<String>): Result<List<UserData>>
+    fun getUsersOfEventFlow(eventId: String): Flow<Result<List<UserData>>>
+    fun getUsersOfTournamentFlow(tournamentId: String): Flow<Result<List<UserData>>>
+    suspend fun searchPlayers(search: String): Result<List<UserData>>
+    suspend fun createNewUser(
+        email: String, password: String, firstName: String, lastName: String, userName: String
+    ): Result<UserData>
+
+    suspend fun updateUser(user: UserData): Result<UserData>
+}
+
 class UserRepository(
     internal val mvpDatabase: MVPDatabase,
     internal val account: Account,

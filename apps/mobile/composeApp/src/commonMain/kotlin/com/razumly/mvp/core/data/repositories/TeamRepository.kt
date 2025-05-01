@@ -25,6 +25,21 @@ import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
+interface ITeamRepository : IMVPRepository {
+    fun getTeamsOfTournamentFlow(tournamentId: String): Flow<Result<List<TeamWithPlayers>>>
+    fun getTeamsOfEventFlow(eventId: String): Flow<Result<List<TeamWithPlayers>>>
+    suspend fun getTeam(teamId: String): Result<Team>
+    suspend fun getTeamsOfTournament(tournamentId: String): Result<List<Team>>
+    suspend fun getTeamsOfEvent(eventId: String): Result<List<Team>>
+    suspend fun addPlayerToTeam(team: Team, player: UserData): Result<Unit>
+    suspend fun removePlayerFromTeam(team: Team, player: UserData): Result<Unit>
+    suspend fun createTeam(newTeam: Team): Result<Team>
+    suspend fun updateTeam(newTeam: Team): Result<Team>
+    suspend fun deleteTeam(team: TeamWithPlayers): Result<Unit>
+    fun getTeamsWithPlayersFlow(ids: List<String>): Flow<Result<List<TeamWithPlayers>>>
+    fun getTeamWithPlayersFlow(id: String): Flow<Result<TeamWithRelations>>
+}
+
 class TeamRepository(
     private val database: Databases,
     private val mvpDatabase: MVPDatabase,
@@ -258,7 +273,7 @@ class TeamRepository(
                 )
             )
         }
-        mvpDatabase.getTeamDao.deleteTeamWithRelations(team.team)
+        mvpDatabase.getTeamDao.deleteTeam(team.team)
     }
 
     override fun getTeamsWithPlayersFlow(ids: List<String>): Flow<Result<List<TeamWithPlayers>>> {

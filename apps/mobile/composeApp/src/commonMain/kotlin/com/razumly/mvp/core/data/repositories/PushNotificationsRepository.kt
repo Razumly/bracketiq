@@ -9,6 +9,9 @@ import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.UserData
 import io.appwrite.ID
+import io.appwrite.models.Message
+import io.appwrite.models.Subscriber
+import io.appwrite.models.Topic
 import io.appwrite.services.Account
 import io.appwrite.services.Messaging
 import kotlinx.coroutines.CoroutineScope
@@ -21,13 +24,41 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
+interface IPushNotificationsRepository {
+    suspend fun subscribeUserToTeamNotifications(user: UserData, team: Team): Result<Subscriber>
+    suspend fun unsubscribeUserFromTeamNotifications(user: UserData, team: Team): Result<Any>
+    suspend fun subscribeUserToEventNotifications(
+        user: UserData,
+        event: EventAbs
+    ): Result<Subscriber>
+    suspend fun unsubscribeUserFromEventNotifications(user: UserData, event: EventAbs): Result<Any>
+    suspend fun subscribeUserToMatchNotifications(
+        user: UserData,
+        match: MatchMVP
+    ): Result<Subscriber>
+    suspend fun unsubscribeUserFromMatchNotifications(user: UserData, match: MatchMVP): Result<Any>
+    suspend fun sendUserNotification(user: UserData, title: String, body: String): Result<Message>
+    suspend fun sendTeamNotification(team: Team, title: String, body: String): Result<Message>
+    suspend fun sendEventNotification(event: EventAbs, title: String, body: String): Result<Message>
+    suspend fun sendMatchNotification(match: MatchMVP, title: String, body: String): Result<Message>
+    suspend fun createTeamTopic(team: Team): Result<Topic>
+    suspend fun deleteTeamTopic(team: Team): Result<Any>
+    suspend fun createEventTopic(event: EventImp): Result<Topic>
+    suspend fun deleteEventTopic(event: EventImp): Result<Any>
+    suspend fun createMatchTopic(matchId: String): Result<Topic>
+    suspend fun deleteMatchTopic(matchId: String): Result<Any>
+    suspend fun addDeviceAsTarget(): Result<Unit>
+    suspend fun removeDeviceAsTarget(): Result<Unit>
+}
+
 class PushNotificationsRepository(
     private val account: Account,
     private val userDataSource: CurrentUserDataSource,
     private val messaging: Messaging,
-) {
+) : IPushNotificationsRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val _pushToken = userDataSource.getPushToken().stateIn(scope, SharingStarted.Eagerly, "")
+    private val _pushToken =
+        userDataSource.getPushToken().stateIn(scope, SharingStarted.Eagerly, "")
     private val _pushTarget =
         userDataSource.getPushTarget().stateIn(scope, SharingStarted.Eagerly, "")
 
@@ -65,102 +96,106 @@ class PushNotificationsRepository(
         NotifierManager.addListener(managerListener)
     }
 
-    suspend fun subscribeUserToTeamNotifications(user: UserData, team: Team) =
+    override suspend fun subscribeUserToTeamNotifications(user: UserData, team: Team) =
         runCatching {
-        messaging.createSubscriber(team.id, user.id, _pushTarget.value)
-    }
+            messaging.createSubscriber(team.id, user.id, _pushTarget.value)
+        }
 
-    suspend fun unsubscribeUserFromTeamNotifications(user: UserData, team: Team) =
+    override suspend fun unsubscribeUserFromTeamNotifications(user: UserData, team: Team) =
         runCatching {
-        messaging.deleteSubscriber(team.id, user.id)
-    }
+            messaging.deleteSubscriber(team.id, user.id)
+        }
 
-    suspend fun subscribeUserToEventNotifications(user: UserData, event: EventAbs) =
+    override suspend fun subscribeUserToEventNotifications(user: UserData, event: EventAbs) =
         runCatching {
-        messaging.createSubscriber(event.id, user.id, _pushTarget.value)
-    }
+            messaging.createSubscriber(event.id, user.id, _pushTarget.value)
+        }
 
-    suspend fun unsubscribeUserFromEventNotifications(user: UserData, event: EventAbs) =
+    override suspend fun unsubscribeUserFromEventNotifications(user: UserData, event: EventAbs) =
         runCatching {
             messaging.deleteSubscriber(event.id, user.id)
         }
 
-    suspend fun subscribeUserToMatchNotifications(user: UserData, match: MatchMVP) =
+    override suspend fun subscribeUserToMatchNotifications(user: UserData, match: MatchMVP) =
         runCatching {
-        messaging.createSubscriber(match.id, user.id, _pushTarget.value)
-    }
+            messaging.createSubscriber(match.id, user.id, _pushTarget.value)
+        }
 
-    suspend fun unsubscribeUserFromMatchNotifications(user: UserData, match: MatchMVP) =
+    override suspend fun unsubscribeUserFromMatchNotifications(user: UserData, match: MatchMVP) =
         runCatching {
             messaging.deleteSubscriber(match.id, user.id)
         }
 
-    suspend fun sendUserNotification(user: UserData, title: String, body: String) = runCatching {
-        messaging.createPush(
-            messageId = ID.unique(),
-            title = title,
-            body = body,
-            users = listOf(user.id),
-        )
-    }
+    override suspend fun sendUserNotification(user: UserData, title: String, body: String) =
+        runCatching {
+            messaging.createPush(
+                messageId = ID.unique(),
+                title = title,
+                body = body,
+                users = listOf(user.id),
+            )
+        }
 
-    suspend fun sendTeamNotification(team: Team, title: String, body: String) = runCatching {
-        messaging.createPush(
-            messageId = ID.unique(),
-            title = title,
-            body = body,
-            topics = listOf("team-${team.id}"),
-        )
-    }
+    override suspend fun sendTeamNotification(team: Team, title: String, body: String) =
+        runCatching {
+            messaging.createPush(
+                messageId = ID.unique(),
+                title = title,
+                body = body,
+                topics = listOf("team-${team.id}"),
+            )
+        }
 
-    suspend fun sendEventNotification(event: EventAbs, title: String, body: String) = runCatching {
-        messaging.createPush(
-            messageId = ID.unique(),
-            title = title,
-            body = body,
-            topics = listOf("event-${event.id}"),
-        )
-    }
+    override suspend fun sendEventNotification(event: EventAbs, title: String, body: String) =
+        runCatching {
+            messaging.createPush(
+                messageId = ID.unique(),
+                title = title,
+                body = body,
+                topics = listOf("event-${event.id}"),
+            )
+        }
 
-    suspend fun sendMatchNotification(match: MatchMVP, title: String, body: String) = runCatching {
-        messaging.createPush(
-            messageId = ID.unique(),
-            title = title,
-            body = body,
-            topics = listOf("match-${match.id}"),
-        )
-    }
+    override suspend fun sendMatchNotification(match: MatchMVP, title: String, body: String) =
+        runCatching {
+            messaging.createPush(
+                messageId = ID.unique(),
+                title = title,
+                body = body,
+                topics = listOf("match-${match.id}"),
+            )
+        }
 
-    suspend fun createTeamTopic(team: Team) = runCatching {
+    override suspend fun createTeamTopic(team: Team) = runCatching {
         messaging.createTopic(team.id, "team-${team.id}")
     }
 
-    suspend fun deleteTeamTopic(team: Team) = runCatching {
+    override suspend fun deleteTeamTopic(team: Team) = runCatching {
         messaging.deleteTopic(team.id)
     }
 
-    suspend fun createEventTopic(event: EventImp) = runCatching {
+    override suspend fun createEventTopic(event: EventImp) = runCatching {
         messaging.createTopic(event.id, "event-${event.id}")
     }
 
-    suspend fun deleteEventTopic(event: EventImp) = runCatching {
+    override suspend fun deleteEventTopic(event: EventImp) = runCatching {
         messaging.deleteTopic(event.id)
     }
 
-    suspend fun createMatchTopic(matchId: String) = runCatching {
+    override suspend fun createMatchTopic(matchId: String) = runCatching {
         messaging.createTopic(matchId, "match-${matchId}")
     }
 
-    suspend fun deleteMatchTopic(matchId: String) = runCatching {
+    override suspend fun deleteMatchTopic(matchId: String) = runCatching {
         messaging.deleteTopic(matchId)
     }
 
-    suspend fun addDeviceAsTarget(): Result<Unit> = runCatching {
+    override suspend fun addDeviceAsTarget(): Result<Unit> = runCatching {
         val target = account.createPushTarget(ID.unique(), _pushToken.value)
         userDataSource.savePushTarget(target.id)
     }
 
-    suspend fun removeDeviceAsTarget(): Result<Unit> = runCatching {
+    override suspend fun removeDeviceAsTarget(): Result<Unit> = runCatching {
         if (_pushTarget.value.isBlank()) return Result.failure(Exception("No push target found"))
         account.deletePushTarget(_pushTarget.value)
         userDataSource.savePushTarget("")

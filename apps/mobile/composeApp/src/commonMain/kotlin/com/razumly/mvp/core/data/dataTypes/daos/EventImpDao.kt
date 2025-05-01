@@ -56,6 +56,6 @@ interface EventImpDao {
     @Query("DELETE FROM user_event_cross_ref WHERE eventId = :eventId")
     suspend fun deleteEventUserCrossRefs(eventId: String)
 
-    @Query("DELETE FROM team_event_cross_ref WHERE eventId = :eventId")
+    @Query("DELETE FROM event_team_cross_ref WHERE eventId = :eventId")
     suspend fun deleteEventTeamCrossRefs(eventId: String)
 }

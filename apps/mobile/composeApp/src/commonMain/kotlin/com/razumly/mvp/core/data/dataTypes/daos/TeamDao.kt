@@ -21,9 +21,6 @@ interface TeamDao {
     @Upsert
     suspend fun upsertTeam(team: Team)
 
-    @Upsert
-    suspend fun upsertTeams(teams: List<Team>)
-
     @Query(
         """
     SELECT * FROM Team 
@@ -37,9 +34,9 @@ interface TeamDao {
     @Query(
         """
     SELECT * FROM Team 
-    INNER JOIN team_event_cross_ref 
-    ON Team.id = team_event_cross_ref.teamId 
-    WHERE team_event_cross_ref.eventId = :eventId
+    INNER JOIN event_team_cross_ref 
+    ON Team.id = event_team_cross_ref.teamId 
+    WHERE event_team_cross_ref.eventId = :eventId
 """
     )
     suspend fun getTeamsInEvent(eventId: String): List<Team>
@@ -83,6 +80,18 @@ interface TeamDao {
     @Delete
     suspend fun deleteTeamPendingPlayerCrossRef(crossRef: TeamPendingPlayerCrossRef)
 
+    @Query("DELETE FROM team_user_cross_ref WHERE teamId == :teamId")
+    suspend fun deleteTeamPlayerCrossRefsByTeamId(teamId: String)
+
+    @Query("DELETE FROM team_pending_player_cross_ref WHERE teamId == :teamId")
+    suspend fun deleteTeamPendingPlayerCrossRefsByTeamId(teamId: String)
+
+    @Query("DELETE FROM event_team_cross_ref WHERE teamId == :teamId")
+    suspend fun deleteEventTeamCrossRefsByTeamId(teamId: String)
+
+    @Query("DELETE FROM tournament_team_cross_ref WHERE teamId == :teamId")
+    suspend fun deleteTournamentTeamCrossRefsByTeamId(teamId: String)
+
     @Transaction
     @Query("SELECT * FROM Team WHERE id = :teamId")
     suspend fun getTeamWithPlayers(teamId: String): TeamWithRelations?
@@ -110,9 +119,9 @@ interface TeamDao {
     @Query(
         """
     SELECT * FROM Team 
-    INNER JOIN team_event_cross_ref 
-    ON Team.id = team_event_cross_ref.teamId 
-    WHERE team_event_cross_ref.eventId = :eventId
+    INNER JOIN event_team_cross_ref 
+    ON Team.id = event_team_cross_ref.teamId 
+    WHERE event_team_cross_ref.eventId = :eventId
 """
     )
     fun getTeamsInEventFlow(eventId: String): Flow<List<TeamWithPlayers>>
@@ -122,21 +131,11 @@ interface TeamDao {
     fun getTeamsWithPlayersFlowByIds(ids: List<String>): Flow<List<TeamWithPlayers>>
 
     @Transaction
-    @Delete
-    suspend fun deleteTeamWithRelations(team: Team) {
-        deleteUsersFromTeam(team.id)
-        deleteTeamFromEvents(team)
-        deleteTeamFromTournaments(team)
-        deletePendingUsersFromTeam(team.id)
-        deleteTeam(team)
-    }
-
-    @Transaction
     suspend fun upsertTeamWithRelations(team: Team) {
-        deleteUsersFromTeam(team.id)
-        deleteTeamFromEvents(team)
-        deleteTeamFromTournaments(team)
-        deletePendingUsersFromTeam(team.id)
+        deleteTeamPlayerCrossRefsByTeamId(team.id)
+        deleteTournamentTeamCrossRefsByTeamId(team.id)
+        deleteEventTeamCrossRefsByTeamId(team.id)
+        deleteTeamPendingPlayerCrossRefsByTeamId(team.id)
         upsertTeam(team)
         try {
             upsertTeamPlayerCrossRefs(team.players.map { playerId ->
@@ -177,30 +176,4 @@ interface TeamDao {
             upsertTeamWithRelations(team)
         }
     }
-
-    @Transaction
-    suspend fun deleteTeamFromEvents(team: Team) {
-        team.eventIds.forEach { eventId ->
-            deleteEventTeamCrossRef(EventTeamCrossRef(eventId, team.id))
-        }
-    }
-
-    @Transaction
-    suspend fun deleteTeamFromTournaments(team: Team) {
-        team.tournamentIds.forEach { tournamentId ->
-            deleteTournamentTeamCrossRef(TournamentTeamCrossRef(tournamentId, team.id))
-        }
-    }
-
-    @Query("DELETE FROM team_user_cross_ref WHERE teamId = :teamId")
-    suspend fun deleteUsersFromTeam(teamId: String)
-
-    @Query("DELETE FROM team_pending_player_cross_ref WHERE teamId = :teamId")
-    suspend fun deletePendingUsersFromTeam(teamId: String)
-
-    @Delete
-    suspend fun deleteEventTeamCrossRef(crossRef: EventTeamCrossRef)
-
-    @Delete
-    suspend fun deleteTournamentTeamCrossRef(crossRef: TournamentTeamCrossRef)
 }

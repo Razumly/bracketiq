@@ -7,7 +7,7 @@ import com.razumly.mvp.core.data.dataTypes.crossRef.ChatUserCrossRef
 import kotlinx.serialization.Serializable
 
 @Serializable
-class ChatGroupWithRelations (
+data class ChatGroupWithRelations (
     @Embedded val chatGroup: ChatGroup,
 
     @Relation(

@@ -26,6 +26,17 @@ interface ChatGroupDao {
     @Delete
     suspend fun deleteChatGroupUserCrossRef(crossRef: ChatUserCrossRef)
 
+    @Query("DELETE FROM chat_user_cross_ref WHERE chatId == :id")
+    suspend fun deleteChatGroupUserCrossRefsByChatId(id: String)
+
+    suspend fun upsertChatGroupWithRelations(chatGroup: ChatGroup) {
+        upsertChatGroup(chatGroup)
+        deleteChatGroupUserCrossRefsByChatId(chatGroup.id)
+        chatGroup.userIds.forEach { userId ->
+            upsertChatGroupUserCrossRef(ChatUserCrossRef(chatGroup.id, userId))
+        }
+    }
+
     @Query("DELETE FROM ChatGroup WHERE id IN (:ids)")
     suspend fun deleteChatGroupsByIds(ids: List<String>)
 

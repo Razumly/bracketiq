@@ -7,7 +7,7 @@ import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.razumly.mvp.core.data.dataTypes.Team
 
 @Entity(
-    tableName = "team_event_cross_ref",
+    tableName = "event_team_cross_ref",
     primaryKeys = ["teamId", "eventId"],
     foreignKeys = [
         ForeignKey(

@@ -5,17 +5,25 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
 import androidx.compose.material3.FabPosition
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -26,10 +34,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.razumly.mvp.chat.Composables.ChatListItem
-import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.presentation.composables.InvitePlayerCard
 import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.SearchPlayerDialog
+import com.razumly.mvp.home.LocalNavBarPadding
 
 @Composable
 fun ChatListScreen(component: ChatListComponent) {
@@ -37,7 +45,7 @@ fun ChatListScreen(component: ChatListComponent) {
     var showNewChatDialog by remember { mutableStateOf(false) }
 
     Scaffold(
-        floatingActionButton = {
+        modifier = Modifier.padding(LocalNavBarPadding.current), floatingActionButton = {
             IconButton(
                 onClick = { showNewChatDialog = true },
             ) {
@@ -45,10 +53,10 @@ fun ChatListScreen(component: ChatListComponent) {
                     Icon(Icons.Default.Add, contentDescription = "Create Chat")
                 }
             }
-        },
-        floatingActionButtonPosition = FabPosition.End
-    ) {
+        }, floatingActionButtonPosition = FabPosition.End
+    ) { padding ->
         LazyColumn(
+            modifier = Modifier.padding(padding).padding(16.dp).fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
@@ -66,30 +74,61 @@ fun ChatListScreen(component: ChatListComponent) {
 
 @Composable
 fun NewChatDialog(component: ChatListComponent, onDismiss: () -> Unit) {
-    val usersInChat by remember { mutableStateOf(listOf<UserData>()) }
+    val newChat by component.newChat.collectAsState()
     var showSearchDialog by remember { mutableStateOf(false) }
     val suggestions by component.suggestedPlayers.collectAsState()
     val friends by component.friends.collectAsState()
-    val newChat by component.newChat.collectAsState()
+    var isValid by remember { mutableStateOf(false) }
+
+    LaunchedEffect(newChat) {
+        isValid = newChat.chatGroup.name.isNotEmpty() && newChat.users.size > 1
+    }
 
     Dialog(onDismissRequest = { onDismiss() }) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            LazyColumn {
-                items(usersInChat) {
-                    PlayerCard(player = it)
-                }
-                item {
-                    InvitePlayerCard() {
-                        showSearchDialog = true
+        Card(Modifier.fillMaxSize()) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                OutlinedTextField(
+                    value = newChat.chatGroup.name,
+                    onValueChange = {
+                        component.updateNewChatField { newChat.chatGroup.copy(name = it) }
+                    },
+                    label = { Text("Chat Name") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                LazyColumn {
+                    items(newChat.users) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            PlayerCard(player = it)
+                            Button(onClick = {
+                                component.removeUserFromNewChat(it)
+                            }) {
+                                Text("Remove")
+                            }
+                        }
+                    }
+                    item {
+                        InvitePlayerCard() {
+                            showSearchDialog = true
+                        }
                     }
                 }
-            }
-            Row {
-                IconButton(onClick = { component.onChatCreated() }) {
-                    Icon(Icons.Default.Check, contentDescription = "Create Chat")
-                }
-                IconButton(onClick = { onDismiss() }) {
-                    Icon(Icons.Default.Close, contentDescription = "Cancel")
+                Row {
+                    IconButton(enabled = isValid, onClick = {
+                        component.onChatCreated()
+                        onDismiss()
+                    }) {
+                        Icon(Icons.Default.Check, contentDescription = "Create Chat")
+                    }
+                    IconButton(onClick = { onDismiss() }) {
+                        Icon(Icons.Default.Close, contentDescription = "Cancel")
+                    }
                 }
             }
         }
@@ -98,9 +137,11 @@ fun NewChatDialog(component: ChatListComponent, onDismiss: () -> Unit) {
                 freeAgents = listOf(),
                 friends = friends,
                 onSearch = { component.searchPlayers(it) },
-                onPlayerSelected = { component.updateNewChatField { copy(userIds = newChat.userIds + it.id) } },
+                onPlayerSelected = { component.addUserToNewChat(it) },
                 onDismiss = { showSearchDialog = false },
-                suggestions = suggestions,
+                suggestions = suggestions.filter { suggestedUser ->
+                    !newChat.users.map { chatUser -> chatUser.id }.contains(suggestedUser.id)
+                },
                 eventName = "",
             )
         }

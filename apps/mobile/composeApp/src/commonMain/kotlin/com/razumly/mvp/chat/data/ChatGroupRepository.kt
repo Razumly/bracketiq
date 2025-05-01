@@ -4,6 +4,7 @@ import com.razumly.mvp.core.data.MVPDatabase
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.data.dataTypes.crossRef.ChatUserCrossRef
+import com.razumly.mvp.core.data.repositories.IMVPRepository
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResponse
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
 import com.razumly.mvp.core.data.repositories.IUserRepository
@@ -17,6 +18,15 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+
+interface IChatGroupRepository : IMVPRepository {
+    fun getChatGroupsFlow(): Flow<Result<List<ChatGroup>>>
+    fun getChatGroupFlow(chatGroupId: String): Flow<Result<ChatGroupWithRelations>>
+    suspend fun createChatGroup(newChatGroup: ChatGroup): Result<Unit>
+    suspend fun updateChatGroup(newChatGroup: ChatGroup): Result<ChatGroup>
+    suspend fun deleteUserFromChatGroup(chatGroup: ChatGroup, userId: String): Result<Unit>
+    suspend fun addUserToChatGroup(chatGroup: ChatGroup, userId: String): Result<Unit>
+}
 
 class ChatGroupRepository(
     private val databases: Databases,
@@ -61,7 +71,7 @@ class ChatGroupRepository(
                         DbConstants.CHAT_GROUP_COLLECTION,
                         nestedType = ChatGroup::class,
                         queries = listOf(Query.contains("userIds", userId))
-                    ).documents.map { it.data }
+                    ).documents.map { it.data.copy(id = it.id) }
                 },
                 getLocalData = {
                     mvpDatabase.getChatGroupDao.getChatGroupsByUserId(userId)
@@ -89,7 +99,7 @@ class ChatGroupRepository(
             ).data
         },
         saveCall = { chatGroup ->
-            mvpDatabase.getChatGroupDao.upsertChatGroup(chatGroup)
+            mvpDatabase.getChatGroupDao.upsertChatGroupWithRelations(chatGroup)
         },
         onReturn = { }
     )
@@ -105,7 +115,7 @@ class ChatGroupRepository(
             ).data
         },
         saveCall = { chatGroup ->
-            mvpDatabase.getChatGroupDao.upsertChatGroup(chatGroup)
+            mvpDatabase.getChatGroupDao.upsertChatGroupWithRelations(chatGroup)
         },
         onReturn = { it }
     )

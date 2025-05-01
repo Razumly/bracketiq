@@ -8,6 +8,11 @@ import com.razumly.mvp.core.util.DbConstants
 import io.appwrite.Query
 import io.appwrite.services.Databases
 
+interface IMessagesRepository {
+    suspend fun getMessagesInChatGroup(chatGroupId: String): Result<List<MessageMVP>>
+    suspend fun createMessage(newMessage: MessageMVP): Result<Unit>
+}
+
 class MessagesRepository(
     private val mvpDatabase: MVPDatabase,
     private val databases: Databases
@@ -19,7 +24,7 @@ class MessagesRepository(
                 DbConstants.MESSAGES_COLLECTION,
                 nestedType = MessageMVP::class,
                 queries = listOf(Query.equal("chatGroupId", chatGroupId))
-            ).documents.map { it.data }
+            ).documents.map { it.data.copy(id = it.id) }
         },
         getLocalData = {
             mvpDatabase.getMessageDao.getMessagesInChatGroup(chatGroupId)

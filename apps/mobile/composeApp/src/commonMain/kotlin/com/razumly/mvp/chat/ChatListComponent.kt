@@ -3,6 +3,7 @@ package com.razumly.mvp.chat
 import com.arkivanov.decompose.ComponentContext
 import com.razumly.mvp.chat.data.IChatGroupRepository
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
+import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import io.appwrite.ID
@@ -18,7 +19,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 interface ChatListComponent {
-    val newChat: StateFlow<ChatGroup>
+    val newChat: StateFlow<ChatGroupWithRelations>
     val selectedChat: StateFlow<ChatGroup?>
     val chatGroups: StateFlow<List<ChatGroup>>
     val errorState: StateFlow<String?>
@@ -29,6 +30,8 @@ interface ChatListComponent {
     fun onChatSelected(chat: ChatGroup)
     fun onChatCreated()
     fun updateNewChatField(update: ChatGroup.() -> ChatGroup)
+    fun addUserToNewChat(user: UserData)
+    fun removeUserFromNewChat(user: UserData)
     fun searchPlayers(query: String)
 }
 
@@ -41,7 +44,15 @@ class DefaultChatListComponent(
     ComponentContext by componentContext {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-    private val _newChat = MutableStateFlow(ChatGroup(ID.unique(), "", emptyList()))
+    override val currentUser = userRepository.currentUser.value!!
+
+    private val _newChat = MutableStateFlow(
+        ChatGroupWithRelations(
+            ChatGroup(ID.unique(), "", listOf(currentUser.id), currentUser.id),
+            users = listOf(currentUser),
+            messages = listOf(),
+        )
+    )
     override val newChat = _newChat.asStateFlow()
 
     private val _selectedChat = MutableStateFlow<ChatGroup?>(null)
@@ -55,8 +66,6 @@ class DefaultChatListComponent(
 
     private val _friends = MutableStateFlow<List<UserData>>(listOf())
     override val friends = _friends.asStateFlow()
-
-    override val currentUser = userRepository.currentUser.value!!
 
     init {
         scope.launch {
@@ -81,13 +90,34 @@ class DefaultChatListComponent(
     }
 
     override fun updateNewChatField(update: ChatGroup.() -> ChatGroup) {
-        _newChat.value = newChat.value.update()
+        _newChat.value = newChat.value.copy(chatGroup = newChat.value.chatGroup.update())
     }
 
     override fun onChatCreated() {
         scope.launch {
-            chatGroupRepository.createChatGroup(newChat.value)
+            chatGroupRepository.createChatGroup(newChat.value.chatGroup).onFailure {
+                _errorState.value = it.message
+            }
         }
+    }
+
+    override fun addUserToNewChat(user: UserData) {
+        val newChatGroup = _newChat.value.chatGroup
+        _newChat.value = _newChat.value.copy(
+            chatGroup = newChatGroup.copy(userIds = newChatGroup.userIds + user.id),
+            users = _newChat.value.users + user
+        )
+    }
+
+    override fun removeUserFromNewChat(user: UserData) {
+        if (!_newChat.value.chatGroup.userIds.contains(user.id)) {
+            return
+        }
+        val newChatGroup = _newChat.value.chatGroup
+        _newChat.value = _newChat.value.copy(
+            chatGroup = newChatGroup.copy(userIds = newChatGroup.userIds - user.id),
+            users = _newChat.value.users - user
+        )
     }
 
     override fun searchPlayers(query: String) {

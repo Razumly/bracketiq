@@ -18,6 +18,15 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
+interface IEventRepository : IMVPRepository {
+    fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>>
+    suspend fun getEvent(eventId: String): Result<EventWithRelations>
+    suspend fun createEvent(newEvent: EventImp): Result<EventImp>
+    suspend fun updateEvent(newEvent: EventImp): Result<EventImp>
+    suspend fun getEvents(query: String): Result<List<EventImp>>
+    fun getEventsFlow(query: String): Flow<Result<List<EventImp>>>
+}
+
 class EventRepository(
     private val mvpDatabase: MVPDatabase,
     private val database: Databases,

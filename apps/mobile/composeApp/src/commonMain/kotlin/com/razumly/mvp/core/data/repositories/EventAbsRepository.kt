@@ -16,6 +16,21 @@ import io.github.aakira.napier.Napier
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 
+interface IEventAbsRepository : IMVPRepository {
+    fun getEventWithRelationsFlow(event: EventAbs): Flow<Result<EventAbsWithRelations>>
+    fun getEventsInBoundsFlow(bounds: Bounds): Flow<Result<List<EventAbs>>>
+    fun searchEventsFlow(searchQuery: String, userLocation: LatLng): Flow<Result<List<EventAbs>>>
+    suspend fun createEvent(event: EventAbs): Result<Unit>
+    suspend fun updateEvent(event: EventAbs): Result<Unit>
+    suspend fun removeTeamFromEvent(event: EventAbs, teamWithPlayers: TeamWithPlayers): Result<Unit>
+    suspend fun removeCurrentUserFromEvent(event: EventAbs): Result<Unit>
+    suspend fun getEvent(event: EventAbs): Result<EventAbsWithRelations>
+    suspend fun getEventsInBounds(bounds: Bounds): Result<List<EventAbs>>
+    suspend fun searchEvents(searchQuery: String, userLocation: LatLng): Result<List<EventAbs>>
+    suspend fun addCurrentUserToEvent(event: EventAbs): Result<Unit>
+    suspend fun addTeamToEvent(event: EventAbs, team: TeamWithPlayers): Result<Unit>
+}
+
 class EventAbsRepository(
     private val eventRepository: IEventRepository,
     private val tournamentRepository: ITournamentRepository,
