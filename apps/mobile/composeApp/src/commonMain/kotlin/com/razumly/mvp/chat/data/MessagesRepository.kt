@@ -7,36 +7,53 @@ import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleRes
 import com.razumly.mvp.core.util.DbConstants
 import io.appwrite.Query
 import io.appwrite.services.Databases
+import io.appwrite.services.Realtime
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.IO
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 interface IMessagesRepository {
     suspend fun getMessagesInChatGroup(chatGroupId: String): Result<List<MessageMVP>>
     suspend fun createMessage(newMessage: MessageMVP): Result<Unit>
+    suspend fun subscribeToChatGroup(chatGroupId: String): Result<Unit>
 }
 
 class MessagesRepository(
     private val mvpDatabase: MVPDatabase,
-    private val databases: Databases
-): IMessagesRepository {
-    override suspend fun getMessagesInChatGroup(chatGroupId: String): Result<List<MessageMVP>> = multiResponse(
-        getRemoteData = {
+    private val databases: Databases,
+    private val realtime: Realtime
+) : IMessagesRepository {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    override suspend fun subscribeToChatGroup(chatGroupId: String): Result<Unit> = runCatching {
+        val channels = listOf(DbConstants.CHAT_GROUPS_CHANNEL)
+        realtime.subscribe(channels, payloadType = MessageMVP::class) { response ->
+            response.payload.let {
+                if (it.chatId != chatGroupId) return@subscribe
+                scope.launch {
+                    mvpDatabase.getMessageDao.upsertMessage(it)
+                }
+            }
+        }
+    }
+
+    override suspend fun getMessagesInChatGroup(chatGroupId: String): Result<List<MessageMVP>> =
+        multiResponse(getRemoteData = {
             databases.listDocuments(
                 DbConstants.DATABASE_NAME,
                 DbConstants.MESSAGES_COLLECTION,
                 nestedType = MessageMVP::class,
                 queries = listOf(Query.equal("chatGroupId", chatGroupId))
             ).documents.map { it.data.copy(id = it.id) }
-        },
-        getLocalData = {
+        }, getLocalData = {
             mvpDatabase.getMessageDao.getMessagesInChatGroup(chatGroupId)
-        },
-        saveData = {
+        }, saveData = {
             mvpDatabase.getMessageDao.upsertMessages(it)
-        },
-        deleteData = { }
-    )
+        }, deleteData = { })
 
-    override suspend fun createMessage(newMessage: MessageMVP): Result<Unit> = singleResponse(
-        networkCall = {
+    override suspend fun createMessage(newMessage: MessageMVP): Result<Unit> =
+        singleResponse(networkCall = {
             databases.createDocument(
                 databaseId = DbConstants.DATABASE_NAME,
                 collectionId = DbConstants.MESSAGES_COLLECTION,
@@ -44,10 +61,7 @@ class MessagesRepository(
                 data = newMessage,
                 nestedType = MessageMVP::class
             ).data
-        },
-        saveCall = {
+        }, saveCall = {
             mvpDatabase.getMessageDao.upsertMessages(listOf(it))
-        },
-        onReturn = {}
-    )
+        }, onReturn = {})
 }

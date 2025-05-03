@@ -11,6 +11,9 @@ interface MessageDao {
     @Upsert
     suspend fun upsertMessages(messageMVPs: List<MessageMVP>)
 
+    @Upsert
+    suspend fun upsertMessage(messageMVP: MessageMVP)
+
     @Delete
     suspend fun deleteMessage(messageMVP: MessageMVP)
 

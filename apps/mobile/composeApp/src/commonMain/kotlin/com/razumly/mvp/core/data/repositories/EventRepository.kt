@@ -15,6 +15,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
@@ -101,7 +102,7 @@ class EventRepository(
                 ).documents.map { dtoDoc -> dtoDoc.convert { it.toEvent(dtoDoc.id) }.data }
             },
             getLocalData = {
-                listOf()
+                mvpDatabase.getEventImpDao.getAllCachedEvents().first()
             },
             saveData = { mvpDatabase.getEventImpDao.upsertEvents(it) },
             deleteData = { events -> mvpDatabase.getEventImpDao.deleteEventsById(events) }

@@ -7,7 +7,6 @@ import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TournamentUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.dtos.UserDataDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.toUserData
-import com.razumly.mvp.core.data.dataTypes.toUserDataDTO
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResponse
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
 import com.razumly.mvp.core.util.DbConstants

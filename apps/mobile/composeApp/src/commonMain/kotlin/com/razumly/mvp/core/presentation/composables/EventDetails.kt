@@ -93,7 +93,7 @@ import kotlinx.datetime.format
 import kotlinx.datetime.toLocalDateTime
 
 @OptIn(
-    ExperimentalHazeMaterialsApi::class, ExperimentalHazeApi::class,
+    ExperimentalHazeApi::class,
     ExperimentalComposeUiApi::class
 )
 @Composable
@@ -205,7 +205,7 @@ fun EventDetails(
                                 startIntensity = 0f,
                                 endIntensity = 1f,
                                 startY = 0f,
-                                endY = 300f
+                                endY = 500f
                             )
                         }.padding(navPadding).padding(horizontal = 16.dp).padding(top = 32.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp),

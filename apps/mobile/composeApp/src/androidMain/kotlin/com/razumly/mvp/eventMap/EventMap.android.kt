@@ -183,7 +183,7 @@ actual fun EventMap(
             }
         }
 
-        if (canClickPOI && focusedEvent == null) {
+        if (canClickPOI) {
             currentCameraState.projection?.visibleRegion?.latLngBounds?.let {
                 MapSearchBar(
                     Modifier

@@ -54,7 +54,7 @@ interface HomeComponent {
 
         data class MatchContent(val component: MatchContentComponent) : Child()
         data class ChatList(val component: ChatListComponent) : Child()
-        data class ChatGroup(val component: ChatGroupComponent) : Child()
+        data class Chat(val component: ChatGroupComponent) : Child()
         data class Create(val component: CreateEventComponent, val mapComponent: MapComponent) :
             Child()
 
@@ -165,7 +165,7 @@ class DefaultHomeComponent(
                 }.value
             )
 
-            is Config.Chat -> Child.ChatGroup(
+            is Config.Chat -> Child.Chat(
                 _koin.inject<DefaultChatGroupComponent> {
                     parametersOf(componentContext, config.chatGroup)
                 }.value

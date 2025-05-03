@@ -17,6 +17,7 @@ object DbConstants {
     const val LONG_ATTRIBUTE = "long"
     const val ERROR_TAG = "Database"
     const val MATCHES_CHANNEL = "databases.$DATABASE_NAME.collections.$MATCHES_COLLECTION.documents"
-    const val USER_CHANNEL = "datbases.$DATABASE_NAME.collections.$USER_DATA_COLLECTION.documents"
+    const val CHAT_GROUPS_CHANNEL = "databases.$DATABASE_NAME.collections.$CHAT_GROUP_COLLECTION.documents"
+    const val USER_CHANNEL = "databases.$DATABASE_NAME.collections.$USER_DATA_COLLECTION.documents"
 
 }

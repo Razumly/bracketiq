@@ -95,7 +95,7 @@ fun HomeScreen(component: HomeComponent) {
                                         ChatListScreen(instance.component)
                                     }
 
-                                    is HomeComponent.Child.ChatGroup -> {
+                                    is HomeComponent.Child.Chat -> {
                                         Napier.d(tag = "Navigation") { "Navigating to Chat Screen" }
                                     }
 

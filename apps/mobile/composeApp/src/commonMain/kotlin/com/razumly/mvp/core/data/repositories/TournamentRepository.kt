@@ -16,6 +16,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
@@ -69,7 +70,7 @@ class TournamentRepository(
                 TournamentDTO::class
             ).documents.map { dtoDoc -> dtoDoc.convert { it.toTournament(dtoDoc.id) }.data }
         }, getLocalData = {
-            listOf()
+            mvpDatabase.getTournamentDao.getAllCachedTournamentsFlow().first()
         }, saveData = { mvpDatabase.getTournamentDao.upsertTournaments(it) },
             deleteData = { tournaments ->
                 mvpDatabase.getTournamentDao.deleteTournamentsById(

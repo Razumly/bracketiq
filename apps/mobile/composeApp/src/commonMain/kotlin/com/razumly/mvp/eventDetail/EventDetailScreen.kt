@@ -97,7 +97,10 @@ fun EventDetailScreen(
                         onEventTypeSelected = { component.onTypeSelected(it) },
                         onAddCurrentUser = {}
                     ) { isValid ->
-                        Row {
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
                             if (isEditing) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Button(onClick = {

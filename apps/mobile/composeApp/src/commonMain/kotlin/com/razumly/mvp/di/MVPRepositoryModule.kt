@@ -48,7 +48,7 @@ val MVPRepositoryModule = module {
         PushNotificationsRepository(get(), get(), get())
     }
     single {
-        MessagesRepository(get(), get())
+        MessagesRepository(get(), get(), get())
     } bind IMessagesRepository::class
     single {
         ChatGroupRepository(get(), get(), get(), get())

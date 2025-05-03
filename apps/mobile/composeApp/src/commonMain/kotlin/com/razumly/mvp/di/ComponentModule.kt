@@ -39,7 +39,7 @@ val componentModule = module {
         DefaultHomeComponent(
             componentContext = componentContext,
             onNavigateToLogin = onNavigateToLogin
-            )
+        )
     }
 
     factory { (componentContext: ComponentContext, selectedMatch: MatchWithRelations, selectedTournament: Tournament) ->
@@ -54,23 +54,22 @@ val componentModule = module {
         )
     }
 
-    factory {
-        (
-            componentContext: ComponentContext,
-            event: EventAbs,
-            onMatchSelected: (MatchWithRelations, Tournament) -> Unit,
-            onNavigateToTeamSettings: (freeAgents: List<String>, event: EventAbs?) -> Unit
-        ) ->
-            DefaultEventDetailComponent(
-                componentContext = componentContext,
-                event = event,
-                onMatchSelected = onMatchSelected,
-                eventAbsRepository = get(),
-                userRepository = get(),
-                matchRepository = get(),
-                teamRepository = get(),
-                onNavigateToTeamSettings = onNavigateToTeamSettings
-            )
+    factory { (
+                  componentContext: ComponentContext,
+                  event: EventAbs,
+                  onMatchSelected: (MatchWithRelations, Tournament) -> Unit,
+                  onNavigateToTeamSettings: (freeAgents: List<String>, event: EventAbs?) -> Unit
+              ) ->
+        DefaultEventDetailComponent(
+            componentContext = componentContext,
+            event = event,
+            onMatchSelected = onMatchSelected,
+            eventAbsRepository = get(),
+            userRepository = get(),
+            matchRepository = get(),
+            teamRepository = get(),
+            onNavigateToTeamSettings = onNavigateToTeamSettings
+        )
     }
 
     factory { (componentContext: ComponentContext, onCreatedEvent: () -> Unit) ->
@@ -83,17 +82,16 @@ val componentModule = module {
         )
     }
 
-    factory {
-        (
-            componentContext: ComponentContext,
-            onEventSelected: (event: EventAbs) -> Unit,
-        ) ->
-            DefaultSearchEventListComponent(
-                componentContext = componentContext,
-                locationTracker = get(),
-                onEventSelected = onEventSelected,
-                eventAbsRepository = get()
-            )
+    factory { (
+                  componentContext: ComponentContext,
+                  onEventSelected: (event: EventAbs) -> Unit,
+              ) ->
+        DefaultSearchEventListComponent(
+            componentContext = componentContext,
+            locationTracker = get(),
+            onEventSelected = onEventSelected,
+            eventAbsRepository = get()
+        )
     }
 
     factory { (componentContext: ComponentContext, onNavigateToChat: (chat: ChatGroup) -> Unit) ->
@@ -105,10 +103,13 @@ val componentModule = module {
         )
     }
 
-    factory { (componentContext: ComponentContext, chatGroup : ChatGroup) ->
+    factory { (componentContext: ComponentContext, chatGroup: ChatGroup) ->
         DefaultChatGroupComponent(
             componentContext = componentContext,
-            chatGroup = chatGroup
+            chatGroup = chatGroup,
+            userRepository = get(),
+            messagesRepository = get(),
+            pushNotificationsRepository = get(),
         )
     }
 

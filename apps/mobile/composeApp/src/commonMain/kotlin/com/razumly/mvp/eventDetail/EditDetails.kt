@@ -307,7 +307,11 @@ fun EditDetails(
                         if (newValue.isBlank()) {
                             onEditTournament { copy(winnerSetCount = 0) }
                         } else {
-                            onEditTournament { copy(winnerSetCount = newValue.toInt()) }
+                            onEditTournament {
+                                copy(
+                                    winnerSetCount = newValue.toInt(),
+                                    winnerBracketPointsToVictory = List(newValue.toInt()) { 0 })
+                            }
                         }
                     }
                 },
@@ -317,7 +321,6 @@ fun EditDetails(
                 errorMessage = stringResource(Res.string.value_too_low),
             )
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                val winnerPoints by remember { mutableStateOf(event.winnerBracketPointsToVictory.toMutableList()) }
                 val focusRequesters = remember { List(4) { FocusRequester() } }
                 repeat(event.winnerSetCount) { index ->
                     PointsTextField(value = event.winnerBracketPointsToVictory.getOrNull(index)
@@ -325,12 +328,16 @@ fun EditDetails(
                         label = "Set ${index + 1} Points to Win",
                         onValueChange = { newValue ->
                             if (newValue.all { it.isDigit() } && newValue.length <= 2) {
-                                if (newValue.isBlank()) {
-                                    winnerPoints[index] = 0
+                                val winnerPoints = if (newValue.isBlank()) {
+                                    0
                                 } else {
-                                    winnerPoints[index] = newValue.toInt()
+                                    newValue.toInt()
                                 }
-                                onEditTournament { copy(winnerBracketPointsToVictory = winnerPoints) }
+                                onEditTournament {
+                                    copy(
+                                        winnerBracketPointsToVictory = event.winnerBracketPointsToVictory.toMutableList()
+                                            .apply { set(index, winnerPoints) })
+                                }
                             }
                         },
                         focusRequester = focusRequesters[index],

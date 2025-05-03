@@ -3,6 +3,7 @@ package com.razumly.mvp.core.data.repositories
 import com.mmk.kmpnotifier.notification.NotifierManager
 import com.mmk.kmpnotifier.notification.PayloadData
 import com.razumly.mvp.core.data.CurrentUserDataSource
+import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
@@ -28,25 +29,35 @@ interface IPushNotificationsRepository {
     suspend fun subscribeUserToTeamNotifications(user: UserData, team: Team): Result<Subscriber>
     suspend fun unsubscribeUserFromTeamNotifications(user: UserData, team: Team): Result<Any>
     suspend fun subscribeUserToEventNotifications(
-        user: UserData,
-        event: EventAbs
+        user: UserData, event: EventAbs
     ): Result<Subscriber>
+
     suspend fun unsubscribeUserFromEventNotifications(user: UserData, event: EventAbs): Result<Any>
     suspend fun subscribeUserToMatchNotifications(
-        user: UserData,
-        match: MatchMVP
+        user: UserData, match: MatchMVP
     ): Result<Subscriber>
+
     suspend fun unsubscribeUserFromMatchNotifications(user: UserData, match: MatchMVP): Result<Any>
+    suspend fun subscribeUserToChatGroup(user: UserData, chatGroup: ChatGroup): Result<Subscriber>
+    suspend fun unsubscribeUserFromChatGroup(user: UserData, chatGroup: ChatGroup): Result<Any>
+
     suspend fun sendUserNotification(user: UserData, title: String, body: String): Result<Message>
     suspend fun sendTeamNotification(team: Team, title: String, body: String): Result<Message>
     suspend fun sendEventNotification(event: EventAbs, title: String, body: String): Result<Message>
     suspend fun sendMatchNotification(match: MatchMVP, title: String, body: String): Result<Message>
+    suspend fun sendChatGroupNotification(
+        chatGroup: ChatGroup, title: String, body: String
+    ): Result<Message>
+
     suspend fun createTeamTopic(team: Team): Result<Topic>
     suspend fun deleteTeamTopic(team: Team): Result<Any>
     suspend fun createEventTopic(event: EventImp): Result<Topic>
     suspend fun deleteEventTopic(event: EventImp): Result<Any>
     suspend fun createMatchTopic(matchId: String): Result<Topic>
     suspend fun deleteMatchTopic(matchId: String): Result<Any>
+    suspend fun createChatGroupTopic(chatGroup: ChatGroup): Result<Topic>
+    suspend fun deleteChatGroupTopic(chatGroup: ChatGroup): Result<Any>
+
     suspend fun addDeviceAsTarget(): Result<Unit>
     suspend fun removeDeviceAsTarget(): Result<Unit>
 }
@@ -126,6 +137,16 @@ class PushNotificationsRepository(
             messaging.deleteSubscriber(match.id, user.id)
         }
 
+    override suspend fun subscribeUserToChatGroup(user: UserData, chatGroup: ChatGroup) =
+        runCatching {
+            messaging.createSubscriber("chat-${chatGroup.id}", user.id, _pushTarget.value)
+        }
+
+    override suspend fun unsubscribeUserFromChatGroup(user: UserData, chatGroup: ChatGroup) =
+        runCatching {
+            messaging.deleteSubscriber("chat-${chatGroup.id}", user.id)
+        }
+
     override suspend fun sendUserNotification(user: UserData, title: String, body: String) =
         runCatching {
             messaging.createPush(
@@ -166,6 +187,17 @@ class PushNotificationsRepository(
             )
         }
 
+    override suspend fun sendChatGroupNotification(
+        chatGroup: ChatGroup, title: String, body: String
+    ) = runCatching {
+        messaging.createPush(
+            messageId = ID.unique(),
+            title = title,
+            body = body,
+            topics = listOf("chat-${chatGroup.id}"),
+        )
+    }
+
     override suspend fun createTeamTopic(team: Team) = runCatching {
         messaging.createTopic(team.id, "team-${team.id}")
     }
@@ -188,6 +220,14 @@ class PushNotificationsRepository(
 
     override suspend fun deleteMatchTopic(matchId: String) = runCatching {
         messaging.deleteTopic(matchId)
+    }
+
+    override suspend fun createChatGroupTopic(chatGroup: ChatGroup) = runCatching {
+        messaging.createTopic(chatGroup.id, "chat-${chatGroup.id}")
+    }
+
+    override suspend fun deleteChatGroupTopic(chatGroup: ChatGroup) = runCatching {
+        messaging.deleteTopic(chatGroup.id)
     }
 
     override suspend fun addDeviceAsTarget(): Result<Unit> = runCatching {
