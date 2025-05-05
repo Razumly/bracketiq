@@ -3,8 +3,8 @@ package com.razumly.mvp.chat.data
 import com.razumly.mvp.core.data.MVPDatabase
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
-import com.razumly.mvp.core.data.dataTypes.MessageMVP
 import com.razumly.mvp.core.data.dataTypes.crossRef.ChatUserCrossRef
+import com.razumly.mvp.core.data.dataTypes.dtos.MessageMVPDTO
 import com.razumly.mvp.core.data.repositories.IMVPRepository
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResponse
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
@@ -14,6 +14,7 @@ import io.appwrite.Query
 import io.appwrite.models.RealtimeSubscription
 import io.appwrite.services.Databases
 import io.appwrite.services.Realtime
+import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
@@ -37,6 +38,7 @@ class ChatGroupRepository(
     private val databases: Databases,
     private val mvpDatabase: MVPDatabase,
     private val userRepository: IUserRepository,
+    private val messageRepository: IMessagesRepository,
     private val realtime: Realtime
 ) : IChatGroupRepository {
     private val _scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -50,19 +52,25 @@ class ChatGroupRepository(
     }
 
     private fun subscribeToChatGroups(): Result<Unit> = runCatching {
-        val channels = listOf(DbConstants.CHAT_GROUPS_CHANNEL)
+        val groupChannel = listOf(DbConstants.CHAT_GROUPS_CHANNEL)
+        val messageChannel = listOf(DbConstants.MESSAGES_CHANNEL)
         _chatGroupMessagesSubscription.value =
-            realtime.subscribe(channels, payloadType = MessageMVP::class) { response ->
+            realtime.subscribe(messageChannel, payloadType = MessageMVPDTO::class) { response ->
+                val action = response.events.last().split(".").last()
                 response.payload.let { message ->
                     if (!_subscriptionList.value.map { it.id }
                             .contains(message.chatId)) return@subscribe
                     _scope.launch {
-                        mvpDatabase.getMessageDao.upsertMessage(message)
+                        if (action == "create") {
+                            mvpDatabase.getMessageDao.upsertMessage(message.toMessageMVP(message.id))
+                        } else if (action == "delete") {
+                            mvpDatabase.getMessageDao.deleteMessageById(message.id)
+                        }
                     }
                 }
             }
         _chatGroupsSubscription.value =
-            realtime.subscribe(channels, payloadType = ChatGroup::class) { response ->
+            realtime.subscribe(groupChannel, payloadType = ChatGroup::class) { response ->
                 response.payload.let { chatGroup ->
                     if (!_subscriptionList.value.map { it.id }
                             .contains(chatGroup.id)) return@subscribe
@@ -105,6 +113,13 @@ class ChatGroupRepository(
                 mvpDatabase.getChatGroupDao.getChatGroupsByUserId(userId)
             }, saveData = {
                 _subscriptionList.value = it
+
+                userRepository.getUsers(it.map { chatGroup -> chatGroup.userIds }.flatten())
+                it.map { chatGroup -> chatGroup.id }.forEach { chatGroupId ->
+                    messageRepository.getMessagesInChatGroup(chatGroupId).onFailure { e ->
+                        Napier.e("Failed to get messages for chat group $chatGroupId", e)
+                    }
+                }
                 mvpDatabase.getChatGroupDao.upsertChatGroupsWithRelations(it)
             }, deleteData = {
                 mvpDatabase.getChatGroupDao.deleteChatGroupsByIds(it)

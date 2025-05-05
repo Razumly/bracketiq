@@ -46,10 +46,11 @@ class DefaultChatGroupComponent(
     override val errorState = _errorState.asStateFlow()
 
     override val chatGroup = chatGroupRepository.getChatGroupFlow(chatGroupInit.chatGroup.id).map { result ->
-        result.getOrElse {
+        val chatGroup = result.getOrElse {
             _errorState.value = it.message
             chatGroupInit
         }
+        chatGroup.copy(messages = chatGroup.messages.sortedBy { it.sentTime })
     }.stateIn(scope, SharingStarted.Eagerly, chatGroupInit)
 
     private val _messageInput = MutableStateFlow("")
@@ -71,7 +72,8 @@ class DefaultChatGroupComponent(
                 body = text,
                 attachmentUrls = listOf(),
                 chatId = chatGroup.value.chatGroup.id,
-                readByIds = listOf(user.id)
+                readByIds = listOf(user.id),
+                sentTime = kotlinx.datetime.Clock.System.now()
             )
 
             scope.launch {

@@ -6,7 +6,6 @@ import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.presentation.RootComponent
 import com.razumly.mvp.eventCreate.CreateEventComponent
 import com.razumly.mvp.eventCreate.DefaultCreateEventComponent
-import com.razumly.mvp.eventFollowing.FollowingEventListComponent
 import com.razumly.mvp.eventSearch.DefaultSearchEventListComponent
 import com.razumly.mvp.home.DefaultHomeComponent
 import com.razumly.mvp.matchDetail.DefaultMatchContentComponent

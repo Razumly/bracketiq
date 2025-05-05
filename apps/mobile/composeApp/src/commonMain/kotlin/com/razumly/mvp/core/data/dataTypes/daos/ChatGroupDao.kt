@@ -7,6 +7,7 @@ import androidx.room.Upsert
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.data.dataTypes.crossRef.ChatUserCrossRef
+import io.github.aakira.napier.Napier
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -37,9 +38,17 @@ interface ChatGroupDao {
 
     suspend fun upsertChatGroupWithRelations(chatGroup: ChatGroup) {
         upsertChatGroup(chatGroup)
-        deleteChatGroupUserCrossRefsByChatId(chatGroup.id)
+        try {
+            deleteChatGroupUserCrossRefsByChatId(chatGroup.id)
+        } catch (e: Exception) {
+            Napier.e("deleteChatGroupUserCrossRefsByChatId", e)
+        }
         chatGroup.userIds.forEach { userId ->
-            upsertChatGroupUserCrossRef(ChatUserCrossRef(chatGroup.id, userId))
+            try {
+                upsertChatGroupUserCrossRef(ChatUserCrossRef(chatGroup.id, userId))
+            } catch (e: Exception) {
+                Napier.e("Failed to add chat group user crossRef for chat: ${chatGroup.id}", e)
+            }
         }
     }
 

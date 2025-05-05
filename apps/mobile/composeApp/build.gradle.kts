@@ -179,7 +179,6 @@ dependencies {
     add("kspIosArm64", libs.androidx.room.compiler)
     add("kspIosSimulatorArm64", libs.androidx.room.compiler)
     implementation(libs.androidx.foundation.layout)
-    implementation(libs.androidx.ui)
     implementation(libs.androidx.material)
 }
 

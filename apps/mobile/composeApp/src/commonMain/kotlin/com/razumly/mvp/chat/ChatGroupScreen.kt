@@ -25,13 +25,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.MessageMVP
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.presentation.util.dateTimeFormat
 import com.razumly.mvp.home.LocalNavBarPadding
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.format
+import kotlinx.datetime.toLocalDateTime
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatGroupScreen(component: ChatGroupComponent) {
     val input by component.messageInput.collectAsState()
     val chatGroupWithRelations by component.chatGroup.collectAsState()
+    val currentUserId = component.currentUser.value?.id!!
     val chatGroup = chatGroupWithRelations.chatGroup
     val messages = chatGroupWithRelations.messages
     val users = chatGroupWithRelations.users
@@ -42,15 +47,19 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
                 modifier = Modifier.weight(1f).fillMaxWidth(), reverseLayout = true
             ) {
                 itemsIndexed(messages.reversed()) { index, message ->
-                    if (index == 0) {
-                        MessageCard(
-                            message,
-                            users.find { it.id == message.userId }!!,
-                            Modifier.padding(top = values.calculateTopPadding())
-                        )
+                    val modifier = if (index == 0) {
+                        Modifier.padding(top = values.calculateTopPadding()).fillMaxWidth(0.75f)
                     } else {
-                        MessageCard(message, users.find { it.id == message.userId }!!)
+                        Modifier.fillMaxWidth(0.75f)
                     }
+                    if (message.userId == currentUserId) {
+                        modifier.align(Alignment.End)
+                    }
+                    MessageCard(
+                        message,
+                        users.find { it.id == message.userId }!!,
+                        modifier
+                    )
                 }
             }
 
@@ -69,13 +78,20 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
 }
 
 @Composable
-fun MessageCard(message: MessageMVP, user: UserData?, modifier: Modifier = Modifier) {
-    Text(
-        user?.fullName ?: "Unknown User", modifier = modifier, style = MaterialTheme.typography.labelSmall
-    )
-    Card {
+fun MessageCard(message: MessageMVP, user: UserData, modifier: Modifier = Modifier) {
+    Column(modifier) {
         Text(
-            message.body, style = MaterialTheme.typography.bodyMedium
+            user.fullName,
+            style = MaterialTheme.typography.labelSmall
+        )
+        Card {
+            Text(
+                message.body, style = MaterialTheme.typography.bodyMedium
+            )
+        }
+        Text(
+            "Sent at: " + message.sentTime.toLocalDateTime(TimeZone.currentSystemDefault())
+                .format(dateTimeFormat)
         )
     }
 
