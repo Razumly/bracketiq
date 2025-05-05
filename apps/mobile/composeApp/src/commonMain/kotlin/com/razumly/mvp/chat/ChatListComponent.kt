@@ -21,13 +21,13 @@ import kotlinx.coroutines.launch
 interface ChatListComponent {
     val newChat: StateFlow<ChatGroupWithRelations>
     val selectedChat: StateFlow<ChatGroup?>
-    val chatGroups: StateFlow<List<ChatGroup>>
+    val chatGroups: StateFlow<List<ChatGroupWithRelations>>
     val errorState: StateFlow<String?>
     val suggestedPlayers: StateFlow<List<UserData>>
     val currentUser: UserData
     val friends: StateFlow<List<UserData>>
 
-    fun onChatSelected(chat: ChatGroup)
+    fun onChatSelected(chat: ChatGroupWithRelations)
     fun onChatCreated()
     fun updateNewChatField(update: ChatGroup.() -> ChatGroup)
     fun addUserToNewChat(user: UserData)
@@ -37,7 +37,7 @@ interface ChatListComponent {
 
 class DefaultChatListComponent(
     componentContext: ComponentContext,
-    private val onNavigateToChat: (ChatGroup) -> Unit,
+    private val onNavigateToChat: (ChatGroupWithRelations) -> Unit,
     private val chatGroupRepository: IChatGroupRepository,
     private val userRepository: IUserRepository,
 ) : ChatListComponent,
@@ -67,6 +67,13 @@ class DefaultChatListComponent(
     private val _friends = MutableStateFlow<List<UserData>>(listOf())
     override val friends = _friends.asStateFlow()
 
+    override val chatGroups = chatGroupRepository.chatGroupsFlow.map { result ->
+        result.getOrElse {
+            _errorState.value = it.message
+            emptyList()
+        }
+    }.stateIn(scope, SharingStarted.Eagerly, listOf())
+
     init {
         scope.launch {
             _friends.value = currentUser.friendIds.let { friends ->
@@ -78,14 +85,7 @@ class DefaultChatListComponent(
         }
     }
 
-    override val chatGroups = chatGroupRepository.getChatGroupsFlow().map { result ->
-        result.getOrElse {
-            _errorState.value = it.message
-            emptyList()
-        }
-    }.stateIn(scope, SharingStarted.Eagerly, listOf())
-
-    override fun onChatSelected(chat: ChatGroup) {
+    override fun onChatSelected(chat: ChatGroupWithRelations) {
         onNavigateToChat(chat)
     }
 

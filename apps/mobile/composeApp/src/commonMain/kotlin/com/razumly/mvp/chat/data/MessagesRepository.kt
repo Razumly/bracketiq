@@ -17,7 +17,6 @@ import kotlinx.coroutines.launch
 interface IMessagesRepository {
     suspend fun getMessagesInChatGroup(chatGroupId: String): Result<List<MessageMVP>>
     suspend fun createMessage(newMessage: MessageMVP): Result<Unit>
-    suspend fun subscribeToChatGroup(chatGroupId: String): Result<Unit>
 }
 
 class MessagesRepository(
@@ -25,19 +24,6 @@ class MessagesRepository(
     private val databases: Databases,
     private val realtime: Realtime
 ) : IMessagesRepository {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    override suspend fun subscribeToChatGroup(chatGroupId: String): Result<Unit> = runCatching {
-        val channels = listOf(DbConstants.CHAT_GROUPS_CHANNEL)
-        realtime.subscribe(channels, payloadType = MessageMVP::class) { response ->
-            response.payload.let {
-                if (it.chatId != chatGroupId) return@subscribe
-                scope.launch {
-                    mvpDatabase.getMessageDao.upsertMessage(it)
-                }
-            }
-        }
-    }
-
     override suspend fun getMessagesInChatGroup(chatGroupId: String): Result<List<MessageMVP>> =
         multiResponse(getRemoteData = {
             databases.listDocuments(

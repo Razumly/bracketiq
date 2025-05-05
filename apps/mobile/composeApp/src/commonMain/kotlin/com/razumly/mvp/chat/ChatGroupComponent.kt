@@ -1,8 +1,9 @@
 package com.razumly.mvp.chat
 
 import com.arkivanov.decompose.ComponentContext
+import com.razumly.mvp.chat.data.IChatGroupRepository
 import com.razumly.mvp.chat.data.IMessagesRepository
-import com.razumly.mvp.core.data.dataTypes.ChatGroup
+import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.data.dataTypes.MessageMVP
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
@@ -12,13 +13,18 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 interface ChatGroupComponent {
-    val messages: StateFlow<List<MessageMVP>>
     val currentUser: StateFlow<UserData?>
     val messageInput: StateFlow<String>
+    val chatGroup: StateFlow<ChatGroupWithRelations>
+    val errorState: StateFlow<String?>
 
     fun onMessageInputChange(newText: String)
     fun sendMessage()
@@ -27,29 +33,29 @@ interface ChatGroupComponent {
 
 class DefaultChatGroupComponent(
     componentContext: ComponentContext,
-    private val chatGroup: ChatGroup,
-    private val userRepository: IUserRepository,
+    private val chatGroupInit: ChatGroupWithRelations,
+    userRepository: IUserRepository,
     private val messagesRepository: IMessagesRepository,
+    chatGroupRepository: IChatGroupRepository,
     private val pushNotificationsRepository: IPushNotificationsRepository
 ) : ChatGroupComponent, ComponentContext by componentContext {
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-    private val _messages = MutableStateFlow<List<MessageMVP>>(emptyList())
-    override val messages: StateFlow<List<MessageMVP>> = _messages
+    private val _errorState = MutableStateFlow<String?>(null)
+    override val errorState = _errorState.asStateFlow()
+
+    override val chatGroup = chatGroupRepository.getChatGroupFlow(chatGroupInit.chatGroup.id).map { result ->
+        result.getOrElse {
+            _errorState.value = it.message
+            chatGroupInit
+        }
+    }.stateIn(scope, SharingStarted.Eagerly, chatGroupInit)
 
     private val _messageInput = MutableStateFlow("")
     override val messageInput: StateFlow<String> = _messageInput
 
     override val currentUser: StateFlow<UserData?> = userRepository.currentUser
-
-    init {
-        scope.launch {
-            messagesRepository.getMessagesInChatGroup(chatGroup.id)
-                .onSuccess { _messages.value = it }
-                .onFailure { /* Handle error */ }
-        }
-    }
 
     override fun onMessageInputChange(newText: String) {
         _messageInput.value = newText
@@ -63,19 +69,20 @@ class DefaultChatGroupComponent(
                 id = ID.unique(),
                 userId = user.id,
                 body = text,
-                attachmentUrls = "",
-                chatId = chatGroup.id,
+                attachmentUrls = listOf(),
+                chatId = chatGroup.value.chatGroup.id,
                 readByIds = listOf(user.id)
             )
 
             scope.launch {
-                messagesRepository.createMessage(message)
+                messagesRepository.createMessage(message).onFailure {
+                    _errorState.value = it.message
+                }
                 pushNotificationsRepository.sendChatGroupNotification(
-                    chatGroup,
+                    chatGroup.value.chatGroup,
                     "New message from ${user.fullName}",
                     text
                 )
-                _messages.value += message
                 _messageInput.value = ""
             }
         }

@@ -12,7 +12,7 @@ import com.razumly.mvp.chat.ChatGroupComponent
 import com.razumly.mvp.chat.ChatListComponent
 import com.razumly.mvp.chat.DefaultChatGroupComponent
 import com.razumly.mvp.chat.DefaultChatListComponent
-import com.razumly.mvp.core.data.dataTypes.ChatGroup
+import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Tournament
@@ -80,7 +80,7 @@ interface HomeComponent {
 
         @Serializable
         data class Chat(
-            val chatGroup: ChatGroup
+            val chatGroup: ChatGroupWithRelations,
         ) : Config()
 
         @Serializable
@@ -218,7 +218,7 @@ class DefaultHomeComponent(
         navigation.pushNew(Config.Teams(freeAgents, event))
     }
 
-    private fun onNavigateToChat(chatGroup: ChatGroup) {
+    private fun onNavigateToChat(chatGroup: ChatGroupWithRelations) {
         navigation.pushNew(Config.Chat(chatGroup))
     }
 

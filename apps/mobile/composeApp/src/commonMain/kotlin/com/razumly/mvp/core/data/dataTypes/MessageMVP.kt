@@ -13,7 +13,7 @@ data class MessageMVP (
     override val id: String = "",
     val userId: String,
     val body: String,
-    val attachmentUrls: String,
+    val attachmentUrls: List<String>,
     val chatId: String,
     val readByIds: List<String>,
 ): MVPDocument
