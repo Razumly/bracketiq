@@ -55,7 +55,7 @@ fun EventDetailScreen(
     var showDropdownMenu by remember { mutableStateOf(false) }
     val selectedEvent by component.selectedEvent.collectAsState()
     val teamSignup = selectedEvent.event.teamSignup
-    val currentUser by component.currentUser.collectAsState()
+    val currentUser = component.currentUser
     var showTeamSelectionDialog by remember { mutableStateOf(false) }
     val validTeams by component.validTeams.collectAsState()
     val showDetails by component.showDetails.collectAsState()
@@ -65,8 +65,8 @@ fun EventDetailScreen(
     val editedEvent by component.editedEvent.collectAsState()
 
     val isUserInEvent =
-        (currentUser!!.eventIds + currentUser!!.tournamentIds).contains(selectedEvent.event.id) || (selectedEvent.event.waitList + selectedEvent.event.freeAgents).contains(
-            currentUser!!.id
+        (currentUser.eventIds + currentUser.tournamentIds).contains(selectedEvent.event.id) || (selectedEvent.event.waitList + selectedEvent.event.freeAgents).contains(
+            currentUser.id
         )
 
     LaunchedEffect(Unit) {

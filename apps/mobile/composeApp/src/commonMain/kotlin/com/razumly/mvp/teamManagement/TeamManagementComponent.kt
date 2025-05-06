@@ -15,15 +15,15 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 interface TeamManagementComponent {
     val selectedEvent: EventAbs?
-    val currentUser: StateFlow<UserData?>
+    val currentUser: UserData
     val friends: StateFlow<List<UserData>>
     val currentTeams: StateFlow<List<TeamWithPlayers>>
     val teamInvites: StateFlow<List<TeamWithPlayers>>
@@ -52,32 +52,26 @@ class DefaultTeamManagementComponent(
 
     private val _errorState = MutableStateFlow<String?>(null)
 
-    override val currentUser = userRepository.currentUser
+    override val currentUser = userRepository.currentUser.value.getOrThrow()
 
     private val _friends = MutableStateFlow<List<UserData>>(listOf())
     override val friends = _friends.asStateFlow()
 
-    override val currentTeams = currentUser.map { user ->
-        user?.teamIds ?: emptyList()
-    }.flatMapLatest { teamIds ->
-        teamRepository.getTeamsWithPlayersFlow(teamIds).map { team ->
+    override val currentTeams =
+        teamRepository.getTeamsWithPlayersFlow(currentUser.teamIds).map { team ->
             team.getOrElse {
                 _errorState.value = it.message
                 emptyList()
             }
-        }
-    }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+        }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
-    override val teamInvites = currentUser.map { user ->
-        user?.teamInvites ?: emptyList()
-    }.flatMapLatest { teamIds ->
-        teamRepository.getTeamsWithPlayersFlow(teamIds).map { team ->
+    override val teamInvites =
+        teamRepository.getTeamsWithPlayersFlow(currentUser.teamInvites).map { team ->
             team.getOrElse {
                 _errorState.value = it.message
                 emptyList()
             }
-        }
-    }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+        }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     private val _selectedTeam = MutableStateFlow<TeamWithPlayers?>(null)
     override val selectedTeam = _selectedTeam.asStateFlow()
@@ -85,16 +79,22 @@ class DefaultTeamManagementComponent(
     private val _suggestedPlayers = MutableStateFlow<List<UserData>>(listOf())
     override val suggestedPlayers = _suggestedPlayers.asStateFlow()
 
-    override val freeAgentsFiltered = combine(currentUser, selectedTeam) { user, team ->
-        val playerIdsToExclude = buildSet {
-            user?.id?.let { add(it) }
-            team?.players?.forEach { add(it.id) }
+    override val freeAgentsFiltered = selectedTeam
+        .flatMapLatest { team ->
+            val playerIdsToExclude = buildSet {
+                add(currentUser.id) // uses direct value, not flow
+                team?.players?.forEach { add(it.id) }
+            }
+
+            flow {
+                val result = userRepository.getUsers(freeAgents.filterNot { it in playerIdsToExclude })
+                emit(result.getOrElse {
+                    _errorState.value = it.message
+                    emptyList()
+                })
+            }
         }
-        userRepository.getUsers(freeAgents.filterNot { it in playerIdsToExclude }).getOrElse {
-            _errorState.value = it.message
-            emptyList()
-        }
-    }.stateIn(scope, SharingStarted.Eagerly, listOf())
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     override val enableDeleteTeam = selectedTeam.map { team ->
         team?.team?.eventIds?.isEmpty() == true && team.team.tournamentIds.isEmpty()
@@ -103,13 +103,9 @@ class DefaultTeamManagementComponent(
 
     init {
         scope.launch {
-            currentUser.collect { user ->
-                _friends.value = user?.friendIds?.let { friends ->
-                    userRepository.getUsers(friends).getOrElse {
-                        _errorState.value = it.message
-                        emptyList()
-                    }
-                } ?: emptyList()
+            _friends.value = userRepository.getUsers(currentUser.friendIds).getOrElse {
+                _errorState.value = it.message
+                emptyList()
             }
         }
         scope.launch {
@@ -124,7 +120,7 @@ class DefaultTeamManagementComponent(
 
     override fun selectTeam(team: TeamWithPlayers?) {
         _selectedTeam.value = team ?: TeamWithPlayers(
-            Team(currentUser.value!!.id), listOf(currentUser.value!!), listOf()
+            Team(currentUser.id), listOf(currentUser), listOf()
         )
     }
 
@@ -139,7 +135,7 @@ class DefaultTeamManagementComponent(
 
     override fun joinTeam(team: Team) {
         scope.launch {
-            teamRepository.addPlayerToTeam(team, currentUser.value!!).onFailure {
+            teamRepository.addPlayerToTeam(team, currentUser).onFailure {
                 _errorState.value = it.message
             }
         }
@@ -172,7 +168,7 @@ class DefaultTeamManagementComponent(
                 _errorState.value = it.message
                 emptyList()
             }.filterNot { user ->
-                currentUser.value?.id == user.id
+                currentUser.id == user.id
             }
         }
     }

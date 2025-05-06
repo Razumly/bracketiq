@@ -9,7 +9,7 @@ import com.razumly.mvp.core.util.DbConstants
 import io.appwrite.Query
 import io.appwrite.services.Databases
 
-interface IMessagesRepository {
+interface IMessageRepository {
     suspend fun getMessagesInChatGroup(chatGroupId: String): Result<List<MessageMVP>>
     suspend fun createMessage(newMessage: MessageMVP): Result<Unit>
 }
@@ -17,7 +17,7 @@ interface IMessagesRepository {
 class MessagesRepository(
     private val mvpDatabase: MVPDatabase,
     private val databases: Databases,
-) : IMessagesRepository {
+) : IMessageRepository {
     override suspend fun getMessagesInChatGroup(chatGroupId: String): Result<List<MessageMVP>> =
         multiResponse(getRemoteData = {
             databases.listDocuments(

@@ -1,5 +1,7 @@
 package com.razumly.mvp.chat
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -8,7 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -36,34 +38,30 @@ import kotlinx.datetime.toLocalDateTime
 fun ChatGroupScreen(component: ChatGroupComponent) {
     val input by component.messageInput.collectAsState()
     val chatGroupWithRelations by component.chatGroup.collectAsState()
-    val currentUserId = component.currentUser.value?.id!!
+    val currentUserId = component.currentUser.id
     val chatGroup = chatGroupWithRelations.chatGroup
     val messages = chatGroupWithRelations.messages
     val users = chatGroupWithRelations.users
 
     Scaffold(topBar = { TopAppBar(title = { Text(chatGroup.name) }) }) { values ->
-        Column(Modifier.fillMaxSize().padding(16.dp).padding(LocalNavBarPadding.current)) {
+        Box(
+            Modifier.fillMaxSize().padding(top = values.calculateTopPadding()).padding(16.dp)
+                .padding(LocalNavBarPadding.current)
+        ) {
             LazyColumn(
-                modifier = Modifier.weight(1f).fillMaxWidth(), reverseLayout = true
+                modifier = Modifier.fillMaxSize()
             ) {
-                itemsIndexed(messages.reversed()) { index, message ->
-                    val modifier = if (index == 0) {
-                        Modifier.padding(top = values.calculateTopPadding()).fillMaxWidth(0.75f)
-                    } else {
-                        Modifier.fillMaxWidth(0.75f)
-                    }
-                    if (message.userId == currentUserId) {
-                        modifier.align(Alignment.End)
-                    }
+                items(messages) { message ->
+                    val isCurrentUser = message.userId == currentUserId
                     MessageCard(
-                        message,
-                        users.find { it.id == message.userId }!!,
-                        modifier
+                        message = message,
+                        user = users.find { it.id == message.userId },
+                        isCurrentUser = isCurrentUser
                     )
                 }
             }
 
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().align(Alignment.BottomCenter), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(value = input,
                     onValueChange = component::onMessageInputChange,
                     modifier = Modifier.weight(1f),
@@ -78,21 +76,29 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
 }
 
 @Composable
-fun MessageCard(message: MessageMVP, user: UserData, modifier: Modifier = Modifier) {
-    Column(modifier) {
-        Text(
-            user.fullName,
-            style = MaterialTheme.typography.labelSmall
-        )
-        Card {
+fun MessageCard(message: MessageMVP, user: UserData?, isCurrentUser: Boolean = false) {
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = if (isCurrentUser) Arrangement.End else Arrangement.Start
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(0.75f),
+            horizontalAlignment = if (isCurrentUser) Alignment.End else Alignment.Start
+        ) {
             Text(
-                message.body, style = MaterialTheme.typography.bodyMedium
+                user?.fullName ?: "Unknown User", style = MaterialTheme.typography.labelSmall
+            )
+            Card {
+                Text(
+                    text = message.body, style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(8.dp),
+                )
+            }
+            Text(
+                "Sent at: " + message.sentTime.toLocalDateTime(TimeZone.currentSystemDefault())
+                    .format(dateTimeFormat), style = MaterialTheme.typography.labelSmall
             )
         }
-        Text(
-            "Sent at: " + message.sentTime.toLocalDateTime(TimeZone.currentSystemDefault())
-                .format(dateTimeFormat)
-        )
     }
-
 }

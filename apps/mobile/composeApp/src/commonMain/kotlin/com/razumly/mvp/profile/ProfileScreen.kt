@@ -28,6 +28,11 @@ fun ProfileScreen(component: ProfileComponent) {
                 Text("Manage Teams")
             }
             Button(
+                onClick = { component.clearCache() },
+            ) {
+                Text("Clear Cache")
+            }
+            Button(
                 onClick = { component.onLogout() },
             ) {
                 Text("Logout")

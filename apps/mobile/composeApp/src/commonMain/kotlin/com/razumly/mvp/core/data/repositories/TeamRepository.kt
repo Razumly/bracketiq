@@ -174,7 +174,7 @@ class TeamRepository(
         }
 
         pushNotificationRepository.unsubscribeUserFromTeamNotifications(player, team)
-        if (player.id != userRepository.currentUser.value?.id) {
+        if (player.id != userRepository.currentUser.value.getOrThrow().id) {
             pushNotificationRepository.sendUserNotification(
                 player,
                 team.name ?: "Team Update",
@@ -186,8 +186,7 @@ class TeamRepository(
 
     override suspend fun createTeam(newTeam: Team): Result<Team> {
         val id = ID.unique()
-        val currentUser = userRepository.currentUser.value
-            ?: return Result.failure(Exception("No current user"))
+        val currentUser = userRepository.currentUser.value.getOrThrow()
 
         return singleResponse(networkCall = {
             val remoteTeam = database.createDocument(

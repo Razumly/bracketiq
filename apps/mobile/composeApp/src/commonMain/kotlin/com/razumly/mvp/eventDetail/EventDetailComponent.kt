@@ -46,7 +46,7 @@ interface EventDetailComponent : ComponentContext {
     val showDetails: StateFlow<Boolean>
     val errorState: StateFlow<String?>
     val eventWithRelations: StateFlow<EventWithFullRelations>
-    val currentUser: StateFlow<UserData?>
+    val currentUser: UserData
     val validTeams: StateFlow<List<TeamWithPlayers>>
     val isHost: StateFlow<Boolean>
     val editedEvent: StateFlow<EventAbs>
@@ -96,7 +96,7 @@ class DefaultEventDetailComponent(
     private val onNavigateToTeamSettings: (freeAgents: List<String>, event: EventAbs?) -> Unit
 ) : EventDetailComponent, ComponentContext by componentContext {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    override val currentUser = userRepository.currentUser
+    override val currentUser = userRepository.currentUser.value.getOrThrow()
 
     private val _errorState = MutableStateFlow<String?>(null)
     override val errorState = _errorState.asStateFlow()
@@ -112,7 +112,7 @@ class DefaultEventDetailComponent(
             }
         }.stateIn(scope, SharingStarted.Eagerly, EventAbsWithRelations.getEmptyEvent(event))
 
-    override val isHost = selectedEvent.map { it.event.hostId == currentUser.value?.id }
+    override val isHost = selectedEvent.map { it.event.hostId == currentUser.id }
         .stateIn(scope, SharingStarted.Eagerly, false)
 
     override val eventWithRelations = selectedEvent.flatMapLatest { eventWithPlayers ->
@@ -140,8 +140,6 @@ class DefaultEventDetailComponent(
         )
     )
 
-    private val _currentUser = userRepository.currentUser
-
     private val _divisionMatches = MutableStateFlow<Map<String, MatchWithRelations>>(emptyMap())
     override val divisionMatches = _divisionMatches.asStateFlow()
 
@@ -163,14 +161,12 @@ class DefaultEventDetailComponent(
     private val _showDetails = MutableStateFlow(false)
     override val showDetails = _showDetails.asStateFlow()
 
-    @OptIn(ExperimentalCoroutinesApi::class)
-    private val _userTeams = currentUser.filterNotNull().flatMapLatest { user ->
-        teamRepository.getTeamsWithPlayersFlow(user.teamIds).map { result ->
+    private val _userTeams =
+        teamRepository.getTeamsWithPlayersFlow(currentUser.teamIds).map { result ->
             result.getOrElse {
                 emptyList()
             }
-        }
-    }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+        }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     private val _usersTeam = MutableStateFlow<TeamWithPlayers?>(null)
 
@@ -187,10 +183,10 @@ class DefaultEventDetailComponent(
                 .collect { event ->
                     matchRepository.subscribeToMatches()
                     _userInTournament.value =
-                        _currentUser.value?.let { event.players.contains(it) } == true
+                        event.players.contains(currentUser) == true
                     if (_userInTournament.value) {
                         _usersTeam.value =
-                            event.teams.find { it.team.players.contains(_currentUser.value?.id) }
+                            event.teams.find { it.team.players.contains(currentUser.id) }
                     }
                     event.event.divisions.firstOrNull()?.let { selectDivision(it) }
                 }
@@ -248,12 +244,9 @@ class DefaultEventDetailComponent(
     override fun leaveEvent() {
         scope.launch {
             val userInFreeAgents =
-                selectedEvent.value.event.freeAgents.contains(_currentUser.value?.id)
-            if (currentUser.value == null) {
-                return@launch
-            }
+                selectedEvent.value.event.freeAgents.contains(currentUser.id)
             val userInEvent =
-                (currentUser.value!!.eventIds + currentUser.value!!.tournamentIds).contains(
+                (currentUser.eventIds + currentUser.tournamentIds).contains(
                     selectedEvent.value.event.id
                 )
             if (!selectedEvent.value.event.teamSignup || userInFreeAgents || (userInEvent && _usersTeam.value == null)) {

@@ -38,7 +38,7 @@ class ChatGroupRepository(
     private val databases: Databases,
     private val mvpDatabase: MVPDatabase,
     private val userRepository: IUserRepository,
-    private val messageRepository: IMessagesRepository,
+    private val messageRepository: IMessageRepository,
     private val realtime: Realtime
 ) : IChatGroupRepository {
     private val _scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -75,6 +75,7 @@ class ChatGroupRepository(
                     if (!_subscriptionList.value.map { it.id }
                             .contains(chatGroup.id)) return@subscribe
                     _scope.launch {
+                        userRepository.getUsers(chatGroup.userIds)
                         mvpDatabase.getChatGroupDao.upsertChatGroupWithRelations(chatGroup)
                     }
                 }
@@ -97,7 +98,7 @@ class ChatGroupRepository(
     }
 
     private fun groupsFlow(): Flow<Result<List<ChatGroupWithRelations>>> {
-        val userId = userRepository.currentUser.value!!.id
+        val userId = userRepository.currentUser.value.getOrThrow().id
         val localFlow =
             mvpDatabase.getChatGroupDao.getChatGroupsFlowByUserId(userId).map { Result.success(it) }
 
@@ -114,7 +115,7 @@ class ChatGroupRepository(
             }, saveData = {
                 _subscriptionList.value = it
 
-                userRepository.getUsers(it.map { chatGroup -> chatGroup.userIds }.flatten())
+                userRepository.getUsers(it.map { chatGroup -> chatGroup.userIds }.flatten()).getOrThrow()
                 it.map { chatGroup -> chatGroup.id }.forEach { chatGroupId ->
                     messageRepository.getMessagesInChatGroup(chatGroupId).onFailure { e ->
                         Napier.e("Failed to get messages for chat group $chatGroupId", e)

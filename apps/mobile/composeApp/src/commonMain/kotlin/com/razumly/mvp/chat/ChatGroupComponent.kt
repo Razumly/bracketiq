@@ -2,7 +2,7 @@ package com.razumly.mvp.chat
 
 import com.arkivanov.decompose.ComponentContext
 import com.razumly.mvp.chat.data.IChatGroupRepository
-import com.razumly.mvp.chat.data.IMessagesRepository
+import com.razumly.mvp.chat.data.IMessageRepository
 import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.data.dataTypes.MessageMVP
 import com.razumly.mvp.core.data.dataTypes.UserData
@@ -19,9 +19,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.datetime.Clock
 
 interface ChatGroupComponent {
-    val currentUser: StateFlow<UserData?>
+    val currentUser: UserData
     val messageInput: StateFlow<String>
     val chatGroup: StateFlow<ChatGroupWithRelations>
     val errorState: StateFlow<String?>
@@ -35,7 +36,7 @@ class DefaultChatGroupComponent(
     componentContext: ComponentContext,
     private val chatGroupInit: ChatGroupWithRelations,
     userRepository: IUserRepository,
-    private val messagesRepository: IMessagesRepository,
+    private val messagesRepository: IMessageRepository,
     chatGroupRepository: IChatGroupRepository,
     private val pushNotificationsRepository: IPushNotificationsRepository
 ) : ChatGroupComponent, ComponentContext by componentContext {
@@ -56,24 +57,23 @@ class DefaultChatGroupComponent(
     private val _messageInput = MutableStateFlow("")
     override val messageInput: StateFlow<String> = _messageInput
 
-    override val currentUser: StateFlow<UserData?> = userRepository.currentUser
+    override val currentUser = userRepository.currentUser.value.getOrThrow()
 
     override fun onMessageInputChange(newText: String) {
         _messageInput.value = newText
     }
 
     override fun sendMessage() {
-        val user = currentUser.value ?: return
         val text = _messageInput.value.trim()
         if (text.isNotBlank()) {
             val message = MessageMVP(
                 id = ID.unique(),
-                userId = user.id,
+                userId = currentUser.id,
                 body = text,
                 attachmentUrls = listOf(),
                 chatId = chatGroup.value.chatGroup.id,
-                readByIds = listOf(user.id),
-                sentTime = kotlinx.datetime.Clock.System.now()
+                readByIds = listOf(currentUser.id),
+                sentTime = Clock.System.now()
             )
 
             scope.launch {
@@ -82,7 +82,7 @@ class DefaultChatGroupComponent(
                 }
                 pushNotificationsRepository.sendChatGroupNotification(
                     chatGroup.value.chatGroup,
-                    "New message from ${user.fullName}",
+                    "New message from ${currentUser.fullName}",
                     text
                 )
                 _messageInput.value = ""

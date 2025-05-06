@@ -31,7 +31,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 interface IUserRepository : IMVPRepository {
-    val currentUser: StateFlow<UserData?>
+    val currentUser: StateFlow<Result<UserData>>
     suspend fun login(email: String, password: String): Result<UserData>
     suspend fun logout(): Result<Unit>
     suspend fun getUsersOfTournament(tournamentId: String): Result<List<UserData>>
@@ -58,11 +58,9 @@ class UserRepository(
     private val _pushToken = currentUserDataSource.getPushToken().stateIn(scope, SharingStarted.Eagerly, "")
     private val _pushTarget = currentUserDataSource.getPushTarget().stateIn(scope, SharingStarted.Eagerly, "")
 
-    override val currentUser: StateFlow<UserData?> =
-        getCurrentUserFlow().distinctUntilChanged().map { user ->
-            user.getOrThrow()
-        }.stateIn(
-            scope, SharingStarted.Lazily, null
+    override val currentUser: StateFlow<Result<UserData>> =
+        getCurrentUserFlow().distinctUntilChanged().stateIn(
+            scope, SharingStarted.Lazily, Result.success(UserData())
         )
 
     override suspend fun login(email: String, password: String): Result<UserData> = runCatching {
@@ -133,7 +131,8 @@ class UserRepository(
                 Result.success(user)
             } else {
                 currentUserDataSource.saveUserId("")
-                Result.failure(Exception("User ID not found locally"))
+                Napier.d("User not found locally")
+                Result.success(UserData())
             }
         })
     }
@@ -253,5 +252,4 @@ class UserRepository(
             data
         })
     }
-
 }

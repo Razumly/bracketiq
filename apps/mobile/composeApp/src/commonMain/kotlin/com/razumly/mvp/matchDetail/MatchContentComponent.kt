@@ -155,20 +155,17 @@ class DefaultMatchContentComponent(
     private val _showSetConfirmDialog = MutableStateFlow(false)
     override val showSetConfirmDialog = _showSetConfirmDialog.asStateFlow()
 
-    private val _currentUser = userRepository.currentUser
+    private val _currentUser = userRepository.currentUser.value.getOrThrow()
 
-    @OptIn(ExperimentalCoroutinesApi::class)
     private val _currentUserTeam =
-        _currentUser.map { user -> user?.teamIds ?: emptyList() }.flatMapLatest { teamIds ->
-                teamRepository.getTeamsWithPlayersFlow(teamIds).map { teamResults ->
+                teamRepository.getTeamsWithPlayersFlow(_currentUser.teamIds).map { teamResults ->
                     teamResults.getOrElse {
                         _errorState.value = it.message
                         emptyList()
                     }.find { team ->
                         tournament.value?.id != null && team.team.tournamentIds.contains(tournament.value?.id)
                     }
-                }
-            }.stateIn(scope, SharingStarted.Eagerly, null)
+                }.stateIn(scope, SharingStarted.Eagerly, null)
 
     private var maxSets = 0
 
@@ -189,9 +186,7 @@ class DefaultMatchContentComponent(
         }
         scope.launch {
             matchRepository.setIgnoreMatch(selectedMatch.match)
-            _currentUser.collect {
-                checkRefStatus()
-            }
+            checkRefStatus()
         }
     }
 
@@ -204,8 +199,7 @@ class DefaultMatchContentComponent(
     }
 
     override fun checkRefStatus() {
-        _isRef.value = _currentUser.value?.teamIds
-            ?.contains(matchWithTeams.value.ref?.team?.id) == true
+        _isRef.value = _currentUser.teamIds.contains(matchWithTeams.value.ref?.team?.id) == true
         _showRefCheckInDialog.value = refCheckedIn.value != true
     }
 

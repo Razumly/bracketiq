@@ -7,10 +7,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 interface AuthComponent {
@@ -42,7 +40,6 @@ class DefaultAuthComponent(
     override val loginState: StateFlow<LoginState> = _loginState.asStateFlow()
 
     internal val _currentUser = userRepository.currentUser
-        .stateIn(scope, SharingStarted.Eagerly, null)
 
     private val _isSignup = MutableStateFlow(false)
     override val isSignup: StateFlow<Boolean> = _isSignup.asStateFlow()
@@ -60,7 +57,7 @@ class DefaultAuthComponent(
         }
         scope.launch {
             _currentUser.collect { user ->
-                if (user == null) {
+                if (user.getOrThrow().id.isBlank()) {
                     _loginState.value = LoginState.Initial
                 } else {
                     _loginState.value = LoginState.Success
@@ -76,7 +73,7 @@ class DefaultAuthComponent(
             userRepository.login(email, password).onFailure {
                 _loginState.value = LoginState.Error(it.message.toString())
             }.onSuccess {
-                if (_currentUser.value == null) {
+                if (_currentUser.value.getOrThrow().id.isBlank()) {
                     _loginState.value = LoginState.Error("Invalid email or password")
                 } else {
                     _loginState.value = LoginState.Success

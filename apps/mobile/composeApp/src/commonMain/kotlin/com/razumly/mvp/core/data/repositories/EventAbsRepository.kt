@@ -201,21 +201,13 @@ class EventAbsRepository(
     }
 
     override suspend fun removeCurrentUserFromEvent(event: EventAbs): Result<Unit> {
-        val currentUser = userRepository.currentUser.value
-        if (currentUser == null) {
-            Napier.e("No current user")
-            return Result.failure(Exception("No Current User"))
-        }
+        val currentUser = userRepository.currentUser.value.getOrThrow()
 
         return removePlayerFromEvent(event, currentUser)
     }
 
     override suspend fun addCurrentUserToEvent(event: EventAbs): Result<Unit> {
-        val currentUser = userRepository.currentUser.value
-        if (currentUser == null) {
-            Napier.e("No current user")
-            return Result.failure(Exception("No Current User"))
-        }
+        val currentUser = userRepository.currentUser.value.getOrThrow()
         when (event) {
             is EventImp -> {
                 eventRepository.getEvent(event.id).onSuccess { eventWithRelations ->

@@ -119,7 +119,8 @@ val componentModule = module {
             componentContext = componentContext,
             onNavigateToLogin = onNavigateToLogin,
             onNavigateToTeamSettings = onNavigateToTeamSettings,
-            userRepository = get()
+            userRepository = get(),
+            mvpDatabase = get()
         )
     }
 

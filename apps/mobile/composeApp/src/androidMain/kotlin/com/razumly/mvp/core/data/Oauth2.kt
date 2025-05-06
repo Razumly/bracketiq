@@ -24,7 +24,7 @@ suspend fun UserRepository.oauth2Login(activity: ComponentActivity): Result<Unit
     val id = session.userId
 
     return kotlin.runCatching {
-        currentUser.value?.let {
+        currentUser.value.onSuccess {
             val userInfo = getGoogleUserInfo(session.providerAccessToken)
             return kotlin.runCatching {
                 database.createDocument(

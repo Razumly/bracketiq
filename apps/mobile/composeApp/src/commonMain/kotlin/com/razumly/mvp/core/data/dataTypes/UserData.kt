@@ -4,7 +4,6 @@ import androidx.room.Entity
 import androidx.room.PrimaryKey
 import com.razumly.mvp.core.data.dataTypes.dtos.UserDataDTO
 import com.razumly.mvp.core.presentation.util.toTitleCase
-import io.appwrite.ID
 import kotlinx.serialization.Serializable
 
 @Entity
@@ -35,7 +34,7 @@ data class UserData(
                 teamInvites = emptyList(),
                 eventInvites = emptyList(),
                 tournamentInvites = emptyList(),
-                id = ID.unique()
+                id = ""
             )
         }
     }

@@ -3,6 +3,7 @@ package com.razumly.mvp.core.data.dataTypes.daos
 import androidx.room.Dao
 import androidx.room.Delete
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Upsert
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
@@ -55,12 +56,14 @@ interface ChatGroupDao {
     @Query("DELETE FROM ChatGroup WHERE id IN (:ids)")
     suspend fun deleteChatGroupsByIds(ids: List<String>)
 
+    @Transaction
     @Query("SELECT * FROM ChatGroup WHERE userIds LIKE '%' || :userId || '%'")
     fun getChatGroupsFlowByUserId(userId: String): Flow<List<ChatGroupWithRelations>>
 
     @Query("SELECT * FROM ChatGroup WHERE userIds LIKE '%' || :userId || '%'")
     suspend fun getChatGroupsByUserId(userId: String): List<ChatGroup>
 
+    @Transaction
     @Query("SELECT * FROM ChatGroup WHERE id = :id")
     fun getChatGroupFlowById(id: String): Flow<ChatGroupWithRelations>
 }

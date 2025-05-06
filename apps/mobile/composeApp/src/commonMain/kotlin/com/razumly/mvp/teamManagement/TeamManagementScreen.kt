@@ -33,8 +33,8 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
     val freeAgents by component.freeAgentsFiltered.collectAsState()
     val selectedEvent = component.selectedEvent
     val selectedTeam by component.selectedTeam.collectAsState()
-    val currentUser by component.currentUser.collectAsState()
-    val isCaptain = selectedTeam?.team?.captainId == currentUser?.id
+    val currentUser = component.currentUser
+    val isCaptain = selectedTeam?.team?.captainId == currentUser.id
     var createTeam by remember { mutableStateOf(false) }
     val teamInvites by component.teamInvites.collectAsState()
     val deleteEnabled by component.enableDeleteTeam.collectAsState()
@@ -73,7 +73,7 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
         }
     }
 
-    if (selectedTeam != null && currentUser != null) {
+    if (selectedTeam != null) {
         Dialog(onDismissRequest = { component.deselectTeam() }) {
             CreateOrEditTeamDialog(
                 team = selectedTeam!!,
@@ -96,7 +96,7 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
                 deleteEnabled = deleteEnabled,
                 selectedEvent = selectedEvent,
                 isCaptain = isCaptain,
-                currentUser = currentUser!!
+                currentUser = currentUser
             )
         }
     }

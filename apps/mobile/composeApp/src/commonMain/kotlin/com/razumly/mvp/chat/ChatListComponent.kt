@@ -44,7 +44,7 @@ class DefaultChatListComponent(
     ComponentContext by componentContext {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-    override val currentUser = userRepository.currentUser.value!!
+    override val currentUser = userRepository.currentUser.value.getOrThrow()
 
     private val _newChat = MutableStateFlow(
         ChatGroupWithRelations(
