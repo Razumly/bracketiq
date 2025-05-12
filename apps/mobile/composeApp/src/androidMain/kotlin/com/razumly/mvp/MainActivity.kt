@@ -4,6 +4,8 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import com.arkivanov.decompose.retainedComponent
 import com.mmk.kmpnotifier.extensions.onCreateOrOnNewIntent
 import com.mmk.kmpnotifier.notification.NotifierManager
@@ -15,7 +17,12 @@ import org.koin.androidx.compose.KoinAndroidContext
 import org.koin.core.parameter.parametersOf
 import org.koin.mp.KoinPlatform.getKoin
 
+val LocalRootComponent = compositionLocalOf<RootComponent> { error("No component provided") }
+
 class MainActivity : ComponentActivity() {
+    private val rootComponent: RootComponent by lazy {
+        retainedComponent("RootRetainedComponent") { getKoin().get<RootComponent>{ parametersOf(it) } }
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -23,10 +30,11 @@ class MainActivity : ComponentActivity() {
         permissionUtil.askNotificationPermission()
         NotifierManager.onCreateOrOnNewIntent(intent)
         setContent {
-            MVPTheme() {
+            MVPTheme {
                 KoinAndroidContext {
-                    val rootComponent = retainedComponent { getKoin().get<RootComponent>{ parametersOf(it) } }
-                    App(rootComponent)
+                    CompositionLocalProvider(LocalRootComponent provides rootComponent) {
+                        App(rootComponent)
+                    }
                 }
             }
         }

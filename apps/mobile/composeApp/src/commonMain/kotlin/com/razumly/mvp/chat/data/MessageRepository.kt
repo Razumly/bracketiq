@@ -14,7 +14,7 @@ interface IMessageRepository {
     suspend fun createMessage(newMessage: MessageMVP): Result<Unit>
 }
 
-class MessagesRepository(
+class MessageRepository(
     private val mvpDatabase: MVPDatabase,
     private val databases: Databases,
 ) : IMessageRepository {

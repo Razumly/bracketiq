@@ -150,6 +150,7 @@ class DefaultSearchEventListComponent(
 
     override fun suggestEvents(searchQuery: String) {
         scope.launch {
+            if (_currentLocation.value == null) return@launch
             eventAbsRepository.searchEvents(searchQuery, _currentLocation.value!!)
                 .onSuccess {
                     _suggestedEvents.value = it

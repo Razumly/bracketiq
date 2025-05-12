@@ -8,6 +8,7 @@ import com.razumly.mvp.core.data.dataTypes.dtos.MessageMVPDTO
 import com.razumly.mvp.core.data.repositories.IMVPRepository
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResponse
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
+import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.util.DbConstants
 import io.appwrite.Query
@@ -39,7 +40,8 @@ class ChatGroupRepository(
     private val mvpDatabase: MVPDatabase,
     private val userRepository: IUserRepository,
     private val messageRepository: IMessageRepository,
-    private val realtime: Realtime
+    private val realtime: Realtime,
+    private val pushNotificationsRepository: IPushNotificationsRepository
 ) : IChatGroupRepository {
     private val _scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val _chatGroupMessagesSubscription = MutableStateFlow<RealtimeSubscription?>(null)
@@ -115,7 +117,8 @@ class ChatGroupRepository(
             }, saveData = {
                 _subscriptionList.value = it
 
-                userRepository.getUsers(it.map { chatGroup -> chatGroup.userIds }.flatten()).getOrThrow()
+                userRepository.getUsers(it.map { chatGroup -> chatGroup.userIds }.flatten())
+                    .getOrThrow()
                 it.map { chatGroup -> chatGroup.id }.forEach { chatGroupId ->
                     messageRepository.getMessagesInChatGroup(chatGroupId).onFailure { e ->
                         Napier.e("Failed to get messages for chat group $chatGroupId", e)
@@ -138,8 +141,22 @@ class ChatGroupRepository(
                 newChatGroup.id,
                 newChatGroup,
                 nestedType = ChatGroup::class
-            ).data
+            ).data.copy(id = newChatGroup.id)
         }, saveCall = { chatGroup ->
+            pushNotificationsRepository.createChatGroupTopic(chatGroup).onSuccess {
+                chatGroup.userIds.forEach { userId ->
+                    pushNotificationsRepository.subscribeUserToChatGroup(userId, chatGroup.id)
+                        .getOrThrow()
+                }
+            }.onFailure {
+                Napier.e("Failed to create chat group topic", it)
+                databases.deleteDocument(
+                    DbConstants.DATABASE_NAME,
+                    DbConstants.CHAT_GROUP_COLLECTION,
+                    chatGroup.id
+                )
+                throw it
+            }
             _subscriptionList.value += chatGroup
             mvpDatabase.getChatGroupDao.upsertChatGroupWithRelations(chatGroup)
         }, onReturn = { })
@@ -165,6 +182,11 @@ class ChatGroupRepository(
             ChatUserCrossRef(
                 chatGroup.id, userId
             )
+        )
+        pushNotificationsRepository.sendUserNotification(
+            userId,
+            "You left the chat",
+            chatGroup.name
         )
         return updateChatGroup(newChatGroup).map {}
     }

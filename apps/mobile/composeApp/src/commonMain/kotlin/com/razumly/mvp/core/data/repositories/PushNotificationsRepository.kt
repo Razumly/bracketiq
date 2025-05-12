@@ -4,17 +4,13 @@ import com.mmk.kmpnotifier.notification.NotifierManager
 import com.mmk.kmpnotifier.notification.PayloadData
 import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
-import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.EventImp
-import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.Team
-import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.Tournament
 import io.appwrite.ID
-import io.appwrite.models.Message
-import io.appwrite.models.Subscriber
-import io.appwrite.models.Topic
+import io.appwrite.models.Execution
 import io.appwrite.services.Account
-import io.appwrite.services.Messaging
+import io.appwrite.services.Functions
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
@@ -24,39 +20,58 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 interface IPushNotificationsRepository {
-    suspend fun subscribeUserToTeamNotifications(user: UserData, team: Team): Result<Subscriber>
-    suspend fun unsubscribeUserFromTeamNotifications(user: UserData, team: Team): Result<Any>
+    suspend fun subscribeUserToTeamNotifications(userId: String, teamId: String): Result<Execution>
+    suspend fun unsubscribeUserFromTeamNotifications(
+        userId: String, teamId: String
+    ): Result<Execution>
+
     suspend fun subscribeUserToEventNotifications(
-        user: UserData, event: EventAbs
-    ): Result<Subscriber>
+        userId: String, eventId: String
+    ): Result<Execution>
 
-    suspend fun unsubscribeUserFromEventNotifications(user: UserData, event: EventAbs): Result<Any>
+    suspend fun unsubscribeUserFromEventNotifications(
+        userId: String, eventId: String
+    ): Result<Execution>
+
     suspend fun subscribeUserToMatchNotifications(
-        user: UserData, match: MatchMVP
-    ): Result<Subscriber>
+        userId: String, matchId: String
+    ): Result<Execution>
 
-    suspend fun unsubscribeUserFromMatchNotifications(user: UserData, match: MatchMVP): Result<Any>
-    suspend fun subscribeUserToChatGroup(user: UserData, chatGroup: ChatGroup): Result<Subscriber>
-    suspend fun unsubscribeUserFromChatGroup(user: UserData, chatGroup: ChatGroup): Result<Any>
+    suspend fun unsubscribeUserFromMatchNotifications(
+        userId: String, matchId: String
+    ): Result<Execution>
 
-    suspend fun sendUserNotification(user: UserData, title: String, body: String): Result<Message>
-    suspend fun sendTeamNotification(team: Team, title: String, body: String): Result<Message>
-    suspend fun sendEventNotification(event: EventAbs, title: String, body: String): Result<Message>
-    suspend fun sendMatchNotification(match: MatchMVP, title: String, body: String): Result<Message>
+    suspend fun subscribeUserToChatGroup(userId: String, chatGroupId: String): Result<Execution>
+    suspend fun unsubscribeUserFromChatGroup(userId: String, chatGroupId: String): Result<Execution>
+
+    suspend fun sendUserNotification(userId: String, title: String, body: String): Result<Execution>
+    suspend fun sendTeamNotification(teamId: String, title: String, body: String): Result<Execution>
+    suspend fun sendEventNotification(
+        eventId: String,
+        title: String,
+        body: String
+    ): Result<Execution>
+
+    suspend fun sendMatchNotification(
+        matchId: String,
+        title: String,
+        body: String
+    ): Result<Execution>
+
     suspend fun sendChatGroupNotification(
-        chatGroup: ChatGroup, title: String, body: String
-    ): Result<Message>
+        chatGroupId: String, title: String, body: String
+    ): Result<Execution>
 
-    suspend fun createTeamTopic(team: Team): Result<Topic>
-    suspend fun deleteTeamTopic(team: Team): Result<Any>
-    suspend fun createEventTopic(event: EventImp): Result<Topic>
-    suspend fun deleteEventTopic(event: EventImp): Result<Any>
-    suspend fun createMatchTopic(matchId: String): Result<Topic>
-    suspend fun deleteMatchTopic(matchId: String): Result<Any>
-    suspend fun createChatGroupTopic(chatGroup: ChatGroup): Result<Topic>
-    suspend fun deleteChatGroupTopic(chatGroup: ChatGroup): Result<Any>
+    suspend fun createTeamTopic(team: Team): Result<Execution>
+    suspend fun deleteTopic(id: String): Result<Execution>
+    suspend fun createEventTopic(event: EventImp): Result<Execution>
+    suspend fun createTournamentTopic(tournament: Tournament): Result<Execution>
+    suspend fun createChatGroupTopic(chatGroup: ChatGroup): Result<Execution>
 
     suspend fun addDeviceAsTarget(): Result<Unit>
     suspend fun removeDeviceAsTarget(): Result<Unit>
@@ -65,7 +80,7 @@ interface IPushNotificationsRepository {
 class PushNotificationsRepository(
     private val account: Account,
     private val userDataSource: CurrentUserDataSource,
-    private val messaging: Messaging,
+    private val functions: Functions,
 ) : IPushNotificationsRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val _pushToken =
@@ -107,127 +122,121 @@ class PushNotificationsRepository(
         NotifierManager.addListener(managerListener)
     }
 
-    override suspend fun subscribeUserToTeamNotifications(user: UserData, team: Team) =
+    private suspend fun mvpMessagingFunction(body: MessageBody): Execution {
+        return functions.createExecution("mvpMessaging", Json.encodeToString(body), async = false)
+    }
+
+    override suspend fun subscribeUserToTeamNotifications(userId: String, teamId: String) =
         runCatching {
-            messaging.createSubscriber(team.id, user.id, _pushTarget.value)
+            val messageBody = MessageBody("subscribe", teamId, userIds = listOf(userId))
+            mvpMessagingFunction(messageBody)
         }
 
-    override suspend fun unsubscribeUserFromTeamNotifications(user: UserData, team: Team) =
+    override suspend fun unsubscribeUserFromTeamNotifications(userId: String, teamId: String) =
         runCatching {
-            messaging.deleteSubscriber(team.id, user.id)
+            val messageBody =
+                MessageBody("unsubscribe", teamId, userIds = listOf(userId))
+            mvpMessagingFunction(messageBody)
         }
 
-    override suspend fun subscribeUserToEventNotifications(user: UserData, event: EventAbs) =
+    override suspend fun subscribeUserToEventNotifications(userId: String, eventId: String) =
         runCatching {
-            messaging.createSubscriber(event.id, user.id, _pushTarget.value)
+            val messageBody = MessageBody("subscribe", eventId, userIds = listOf(userId))
+            mvpMessagingFunction(messageBody)
         }
 
-    override suspend fun unsubscribeUserFromEventNotifications(user: UserData, event: EventAbs) =
+    override suspend fun unsubscribeUserFromEventNotifications(userId: String, eventId: String) =
         runCatching {
-            messaging.deleteSubscriber(event.id, user.id)
+            val messageBody =
+                MessageBody("unsubscribe", eventId, userIds = listOf(userId))
+            mvpMessagingFunction(messageBody)
         }
 
-    override suspend fun subscribeUserToMatchNotifications(user: UserData, match: MatchMVP) =
+    override suspend fun subscribeUserToMatchNotifications(userId: String, matchId: String) =
         runCatching {
-            messaging.createSubscriber(match.id, user.id, _pushTarget.value)
+            val messageBody = MessageBody("subscribe", matchId, userIds = listOf(userId))
+            mvpMessagingFunction(messageBody)
         }
 
-    override suspend fun unsubscribeUserFromMatchNotifications(user: UserData, match: MatchMVP) =
+    override suspend fun unsubscribeUserFromMatchNotifications(userId: String, matchId: String) =
         runCatching {
-            messaging.deleteSubscriber(match.id, user.id)
+            val messageBody =
+                MessageBody("unsubscribe", matchId, userIds = listOf(userId))
+            mvpMessagingFunction(messageBody)
         }
 
-    override suspend fun subscribeUserToChatGroup(user: UserData, chatGroup: ChatGroup) =
+    override suspend fun subscribeUserToChatGroup(userId: String, chatGroupId: String) =
         runCatching {
-            messaging.createSubscriber("chat-${chatGroup.id}", user.id, _pushTarget.value)
+            val messageBody =
+                MessageBody("subscribe", chatGroupId, userIds = listOf(userId))
+            mvpMessagingFunction(messageBody)
         }
 
-    override suspend fun unsubscribeUserFromChatGroup(user: UserData, chatGroup: ChatGroup) =
+    override suspend fun unsubscribeUserFromChatGroup(userId: String, chatGroupId: String) =
         runCatching {
-            messaging.deleteSubscriber("chat-${chatGroup.id}", user.id)
+            val messageBody =
+                MessageBody("unsubscribe", chatGroupId, userIds = listOf(userId))
+            mvpMessagingFunction(messageBody)
         }
 
-    override suspend fun sendUserNotification(user: UserData, title: String, body: String) =
+    override suspend fun sendUserNotification(userId: String, title: String, body: String) =
         runCatching {
-            messaging.createPush(
-                messageId = ID.unique(),
-                title = title,
-                body = body,
-                users = listOf(user.id),
-            )
+            val messageBody =
+                MessageBody("send", "", title = title, body = body, userIds = listOf(userId))
+            mvpMessagingFunction(messageBody)
         }
 
-    override suspend fun sendTeamNotification(team: Team, title: String, body: String) =
+    override suspend fun sendTeamNotification(teamId: String, title: String, body: String) =
         runCatching {
-            messaging.createPush(
-                messageId = ID.unique(),
-                title = title,
-                body = body,
-                topics = listOf("team-${team.id}"),
-            )
+            val messageBody = MessageBody("send", teamId, title = title, body = body)
+            mvpMessagingFunction(messageBody)
         }
 
-    override suspend fun sendEventNotification(event: EventAbs, title: String, body: String) =
+    override suspend fun sendEventNotification(eventId: String, title: String, body: String) =
         runCatching {
-            messaging.createPush(
-                messageId = ID.unique(),
-                title = title,
-                body = body,
-                topics = listOf("event-${event.id}"),
-            )
+            val messageBody = MessageBody("send", eventId, title = title, body = body)
+            mvpMessagingFunction(messageBody)
         }
 
-    override suspend fun sendMatchNotification(match: MatchMVP, title: String, body: String) =
+    override suspend fun sendMatchNotification(matchId: String, title: String, body: String) =
         runCatching {
-            messaging.createPush(
-                messageId = ID.unique(),
-                title = title,
-                body = body,
-                topics = listOf("match-${match.id}"),
-            )
+            val messageBody = MessageBody("send", matchId, title = title, body = body)
+            mvpMessagingFunction(messageBody)
         }
 
     override suspend fun sendChatGroupNotification(
-        chatGroup: ChatGroup, title: String, body: String
+        chatGroupId: String, title: String, body: String
     ) = runCatching {
-        messaging.createPush(
-            messageId = ID.unique(),
-            title = title,
-            body = body,
-            topics = listOf("chat-${chatGroup.id}"),
-        )
+        val messageBody = MessageBody("send", chatGroupId, title = title, body = body)
+        mvpMessagingFunction(messageBody)
     }
 
     override suspend fun createTeamTopic(team: Team) = runCatching {
-        messaging.createTopic(team.id, "team-${team.id}")
+        val messageBody = MessageBody("create", team.id, "team-${team.id}", listOf(team.captainId))
+        mvpMessagingFunction(messageBody)
     }
 
-    override suspend fun deleteTeamTopic(team: Team) = runCatching {
-        messaging.deleteTopic(team.id)
+    override suspend fun deleteTopic(id: String) = runCatching {
+        val messageBody = MessageBody("delete", id)
+        mvpMessagingFunction(messageBody)
     }
 
     override suspend fun createEventTopic(event: EventImp) = runCatching {
-        messaging.createTopic(event.id, "event-${event.id}")
+        val messageBody = MessageBody("create", event.id, "event-${event.id}", listOf(event.hostId))
+        mvpMessagingFunction(messageBody)
     }
 
-    override suspend fun deleteEventTopic(event: EventImp) = runCatching {
-        messaging.deleteTopic(event.id)
-    }
-
-    override suspend fun createMatchTopic(matchId: String) = runCatching {
-        messaging.createTopic(matchId, "match-${matchId}")
-    }
-
-    override suspend fun deleteMatchTopic(matchId: String) = runCatching {
-        messaging.deleteTopic(matchId)
+    override suspend fun createTournamentTopic(tournament: Tournament) = runCatching {
+        val messageBody = MessageBody(
+            "create", tournament.id, "tournament-${tournament.id}", listOf(tournament.hostId)
+        )
+        mvpMessagingFunction(messageBody)
     }
 
     override suspend fun createChatGroupTopic(chatGroup: ChatGroup) = runCatching {
-        messaging.createTopic(chatGroup.id, "chat-${chatGroup.id}")
-    }
-
-    override suspend fun deleteChatGroupTopic(chatGroup: ChatGroup) = runCatching {
-        messaging.deleteTopic(chatGroup.id)
+        val messageBody =
+            MessageBody("create", chatGroup.id, "chat-${chatGroup.id}", chatGroup.userIds)
+        mvpMessagingFunction(messageBody)
     }
 
     override suspend fun addDeviceAsTarget(): Result<Unit> = runCatching {
@@ -241,3 +250,14 @@ class PushNotificationsRepository(
         userDataSource.savePushTarget("")
     }
 }
+
+@Serializable
+data class MessageBody(
+    val command: String,
+    val topicId: String,
+    val topicName: String = "",
+    val userIds: List<String> = listOf(),
+    val title: String = "",
+    val body: String = "",
+    val action: String = ""
+)

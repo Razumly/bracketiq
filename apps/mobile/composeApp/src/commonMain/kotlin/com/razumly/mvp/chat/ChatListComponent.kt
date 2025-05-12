@@ -98,6 +98,12 @@ class DefaultChatListComponent(
             chatGroupRepository.createChatGroup(newChat.value.chatGroup).onFailure {
                 _errorState.value = it.message
             }
+            _newChat.value =
+                ChatGroupWithRelations(
+                    ChatGroup(ID.unique(), "", listOf(currentUser.id), currentUser.id),
+                    users = listOf(currentUser),
+                    messages = listOf(),
+                )
         }
     }
 

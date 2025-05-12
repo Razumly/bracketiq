@@ -142,7 +142,7 @@ class TeamRepository(
             }
         }
 
-        pushNotificationRepository.subscribeUserToTeamNotifications(player, team)
+        pushNotificationRepository.subscribeUserToTeamNotifications(player.id, team.id)
         return addResult
     }
 
@@ -173,10 +173,10 @@ class TeamRepository(
             }
         }
 
-        pushNotificationRepository.unsubscribeUserFromTeamNotifications(player, team)
+        pushNotificationRepository.unsubscribeUserFromTeamNotifications(player.id, team.id)
         if (player.id != userRepository.currentUser.value.getOrThrow().id) {
             pushNotificationRepository.sendUserNotification(
-                player,
+                player.id,
                 team.name ?: "Team Update",
                 "You have been removed from a team"
             )
@@ -207,7 +207,7 @@ class TeamRepository(
                         player.copy(teamInvites = player.teamInvites + newTeam.id)
                     )
                     pushNotificationRepository.sendUserNotification(
-                        player,
+                        player.id,
                         "Team Invite",
                         "You have been invited to a team"
                     )
@@ -240,7 +240,7 @@ class TeamRepository(
                     player.copy(teamInvites = player.teamInvites + newData.id)
                 )
                 pushNotificationRepository.sendUserNotification(
-                    player,
+                    player.id,
                     "Team Invite",
                     "You have been invited to a team"
                 )

@@ -436,27 +436,29 @@ fun BackgroundImage(modifier: Modifier, imageUrl: String) {
     Column(
         modifier,
     ) {
-        AsyncImage(
-            model = imageUrl,
-            contentDescription = "Event Image",
-            modifier = Modifier
-                .height(imageHeight.dp),
-            contentScale = ContentScale.Crop,
-        )
+        if (imageUrl.isNotBlank()) {
+            AsyncImage(
+                model = imageUrl,
+                contentDescription = "Event Image",
+                modifier = Modifier
+                    .height(imageHeight.dp),
+                contentScale = ContentScale.Crop,
+            )
 
-        AsyncImage(model = imageUrl,
-            contentDescription = "Flipped Hazy Background",
-            modifier = Modifier.fillMaxSize()
-                .graphicsLayer {
-                    clip = true
-                    rotationX = 180f
-                }.graphicsLayer {
-                    transformOrigin = TransformOrigin(0.5f, 1f)
-                    scaleY = 50f
-                }.blur(32.dp),
-            contentScale = ContentScale.Crop,
-            clipToBounds = true
-        )
+            AsyncImage(model = imageUrl,
+                contentDescription = "Flipped Hazy Background",
+                modifier = Modifier.fillMaxSize()
+                    .graphicsLayer {
+                        clip = true
+                        rotationX = 180f
+                    }.graphicsLayer {
+                        transformOrigin = TransformOrigin(0.5f, 1f)
+                        scaleY = 50f
+                    }.blur(32.dp),
+                contentScale = ContentScale.Crop,
+                clipToBounds = true
+            )
+        }
     }
 }
 

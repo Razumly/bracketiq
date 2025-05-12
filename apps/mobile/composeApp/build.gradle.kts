@@ -1,4 +1,5 @@
 
+import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
 import java.io.ByteArrayOutputStream
@@ -17,9 +18,12 @@ plugins {
     id("kotlin-parcelize")
     id("com.google.gms.google-services") version "4.4.2"
 }
-
+composeCompiler {
+    includeSourceInformation = true
+}
 kotlin {
     androidTarget {
+        @OptIn(ExperimentalKotlinGradlePluginApi::class)
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_17)
         }
@@ -127,7 +131,7 @@ android {
     }
 
     packaging {
-        resources.excludes.add("META-INF/*")
+        resources.pickFirsts.add("META-INF/*")
         resources.pickFirsts.add("mozilla/*")
     }
     defaultConfig {

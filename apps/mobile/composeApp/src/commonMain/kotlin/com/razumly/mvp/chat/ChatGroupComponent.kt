@@ -65,6 +65,7 @@ class DefaultChatGroupComponent(
 
     override fun sendMessage() {
         val text = _messageInput.value.trim()
+        _messageInput.value = ""
         if (text.isNotBlank()) {
             val message = MessageMVP(
                 id = ID.unique(),
@@ -81,11 +82,12 @@ class DefaultChatGroupComponent(
                     _errorState.value = it.message
                 }
                 pushNotificationsRepository.sendChatGroupNotification(
-                    chatGroup.value.chatGroup,
+                    chatGroup.value.chatGroup.id,
                     "New message from ${currentUser.fullName}",
                     text
-                )
-                _messageInput.value = ""
+                ).onFailure {
+                    _errorState.value = it.message
+                }
             }
         }
     }
