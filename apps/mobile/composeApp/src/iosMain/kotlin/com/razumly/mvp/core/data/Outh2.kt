@@ -1,5 +1,6 @@
 package com.razumly.mvp.core.data
 
+import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.UserWithRelations
 import com.razumly.mvp.core.data.dataTypes.dtos.UserDataDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.toUserData
@@ -22,11 +23,16 @@ suspend fun UserRepository.oauth2Login(): UserWithRelations? {
             id,
             nestedType = UserDataDTO::class
         ).data.copy(id = id)
-        tournamentDB.getUserDataDao.upsertUserData(currentUser.toUserData(id))
-        val currentUserRelations =
-            tournamentDB.getUserDataDao.getUserWithRelationsById(account.get().id)
 
-        return currentUserRelations
+        return UserWithRelations(
+            UserData(
+                "name", "lastName", listOf(), listOf(), listOf(), listOf(), "suwew", listOf(),
+                listOf(), listOf(), "sdsw"
+            ),
+            teams = listOf(),
+            tournaments = listOf(),
+            pickupGames = listOf()
+        )
     } catch (e: Exception) {
         Napier.e("Failed to login", e, DbConstants.ERROR_TAG)
         throw e

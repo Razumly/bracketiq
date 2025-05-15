@@ -27,7 +27,7 @@ import kotlinx.coroutines.launch
 
 interface ITeamRepository : IMVPRepository {
     fun getTeamsOfTournamentFlow(tournamentId: String): Flow<Result<List<TeamWithPlayers>>>
-    fun getTeamsOfEventFlow(eventId: String): Flow<Result<List<TeamWithPlayers>>>
+    suspend fun getTeamsOfEventFlow(eventId: String): Flow<Result<List<TeamWithPlayers>>>
     suspend fun getTeam(teamId: String): Result<Team>
     suspend fun getTeamsOfTournament(tournamentId: String): Result<List<Team>>
     suspend fun getTeamsOfEvent(eventId: String): Result<List<Team>>
@@ -62,7 +62,7 @@ class TeamRepository(
             awaitClose { localJob.cancel() }
         }
 
-    override fun getTeamsOfEventFlow(eventId: String): Flow<Result<List<TeamWithPlayers>>> {
+    override suspend fun getTeamsOfEventFlow(eventId: String): Flow<Result<List<TeamWithPlayers>>> {
         val localFlow =
             mvpDatabase.getTeamDao.getTeamsInEventFlow(eventId).map { Result.success(it) }
         scope.launch {

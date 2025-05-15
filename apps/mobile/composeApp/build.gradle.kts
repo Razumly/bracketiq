@@ -1,5 +1,4 @@
 
-import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
 import java.io.ByteArrayOutputStream
@@ -7,6 +6,7 @@ import java.io.ByteArrayOutputStream
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
+    alias(libs.plugins.kotlinCocoapods)
     alias(libs.plugins.androidApplication)
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
@@ -23,24 +23,40 @@ composeCompiler {
 }
 kotlin {
     androidTarget {
-        @OptIn(ExperimentalKotlinGradlePluginApi::class)
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_17)
         }
     }
 
-    listOf(
-        iosX64(),
-        iosArm64(),
-        iosSimulatorArm64()
-    ).forEach { iosTarget ->
-        iosTarget.binaries.framework {
-            export(libs.kmpnotifier)
+    iosX64()
+    iosArm64()
+    iosSimulatorArm64()
+
+    applyDefaultHierarchyTemplate()
+
+    listOf(iosX64(), iosArm64(), iosSimulatorArm64()).forEach { target ->
+        target.binaries.framework {
             baseName = "ComposeApp"
-            isStatic = true
+            // your extra linker flags
             linkerOpts.add("-lsqlite3")
         }
     }
+
+    cocoapods {
+        version = "2.0"
+        summary = "MVP App for pick up Volleyball events"
+        homepage = "https://example.com"
+        ios.deploymentTarget = "15.3"
+        podfile = project.file("../iosApp/Podfile")
+
+        framework {
+            baseName = "ComposeApp"
+            isStatic = true
+            freeCompilerArgs += "-Xbinary=bundleId=com.razumly.mvp.MVP"
+            export(libs.kmpnotifier)
+        }
+    }
+
 
     sourceSets {
         commonMain {
@@ -67,11 +83,9 @@ kotlin {
                 implementation(libs.kmp.date.time.picker)
                 implementation(libs.androidx.datastore)
                 implementation(libs.datastore.preferences)
-                implementation( libs.accompanist.pager)
                 implementation(libs.materialKolor)
                 implementation(libs.kmpalette.extensions.network)
                 implementation(libs.kmpalette.core)
-                implementation(libs.ui.backhandler)
                 api(libs.kmpnotifier)
                 api(libs.decompose.decompose)
                 api(libs.decompose.extensions)
@@ -84,7 +98,7 @@ kotlin {
                 api(libs.napier)
                 api(libs.permissions)
                 api(libs.geo)
-                api("io.github.camka14.appwrite:sdk-for-kmp:1.0.0-SNAPSHOT")
+                api("io.github.camka14.appwrite:sdk-for-kmp:0.2.0")
             }
         }
 
@@ -109,8 +123,6 @@ kotlin {
                 implementation(libs.firebase.messaging)
             }
         }
-
-
     commonTest.dependencies {
             implementation(libs.kotlin.test)
             implementation(libs.assertk)
@@ -125,10 +137,6 @@ kotlin {
 android {
     namespace = "com.razumly.mvp"
     compileSdk = libs.versions.android.compileSdk.get().toInt()
-
-    buildFeatures {
-        buildConfig = true
-    }
 
     packaging {
         resources.pickFirsts.add("META-INF/*")
@@ -186,7 +194,7 @@ dependencies {
     implementation(libs.androidx.material)
 }
 
-val deviceName = project.findProperty("iosDevice") as? String ?: "iPhone 15"
+val deviceName = project.findProperty("iosDevice") as? String ?: "BE7968D4-D8CD-4F4F-A995-307A153AB31C"
 
 tasks.register<Exec>("bootIOSSimulator") {
     isIgnoreExitValue = true

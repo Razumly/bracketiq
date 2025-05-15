@@ -65,6 +65,7 @@ class RootComponent(
         }
     }
 
+    @Throws(Throwable::class)
     private fun createChild(
         config: Config,
         componentContext: ComponentContext

@@ -55,8 +55,10 @@ class UserRepository(
     private val pushNotificationsRepository: PushNotificationsRepository
 ) : IUserRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val _pushToken = currentUserDataSource.getPushToken().stateIn(scope, SharingStarted.Eagerly, "")
-    private val _pushTarget = currentUserDataSource.getPushTarget().stateIn(scope, SharingStarted.Eagerly, "")
+    private val _pushToken =
+        currentUserDataSource.getPushToken().stateIn(scope, SharingStarted.Eagerly, "")
+    private val _pushTarget =
+        currentUserDataSource.getPushTarget().stateIn(scope, SharingStarted.Eagerly, "")
 
     override val currentUser: StateFlow<Result<UserData>> =
         getCurrentUserFlow().distinctUntilChanged().stateIn(
@@ -64,15 +66,18 @@ class UserRepository(
         )
 
     override suspend fun login(email: String, password: String): Result<UserData> = runCatching {
+        Napier.d("Logging in user: $email, $password")
         account.createEmailPasswordSession(email, password)
         val id = account.get().id
         currentUserDataSource.saveUserId(id)
+        Napier.d("User logged in: $id")
         val currentUser = database.getDocument(
             DbConstants.DATABASE_NAME,
             DbConstants.USER_DATA_COLLECTION,
             id,
             nestedType = UserDataDTO::class
         ).data.copy(id = id).toUserData(id)
+        Napier.d("User data: $currentUser")
         if (_pushToken.value.isNotBlank() && _pushTarget.value.isBlank()) {
             pushNotificationsRepository.addDeviceAsTarget()
         }
@@ -87,9 +92,11 @@ class UserRepository(
         pushNotificationsRepository.removeDeviceAsTarget()
     }
 
+    @Throws(Throwable::class)
     private fun getCurrentUserFlow(): Flow<Result<UserData>> = flow {
-        val userId = currentUserDataSource.getUserId().first() // Get the user ID only once
-
+        val userId = runCatching {
+            currentUserDataSource.getUserId().first() // Get the user ID only once
+        }.getOrElse { emit(Result.failure(Exception("Failed to fetch user ID", it))); return@flow }
         val finalUserId = userId.ifBlank {
             val fetchedUserId = runCatching {
                 account.get().id
@@ -146,7 +153,7 @@ class UserRepository(
                     TournamentUserCrossRef(it.id, tournamentId)
                 })
             }
-            }
+    }
 
     override suspend fun getUsersOfEvent(eventId: String): Result<List<UserData>> {
         val query = Query.contains(DbConstants.EVENTS_ATTRIBUTE, eventId)

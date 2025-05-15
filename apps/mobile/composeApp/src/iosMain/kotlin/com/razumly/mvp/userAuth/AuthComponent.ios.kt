@@ -8,7 +8,6 @@ fun DefaultAuthComponent.oauth2Login() {
     scope.launch {
         _loginState.value = LoginState.Loading
 
-        _currentUser.value = userRepository.oauth2Login()
         if (_currentUser.value == null) {
             _loginState.value = LoginState.Error("Invalid email or password")
         } else {

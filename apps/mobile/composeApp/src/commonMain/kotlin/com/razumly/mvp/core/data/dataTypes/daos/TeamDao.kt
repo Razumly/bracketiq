@@ -3,6 +3,7 @@ package com.razumly.mvp.core.data.dataTypes.daos
 import androidx.room.Dao
 import androidx.room.Delete
 import androidx.room.Query
+import androidx.room.RewriteQueriesToDropUnusedColumns
 import androidx.room.Transaction
 import androidx.room.Upsert
 import com.razumly.mvp.core.data.dataTypes.Team
@@ -21,6 +22,7 @@ interface TeamDao {
     @Upsert
     suspend fun upsertTeam(team: Team)
 
+    @RewriteQueriesToDropUnusedColumns
     @Query(
         """
     SELECT * FROM Team 
@@ -31,6 +33,7 @@ interface TeamDao {
     )
     suspend fun getTeamsInTournament(tournamentId: String): List<Team>
 
+    @RewriteQueriesToDropUnusedColumns
     @Query(
         """
     SELECT * FROM Team 
@@ -92,18 +95,22 @@ interface TeamDao {
     @Query("DELETE FROM tournament_team_cross_ref WHERE teamId == :teamId")
     suspend fun deleteTournamentTeamCrossRefsByTeamId(teamId: String)
 
+    @RewriteQueriesToDropUnusedColumns
     @Transaction
     @Query("SELECT * FROM Team WHERE id = :teamId")
     suspend fun getTeamWithPlayers(teamId: String): TeamWithRelations?
 
+    @RewriteQueriesToDropUnusedColumns
     @Transaction
     @Query("SELECT * FROM Team WHERE id = :teamId")
     fun getTeamWithPlayersFlow(teamId: String): Flow<TeamWithRelations>
 
+    @RewriteQueriesToDropUnusedColumns
     @Transaction
     @Query("SELECT * FROM Team WHERE id in (:teamIds)")
     suspend fun getTeamsWithPlayers(teamIds: List<String>): List<TeamWithRelations>
 
+    @RewriteQueriesToDropUnusedColumns
     @Transaction
     @Query(
         """
@@ -115,6 +122,7 @@ interface TeamDao {
     )
     fun getTeamsInTournamentFlow(tournamentId: String): Flow<List<TeamWithPlayers>>
 
+    @RewriteQueriesToDropUnusedColumns
     @Transaction
     @Query(
         """
@@ -126,6 +134,7 @@ interface TeamDao {
     )
     fun getTeamsInEventFlow(eventId: String): Flow<List<TeamWithPlayers>>
 
+    @RewriteQueriesToDropUnusedColumns
     @Transaction
     @Query("SELECT * FROM Team WHERE id In (:ids)")
     fun getTeamsWithPlayersFlowByIds(ids: List<String>): Flow<List<TeamWithPlayers>>

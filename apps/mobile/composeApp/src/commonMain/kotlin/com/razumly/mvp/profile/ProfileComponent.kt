@@ -38,7 +38,7 @@ class DefaultProfileComponent(
 
     override fun clearCache() {
         scopeIO.launch {
-            mvpDatabase.clearAllTables() // IDE BUG: NOT A SYNTAX ISSUE
+//            mvpDatabase.clearAllTables() // IDE BUG: NOT A SYNTAX ISSUE
         }
     }
 }

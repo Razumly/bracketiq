@@ -57,7 +57,10 @@ class DefaultAuthComponent(
         }
         scope.launch {
             _currentUser.collect { user ->
-                if (user.getOrThrow().id.isBlank()) {
+                if (user.getOrElse{
+                    _loginState.value = LoginState.Initial
+                        return@collect
+                    }.id.isBlank()) {
                     _loginState.value = LoginState.Initial
                 } else {
                     _loginState.value = LoginState.Success

@@ -38,7 +38,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.backhandler.BackHandler
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
@@ -134,15 +133,6 @@ fun EventDetails(
     val colorState = rememberDominantColorState(loader = painterLoader)
     LaunchedEffect(painter) {
         colorState.updateFrom(painter)
-    }
-
-    BackHandler(enabled = showMapCard) {
-        if (showImageSelector) {
-            showImageSelector = false
-        } else {
-            showMapCard = false
-            onPlaceSelected(event.toMVPPlace())
-        }
     }
 
     val backgroundColor =
