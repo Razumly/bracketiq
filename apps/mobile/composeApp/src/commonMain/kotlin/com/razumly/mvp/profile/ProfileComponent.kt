@@ -6,6 +6,7 @@ import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
@@ -25,9 +26,12 @@ class DefaultProfileComponent(
 ) : ProfileComponent, ComponentContext by componentContext {
     private val scopeMain = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private val scopeIO = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val _error = MutableStateFlow("")
     override fun onLogout() {
         scopeMain.launch {
-            userRepository.logout()
+            userRepository.logout().onFailure {
+                _error.value = it.message.toString()
+            }
             onNavigateToLogin()
         }
     }

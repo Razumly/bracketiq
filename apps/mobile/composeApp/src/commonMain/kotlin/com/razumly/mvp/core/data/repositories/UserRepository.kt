@@ -20,12 +20,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -60,10 +59,12 @@ class UserRepository(
     private val _pushTarget =
         currentUserDataSource.getPushTarget().stateIn(scope, SharingStarted.Eagerly, "")
 
-    override val currentUser: StateFlow<Result<UserData>> =
-        getCurrentUserFlow().distinctUntilChanged().stateIn(
-            scope, SharingStarted.Lazily, Result.success(UserData())
-        )
+    private var _currentUser = MutableStateFlow(Result.failure<UserData>(Exception("No User")))
+    override val currentUser: StateFlow<Result<UserData>> = _currentUser.asStateFlow()
+
+    init {
+        scope.launch { loadCurrentUser() }
+    }
 
     override suspend fun login(email: String, password: String): Result<UserData> = runCatching {
         Napier.d("Logging in user: $email, $password")
@@ -83,65 +84,54 @@ class UserRepository(
         }
         mvpDatabase.getUserDataDao.upsertUserData(currentUser)
 
+        _currentUser.value = Result.success(currentUser)
         return Result.success(currentUser)
     }
 
     override suspend fun logout(): Result<Unit> = kotlin.runCatching {
+        _currentUser.value = Result.failure(Exception("No User"))
         currentUserDataSource.saveUserId("")
         account.deleteSession("current")
         pushNotificationsRepository.removeDeviceAsTarget()
     }
 
     @Throws(Throwable::class)
-    private fun getCurrentUserFlow(): Flow<Result<UserData>> = flow {
-        val userId = runCatching {
-            currentUserDataSource.getUserId().first() // Get the user ID only once
-        }.getOrElse { emit(Result.failure(Exception("Failed to fetch user ID", it))); return@flow }
-        val finalUserId = userId.ifBlank {
-            val fetchedUserId = runCatching {
-                account.get().id
-            }.getOrElse {
-                emit(Result.failure(Exception("Failed to fetch user ID", it)))
-                return@flow
-            }
-            currentUserDataSource.saveUserId(fetchedUserId)
-            fetchedUserId
+    private suspend fun loadCurrentUser() {
+        val savedId = runCatching {
+            currentUserDataSource.getUserId().first().takeIf(String::isNotBlank)
+        }.getOrNull()
+
+        if (!savedId.isNullOrBlank()) {
+            val local = mvpDatabase.getUserDataDao.getUserDataById(savedId)
+            _currentUser.value = Result.success(local)
         }
 
-        if (_pushToken.value.isNotBlank() && _pushTarget.value.isBlank()) {
-            pushNotificationsRepository.addDeviceAsTarget().onFailure {
-                Napier.e("Failed to add device as target", it, "UserRepository")
-            }
+        val sessionId = runCatching {
+            account.get().id.takeIf(String::isNotBlank)
+        }.getOrNull()
+
+        if (sessionId.isNullOrBlank()) {
+            return
         }
 
-        val userDataResult = singleResponse(networkCall = {
+        val remoteRes = runCatching {
             database.getDocument(
                 DbConstants.DATABASE_NAME,
                 DbConstants.USER_DATA_COLLECTION,
-                finalUserId,
-                nestedType = UserDataDTO::class,
-            ).data.toUserData(finalUserId)
-        }, saveCall = { userData ->
-            mvpDatabase.getUserDataDao.upsertUserData(userData)
-            currentUserDataSource.saveUserId(userData.id)
-        }, onReturn = { it })
-
-        if (userDataResult.isFailure) {
-            emit(Result.failure(userDataResult.exceptionOrNull()!!))
-            return@flow
+                sessionId,
+                nestedType = UserDataDTO::class
+            ).data.toUserData(sessionId)
         }
 
-        // Always return the Room flow to ensure it updates with new data
-        emitAll(mvpDatabase.getUserDataDao.getUserFlowById(finalUserId).map { user ->
-            if (user != null) {
-                Napier.d("User found locally")
-                Result.success(user)
-            } else {
-                currentUserDataSource.saveUserId("")
-                Napier.d("User not found locally")
-                Result.success(UserData())
-            }
-        })
+        remoteRes.onFailure { err ->
+            _currentUser.value = Result.failure(err)
+        }.onSuccess { user ->
+            mvpDatabase.getUserDataDao.upsertUserData(user)
+            currentUserDataSource.saveUserId(user.id)
+
+            val fresh = mvpDatabase.getUserDataDao.getUserDataById(user.id)
+            _currentUser.value = Result.success(fresh)
+        }
     }
 
     override suspend fun getUsersOfTournament(tournamentId: String): Result<List<UserData>> {

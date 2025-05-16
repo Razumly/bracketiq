@@ -9,6 +9,10 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
 
 interface AuthComponent {
@@ -55,18 +59,11 @@ class DefaultAuthComponent(
                 }
             }
         }
-        scope.launch {
-            _currentUser.collect { user ->
-                if (user.getOrElse{
-                    _loginState.value = LoginState.Initial
-                        return@collect
-                    }.id.isBlank()) {
-                    _loginState.value = LoginState.Initial
-                } else {
-                    _loginState.value = LoginState.Success
-                }
-            }
-        }
+        _currentUser
+            .filter { it.isSuccess }
+            .take(1)
+            .onEach { _loginState.value = LoginState.Success }
+            .launchIn(scope)
     }
 
     override fun onLogin(email: String, password: String) {
