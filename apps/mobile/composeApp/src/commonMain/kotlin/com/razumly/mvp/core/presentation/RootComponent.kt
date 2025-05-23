@@ -14,6 +14,7 @@ import dev.icerock.moko.permissions.DeniedAlwaysException
 import dev.icerock.moko.permissions.DeniedException
 import dev.icerock.moko.permissions.Permission
 import dev.icerock.moko.permissions.PermissionsController
+import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -25,7 +26,6 @@ import org.koin.mp.KoinPlatform.getKoin
 class RootComponent(
     componentContext: ComponentContext,
     val permissionsController: PermissionsController,
-    val locationTracker: LocationTracker
 ) : ComponentContext by componentContext {
 
     private val navigation = StackNavigation<Config>()
@@ -54,13 +54,16 @@ class RootComponent(
         scope.launch {
             try {
                 permissionsController.providePermission(Permission.LOCATION)
-                locationTracker.startTracking()
             } catch (deniedAlways: DeniedAlwaysException) {
                 // Permission is always denied
             } catch (denied: DeniedException) {
                 // Permission was denied
             }
-
+            if (permissionsController.isPermissionGranted(Permission.LOCATION)) {
+                Napier.d(tag = "Permissions") { "Location permission granted" }
+            } else {
+                Napier.d(tag = "Permissions") { "Location permission not granted" }
+            }
             childStack.subscribe{}
         }
     }

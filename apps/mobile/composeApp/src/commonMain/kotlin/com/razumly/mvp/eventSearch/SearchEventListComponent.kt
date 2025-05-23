@@ -6,6 +6,7 @@ import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.repositories.IEventAbsRepository
 import com.razumly.mvp.core.util.calcDistance
 import com.razumly.mvp.core.util.getBounds
+import com.razumly.mvp.core.util.getCurrentLocation
 import dev.icerock.moko.geo.LatLng
 import dev.icerock.moko.geo.LocationTracker
 import io.github.aakira.napier.Napier
@@ -61,9 +62,6 @@ class DefaultSearchEventListComponent(
     private val _isLoading = MutableStateFlow(false)
     override val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
-    private val _locationStateFlow =
-        locationTracker.getLocationsFlow().stateIn(scope, SharingStarted.Eagerly, null)
-
     private val _currentLocation = MutableStateFlow<LatLng?>(null)
 
     private val _suggestedEvents = MutableStateFlow<List<EventAbs>>(emptyList())
@@ -103,20 +101,9 @@ class DefaultSearchEventListComponent(
 
         scope.launch {
             try {
-                _locationStateFlow.collect {
-                    if (it == null) {
-                        _error.value = "Location not available"
-                        return@collect
-                    }
-                    if (_currentLocation.value == null) {
-                        _currentLocation.value = it
-                        getEvents()
-                    }
-                    if (calcDistance(_currentLocation.value!!, it) > 50) {
-                        _currentLocation.value = it
-                        getEvents()
-                    }
-                }
+                _currentLocation.value = locationTracker.getCurrentLocation()
+                getEvents()
+                Napier.d(tag = "Location", message = "Current location: ${_currentLocation.value}")
             } catch (e: Exception) {
                 _error.value = "Failed to track location: ${e.message}"
             }
@@ -125,7 +112,7 @@ class DefaultSearchEventListComponent(
         scope.launch {
             try {
                 currentRadius.collect {
-                        if (_locationStateFlow.value != null) {
+                        if (_currentLocation.value != null) {
                             getEvents()
                         }
                     }

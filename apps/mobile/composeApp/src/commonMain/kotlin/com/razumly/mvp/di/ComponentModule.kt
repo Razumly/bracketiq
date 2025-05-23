@@ -23,7 +23,6 @@ val componentModule = module {
         RootComponent(
             componentContext = componentContext,
             permissionsController = get(),
-            locationTracker = get()
         )
     }
 
@@ -38,7 +37,8 @@ val componentModule = module {
     factory { (componentContext: ComponentContext, onNavigateToLogin: () -> Unit) ->
         DefaultHomeComponent(
             componentContext = componentContext,
-            onNavigateToLogin = onNavigateToLogin
+            onNavigateToLogin = onNavigateToLogin,
+            locationTracker = get()
         )
     }
 

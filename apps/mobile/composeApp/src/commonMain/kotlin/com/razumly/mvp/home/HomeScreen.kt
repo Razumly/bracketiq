@@ -25,6 +25,7 @@ import com.razumly.mvp.eventSearch.EventSearchScreen
 import com.razumly.mvp.matchDetail.MatchDetailScreen
 import com.razumly.mvp.profile.ProfileScreen
 import com.razumly.mvp.teamManagement.TeamManagementScreen
+import dev.icerock.moko.geo.compose.BindLocationTrackerEffect
 import io.github.aakira.napier.Napier
 
 val LocalNavBarPadding = compositionLocalOf<PaddingValues> { error("No padding values provided") }
@@ -32,6 +33,8 @@ val LocalNavBarPadding = compositionLocalOf<PaddingValues> { error("No padding v
 @Composable
 fun HomeScreen(component: HomeComponent) {
     val selectedPage by component.selectedPage.collectAsState()
+
+    BindLocationTrackerEffect(component.locationTracker)
 
     MVPBottomNavBar(
         selectedPage = selectedPage,

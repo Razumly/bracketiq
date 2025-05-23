@@ -39,11 +39,9 @@ actual class MapComponent(
     val locationTracker: LocationTracker
 ) : ComponentContext by componentContext {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    private val _locationStateFlow = locationTracker.getLocationsFlow()
-        .stateIn(scope, SharingStarted.Eagerly, null)
 
     private val _currentLocation = MutableStateFlow<dev.icerock.moko.geo.LatLng?>(null)
-    actual val currentLocation = _currentLocation.asStateFlow()
+    val currentLocation = _currentLocation.asStateFlow()
 
     private val _events = MutableStateFlow<List<EventAbs>>(emptyList())
     val events: StateFlow<List<EventAbs>> = _events.asStateFlow()
@@ -65,16 +63,7 @@ actual class MapComponent(
 
     init {
         scope.launch {
-            _locationStateFlow.collect {
-                if (it == null) {
-                    return@collect
-                }
-                if (_currentLocation.value == null) {
-                    _currentLocation.value = it
-                } else if (calcDistance(_currentLocation.value!!, it) > 50) {
-                    _currentLocation.value = it
-                }
-            }
+            _currentLocation.value = locationTracker.getCurrentLocation()
         }
     }
 

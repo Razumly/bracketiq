@@ -14,7 +14,6 @@ expect fun EventMap(
     onPlaceSelected: (place: MVPPlace) -> Unit,
     canClickPOI: Boolean,
     modifier: Modifier = Modifier,
-    searchBarPadding: PaddingValues,
     focusedLocation: LatLng?,
     focusedEvent: EventAbs?,
 )

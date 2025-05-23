@@ -59,7 +59,6 @@ fun App(root: RootComponent) {
             .build()
     }
     BindEffect(root.permissionsController)
-    BindLocationTrackerEffect(root.locationTracker)
 
     // Only animate root-level transitions with your custom iOS slides
     Children(

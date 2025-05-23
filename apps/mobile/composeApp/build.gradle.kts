@@ -17,6 +17,7 @@ plugins {
     alias(libs.plugins.secrets)
     id("kotlin-parcelize")
     id("com.google.gms.google-services") version "4.4.2"
+    id("co.touchlab.skie") version "0.10.2-preview.2.1.20"
 }
 composeCompiler {
     includeSourceInformation = true
@@ -49,11 +50,15 @@ kotlin {
         ios.deploymentTarget = "15.3"
         podfile = project.file("../iosApp/Podfile")
 
+        pod("GooglePlaces")
         framework {
             baseName = "ComposeApp"
             isStatic = true
-            freeCompilerArgs += "-Xbinary=bundleId=com.razumly.mvp.MVP"
+            freeCompilerArgs += "-Xbinary=bundleId=com.razumly.mvp"
+            export(libs.decompose.decompose)
+            export(libs.lifecycle)
             export(libs.kmpnotifier)
+            export(libs.geo)
         }
     }
 
@@ -86,6 +91,7 @@ kotlin {
                 implementation(libs.materialKolor)
                 implementation(libs.kmpalette.extensions.network)
                 implementation(libs.kmpalette.core)
+                api(libs.lifecycle)
                 api(libs.kmpnotifier)
                 api(libs.decompose.decompose)
                 api(libs.decompose.extensions)
@@ -174,6 +180,13 @@ room {
     schemaDirectory("$projectDir/schemas")
     generateKotlin = true
 }
+
+skie {
+    features {
+        enableSwiftUIObservingPreview = true
+    }
+}
+
 
 secrets {
     propertiesFileName = "secrets.properties"

@@ -4,6 +4,7 @@ import com.razumly.mvp.di.KoinInitializer
 import io.github.aakira.napier.DebugAntilog
 import kotlin.experimental.ExperimentalObjCName
 import io.github.aakira.napier.Napier
+import platform.Foundation.NSBundle
 
 @OptIn(ExperimentalObjCName::class)
 @ObjCName("initKoin")

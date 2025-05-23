@@ -293,7 +293,6 @@ fun EventDetails(
             modifier = Modifier.graphicsLayer {
                 alpha = if (animationProgress > 0f) 1f else 0f
             }.clip(CircularRevealShape(animationProgress, revealCenter)),
-            searchBarPadding = PaddingValues(),
             focusedLocation = if (editEvent.location.isNotBlank()) editEvent.let {
                 LatLng(
                     it.lat,

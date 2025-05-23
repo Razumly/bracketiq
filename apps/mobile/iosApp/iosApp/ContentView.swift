@@ -2,13 +2,9 @@ import UIKit
 import SwiftUI
 import ComposeApp
 
-
 struct ComposeView: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> UIViewController {
-        let viewController = MainViewControllerKt.MainViewController()
-        print("MainViewController created: \(viewController)")
-
-        return viewController
+        MainViewControllerKt.MainViewController(nativeViewFactory: IOSNativeViewFactory.shared)
     }
 
     func updateUIViewController(_ uiViewController: UIViewController, context: Context) {}

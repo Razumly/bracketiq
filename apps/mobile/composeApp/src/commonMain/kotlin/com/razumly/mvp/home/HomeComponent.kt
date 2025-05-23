@@ -29,6 +29,7 @@ import com.razumly.mvp.matchDetail.MatchContentComponent
 import com.razumly.mvp.profile.DefaultProfileComponent
 import com.razumly.mvp.profile.ProfileComponent
 import com.razumly.mvp.teamManagement.DefaultTeamManagementComponent
+import dev.icerock.moko.geo.LocationTracker
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -39,6 +40,8 @@ import org.koin.mp.KoinPlatform.getKoin
 interface HomeComponent {
     val childStack: Value<ChildStack<*, Child>>
     val selectedPage: StateFlow<Config>
+    val locationTracker: LocationTracker
+
     fun onTabSelected(page: Config)
 
     fun onBack()
@@ -100,6 +103,7 @@ interface HomeComponent {
 class DefaultHomeComponent(
     componentContext: ComponentContext,
     private val onNavigateToLogin: () -> Unit,
+    override val locationTracker: LocationTracker,
 ) : HomeComponent, ComponentContext by componentContext {
     init {
         println("iOS Home: Component initialized")

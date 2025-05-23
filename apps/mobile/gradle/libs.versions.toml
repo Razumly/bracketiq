@@ -24,13 +24,14 @@ kmpalette = "3.1.0"
 kmpDateTimePicker = "1.0.5"
 kmpnotifier = "1.5.1"
 koin = "4.0.2"
-kotlin = "2.1.21"
+kotlin = "2.1.20"
 kotlinTest = "1.9.23"
 kotlinxDatetime = "0.6.1"
 kotlinx_datetime_ext = "1.3.1"
 kotlinxSerializationJson = "1.7.3"
-ksp = "2.1.21-2.0.1"
+ksp = "2.1.20-2.0.1"
 ktor = "3.0.3"
+lifecycle = "2.5.0"
 lifecycleRuntimeComposeAndroid = "2.8.7"
 mapsCompose = "6.2.1"
 material = "1.8.0-alpha08"
@@ -53,6 +54,7 @@ animationAndroid = "1.7.8"
 [libraries]
 firebase-messaging = { module = "com.google.firebase:firebase-messaging", version.ref = "firebaseMessaging" }
 kmpnotifier = { module = "io.github.mirzemehdi:kmpnotifier", version.ref = "kmpnotifier" }
+lifecycle = { module = "com.arkivanov.essenty:lifecycle", version.ref = "lifecycle" }
 materialKolor = { module = "com.materialkolor:material-kolor", version.ref = "materialKolor" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activityCompose" }
 androidx-activity-ktx = { group = "androidx.activity", name = "activity-ktx", version.ref = "activityKtx" }

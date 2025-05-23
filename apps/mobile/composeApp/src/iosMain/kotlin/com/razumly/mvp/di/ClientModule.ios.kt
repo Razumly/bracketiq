@@ -7,7 +7,8 @@ import org.koin.dsl.module
 actual val clientModule = module {
     single {
         Client()
-            .setEndpoint("https://cloud.appwrite.io/v1") // Your API Endpoint
-            .setProject(AppSecrets.mvpProjectId) // Your project ID
+            .setEndpoint("https://cloud.appwrite.io/v1")
+            .setProject(AppSecrets.mvpProjectId)
+            .setSelfSigned(true)
     }
 }

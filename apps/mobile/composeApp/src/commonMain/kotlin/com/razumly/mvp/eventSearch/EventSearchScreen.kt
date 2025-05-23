@@ -171,7 +171,6 @@ fun EventSearchScreen(
                     modifier = Modifier.graphicsLayer {
                         alpha = if (animationProgress > 0f) 1f else 0f
                     }.clip(CircularRevealShape(animationProgress, revealCenter)),
-                    searchBarPadding = PaddingValues(),
                     focusedLocation = selectedEvent?.let {
                         LatLng(it.lat, it.long)
                     },

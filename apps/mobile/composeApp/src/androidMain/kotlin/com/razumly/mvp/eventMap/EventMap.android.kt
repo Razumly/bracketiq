@@ -46,7 +46,6 @@ actual fun EventMap(
     onPlaceSelected: (place: MVPPlace) -> Unit,
     canClickPOI: Boolean,
     modifier: Modifier,
-    searchBarPadding: PaddingValues,
     focusedLocation: dev.icerock.moko.geo.LatLng?,
     focusedEvent: EventAbs?,
 ) {
@@ -187,8 +186,7 @@ actual fun EventMap(
             currentCameraState.projection?.visibleRegion?.latLngBounds?.let {
                 MapSearchBar(
                     Modifier
-                        .padding(horizontal = 16.dp)
-                        .padding(searchBarPadding),
+                        .padding(horizontal = 16.dp),
                     component,
                     currentCameraState.position.target,
                     it

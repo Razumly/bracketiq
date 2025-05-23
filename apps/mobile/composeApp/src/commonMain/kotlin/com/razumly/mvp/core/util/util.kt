@@ -2,7 +2,10 @@ package com.razumly.mvp.core.util
 
 import com.razumly.mvp.core.data.dataTypes.Bounds
 import dev.icerock.moko.geo.LatLng
+import dev.icerock.moko.geo.LocationTracker
 import io.appwrite.models.Document
+import io.github.aakira.napier.Napier
+import kotlinx.coroutines.flow.first
 import kotlin.math.PI
 import kotlin.math.absoluteValue
 import kotlin.math.acos
@@ -43,5 +46,17 @@ fun calcDistance(start: LatLng, end: LatLng): Double {
         ) * 3959
     } catch (e: Exception) {
         0.0
+    }
+}
+
+suspend fun LocationTracker.getCurrentLocation(): LatLng {
+    try {
+        startTracking()
+        val location = getLocationsFlow().first()
+        stopTracking()
+        return location
+    } catch (e: Exception) {
+        Napier.e("Failed to get current location: ${e.message}")
+        return LatLng(0.0, 0.0)
     }
 }
