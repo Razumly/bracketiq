@@ -1,5 +1,7 @@
 package com.razumly.mvp.eventMap
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,6 +21,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.CameraPosition
@@ -34,6 +39,7 @@ import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
+import com.razumly.mvp.core.presentation.util.CircularRevealShape
 import com.razumly.mvp.core.util.toGoogle
 import dev.icerock.moko.geo.compose.BindLocationTrackerEffect
 import io.github.aakira.napier.Napier
@@ -48,6 +54,8 @@ actual fun EventMap(
     modifier: Modifier,
     focusedLocation: dev.icerock.moko.geo.LatLng?,
     focusedEvent: EventAbs?,
+    showMap: Boolean,
+    revealCenter: Offset
 ) {
     val selectedPlace = remember { mutableStateOf<PointOfInterest?>(null) }
     val scope = rememberCoroutineScope()
@@ -58,6 +66,10 @@ actual fun EventMap(
     val defaultDurationMs = 1000
     val initCameraState = focusedLocation?.toGoogle()
     val cameraPositionState = rememberCameraPositionState()
+
+    val animationProgress by animateFloatAsState(
+        targetValue = if (showMap) 1f else 0f, animationSpec = tween(durationMillis = 1000)
+    )
 
     LaunchedEffect(initCameraState, currentLocation) {
         if (initCameraState != null) {
@@ -86,16 +98,15 @@ actual fun EventMap(
     }
 
     Box(
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier.fillMaxSize()
+            .graphicsLayer {
+            alpha = if (animationProgress > 0f) 1f else 0f
+        }.clip(CircularRevealShape(animationProgress, revealCenter)),
     ) {
         BindLocationTrackerEffect(component.locationTracker)
         LaunchedEffect(currentLocation) {
             currentLocation?.let { validLoc ->
                 val target = validLoc.toGoogle()
-
-                if (!canClickPOI) {
-                    component.getEvents()
-                }
 
                 if (focusedEvent == null) {
                     cameraPositionState.animate(

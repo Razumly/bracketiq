@@ -78,10 +78,6 @@ fun EventSearchScreen(
     var revealCenter by remember { mutableStateOf(Offset.Zero) }
     val suggestions by component.suggestedEvents.collectAsState()
 
-    val animationProgress by animateFloatAsState(
-        targetValue = if (showMapCard) 1f else 0f, animationSpec = tween(durationMillis = 1000)
-    )
-
     Box {
         BindLocationTrackerEffect(component.locationTracker)
         Scaffold(
@@ -168,13 +164,12 @@ fun EventSearchScreen(
                     },
                     onPlaceSelected = {},
                     canClickPOI = false,
-                    modifier = Modifier.graphicsLayer {
-                        alpha = if (animationProgress > 0f) 1f else 0f
-                    }.clip(CircularRevealShape(animationProgress, revealCenter)),
                     focusedLocation = selectedEvent?.let {
                         LatLng(it.lat, it.long)
                     },
-                    focusedEvent = null
+                    focusedEvent = null,
+                    showMap = showMapCard,
+                    revealCenter = revealCenter
                 )
             }
         }

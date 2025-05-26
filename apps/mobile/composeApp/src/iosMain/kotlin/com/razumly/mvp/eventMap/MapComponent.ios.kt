@@ -41,9 +41,9 @@ import kotlinx.serialization.json.JsonContentPolymorphicSerializer
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.jsonObject
 
-@OptIn(ExperimentalForeignApi::class)
 actual class MapComponent(
     componentContext: ComponentContext,
+    doGetEvents: Boolean,
     private val eventAbsRepository: IEventAbsRepository,
     val locationTracker: LocationTracker,
     private val apiKey: String
@@ -62,6 +62,9 @@ actual class MapComponent(
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
+    private val _isMapVisible = MutableStateFlow(false)
+    val isMapVisible = _isMapVisible.asStateFlow()
+
     private val _currentRadiusMeters = MutableStateFlow(50.0)
 
     private val httpClient = HttpClient(Darwin) {
@@ -73,7 +76,18 @@ actual class MapComponent(
     init {
         scope.launch {
             _currentLocation.value = locationTracker.getCurrentLocation()
+            if (doGetEvents) {
+                getEvents()
+            }
         }
+    }
+
+    fun showMap() {
+        _isMapVisible.value = true
+    }
+
+    fun hideMap() {
+        _isMapVisible.value = false
     }
 
     fun setRadius(radius: Double) {

@@ -124,10 +124,6 @@ fun EventDetails(
     var showImageSelector by rememberSaveable { mutableStateOf(false) }
     var selectedPlace by remember { mutableStateOf<MVPPlace?>(null) }
 
-    val animationProgress by animateFloatAsState(
-        targetValue = if (showMapCard) 1f else 0f, animationSpec = tween(durationMillis = 1000)
-    )
-
     val painter = rememberAsyncImagePainter(event.imageUrl)
     val painterLoader = rememberPainterLoader()
     val colorState = rememberDominantColorState(loader = painterLoader)
@@ -290,9 +286,6 @@ fun EventDetails(
                 }
             },
             canClickPOI = editView,
-            modifier = Modifier.graphicsLayer {
-                alpha = if (animationProgress > 0f) 1f else 0f
-            }.clip(CircularRevealShape(animationProgress, revealCenter)),
             focusedLocation = if (editEvent.location.isNotBlank()) editEvent.let {
                 LatLng(
                     it.lat,
@@ -300,6 +293,8 @@ fun EventDetails(
                 )
             } else null,
             focusedEvent = if (editEvent.location.isNotBlank()) editEvent else null,
+            showMap = showMapCard,
+            revealCenter = revealCenter
         )
 
         if (showImageSelector && selectedPlace != null) {

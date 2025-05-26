@@ -3,6 +3,7 @@ package com.razumly.mvp.eventMap
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import dev.icerock.moko.geo.LatLng
@@ -16,4 +17,6 @@ expect fun EventMap(
     modifier: Modifier = Modifier,
     focusedLocation: LatLng?,
     focusedEvent: EventAbs?,
+    showMap: Boolean,
+    revealCenter: Offset
 )

@@ -139,7 +139,7 @@ class DefaultHomeComponent(
                         parametersOf(componentContext, ::onEventSelected)
                     }.value,
                     _koin.inject<MapComponent> {
-                        parametersOf(componentContext)
+                        parametersOf(componentContext, true)
                     }.value
                 )
             }
@@ -154,7 +154,7 @@ class DefaultHomeComponent(
                         )
                     }.value,
                     _koin.inject<MapComponent> {
-                        parametersOf(componentContext)
+                        parametersOf(componentContext, false)
                     }.value
                 )
             }
@@ -180,7 +180,7 @@ class DefaultHomeComponent(
                     parametersOf(componentContext, ::onEventCreated)
                 }.value,
                 _koin.inject<MapComponent> {
-                    parametersOf(componentContext)
+                    parametersOf(componentContext, false)
                 }.value
             )
             is Config.Profile -> Child.Profile(
