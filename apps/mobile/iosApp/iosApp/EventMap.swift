@@ -42,6 +42,37 @@ class IOSNativeViewFactory: NativeViewFactory {
         
         return hostingController
     }
+    
+    func updateNativeMapView(
+            viewController: UIViewController,
+            component: MapComponent,
+            onEventSelected: @escaping (any EventAbs) -> Void,
+            onPlaceSelected: @escaping (MVPPlace) -> Void,
+            canClickPOI: Bool,
+            focusedLocation: LatLng?,
+            focusedEvent: (any EventAbs)?,
+            revealCenterX: Double,
+            revealCenterY: Double
+        ) {
+            guard let hostingController = viewController as? UIHostingController<EventMap> else {
+                return
+            }
+            
+            let centerPoint = CGPoint(x: revealCenterX, y: revealCenterY)
+            
+            // Update the SwiftUI view with new parameters
+            let updatedView = EventMap(
+                component: component,
+                onEventSelected: onEventSelected,
+                onPlaceSelected: onPlaceSelected,
+                canClickPOI: canClickPOI,
+                focusedLocation: focusedLocation,
+                focusedEvent: focusedEvent,
+                revealCenter: centerPoint
+            )
+            
+            hostingController.rootView = updatedView
+        }
 }
 
 struct EventMap: View {
@@ -85,7 +116,6 @@ struct EventMap: View {
             component.isMapVisible
         ) { (loc: LatLng?, ev: [EventAbs], reveal: KotlinBoolean) in
             ZStack(alignment: .top) {
-                // Always render the map, control visibility with opacity
                 GoogleMapView(
                     component: component,
                     events: ev,
@@ -108,43 +138,57 @@ struct EventMap: View {
                 .allowsHitTesting(reveal.boolValue)
                 .animation(.easeInOut(duration: 0.5), value: reveal.boolValue)
                 
-                // Search bar - also use opacity instead of conditional
-                MapSearchBar(
-                    text: $searchText,
-                    suggestions: suggestions,
-                    onSearch: { query in
-                        Task{
-                            places = try await component
-                                .searchPlaces(query: query, latLng: LatLng(latitude: currentLocation!.latitude, longitude: currentLocation!.longitude))
-                        }
-                        searchText = ""
-                    },
-                    onSuggestionTap: { place in
-                        Task{
-                            if place.id == "Query"{
-                                places = try await component.searchPlaces(query: place.name, latLng: LatLng(latitude: currentLocation!.latitude, longitude: currentLocation!.longitude))
-                            } else {
-                                places = []
-                                let place = try await component.getPlace(placeId: place.id)
-                                if place != nil {
-                                    onPlaceSelected(place!)
+                if canClickPOI && reveal.boolValue {
+                    MapSearchBar(
+                        text: $searchText,
+                        suggestions: suggestions,
+                        onSearch: { query in
+                            Task {
+                                if let currentLoc = currentLocation {
+                                    places = try await component.searchPlaces(
+                                        query: query,
+                                        latLng: LatLng(latitude: currentLoc.latitude, longitude: currentLoc.longitude)
+                                    )
+                                }
+                            }
+                            searchText = ""
+                        },
+                        onSuggestionTap: { place in
+                            Task {
+                                if place.id == "Query" {
+                                    if let currentLoc = currentLocation {
+                                        places = try await component.searchPlaces(
+                                            query: place.name,
+                                            latLng: LatLng(latitude: currentLoc.latitude, longitude: currentLoc.longitude)
+                                        )
+                                    }
+                                } else {
+                                    places = []
+                                    let place = try await component.getPlace(placeId: place.id)
+                                    if let place = place {
+                                        onPlaceSelected(place)
+                                    }
+                                }
+                            }
+                        },
+                        onTextChanged: { newValue in // Add the missing text change handler
+                            guard !newValue.isEmpty else {
+                                suggestions = []
+                                return
+                            }
+                            
+                            Task {
+                                if let currentLoc = currentLocation {
+                                    suggestions = try await component.suggestPlaces(
+                                        query: newValue,
+                                        latLng: LatLng(latitude: currentLoc.latitude, longitude: currentLoc.longitude)
+                                    )
                                 }
                             }
                         }
-                    }
-                )
-                .onChange(of: searchText) { newValue in
-                    guard !newValue.isEmpty else {
-                        suggestions = []
-                        return
-                    }
-                    
-                    Task {
-                        suggestions = try await component.suggestPlaces(query: searchText, latLng: LatLng(latitude: currentLocation!.latitude, longitude: currentLocation!.longitude))
-                    }
+                    )
+                    .zIndex(1)
                 }
-                .opacity((canClickPOI && reveal.boolValue) ? 1.0 : 0.0)
-                .allowsHitTesting(canClickPOI && reveal.boolValue)
             }
             .background(Color.clear)
         }
@@ -190,22 +234,35 @@ struct GoogleMapView: UIViewRepresentable {
     func makeUIView(context: Context) -> GMSMapView {
         let camera: GMSCameraPosition
         if let f = focusedLocation {
-            camera = .camera(withLatitude: f.latitude, longitude: f.longitude, zoom: 12)
+            camera = .camera(withLatitude: f.latitude, longitude: f.longitude, zoom: 15) // Increased zoom
         } else if let loc = currentLocation {
-            camera = .camera(withLatitude: loc.latitude, longitude: loc.longitude, zoom: 12)
+            camera = .camera(withLatitude: loc.latitude, longitude: loc.longitude, zoom: 15) // Increased zoom
         } else {
-            camera = .camera(withLatitude: 0, longitude: 0, zoom: 2)
+            camera = .camera(withLatitude: 0.0, longitude: 0.0, zoom: 2) // Default to SF with high zoom
         }
         
         let options = GMSMapViewOptions()
-        options.camera = camera;
-        options.frame = .zero;
+        options.camera = camera
+        options.frame = .zero
         let mapView = GMSMapView.init(options: options)
+        
+        // Configure map for maximum POI visibility
         mapView.isMyLocationEnabled = true
         mapView.delegate = context.coordinator
+        mapView.mapType = .normal
+        
+        // Enable all POI types
+        mapView.settings.consumesGesturesInView = false
+        mapView.settings.scrollGestures = true
+        mapView.settings.zoomGestures = true
+        
+        // Debug: Check if POI clicks are working
+        print("Map created with canClickPOI: \(canClickPOI)")
         
         return mapView
     }
+
+
     
     func updateUIView(_ mapView: GMSMapView, context: Context) {
         // 1) animate to newly focusedEvent or focusedLocation
@@ -261,6 +318,19 @@ class Coordinator: NSObject, GMSMapViewDelegate {
     var lastFocus: (Double, Double)?
     var lastEventId: String?
     
+    // Add these delegate methods for debugging
+    func mapViewDidFinishTileRendering(_ mapView: GMSMapView) {
+        print("✅ Map tiles finished rendering")
+    }
+    
+    func mapView(_ mapView: GMSMapView, idleAt position: GMSCameraPosition) {
+        print("📍 Map idle at position: \(position.target)")
+    }
+    
+    func mapView(_ mapView: GMSMapView, willMove gesture: Bool) {
+        print("🏃‍♂️ Map will move, gesture: \(gesture)")
+    }
+    
     init(
         parent: GoogleMapView,
         onEventSelected: @escaping (EventAbs) -> Void,
@@ -270,22 +340,36 @@ class Coordinator: NSObject, GMSMapViewDelegate {
     }
     
     // Handle POI clicks
+    // Handle POI clicks
     func mapView(
         _ mapView: GMSMapView,
         didTapPOIWithPlaceID placeID: String,
         name: String,
         location: CLLocationCoordinate2D
     ) {
-        guard parent.canClickPOI else { return }
-        mapView.animate(to: GMSCameraPosition.camera(withTarget: location, zoom: 12))
-        // fetch full place info
+        print("POI tapped: \(name) with ID: \(placeID)") // Debug log
+        guard parent.canClickPOI else {
+            print("POI clicks disabled")
+            return
+        }
+        
+        print("Processing POI click for: \(name)")
+        mapView.animate(to: GMSCameraPosition.camera(withTarget: location, zoom: 15))
+        
         Task {
-            let place = try await self.parent.component.getPlace(placeId: placeID)
-            if place != nil {
-                await self.parent.onPlaceSelected(place!)
+            do {
+                let place = try await self.parent.component.getPlace(placeId: placeID)
+                if let place = place {
+                    await MainActor.run {
+                        self.parent.onPlaceSelected(place)
+                    }
+                }
+            } catch {
+                print("Error getting place details: \(error)")
             }
         }
     }
+
     
     // Tapping a marker (show its callout)
     func mapView(_ mapView: GMSMapView, didTap marker: GMSMarker) -> Bool {
@@ -308,20 +392,36 @@ struct MapSearchBar: View {
     let suggestions: [MVPPlace]
     let onSearch: (String) -> Void
     let onSuggestionTap: (MVPPlace) -> Void
+    let onTextChanged: (String) -> Void
+    
+    @FocusState private var isTextFieldFocused: Bool
     
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                TextField("Search places", text: $text, onCommit: {
+                TextField("Search places", text: $text)
+                    .focused($isTextFieldFocused)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .onChange(of: text) { newValue in
+                        onTextChanged(newValue)
+                    }
+                    .onSubmit {
+                        onSearch(text)
+                        text = ""
+                        isTextFieldFocused = false
+                    }
+                    .padding(8)
+                
+                Button("Search") {
                     onSearch(text)
                     text = ""
-                })
-                .padding(8)
-                .background(Color(.systemBackground))
-                .cornerRadius(8)
-                .shadow(radius: 2)
+                    isTextFieldFocused = false
+                }
+                .padding(.trailing, 8)
             }
-            .padding(.horizontal)
+            .background(Color(.systemBackground))
+            .cornerRadius(8)
+            .shadow(radius: 2)
             
             if !suggestions.isEmpty {
                 ScrollView {
@@ -329,25 +429,31 @@ struct MapSearchBar: View {
                         ForEach(suggestions, id: \.id) { place in
                             Button(action: {
                                 onSuggestionTap(place)
+                                isTextFieldFocused = false
                             }) {
-                                Text(place.name)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.vertical, 8)
-                                    .padding(.horizontal)
+                                HStack {
+                                    Text(place.name)
+                                        .foregroundColor(.primary)
+                                    Spacer()
+                                }
+                                .padding(.vertical, 8)
+                                .padding(.horizontal)
                             }
                             Divider()
                         }
                     }
                 }
+                .frame(maxHeight: 200)
                 .background(Color(.systemBackground))
                 .cornerRadius(8)
                 .shadow(radius: 2)
-                .padding(.horizontal)
             }
         }
-        .transition(.opacity)
+        .padding(.horizontal)
     }
 }
+
+
 
 // Custom circular reveal transition
 extension AnyTransition {

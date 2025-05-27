@@ -26,6 +26,7 @@ import org.koin.mp.KoinPlatform.getKoin
 class RootComponent(
     componentContext: ComponentContext,
     val permissionsController: PermissionsController,
+    val locationTracker: LocationTracker
 ) : ComponentContext by componentContext {
 
     private val navigation = StackNavigation<Config>()

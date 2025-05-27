@@ -50,8 +50,6 @@ fun App(root: RootComponent) {
         lastNavigationTime = currentTime
     }
 
-    LogCompositions("iOS Nav", "App childStack")
-
     setSingletonImageLoaderFactory { context ->
         ImageLoader
             .Builder(context)
@@ -59,8 +57,8 @@ fun App(root: RootComponent) {
             .build()
     }
     BindEffect(root.permissionsController)
+    BindLocationTrackerEffect(root.locationTracker)
 
-    // Only animate root-level transitions with your custom iOS slides
     Children(
         stack = childStack,
         animation = backAnimation(

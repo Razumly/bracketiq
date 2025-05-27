@@ -46,6 +46,7 @@ fun CreateEventScreen(
     val newEventState by component.newEventState.collectAsState()
     val childStack by component.childStack.subscribeAsState()
     val isEditing = true
+    val currentLocation by component.currentLocation.collectAsState()
 
     Scaffold(
         modifier = Modifier.padding(LocalNavBarPadding.current),
@@ -109,7 +110,8 @@ fun CreateEventScreen(
                         onEditTournament = { update -> component.updateTournamentField(update) },
                         isNewEvent = true,
                         onEventTypeSelected = { component.onTypeSelected(it) },
-                        onAddCurrentUser = {}
+                        onAddCurrentUser = {},
+                        currentLocation = currentLocation
                     ) { isValid -> canProceed = isValid }
 
                     is CreateEventComponent.Child.Preview -> Preview(

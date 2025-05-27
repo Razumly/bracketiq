@@ -43,7 +43,6 @@ import kotlinx.serialization.json.jsonObject
 
 actual class MapComponent(
     componentContext: ComponentContext,
-    doGetEvents: Boolean,
     private val eventAbsRepository: IEventAbsRepository,
     val locationTracker: LocationTracker,
     private val apiKey: String
@@ -76,9 +75,6 @@ actual class MapComponent(
     init {
         scope.launch {
             _currentLocation.value = locationTracker.getCurrentLocation()
-            if (doGetEvents) {
-                getEvents()
-            }
         }
     }
 
@@ -92,6 +88,10 @@ actual class MapComponent(
 
     fun setRadius(radius: Double) {
         _currentRadiusMeters.value = radius
+    }
+
+    actual fun setEvents(events: List<EventAbs>) {
+        _events.value = events
     }
 
     /**

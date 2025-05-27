@@ -23,6 +23,7 @@ val componentModule = module {
         RootComponent(
             componentContext = componentContext,
             permissionsController = get(),
+            locationTracker = get()
         )
     }
 
@@ -38,7 +39,6 @@ val componentModule = module {
         DefaultHomeComponent(
             componentContext = componentContext,
             onNavigateToLogin = onNavigateToLogin,
-            locationTracker = get()
         )
     }
 
@@ -58,7 +58,7 @@ val componentModule = module {
                   componentContext: ComponentContext,
                   event: EventAbs,
                   onMatchSelected: (MatchWithRelations, Tournament) -> Unit,
-                  onNavigateToTeamSettings: (freeAgents: List<String>, event: EventAbs?) -> Unit
+                  onNavigateToTeamSettings: (freeAgents: List<String>, event: EventAbs?) -> Unit,
               ) ->
         DefaultEventDetailComponent(
             componentContext = componentContext,
@@ -68,7 +68,8 @@ val componentModule = module {
             userRepository = get(),
             matchRepository = get(),
             teamRepository = get(),
-            onNavigateToTeamSettings = onNavigateToTeamSettings
+            onNavigateToTeamSettings = onNavigateToTeamSettings,
+            locationTracker = get()
         )
     }
 

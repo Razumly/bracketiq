@@ -34,6 +34,7 @@ interface SearchEventListComponent {
     val error: StateFlow<String?>
     val isLoading: StateFlow<Boolean>
     val suggestedEvents: StateFlow<List<EventAbs>>
+    val currentLocation: StateFlow<LatLng?>
 
     val events: StateFlow<List<EventAbs>>
     val selectedEvent: StateFlow<EventAbs?>
@@ -62,7 +63,11 @@ class DefaultSearchEventListComponent(
     private val _isLoading = MutableStateFlow(false)
     override val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
+    private val _locationStateFlow =
+        locationTracker.getLocationsFlow().stateIn(scope, SharingStarted.Eagerly, null)
+
     private val _currentLocation = MutableStateFlow<LatLng?>(null)
+    override val currentLocation = _currentLocation.asStateFlow()
 
     private val _suggestedEvents = MutableStateFlow<List<EventAbs>>(emptyList())
     override val suggestedEvents: StateFlow<List<EventAbs>> = _suggestedEvents.asStateFlow()
@@ -100,10 +105,25 @@ class DefaultSearchEventListComponent(
         }
 
         scope.launch {
+            locationTracker.startTracking()
+        }
+
+        scope.launch {
             try {
-                _currentLocation.value = locationTracker.getCurrentLocation()
-                getEvents()
-                Napier.d(tag = "Location", message = "Current location: ${_currentLocation.value}")
+                _locationStateFlow.collect {
+                    if (it == null) {
+                        _error.value = "Location not available"
+                        return@collect
+                    }
+                    if (_currentLocation.value == null) {
+                        _currentLocation.value = it
+                        getEvents()
+                    }
+                    if (calcDistance(_currentLocation.value!!, it) > 50) {
+                        _currentLocation.value = it
+                        getEvents()
+                    }
+                }
             } catch (e: Exception) {
                 _error.value = "Failed to track location: ${e.message}"
             }
@@ -112,12 +132,18 @@ class DefaultSearchEventListComponent(
         scope.launch {
             try {
                 currentRadius.collect {
-                        if (_currentLocation.value != null) {
+                        if (_locationStateFlow.value != null) {
                             getEvents()
                         }
                     }
             } catch (e: Exception) {
                 _error.value = "Failed to update events: ${e.message}"
+            }
+        }
+
+        scope.launch {
+            events.collect {
+                Napier.d(tag = "Events", message = "Events: $it")
             }
         }
     }

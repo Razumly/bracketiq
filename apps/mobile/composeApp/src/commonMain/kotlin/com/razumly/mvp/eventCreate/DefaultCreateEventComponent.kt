@@ -15,9 +15,12 @@ import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.IEventAbsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.util.getCurrentLocation
 import com.razumly.mvp.eventCreate.CreateEventComponent.Child
 import com.razumly.mvp.eventCreate.CreateEventComponent.Config
+import dev.icerock.moko.geo.LatLng
 import dev.icerock.moko.geo.LocationTracker
+import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -35,6 +38,7 @@ interface CreateEventComponent {
     val selectedPlace: StateFlow<MVPPlace?>
     val errorMessage: StateFlow<String?>
     val defaultEvent: StateFlow<EventWithRelations>
+    val currentLocation: StateFlow<LatLng?>
 
     fun updateEventField(update: EventImp.() -> EventImp)
     fun updateTournamentField(update: Tournament.() -> Tournament)
@@ -66,7 +70,7 @@ class DefaultCreateEventComponent(
     componentContext: ComponentContext,
     private val userRepository: IUserRepository,
     private val eventRepository: IEventAbsRepository,
-    val locationTracker: LocationTracker,
+    locationTracker: LocationTracker,
     val onEventCreated: () -> Unit
 ) : CreateEventComponent, ComponentContext by componentContext {
     private val navigation = StackNavigation<Config>()
@@ -90,6 +94,9 @@ class DefaultCreateEventComponent(
     private val _errorMessage = MutableStateFlow<String?>(null)
     override val errorMessage = _errorMessage.asStateFlow()
 
+    private val _currentLocation = MutableStateFlow<LatLng?>(null)
+    override val currentLocation = _currentLocation.asStateFlow()
+
     private val _addUserToEvent = MutableStateFlow(false)
 
     override val childStack = childStack(
@@ -102,6 +109,15 @@ class DefaultCreateEventComponent(
 
     init {
         childStack.subscribe {}
+        scope.launch {
+            locationTracker.startTracking()
+        }
+
+        scope.launch {
+            locationTracker.getLocationsFlow().collect {
+                _currentLocation.value = it
+            }
+        }
         scope.launch {
             userRepository.currentUser.collect { currentUser ->
                 updateEventField { copy(hostId = currentUser.getOrThrow().id) }

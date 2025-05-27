@@ -64,7 +64,7 @@ interface UserDataDao {
     suspend fun deleteTeamCrossRefById(userIds: List<String>)
 
     @Query("SELECT * FROM UserData WHERE id = :id")
-    suspend fun getUserDataById(id: String): UserData
+    suspend fun getUserDataById(id: String): UserData?
 
     @Query("SELECT * FROM UserData WHERE id in (:ids)")
     suspend fun getUserDatasById(ids: List<String>): List<UserData>

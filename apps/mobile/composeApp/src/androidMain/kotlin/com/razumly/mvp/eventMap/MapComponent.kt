@@ -16,6 +16,7 @@ import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.repositories.IEventAbsRepository
 import com.razumly.mvp.core.util.getBounds
+import com.razumly.mvp.core.util.getCurrentLocation
 import dev.icerock.moko.geo.LocationTracker
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CoroutineScope
@@ -31,7 +32,6 @@ import kotlin.coroutines.resumeWithException
 
 actual class MapComponent(
     componentContext: ComponentContext,
-    doGetEvents: Boolean,
     private val eventAbsRepository: IEventAbsRepository,
     context: Context,
     val locationTracker: LocationTracker
@@ -62,9 +62,6 @@ actual class MapComponent(
     init {
         scope.launch {
             _currentLocation.value = locationTracker.getCurrentLocation()
-            if (doGetEvents) {
-                getEvents()
-            }
         }
     }
 
@@ -74,6 +71,10 @@ actual class MapComponent(
 
     fun setRadius(radius: Double) {
         _currentRadiusMeters.value = radius
+    }
+
+    actual fun setEvents(events: List<EventAbs>) {
+        _events.value = events
     }
 
     suspend fun getPlace(placeId: String): MVPPlace =

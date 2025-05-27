@@ -13,42 +13,56 @@ import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import dev.icerock.moko.geo.LatLng
 
-    @Composable
-    actual fun EventMap(
-        component: MapComponent,
-        onEventSelected: (event: EventAbs) -> Unit,
-        onPlaceSelected: (place: MVPPlace) -> Unit,
-        canClickPOI: Boolean,
-        modifier: Modifier,
-        focusedLocation: LatLng?,
-        focusedEvent: EventAbs?,
-        showMap: Boolean,
-        revealCenter: Offset
-    ) {
-        val factory = LocalNativeViewFactory.current
-        LaunchedEffect(showMap) {
-            if (showMap) {
-                component.showMap()
-            } else {
-                component.hideMap()
-            }
-        }
-
+@Composable
+actual fun EventMap(
+    component: MapComponent,
+    onEventSelected: (event: EventAbs) -> Unit,
+    onPlaceSelected: (place: MVPPlace) -> Unit,
+    canClickPOI: Boolean,
+    modifier: Modifier,
+    focusedLocation: LatLng?,
+    focusedEvent: EventAbs?,
+    showMap: Boolean,
+    revealCenter: Offset
+) {
+    val factory = LocalNativeViewFactory.current
+    LaunchedEffect(showMap) {
         if (showMap) {
-            UIKitViewController(
-                modifier = modifier.fillMaxSize().background(Color.Transparent),
-                factory = {
-                    factory.createNativeMapView(
-                        component,
-                        onEventSelected,
-                        onPlaceSelected,
-                        canClickPOI,
-                        focusedLocation,
-                        focusedEvent,
-                        revealCenter.x.toDouble(),
-                        revealCenter.y.toDouble()
-                    )
-                }
-            )
+            component.showMap()
+        } else {
+            component.hideMap()
         }
     }
+
+    if (showMap) {
+        UIKitViewController(
+            modifier = modifier.fillMaxSize().background(Color.Transparent),
+            factory = {
+                factory.createNativeMapView(
+                    component,
+                    onEventSelected,
+                    onPlaceSelected,
+                    canClickPOI,
+                    focusedLocation,
+                    focusedEvent,
+                    revealCenter.x.toDouble(),
+                    revealCenter.y.toDouble()
+                )
+            },
+            update = { viewController ->
+                // Update the native view when parameters change
+                factory.updateNativeMapView(
+                    viewController,
+                    component,
+                    onEventSelected,
+                    onPlaceSelected,
+                    canClickPOI,
+                    focusedLocation,
+                    focusedEvent,
+                    revealCenter.x.toDouble(),
+                    revealCenter.y.toDouble()
+                )
+            }
+        )
+    }
+}

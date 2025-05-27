@@ -71,6 +71,7 @@ fun MainViewController(
                             backHandler = backDispatcher  // Pass backDispatcher here
                         ),
                         permissionsController = permissionsController,
+                        locationTracker = getKoin().get<LocationTracker>()
                     ).also { component ->
                         Napier.d(tag = "Root") { "Component created" }
                         component.childStack.subscribe { stack ->

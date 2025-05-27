@@ -33,10 +33,12 @@ import androidx.compose.material3.NavigationBarDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -77,6 +79,13 @@ fun EventSearchScreen(
     var fabOffset by remember { mutableStateOf(Offset.Zero) }
     var revealCenter by remember { mutableStateOf(Offset.Zero) }
     val suggestions by component.suggestedEvents.collectAsState()
+    val currentLocation by component.currentLocation.collectAsState()
+
+    if (showMapCard) {
+        LaunchedEffect(events) {
+            mapComponent.setEvents(events)
+        }
+    }
 
     Box {
         BindLocationTrackerEffect(component.locationTracker)
@@ -166,7 +175,7 @@ fun EventSearchScreen(
                     canClickPOI = false,
                     focusedLocation = selectedEvent?.let {
                         LatLng(it.lat, it.long)
-                    },
+                    } ?: currentLocation,
                     focusedEvent = null,
                     showMap = showMapCard,
                     revealCenter = revealCenter

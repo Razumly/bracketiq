@@ -25,4 +25,16 @@ interface NativeViewFactory {
         revealCenterX: Double,
         revealCenterY: Double
     ): UIViewController
+
+    fun updateNativeMapView(
+        viewController: UIViewController,
+        component: MapComponent,
+        onEventSelected: (event: EventAbs) -> Unit,
+        onPlaceSelected: (place: MVPPlace) -> Unit,
+        canClickPOI: Boolean,
+        focusedLocation: LatLng?,
+        focusedEvent: EventAbs?,
+        revealCenterX: Double,
+        revealCenterY: Double
+    )
 }

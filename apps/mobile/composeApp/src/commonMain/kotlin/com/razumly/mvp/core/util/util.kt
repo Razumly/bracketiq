@@ -51,9 +51,7 @@ fun calcDistance(start: LatLng, end: LatLng): Double {
 
 suspend fun LocationTracker.getCurrentLocation(): LatLng {
     try {
-        startTracking()
         val location = getLocationsFlow().first()
-        stopTracking()
         return location
     } catch (e: Exception) {
         Napier.e("Failed to get current location: ${e.message}")

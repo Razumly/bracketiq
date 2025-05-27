@@ -5,7 +5,7 @@ import com.razumly.mvp.eventMap.MapComponent
 import org.koin.dsl.module
 
 val mapComponentModule = module {
-    factory { (componentContext: ComponentContext, doGetEvents: Boolean) ->
-        MapComponent(componentContext, doGetEvents, get(), get(), get())
+    factory { (componentContext: ComponentContext) ->
+        MapComponent(componentContext, get(), get(), get())
     }
 }

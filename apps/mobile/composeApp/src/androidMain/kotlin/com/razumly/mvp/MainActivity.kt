@@ -31,10 +31,8 @@ class MainActivity : ComponentActivity() {
         NotifierManager.onCreateOrOnNewIntent(intent)
         setContent {
             MVPTheme {
-                KoinAndroidContext {
-                    CompositionLocalProvider(LocalRootComponent provides rootComponent) {
-                        App(rootComponent)
-                    }
+                CompositionLocalProvider(LocalRootComponent provides rootComponent) {
+                    App(rootComponent)
                 }
             }
         }

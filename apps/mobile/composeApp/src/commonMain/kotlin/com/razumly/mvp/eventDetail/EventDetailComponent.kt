@@ -16,7 +16,10 @@ import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.IEventAbsRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.util.getCurrentLocation
 import com.razumly.mvp.eventDetail.data.IMatchRepository
+import dev.icerock.moko.geo.LatLng
+import dev.icerock.moko.geo.LocationTracker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -50,6 +53,7 @@ interface EventDetailComponent : ComponentContext {
     val validTeams: StateFlow<List<TeamWithPlayers>>
     val isHost: StateFlow<Boolean>
     val editedEvent: StateFlow<EventAbs>
+    val currentLocation: StateFlow<LatLng?>
 
     fun matchSelected(selectedMatch: MatchWithRelations)
     fun selectDivision(division: Division)
@@ -89,6 +93,7 @@ class DefaultEventDetailComponent(
     componentContext: ComponentContext,
     userRepository: IUserRepository,
     event: EventAbs,
+    locationTracker: LocationTracker,
     private val eventAbsRepository: IEventAbsRepository,
     private val matchRepository: IMatchRepository,
     private val teamRepository: ITeamRepository,
@@ -103,6 +108,9 @@ class DefaultEventDetailComponent(
 
     private val _editedEvent = MutableStateFlow(event)
     override var editedEvent = _editedEvent.asStateFlow()
+
+    private val _currentLocation = MutableStateFlow<LatLng?>(null)
+    override var currentLocation = _currentLocation.asStateFlow()
 
     override val selectedEvent: StateFlow<EventAbsWithRelations> =
         eventAbsRepository.getEventWithRelationsFlow(event).map { result ->
@@ -178,6 +186,7 @@ class DefaultEventDetailComponent(
 
     init {
         scope.launch {
+            _currentLocation.value = locationTracker.getCurrentLocation()
             matchRepository.setIgnoreMatch(null)
             eventWithRelations.distinctUntilChanged { old, new -> old == new }.filterNotNull()
                 .collect { event ->

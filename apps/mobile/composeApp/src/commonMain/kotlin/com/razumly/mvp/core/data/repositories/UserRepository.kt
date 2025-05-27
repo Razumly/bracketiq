@@ -103,7 +103,11 @@ class UserRepository(
 
         if (!savedId.isNullOrBlank()) {
             val local = mvpDatabase.getUserDataDao.getUserDataById(savedId)
-            _currentUser.value = Result.success(local)
+            if (local == null) {
+                _currentUser.value = Result.failure(Exception("No User"))
+            } else {
+                _currentUser.value = Result.success(local)
+            }
         }
 
         val sessionId = runCatching {
@@ -130,7 +134,11 @@ class UserRepository(
             currentUserDataSource.saveUserId(user.id)
 
             val fresh = mvpDatabase.getUserDataDao.getUserDataById(user.id)
-            _currentUser.value = Result.success(fresh)
+            if (fresh == null) {
+                _currentUser.value = Result.failure(Exception("No User"))
+            } else {
+                _currentUser.value = Result.success(fresh)
+            }
         }
     }
 

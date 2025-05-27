@@ -3,6 +3,8 @@ package com.razumly.mvp.userAuth
 import com.arkivanov.decompose.ComponentContext
 import com.razumly.mvp.core.data.dataTypes.LoginState
 import com.razumly.mvp.core.data.repositories.IUserRepository
+import io.github.aakira.napier.Napier
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -19,9 +21,14 @@ interface AuthComponent {
     val loginState: StateFlow<LoginState>
     val isSignup: StateFlow<Boolean>
     val passwordError: StateFlow<String>
+
+    @Throws(Throwable::class)
     fun onLogin(email: String, password: String)
+    @Throws(Throwable::class)
     fun onLogout()
+    @Throws(Throwable::class)
     fun toggleIsSignup()
+    @Throws(Throwable::class)
     fun onSignup(
         email: String,
         password: String,
@@ -38,7 +45,13 @@ class DefaultAuthComponent(
     private val onNavigateToHome: () -> Unit
 ) : ComponentContext by componentContext, AuthComponent {
 
-    internal val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    internal val scope = CoroutineScope(
+        SupervisorJob() +
+                Dispatchers.Main.immediate +
+                CoroutineExceptionHandler { _, throwable ->
+                    Napier.e("AuthComponent coroutine error", throwable)
+                }
+    )
 
     internal val _loginState = MutableStateFlow<LoginState>(LoginState.Initial)
     override val loginState: StateFlow<LoginState> = _loginState.asStateFlow()

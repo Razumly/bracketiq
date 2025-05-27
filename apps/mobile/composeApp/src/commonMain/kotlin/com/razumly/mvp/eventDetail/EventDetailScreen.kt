@@ -63,6 +63,7 @@ fun EventDetailScreen(
     val isHost by component.isHost.collectAsState()
     var isEditing by remember { mutableStateOf(false) }
     val editedEvent by component.editedEvent.collectAsState()
+    val currentLocation by component.currentLocation.collectAsState()
 
     val isUserInEvent =
         (currentUser.eventIds + currentUser.tournamentIds).contains(selectedEvent.event.id) || (selectedEvent.event.waitList + selectedEvent.event.freeAgents).contains(
@@ -95,7 +96,8 @@ fun EventDetailScreen(
                         onEditTournament = { update -> component.editTournamentField(update) },
                         isNewEvent = false,
                         onEventTypeSelected = { component.onTypeSelected(it) },
-                        onAddCurrentUser = {}
+                        onAddCurrentUser = {},
+                        currentLocation = currentLocation,
                     ) { isValid ->
                         Column(
                             verticalArrangement = Arrangement.spacedBy(8.dp),

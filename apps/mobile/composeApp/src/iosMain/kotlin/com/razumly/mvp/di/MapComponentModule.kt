@@ -7,7 +7,7 @@ import org.koin.dsl.module
 
 
 val mapComponentModule = module {
-    factory { (componentContext: ComponentContext, doGetEvents: Boolean) ->
-        MapComponent(componentContext, doGetEvents, get(), get(), AppSecrets.googleMapsApiKey)
+    factory { (componentContext: ComponentContext) ->
+        MapComponent(componentContext, get(), get(), AppSecrets.googleMapsApiKey)
     }
 }

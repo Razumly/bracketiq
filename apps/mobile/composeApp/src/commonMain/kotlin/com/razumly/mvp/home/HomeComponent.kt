@@ -40,7 +40,6 @@ import org.koin.mp.KoinPlatform.getKoin
 interface HomeComponent {
     val childStack: Value<ChildStack<*, Child>>
     val selectedPage: StateFlow<Config>
-    val locationTracker: LocationTracker
 
     fun onTabSelected(page: Config)
 
@@ -103,7 +102,6 @@ interface HomeComponent {
 class DefaultHomeComponent(
     componentContext: ComponentContext,
     private val onNavigateToLogin: () -> Unit,
-    override val locationTracker: LocationTracker,
 ) : HomeComponent, ComponentContext by componentContext {
     init {
         println("iOS Home: Component initialized")
@@ -139,7 +137,7 @@ class DefaultHomeComponent(
                         parametersOf(componentContext, ::onEventSelected)
                     }.value,
                     _koin.inject<MapComponent> {
-                        parametersOf(componentContext, true)
+                        parametersOf(componentContext)
                     }.value
                 )
             }
@@ -154,7 +152,7 @@ class DefaultHomeComponent(
                         )
                     }.value,
                     _koin.inject<MapComponent> {
-                        parametersOf(componentContext, false)
+                        parametersOf(componentContext)
                     }.value
                 )
             }
@@ -180,7 +178,7 @@ class DefaultHomeComponent(
                     parametersOf(componentContext, ::onEventCreated)
                 }.value,
                 _koin.inject<MapComponent> {
-                    parametersOf(componentContext, false)
+                    parametersOf(componentContext)
                 }.value
             )
             is Config.Profile -> Child.Profile(

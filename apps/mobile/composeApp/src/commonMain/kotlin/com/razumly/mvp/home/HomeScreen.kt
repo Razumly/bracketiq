@@ -34,8 +34,6 @@ val LocalNavBarPadding = compositionLocalOf<PaddingValues> { error("No padding v
 fun HomeScreen(component: HomeComponent) {
     val selectedPage by component.selectedPage.collectAsState()
 
-    BindLocationTrackerEffect(component.locationTracker)
-
     MVPBottomNavBar(
         selectedPage = selectedPage,
         onPageSelected = {

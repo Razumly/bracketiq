@@ -6,4 +6,5 @@ import dev.icerock.moko.geo.LatLng
 import kotlinx.coroutines.flow.StateFlow
 
 expect class MapComponent {
+    fun setEvents(events: List<EventAbs>)
 }

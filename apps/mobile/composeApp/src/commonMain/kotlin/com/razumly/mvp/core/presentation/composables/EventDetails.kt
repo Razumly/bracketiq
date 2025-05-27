@@ -93,7 +93,6 @@ import kotlinx.datetime.toLocalDateTime
 
 @OptIn(
     ExperimentalHazeApi::class,
-    ExperimentalComposeUiApi::class
 )
 @Composable
 fun EventDetails(
@@ -110,6 +109,7 @@ fun EventDetails(
     isNewEvent: Boolean,
     onAddCurrentUser: (Boolean) -> Unit,
     onEventTypeSelected: (EventType) -> Unit,
+    currentLocation: LatLng?,
     joinButton: @Composable (isValid: Boolean) -> Unit
 ) {
     val event = eventWithRelations.event
@@ -291,7 +291,7 @@ fun EventDetails(
                     it.lat,
                     it.long
                 )
-            } else null,
+            } else currentLocation,
             focusedEvent = if (editEvent.location.isNotBlank()) editEvent else null,
             showMap = showMapCard,
             revealCenter = revealCenter
