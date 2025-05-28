@@ -34,7 +34,7 @@ actual class MapComponent(
     componentContext: ComponentContext,
     private val eventAbsRepository: IEventAbsRepository,
     context: Context,
-    val locationTracker: LocationTracker
+    actual val locationTracker: LocationTracker
 ) : ComponentContext by componentContext {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 

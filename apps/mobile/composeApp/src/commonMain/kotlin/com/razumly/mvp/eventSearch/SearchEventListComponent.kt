@@ -2,11 +2,12 @@ package com.razumly.mvp.eventSearch
 
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.backhandler.BackCallback
+import com.arkivanov.essenty.instancekeeper.InstanceKeeper
+import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.repositories.IEventAbsRepository
 import com.razumly.mvp.core.util.calcDistance
 import com.razumly.mvp.core.util.getBounds
-import com.razumly.mvp.core.util.getCurrentLocation
 import dev.icerock.moko.geo.LatLng
 import dev.icerock.moko.geo.LocationTracker
 import io.github.aakira.napier.Napier
@@ -15,6 +16,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -52,7 +54,7 @@ class DefaultSearchEventListComponent(
     override val locationTracker: LocationTracker,
     override val onEventSelected: (event: EventAbs) -> Unit,
 ) : ComponentContext by componentContext, SearchEventListComponent {
-    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
 
     private val _currentRadius = MutableStateFlow(50.0)
     override val currentRadius: StateFlow<Double> = _currentRadius.asStateFlow()
@@ -107,6 +109,8 @@ class DefaultSearchEventListComponent(
         scope.launch {
             locationTracker.startTracking()
         }
+
+        instanceKeeper.put(CLEANUP_KEY, Cleanup(locationTracker))
 
         scope.launch {
             try {
@@ -202,6 +206,17 @@ class DefaultSearchEventListComponent(
         }.onFailure { e ->
             _error.value = "Failed to fetch events: ${e.message}"
         }
+    }
+
+
+    class Cleanup(private val locationTracker: LocationTracker): InstanceKeeper.Instance {
+        override fun onDestroy() {
+            locationTracker.stopTracking()
+        }
+    }
+
+    companion object {
+        const val CLEANUP_KEY = "Cleanup_Search"
     }
 }
 

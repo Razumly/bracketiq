@@ -6,6 +6,8 @@ import com.arkivanov.decompose.router.stack.childStack
 import com.arkivanov.decompose.router.stack.pop
 import com.arkivanov.decompose.router.stack.replaceCurrent
 import com.arkivanov.essenty.backhandler.BackHandler
+import com.arkivanov.essenty.instancekeeper.InstanceKeeper
+import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.home.DefaultHomeComponent
 import com.razumly.mvp.home.HomeComponent
 import com.razumly.mvp.userAuth.DefaultAuthComponent
@@ -31,7 +33,7 @@ class RootComponent(
 
     private val navigation = StackNavigation<Config>()
     private val _koin = getKoin()
-    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
 
     override val backHandler: BackHandler = componentContext.backHandler
 

@@ -1,6 +1,7 @@
 package com.razumly.mvp.chat
 
 import com.arkivanov.decompose.ComponentContext
+import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.chat.data.IChatGroupRepository
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
@@ -42,7 +43,7 @@ class DefaultChatListComponent(
     private val userRepository: IUserRepository,
 ) : ChatListComponent,
     ComponentContext by componentContext {
-    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
 
     override val currentUser = userRepository.currentUser.value.getOrThrow()
 

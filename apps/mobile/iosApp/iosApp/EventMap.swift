@@ -88,8 +88,9 @@ struct EventMap: View {
     @State private var events: [EventAbs] = []
     @State private var suggestions: [MVPPlace] = []
     @State private var searchText: String = ""
-    @State private var places: [IOSGMPlace] = []
+    @State private var places: [MVPPlace] = []
     @State private var reveal: Bool = false
+    @State private var searchTask: Task<Void, Never>? = nil
     
     init(
         component: MapComponent,
@@ -127,12 +128,6 @@ struct EventMap: View {
                     places: places,
                     revealCenter: revealCenter
                 )
-                .collect(flow: component.currentLocation) { newLoc in
-                    currentLocation = newLoc
-                }
-                .collect(flow: component.events) { newEvents in
-                    events = newEvents
-                }
                 .edgesIgnoringSafeArea(.all)
                 .opacity(reveal.boolValue ? 1.0 : 0.0)
                 .allowsHitTesting(reveal.boolValue)
@@ -144,7 +139,7 @@ struct EventMap: View {
                         suggestions: suggestions,
                         onSearch: { query in
                             Task {
-                                if let currentLoc = currentLocation {
+                                if let currentLoc = loc {
                                     places = try await component.searchPlaces(
                                         query: query,
                                         latLng: LatLng(latitude: currentLoc.latitude, longitude: currentLoc.longitude)
@@ -156,7 +151,7 @@ struct EventMap: View {
                         onSuggestionTap: { place in
                             Task {
                                 if place.id == "Query" {
-                                    if let currentLoc = currentLocation {
+                                    if let currentLoc = loc {
                                         places = try await component.searchPlaces(
                                             query: place.name,
                                             latLng: LatLng(latitude: currentLoc.latitude, longitude: currentLoc.longitude)
@@ -171,18 +166,34 @@ struct EventMap: View {
                                 }
                             }
                         },
-                        onTextChanged: { newValue in // Add the missing text change handler
+                        onTextChanged: { newValue in
+                            searchTask?.cancel()
+                            
                             guard !newValue.isEmpty else {
                                 suggestions = []
                                 return
                             }
                             
-                            Task {
-                                if let currentLoc = currentLocation {
-                                    suggestions = try await component.suggestPlaces(
-                                        query: newValue,
-                                        latLng: LatLng(latitude: currentLoc.latitude, longitude: currentLoc.longitude)
-                                    )
+                            // Create new debounced search task
+                            searchTask = Task {
+                                do {
+                                    // Wait for 300ms (debounce delay)
+                                    try await Task.sleep(nanoseconds: 300_000_000)
+                                    
+                                    // Check if task was cancelled during the delay
+                                    try Task.checkCancellation()
+                                    
+                                    if let currentLoc = loc {
+                                        suggestions = try await component.suggestPlaces(
+                                            query: newValue,
+                                            latLng: LatLng(latitude: currentLoc.latitude, longitude: currentLoc.longitude)
+                                        )
+                                    }
+                                } catch is CancellationError {
+                                    // Task was cancelled, do nothing
+                                    print("Search task cancelled for: \(newValue)")
+                                } catch {
+                                    print("Search error: \(error)")
                                 }
                             }
                         }
@@ -204,7 +215,7 @@ struct GoogleMapView: UIViewRepresentable {
     let focusedEvent: EventAbs?
     let onEventSelected: (EventAbs) -> Void
     let onPlaceSelected: (MVPPlace) -> Void
-    let places: [IOSGMPlace]
+    let places: [MVPPlace]
     let revealCenter: CGPoint
     
     init(
@@ -216,7 +227,7 @@ struct GoogleMapView: UIViewRepresentable {
         focusedEvent: EventAbs? = nil,
         onEventSelected: @escaping (EventAbs) -> Void,
         onPlaceSelected: @escaping (MVPPlace) -> Void,
-        places: [IOSGMPlace],
+        places: [MVPPlace],
         revealCenter: CGPoint
     ){
         self.component = component
@@ -291,10 +302,9 @@ struct GoogleMapView: UIViewRepresentable {
         }
         
         for place in places {
-            let loc = place.location
-            let coord = CLLocationCoordinate2D(latitude: loc.lat, longitude: loc.lng)
+            let coord = CLLocationCoordinate2D(latitude: place.lat, longitude: place.long)
             let m = GMSMarker(position: coord)
-            m.title = place.displayName.text
+            m.title = place.name
             m.userData = place
             m.map = mapView
         }
@@ -318,18 +328,6 @@ class Coordinator: NSObject, GMSMapViewDelegate {
     var lastFocus: (Double, Double)?
     var lastEventId: String?
     
-    // Add these delegate methods for debugging
-    func mapViewDidFinishTileRendering(_ mapView: GMSMapView) {
-        print("✅ Map tiles finished rendering")
-    }
-    
-    func mapView(_ mapView: GMSMapView, idleAt position: GMSCameraPosition) {
-        print("📍 Map idle at position: \(position.target)")
-    }
-    
-    func mapView(_ mapView: GMSMapView, willMove gesture: Bool) {
-        print("🏃‍♂️ Map will move, gesture: \(gesture)")
-    }
     
     init(
         parent: GoogleMapView,

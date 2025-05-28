@@ -12,6 +12,12 @@ object AppSecrets {
             fileType = "plist",
             valueKey = "googleMapsApiKey"
         ) ?: ""
+    val googlePlacesApiKey: String
+        get() = getStringResource(
+            filename = "Secrets",
+            fileType = "plist",
+            valueKey = "googlePlacesApiKey"
+        ) ?: ""
     val mvpProjectId: String
         get() = getStringResource(
             filename = "Secrets",

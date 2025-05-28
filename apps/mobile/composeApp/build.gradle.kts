@@ -91,6 +91,7 @@ kotlin {
                 implementation(libs.materialKolor)
                 implementation(libs.kmpalette.extensions.network)
                 implementation(libs.kmpalette.core)
+                implementation(libs.lifecycle.coroutines)
                 api(libs.lifecycle)
                 api(libs.kmpnotifier)
                 api(libs.decompose.decompose)

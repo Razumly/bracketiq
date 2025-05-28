@@ -1,16 +1,18 @@
 package com.razumly.mvp.eventMap
 
-import cocoapods.GooglePlaces.GMSAutocompleteSessionToken
-import cocoapods.GooglePlaces.GMSPlacesClient
 import com.arkivanov.decompose.ComponentContext
+import com.arkivanov.essenty.instancekeeper.InstanceKeeper
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.repositories.IEventAbsRepository
-import com.razumly.mvp.core.util.calcDistance
 import com.razumly.mvp.core.util.getBounds
 import com.razumly.mvp.core.util.getCurrentLocation
+import com.razumly.mvp.eventCreate.DefaultCreateEventComponent
+import com.razumly.mvp.eventCreate.DefaultCreateEventComponent.Cleanup
+import com.razumly.mvp.eventCreate.DefaultCreateEventComponent.Companion
 import dev.icerock.moko.geo.LatLng
 import dev.icerock.moko.geo.LocationTracker
+import io.github.aakira.napier.Napier
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.engine.darwin.Darwin
@@ -19,22 +21,18 @@ import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
-import io.ktor.http.ContentType
-import io.ktor.http.HttpHeaders
+import io.ktor.client.statement.bodyAsText
 import io.ktor.serialization.kotlinx.json.json
-import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.serialization.DeserializationStrategy
-import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonContentPolymorphicSerializer
@@ -44,8 +42,9 @@ import kotlinx.serialization.json.jsonObject
 actual class MapComponent(
     componentContext: ComponentContext,
     private val eventAbsRepository: IEventAbsRepository,
-    val locationTracker: LocationTracker,
-    private val apiKey: String
+    actual val locationTracker: LocationTracker,
+    private val apiKey: String,
+    private val bundleId: String
 ) : ComponentContext by componentContext {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
@@ -74,7 +73,18 @@ actual class MapComponent(
 
     init {
         scope.launch {
-            _currentLocation.value = locationTracker.getCurrentLocation()
+            locationTracker.startTracking()
+        }
+
+        instanceKeeper.put(
+            CLEANUP_KEY,
+            Cleanup(locationTracker)
+        )
+
+        scope.launch {
+            locationTracker.getLocationsFlow().collect {
+                _currentLocation.value = it
+            }
         }
     }
 
@@ -99,16 +109,20 @@ actual class MapComponent(
      */
     suspend fun getPlace(placeId: String): MVPPlace? {
         val url = "https://places.googleapis.com/v1/places/$placeId" +
-                "?fields=name,location,photos,displayName" +
-                "&key=$apiKey"
+                "?fields=name,location,photos,displayName"
+
         return try {
-            val response = httpClient.get(url).body<WebPlaceDetails>()
+            val response = httpClient.get(url) {
+                header("Content-Type", "application/json")
+                header("X-Goog-Api-Key", apiKey)
+            }.body<WebPlaceDetails>()
+
             MVPPlace(
                 name = response.displayName.text,
                 id = placeId,
-                lat = response.location.lat,
-                long = response.location.lng,
-                imageUrls = getPhotoUrisForPlace(response)
+                lat = response.location.latitude,
+                long = response.location.longitude,
+                imageUrls = getPhotoUrisForPlace(response.photos),
             )
         } catch (t: Throwable) {
             _error.value = t.message
@@ -131,17 +145,19 @@ actual class MapComponent(
             )
         )
         val reqBody = AutocompleteRequest(input = query, locationBias = bias)
+        Napier.d("Request: $reqBody")
 
         return try {
-            val resp: AutoCompleteResponse = httpClient.post("https://places.googleapis.com/v1/places:autocomplete") {
-                header(HttpHeaders.ContentType, ContentType.Application.Json)
+            val resp = httpClient.post("https://places.googleapis.com/v1/places:autocomplete") {
+                header("Content-Type", "application/json")
                 header("X-Goog-Api-Key", apiKey)
                 header("X-Goog-FieldMask", "suggestions.placePrediction.placeId,suggestions.placePrediction.text.text")
                 setBody(reqBody)
-            }.body()
+            }
+            Napier.d("Response: ${resp.bodyAsText()}")
+            val body: AutoCompleteResponse = resp.body()
 
-            // Map only the placePredictions into MVPPlace
-            resp.suggestions.map { sug ->
+            body.suggestions.map { sug ->
                 when (sug){
                     is Suggestion.PlacePrediction -> sug.placePrediction.let { pp -> MVPPlace(name = pp.text.text, id = pp.placeId) }
                     is Suggestion.QueryPrediction -> MVPPlace(name = sug.queryPrediction.text, id = "Query")
@@ -150,6 +166,7 @@ actual class MapComponent(
             }
         } catch (t: Throwable) {
             _error.value = t.message
+            Napier.e("Error: ${t.message}")
             emptyList()
         }
     }
@@ -160,7 +177,7 @@ actual class MapComponent(
     suspend fun searchPlaces(
         query: String,
         latLng: LatLng,
-    ): List<IOSGMPlace> {
+    ): List<MVPPlace> {
         val radius = _currentRadiusMeters.value
         val bias = LocationBias(
             circle = LocationBias.Circle(
@@ -173,27 +190,39 @@ actual class MapComponent(
             textQuery = query,
             locationBias = bias
         )
+        Napier.d("Request: $requestBody")
 
         return try {
-            val resp: SearchTextResponse = httpClient.post("https://places.googleapis.com/v1/places:searchText") {
-                header(HttpHeaders.ContentType, ContentType.Application.Json)
+            val resp = httpClient.post("https://places.googleapis.com/v1/places:searchText") {
+                header("Content-Type", "application/json")
                 header("X-Goog-Api-Key", apiKey)
                 header("X-Goog-FieldMask", "places.displayName,places.photos,places.location")
                 setBody(requestBody)
-            }.body()
-
-            resp.places
+            }
+            Napier.d("Response: ${resp.bodyAsText()}")
+            val body: SearchTextResponse = resp.body()
+            body.places.map { place ->
+                MVPPlace(
+                    name = place.displayName.text,
+                    id = place.id,
+                    lat = place.location.latitude,
+                    long = place.location.longitude,
+                    imageUrls = getPhotoUrisForPlace(place.photos)
+                )
+            }
         } catch (t: Throwable) {
             _error.value = t.message
+            Napier.e("Error: ${t.message}")
             emptyList()
         }
     }
+
     /**
      * Fetch the photo URIs for each photo resource name returned by the new API.
      */
-    suspend fun getPhotoUrisForPlace(placeData: WebPlaceDetails): List<String> = coroutineScope {
+    private suspend fun getPhotoUrisForPlace(photos: List<PhotoRef>): List<String> = coroutineScope {
         // 2) concurrently fetch each media URL
-        placeData.photos.map { photo ->
+        photos.map { photo ->
             "https://places.googleapis.com/v1/${photo.name}/media" +
                     "?key=$apiKey" +
                     "&maxWidthPx=1920&maxHeightPx=1080"
@@ -221,6 +250,16 @@ actual class MapComponent(
 
         _isLoading.value = false
     }
+
+    class Cleanup(private val locationTracker: LocationTracker): InstanceKeeper.Instance {
+        override fun onDestroy() {
+            locationTracker.stopTracking()
+        }
+    }
+
+    companion object {
+        const val CLEANUP_KEY = "Cleanup_Map"
+    }
 }
 
 /** JSON data classes **/
@@ -243,7 +282,7 @@ data class AutocompleteRequest(
 
 @Serializable
 data class Prediction(
-    val place: String,
+    val place: String = "",
     val placeId: String,
     val text: StructuredMainText,
 )
@@ -276,7 +315,7 @@ data class AutoCompleteResponse(
 @Serializable
 data class StructuredMainText(
     val text: String,
-    val matches: List<MatchText>
+    val matches: List<MatchText> = emptyList()
 )
 
 @Serializable
@@ -310,8 +349,8 @@ private data class SearchTextResponse(
 @Serializable
 data class IOSGMPlace(
     val displayName: LocalizedText,
-    val id: String,
-    val photos: List<PhotoRef>,
+    val id: String = "",
+    val photos: List<PhotoRef> = emptyList(),
     val location: LatLngDto
 )
 
@@ -319,7 +358,7 @@ data class IOSGMPlace(
 data class LocalizedText(val text: String, val languageCode: String)
 
 @Serializable
-data class LatLngDto(val lat: Double, val lng: Double)
+data class LatLngDto(val latitude: Double, val longitude: Double)
 
 @Serializable
 data class PhotoRef(val name: String, val widthPx: Int, val heightPx: Int, val authorAttributions: List<AuthorAttribution>, val flagContentUri: String, val googleMapsUri: String)

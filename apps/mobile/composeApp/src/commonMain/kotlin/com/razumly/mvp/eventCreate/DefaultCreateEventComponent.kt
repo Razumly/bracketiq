@@ -7,6 +7,8 @@ import com.arkivanov.decompose.router.stack.childStack
 import com.arkivanov.decompose.router.stack.pop
 import com.arkivanov.decompose.router.stack.pushNew
 import com.arkivanov.decompose.value.Value
+import com.arkivanov.essenty.instancekeeper.InstanceKeeper
+import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
@@ -15,12 +17,10 @@ import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.IEventAbsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
-import com.razumly.mvp.core.util.getCurrentLocation
 import com.razumly.mvp.eventCreate.CreateEventComponent.Child
 import com.razumly.mvp.eventCreate.CreateEventComponent.Config
 import dev.icerock.moko.geo.LatLng
 import dev.icerock.moko.geo.LocationTracker
-import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -39,6 +39,7 @@ interface CreateEventComponent {
     val errorMessage: StateFlow<String?>
     val defaultEvent: StateFlow<EventWithRelations>
     val currentLocation: StateFlow<LatLng?>
+    val locationTracker: LocationTracker
 
     fun updateEventField(update: EventImp.() -> EventImp)
     fun updateTournamentField(update: Tournament.() -> Tournament)
@@ -70,11 +71,11 @@ class DefaultCreateEventComponent(
     componentContext: ComponentContext,
     private val userRepository: IUserRepository,
     private val eventRepository: IEventAbsRepository,
-    locationTracker: LocationTracker,
+    override val locationTracker: LocationTracker,
     val onEventCreated: () -> Unit
 ) : CreateEventComponent, ComponentContext by componentContext {
     private val navigation = StackNavigation<Config>()
-    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
 
     private val _newEventState: MutableStateFlow<EventAbs> = MutableStateFlow(EventImp())
     override val newEventState = _newEventState.asStateFlow()
@@ -112,6 +113,8 @@ class DefaultCreateEventComponent(
         scope.launch {
             locationTracker.startTracking()
         }
+
+        instanceKeeper.put(CLEANUP_KEY, Cleanup(locationTracker))
 
         scope.launch {
             locationTracker.getLocationsFlow().collect {
@@ -229,5 +232,15 @@ class DefaultCreateEventComponent(
     ): Child = when (config) {
         is Config.EventInfo -> Child.EventInfo
         is Config.Preview -> Child.Preview
+    }
+
+    class Cleanup(private val locationTracker: LocationTracker): InstanceKeeper.Instance {
+        override fun onDestroy() {
+            locationTracker.stopTracking()
+        }
+    }
+
+    companion object {
+        const val CLEANUP_KEY = "Cleanup_Create"
     }
 }

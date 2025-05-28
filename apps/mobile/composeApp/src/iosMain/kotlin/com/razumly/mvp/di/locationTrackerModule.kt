@@ -6,12 +6,12 @@ import io.github.aakira.napier.Napier
 import org.koin.dsl.module
 
 val locationTrackerModule = module {
-    single {
+    factory {
         Napier.d(tag = "DI") { "Creating LocationTracker instance" }
         try {
             LocationTracker(
                 permissionsController = get<PermissionsController>()
-            ).also { tracker ->
+            ).also { _ ->
                 Napier.d(tag = "DI") { "LocationTracker instance created successfully" }
             }
         } catch (e: Exception) {

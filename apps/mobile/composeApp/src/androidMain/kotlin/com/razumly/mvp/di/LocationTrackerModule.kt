@@ -4,7 +4,7 @@ import dev.icerock.moko.geo.LocationTracker
 import org.koin.dsl.module
 
 val locationTrackerModule = module {
-    single{
+    factory{
         LocationTracker(
             permissionsController = get()
         )

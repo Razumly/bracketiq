@@ -1,6 +1,7 @@
 package com.razumly.mvp.eventDetail
 
 import com.arkivanov.decompose.ComponentContext
+import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.EventAbsWithRelations
 import com.razumly.mvp.core.data.dataTypes.EventImp
@@ -100,7 +101,7 @@ class DefaultEventDetailComponent(
     private val onMatchSelected: (MatchWithRelations, Tournament) -> Unit,
     private val onNavigateToTeamSettings: (freeAgents: List<String>, event: EventAbs?) -> Unit
 ) : EventDetailComponent, ComponentContext by componentContext {
-    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
     override val currentUser = userRepository.currentUser.value.getOrThrow()
 
     private val _errorState = MutableStateFlow<String?>(null)

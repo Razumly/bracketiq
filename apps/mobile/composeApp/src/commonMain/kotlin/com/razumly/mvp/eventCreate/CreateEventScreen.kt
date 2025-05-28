@@ -29,6 +29,7 @@ import com.razumly.mvp.core.presentation.composables.EventDetails
 import com.razumly.mvp.eventCreate.steps.Preview
 import com.razumly.mvp.eventMap.MapComponent
 import com.razumly.mvp.home.LocalNavBarPadding
+import dev.icerock.moko.geo.compose.BindLocationTrackerEffect
 import mvp.composeapp.generated.resources.Res
 import mvp.composeapp.generated.resources.create_tournament
 import mvp.composeapp.generated.resources.next
@@ -47,6 +48,8 @@ fun CreateEventScreen(
     val childStack by component.childStack.subscribeAsState()
     val isEditing = true
     val currentLocation by component.currentLocation.collectAsState()
+    BindLocationTrackerEffect(component.locationTracker)
+    BindLocationTrackerEffect(mapComponent.locationTracker)
 
     Scaffold(
         modifier = Modifier.padding(LocalNavBarPadding.current),

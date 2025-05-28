@@ -60,16 +60,17 @@ actual fun EventMap(
     val selectedPlace = remember { mutableStateOf<PointOfInterest?>(null) }
     val scope = rememberCoroutineScope()
     var places by remember { mutableStateOf<List<Place>>(listOf()) }
-    val currentLocation by component.currentLocation.collectAsState()
     val events by component.events.collectAsState()
     val defaultZoom = 12f
     val defaultDurationMs = 1000
     val initCameraState = focusedLocation?.toGoogle()
     val cameraPositionState = rememberCameraPositionState()
+    val currentLocation by component.currentLocation.collectAsState()
 
     val animationProgress by animateFloatAsState(
         targetValue = if (showMap) 1f else 0f, animationSpec = tween(durationMillis = 1000)
     )
+    BindLocationTrackerEffect(component.locationTracker)
 
     LaunchedEffect(initCameraState, currentLocation) {
         if (initCameraState != null) {

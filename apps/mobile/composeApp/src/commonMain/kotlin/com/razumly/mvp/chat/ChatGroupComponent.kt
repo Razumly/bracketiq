@@ -1,6 +1,7 @@
 package com.razumly.mvp.chat
 
 import com.arkivanov.decompose.ComponentContext
+import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.chat.data.IChatGroupRepository
 import com.razumly.mvp.chat.data.IMessageRepository
 import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
@@ -41,7 +42,7 @@ class DefaultChatGroupComponent(
     private val pushNotificationsRepository: IPushNotificationsRepository
 ) : ChatGroupComponent, ComponentContext by componentContext {
 
-    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
 
     private val _errorState = MutableStateFlow<String?>(null)
     override val errorState = _errorState.asStateFlow()
