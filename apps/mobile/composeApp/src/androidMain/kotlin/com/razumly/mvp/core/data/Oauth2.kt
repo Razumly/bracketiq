@@ -16,37 +16,34 @@ suspend fun IUserRepository.oauth2Login(activity: ComponentActivity): Result<Uni
         ?: Result.failure(Exception("Not Correct Class"))
 }
 
-suspend fun UserRepository.oauth2Login(activity: ComponentActivity): Result<Unit> {
+suspend fun UserRepository.oauth2Login(activity: ComponentActivity): Result<Unit> = runCatching {
     account.createOAuth2Session(
         provider = OAuthProvider.GOOGLE, activity = activity
     )
     val session = account.getSession("current")
     val id = session.userId
+    loadCurrentUser()
 
-    return kotlin.runCatching {
-        currentUser.value.onSuccess {
-            val userInfo = getGoogleUserInfo(session.providerAccessToken)
-            return kotlin.runCatching {
-                database.createDocument(
-                    databaseId = DbConstants.DATABASE_NAME,
-                    collectionId = DbConstants.USER_DATA_COLLECTION,
-                    documentId = id,
-                    data = UserDataDTO(
-                        firstName = userInfo.givenName,
-                        lastName = userInfo.familyName,
-                        userName = "${userInfo.givenName}${ID.unique()}",
-                        id = id,
-                        tournamentIds = listOf(),
-                        eventIds = listOf(),
-                        teamIds = listOf(),
-                        friendIds = listOf(),
-                        teamInvites = listOf(),
-                        eventInvites = listOf(),
-                        tournamentInvites = listOf(),
-                    ),
-                    nestedType = UserDataDTO::class
-                ).data.toUserData(id)
-            }
-        }
-    }
+    return currentUser.value.onFailure {
+        val userInfo = getGoogleUserInfo(session.providerAccessToken)
+        database.createDocument(
+            databaseId = DbConstants.DATABASE_NAME,
+            collectionId = DbConstants.USER_DATA_COLLECTION,
+            documentId = id,
+            data = UserDataDTO(
+                firstName = userInfo.givenName,
+                lastName = userInfo.familyName,
+                userName = "${userInfo.givenName}${ID.unique()}",
+                id = id,
+                tournamentIds = listOf(),
+                eventIds = listOf(),
+                teamIds = listOf(),
+                friendIds = listOf(),
+                teamInvites = listOf(),
+                eventInvites = listOf(),
+                tournamentInvites = listOf(),
+            ),
+            nestedType = UserDataDTO::class
+        )
+    }.map{}
 }

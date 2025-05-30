@@ -96,7 +96,7 @@ class UserRepository(
     }
 
     @Throws(Throwable::class)
-    private suspend fun loadCurrentUser() {
+    internal suspend fun loadCurrentUser() {
         val savedId = runCatching {
             currentUserDataSource.getUserId().first().takeIf(String::isNotBlank)
         }.getOrNull()
