@@ -95,7 +95,11 @@ data class Tournament(
             long = event.long,
             maxParticipants = event.maxParticipants,
             teamSizeLimit = event.teamSizeLimit,
-            hostId = event.hostId
+            hostId = event.hostId,
+            singleDivision = event.singleDivision,
+            teamSignup = event.teamSignup,
+            waitList = event.waitList,
+            freeAgents = event.freeAgents,
         )
     }
     fun toEvent(): EventImp {

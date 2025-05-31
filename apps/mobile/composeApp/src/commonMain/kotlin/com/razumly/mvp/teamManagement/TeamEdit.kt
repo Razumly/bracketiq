@@ -14,10 +14,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonColors
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonColors
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -53,7 +60,8 @@ fun CreateOrEditTeamDialog(
     deleteEnabled: Boolean,
     selectedEvent: EventAbs?,
     isCaptain: Boolean,
-    currentUser: UserData
+    currentUser: UserData,
+    isNewTeam: Boolean
 ) {
     var teamName by remember { mutableStateOf(team.team.name ?: "") }
     var teamSize by remember { mutableStateOf(team.team.teamSize) }
@@ -61,6 +69,8 @@ fun CreateOrEditTeamDialog(
     var invitedPlayers by remember { mutableStateOf(team.pendingPlayers) }
     var playersInTeam by remember { mutableStateOf(team.players) }
     var showLeaveTeamDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    var showEditDetails = isCaptain || isNewTeam
 
     Card(
         modifier = Modifier.fillMaxWidth().padding(16.dp),
@@ -77,14 +87,14 @@ fun CreateOrEditTeamDialog(
                 },
                 label = { Text("Team Name") },
                 modifier = Modifier.fillMaxWidth(),
-                readOnly = !isCaptain
+                readOnly = !showEditDetails
             )
 
             Spacer(modifier = Modifier.height(12.dp))
             Text("Select Team Size")
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(2, 3, 4, 5, 6, 7).forEach { size ->
-                    FilterChip(enabled = isCaptain, selected = size == teamSize, onClick = {
+                    FilterChip(enabled = showEditDetails, selected = size == teamSize, onClick = {
                         teamSize = size
                     }, label = { Text(size.teamSizeFormat()) })
                 }
@@ -100,7 +110,7 @@ fun CreateOrEditTeamDialog(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         PlayerCard(player = player, modifier = Modifier.weight(1f))
-                        if (isCaptain) {
+                        if (showEditDetails) {
                             Button(onClick = {
                                 playersInTeam = playersInTeam - player
                             }) {
@@ -116,7 +126,7 @@ fun CreateOrEditTeamDialog(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         PlayerCard(player = player, isPending = true, Modifier.weight(1f))
-                        if (isCaptain) {
+                        if (showEditDetails) {
                             Button(onClick = {
                                 invitedPlayers = invitedPlayers - player
                             }) {
@@ -125,13 +135,12 @@ fun CreateOrEditTeamDialog(
                         }
                     }
                 }
-                if (playersInTeam.size + invitedPlayers.size < teamSize || teamSize == 7 && isCaptain) {
+                if (playersInTeam.size + invitedPlayers.size < teamSize || teamSize == 7 && showEditDetails) {
                     item {
                         InvitePlayerCard { showSearchDialog = true }
                     }
                 }
             }
-
             Spacer(modifier = Modifier.height(16.dp))
             Row(
                 Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween
@@ -139,10 +148,7 @@ fun CreateOrEditTeamDialog(
                 OutlinedButton(onClick = onDismiss) {
                     Text("Cancel")
                 }
-                if (isCaptain) {
-                    Button(onClick = { onDelete(team) }, enabled = deleteEnabled) {
-                        Text("Delete")
-                    }
+                if (showEditDetails) {
                     Button(onClick = {
                         onFinish(
                             team.team.copy(players = playersInTeam.map { it.id },
@@ -158,6 +164,37 @@ fun CreateOrEditTeamDialog(
                     Button(onClick = { showLeaveTeamDialog = true }) {
                         Text("Leave Team")
                     }
+                }
+            }
+
+            if (isCaptain) {
+                IconButton(onClick = { showDeleteDialog = true }, enabled = deleteEnabled,
+                    colors = IconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError,
+                        disabledContainerColor = MaterialTheme.colorScheme.errorContainer,
+                        disabledContentColor = MaterialTheme.colorScheme.onErrorContainer
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Default.Delete, contentDescription = "Trash")
+                }
+            }
+        }
+    }
+
+    if (showDeleteDialog) {
+        Dialog(onDismissRequest = { showDeleteDialog = false }) {
+            Box(Modifier.fillMaxSize()) {
+                Text("Are you sure you want to delete this team?")
+                Button(onClick = {
+                    onDelete(team)
+                    showDeleteDialog = false
+                }) {
+                    Text("Yes")
+                }
+                Button(onClick = { showDeleteDialog = false }) {
+                    Text("Cancel")
                 }
             }
         }

@@ -2,14 +2,19 @@ package com.razumly.mvp.core.presentation.composables
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 
 @Composable
 actual fun PlatformBackButton(
     onBack: () -> Unit,
-    modifier: Modifier
+    modifier: Modifier,
+    text: String,
+    tintColor: Color
 ) {
     BackButton(
         onBack = onBack,
-        modifier = modifier
+        modifier = modifier,
+        text = text,
+        tintColor = tintColor
     )
 }

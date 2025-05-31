@@ -1,15 +1,19 @@
 package com.razumly.mvp.core.presentation.composables
 
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.SearchBar
-import androidx.compose.material3.SearchBarDefaults
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -18,9 +22,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SearchBox(
     modifier: Modifier = Modifier,
@@ -28,53 +40,74 @@ fun SearchBox(
     filter: Boolean,
     onChange: (String) -> Unit,
     onSearch: (String) -> Unit,
-    initialList: @Composable () -> Unit,
-    suggestions: @Composable () -> Unit
+    onFocusChange: (Boolean) -> Unit,
+    onPositionChange: (Offset, IntSize) -> Unit
 ) {
-    var searchActive by remember { mutableStateOf(false) }
-    val onActiveChange: (Boolean) -> Unit = { isActive ->
-        searchActive = isActive
-    }
-    var searchInput by mutableStateOf("")
+    var searchInput by remember { mutableStateOf("") }
+    var isFocused by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
 
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .onGloballyPositioned { coordinates ->
+                val position = coordinates.positionInRoot()
+                val size = coordinates.size
+                onPositionChange(position, size)
+            },
         verticalAlignment = Alignment.CenterVertically
     ) {
-        SearchBar(
-            modifier = modifier,
-            inputField = {
-                SearchBarDefaults.InputField(
-                    query = searchInput,
-                    onQueryChange = { newQuery ->
-                        searchInput = newQuery
-                        onChange(newQuery)
-                    },
-                    onSearch = onSearch,
-                    expanded = searchActive,
-                    onExpandedChange = onActiveChange,
-                    placeholder = { Text(placeholder) },
+        OutlinedTextField(
+            value = searchInput,
+            onValueChange = { newQuery ->
+                searchInput = newQuery
+                onChange(newQuery)
+            },
+            placeholder = { Text(placeholder) },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = "Search"
                 )
             },
-            expanded = searchActive,
-            onExpandedChange = onActiveChange,
+            trailingIcon = {
+                if (searchInput.isNotEmpty()) {
+                    IconButton(
+                        onClick = {
+                            searchInput = ""
+                            onChange("")
+                            focusManager.clearFocus()
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Clear,
+                            contentDescription = "Clear"
+                        )
+                    }
+                }
+            },
+            singleLine = true,
+            modifier = Modifier
+                .weight(1f)
+                .onFocusChanged { focusState ->
+                    isFocused = focusState.isFocused
+                    onFocusChange(focusState.isFocused)
+                },
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(
+                onSearch = {
+                    onSearch(searchInput)
+                    focusManager.clearFocus()
+                }
+            )
         )
-        {
-            if (searchInput.isBlank()) {
-                initialList()
-            } else {
-                suggestions()
-            }
-        }
+
         if (filter) {
-            IconButton(
-                onClick = {},
-            ) {
+            Spacer(modifier = Modifier.width(8.dp))
+            IconButton(onClick = { /* Handle filter action */ }) {
                 Icon(Icons.Default.Menu, contentDescription = "Filter")
             }
         }
     }
 }
-

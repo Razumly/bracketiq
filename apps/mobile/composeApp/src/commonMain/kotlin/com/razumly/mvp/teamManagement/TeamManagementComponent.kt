@@ -1,6 +1,7 @@
 package com.razumly.mvp.teamManagement
 
 import com.arkivanov.decompose.ComponentContext
+import com.arkivanov.essenty.backhandler.BackCallback
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
@@ -100,7 +101,6 @@ class DefaultTeamManagementComponent(
         team?.team?.eventIds?.isEmpty() == true && team.team.tournamentIds.isEmpty()
     }.stateIn(scope, SharingStarted.Eagerly, false)
 
-
     init {
         scope.launch {
             _friends.value = userRepository.getUsers(currentUser.friendIds).getOrElse {
@@ -126,7 +126,7 @@ class DefaultTeamManagementComponent(
 
     override fun createTeam(team: Team) {
         scope.launch {
-            teamRepository.createTeam(team).onFailure {
+            teamRepository.createTeam(team.copy(captainId = currentUser.id)).onFailure {
                 _errorState.value = it.message
             }
         }

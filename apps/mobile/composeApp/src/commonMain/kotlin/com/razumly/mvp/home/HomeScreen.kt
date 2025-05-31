@@ -60,13 +60,6 @@ private fun HomeContent(
             Box(
                 modifier = Modifier.fillMaxSize()
             ) {
-                // Only show back button if we have screens to go back to
-                if (childStack.backStack.isNotEmpty()) {
-                    PlatformBackButton(
-                        onBack = { component.onBack() },
-                        modifier = Modifier.zIndex(1f)
-                    )
-                }
                 // Screen content
                 when (val instance = child.instance) {
                     is HomeComponent.Child.Search -> {

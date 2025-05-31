@@ -37,7 +37,7 @@ data class Team(
                 players = listOf(captainId),
                 teamSize = 2,
                 id = ID.unique(),
-                captainId = captainId
+                captainId = ""
             )
         }
     }

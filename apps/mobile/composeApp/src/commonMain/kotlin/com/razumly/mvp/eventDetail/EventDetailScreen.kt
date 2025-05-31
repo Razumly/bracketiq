@@ -9,16 +9,21 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -35,6 +40,7 @@ import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
 import com.razumly.mvp.core.presentation.composables.EventDetails
+import com.razumly.mvp.core.presentation.composables.PlatformBackButton
 import com.razumly.mvp.core.presentation.composables.TeamCard
 import com.razumly.mvp.eventDetail.composables.CollapsableHeader
 import com.razumly.mvp.eventDetail.composables.ParticipantsView
@@ -46,6 +52,7 @@ import kotlinx.coroutines.delay
 val LocalTournamentComponent =
     compositionLocalOf<EventDetailComponent> { error("No tournament provided") }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EventDetailScreen(
     component: EventDetailComponent,
@@ -61,7 +68,7 @@ fun EventDetailScreen(
     val showDetails by component.showDetails.collectAsState()
     var animateExpanded by remember { mutableStateOf(false) }
     val isHost by component.isHost.collectAsState()
-    var isEditing by remember { mutableStateOf(false) }
+    val isEditing by component.isEditing.collectAsState()
     val editedEvent by component.editedEvent.collectAsState()
     val currentLocation by component.currentLocation.collectAsState()
 
@@ -76,7 +83,14 @@ fun EventDetailScreen(
     }
 
     CompositionLocalProvider(LocalTournamentComponent provides component) {
-        Scaffold(Modifier.fillMaxSize()) { innerPadding ->
+        Scaffold(Modifier.fillMaxSize(),
+            topBar = {
+                CenterAlignedTopAppBar(
+                    title = { Text(selectedEvent.event.name) },
+                    navigationIcon = { PlatformBackButton({ component.backCallback.onBack() }) },
+                )
+            }
+        ) { innerPadding ->
             Column(
                 Modifier.background(MaterialTheme.colorScheme.background).fillMaxSize()
             ) {
@@ -107,19 +121,19 @@ fun EventDetailScreen(
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Button(onClick = {
                                         component.updateEvent()
-                                        isEditing = false
+                                        component.toggleEdit()
                                     }, enabled = isValid) {
                                         Text("Confirm")
                                     }
                                     Button(onClick = {
-                                        isEditing = false
+                                        component.toggleEdit()
                                     }) {
                                         Text("Cancel")
                                     }
                                 }
                             } else {
                                 if (isHost) {
-                                    Button(onClick = { isEditing = true }) {
+                                    Button(onClick = { component.toggleEdit() }) {
                                         Text("Edit")
                                     }
                                 }

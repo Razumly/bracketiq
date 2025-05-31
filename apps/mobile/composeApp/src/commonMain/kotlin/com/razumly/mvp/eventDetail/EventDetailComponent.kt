@@ -1,6 +1,7 @@
 package com.razumly.mvp.eventDetail
 
 import com.arkivanov.decompose.ComponentContext
+import com.arkivanov.essenty.backhandler.BackCallback
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.EventAbsWithRelations
@@ -21,7 +22,6 @@ import com.razumly.mvp.core.util.getCurrentLocation
 import com.razumly.mvp.eventDetail.data.IMatchRepository
 import dev.icerock.moko.geo.LatLng
 import dev.icerock.moko.geo.LocationTracker
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
@@ -55,6 +55,8 @@ interface EventDetailComponent : ComponentContext {
     val isHost: StateFlow<Boolean>
     val editedEvent: StateFlow<EventAbs>
     val currentLocation: StateFlow<LatLng?>
+    val isEditing: StateFlow<Boolean>
+    val backCallback: BackCallback
 
     fun matchSelected(selectedMatch: MatchWithRelations)
     fun selectDivision(division: Division)
@@ -112,6 +114,18 @@ class DefaultEventDetailComponent(
 
     private val _currentLocation = MutableStateFlow<LatLng?>(null)
     override var currentLocation = _currentLocation.asStateFlow()
+
+    private val _isEditing = MutableStateFlow(false)
+    override var isEditing = _isEditing.asStateFlow()
+
+    override val backCallback = BackCallback {
+        if (isEditing.value) {
+            _isEditing.value = false
+        } else if (showDetails.value) {
+            _showDetails.value = false
+        }
+    }
+
 
     override val selectedEvent: StateFlow<EventAbsWithRelations> =
         eventAbsRepository.getEventWithRelationsFlow(event).map { result ->
@@ -186,6 +200,17 @@ class DefaultEventDetailComponent(
     private val _userInTournament = MutableStateFlow(false)
 
     init {
+        backHandler.register(backCallback)
+        scope.launch {
+            _isEditing.collect { isEditing ->
+                backCallback.isEnabled = isEditing
+            }
+        }
+        scope.launch {
+            _showDetails.collect { showDetails ->
+                backCallback.isEnabled = showDetails
+            }
+        }
         scope.launch {
             _currentLocation.value = locationTracker.getCurrentLocation()
             matchRepository.setIgnoreMatch(null)

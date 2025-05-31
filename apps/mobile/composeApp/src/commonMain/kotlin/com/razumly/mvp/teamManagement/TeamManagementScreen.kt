@@ -10,8 +10,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -22,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import com.razumly.mvp.core.presentation.composables.PlatformBackButton
 import com.razumly.mvp.core.presentation.composables.TeamCard
 
 @Composable
@@ -96,7 +99,8 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
                 deleteEnabled = deleteEnabled,
                 selectedEvent = selectedEvent,
                 isCaptain = isCaptain,
-                currentUser = currentUser
+                currentUser = currentUser,
+                isNewTeam = selectedTeam!!.team.captainId == ""
             )
         }
     }

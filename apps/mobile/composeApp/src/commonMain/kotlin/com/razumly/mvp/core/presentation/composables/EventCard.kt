@@ -1,6 +1,5 @@
 package com.razumly.mvp.core.presentation.composables
 
-import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -58,7 +57,6 @@ import kotlinx.datetime.format
 import kotlinx.datetime.toLocalDateTime
 
 @OptIn(
-    ExperimentalSharedTransitionApi::class,
     ExperimentalHazeMaterialsApi::class,
     ExperimentalHazeApi::class
 )
@@ -159,11 +157,6 @@ fun EventCard(
                     text = event.name,
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.background
-                )
-                Text(
-                    text = event.rating.toString(),
-                    style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.background
                 )
             }
