@@ -2,8 +2,15 @@
 
 echo "Running post-clone script..."
 
-# Navigate to iOS directory
-cd ..
+# Navigate to mvp-app directory
+cd ../..
+
+
+# CRITICAL: Generate the Kotlin framework first
+echo "Generating Kotlin dummy framework..."
+./gradlew :composeApp:generateDummyFramework
+
+cd iosApp || exit
 
 # Check if Podfile exists
 if [ ! -f "Podfile" ]; then
