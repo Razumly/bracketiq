@@ -1,0 +1,23 @@
+PODS:
+  - composeApp (2.0):
+    - GooglePlaces
+  - GooglePlaces (9.4.1)
+
+DEPENDENCIES:
+  - composeApp (from `../composeApp`)
+
+SPEC REPOS:
+  trunk:
+    - GooglePlaces
+
+EXTERNAL SOURCES:
+  composeApp:
+    :path: "../composeApp"
+
+SPEC CHECKSUMS:
+  composeApp: f360e0d6e6767692da9e56759cb4c8775e782c87
+  GooglePlaces: 8afca6c4e946472e91298589d1640d614b51749a
+
+PODFILE CHECKSUM: 94a36af959c63e8b7ff7802532a2d2c201020e01
+
+COCOAPODS: 1.16.2
