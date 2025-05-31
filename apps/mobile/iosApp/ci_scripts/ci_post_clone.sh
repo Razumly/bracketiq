@@ -5,10 +5,10 @@ echo "Running post-clone script..."
 # Navigate to mvp-app directory
 cd ../..
 
-
-# CRITICAL: Generate the Kotlin framework first
-echo "Generating Kotlin dummy framework..."
-./gradlew :composeApp:generateDummyFramework
+echo "Building Kotlin framework..."
+./gradlew :composeApp:linkPodDebugFrameworkIosArm64
+./gradlew :composeApp:linkPodDebugFrameworkIosX64
+./gradlew :composeApp:linkPodDebugFrameworkIosSimulatorArm64
 
 cd iosApp || exit
 
