@@ -3,7 +3,7 @@
 echo "Running post-clone script..."
 
 # Navigate to iOS directory
-cd iosApp
+cd ..
 
 # Check if Podfile exists
 if [ ! -f "Podfile" ]; then
