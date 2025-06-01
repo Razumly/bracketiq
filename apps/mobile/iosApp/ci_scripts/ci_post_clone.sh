@@ -93,7 +93,7 @@ build_shared_module() {
     echo "\nBuild the shared module"
 
     cd "$repo_dir"
-    ./gradlew :shared:generateDummyFramework
+    ./gradlew :composeApp:generateDummyFramework
 
     return 0
 }
