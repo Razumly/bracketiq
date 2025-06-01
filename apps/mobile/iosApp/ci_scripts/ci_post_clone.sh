@@ -46,14 +46,16 @@ install_jdk_if_needed() {
 
     if [[ $(uname -m) == "arm64" ]]; then
         echo " - Detected M1"
-        arch_type="macos-aarch64"
+        arch_type="aarch64"
+        jdk_url="https://download.java.net/java/GA/jdk17.0.2/dfd4a8d0985749f896bed50d7138ee7f/8/GPL/openjdk-17.0.2_macos-aarch64_bin.tar.gz"
     else
         echo " - Detected Intel"
-        arch_type="macos-x64"
+        arch_type="x64"
+        jdk_url="https://download.java.net/java/GA/jdk17.0.2/dfd4a8d0985749f896bed50d7138ee7f/8/GPL/openjdk-17.0.2_macos-x64_bin.tar.gz"
     fi
 
-    # Location of version / arch detection file.
-    detect_loc="${jdk_dir}/.${jdk_version}.${arch_type}"
+    # Location of version / arch detection file
+    detect_loc="${jdk_dir}/.17.0.2.${arch_type}"
 
     if [ -f "$detect_loc" ]; then
         echo " - Found a valid JDK installation, skipping install"
@@ -62,28 +64,29 @@ install_jdk_if_needed() {
 
     echo " - No valid JDK installation found, installing..."
 
-    tar_name="jdk-${jdk_version}_${arch_type}_bin.tar.gz"
+    tar_name="openjdk-17.0.2_macos-${arch_type}_bin.tar.gz"
 
-    # Download and un-tar JDK to our defined location.
-    curl -OL "https://download.oracle.com/java/20/archive/${tar_name}"
+    # Download from more reliable OpenJDK source
+    curl -L -o "$tar_name" "$jdk_url"
     tar xzf "$tar_name" -C "$root_dir"
 
-    # Move the JDK to our desired location.
+    # Move the JDK to our desired location
     rm -rf "$jdk_dir"
     mkdir -p "$jdk_dir"
-    mv "${root_dir}/jdk-${jdk_version}.jdk/Contents/Home" "$jdk_dir"
+    mv "${root_dir}/jdk-17.0.2.jdk/Contents/Home" "$jdk_dir"
 
     # Cleanup
-    rm -r "${root_dir}/jdk-${jdk_version}.jdk"
+    rm -r "${root_dir}/jdk-17.0.2.jdk"
     rm "$tar_name"
 
-    # Add the detection file for subsequent builds.
+    # Add the detection file for subsequent builds
     touch "$detect_loc"
 
     echo " - Set JAVA_HOME in Xcode Cloud to ${jdk_dir}/Home"
 
     return 0
 }
+
 
 # Function to build the shared module
 build_shared_module() {
