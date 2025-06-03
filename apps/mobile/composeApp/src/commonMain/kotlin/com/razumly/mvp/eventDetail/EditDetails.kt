@@ -69,6 +69,7 @@ fun EditDetails(
     onIsValid: (Boolean) -> Unit,
     onShowStartPicker: () -> Unit,
     onShowEndPicker: () -> Unit,
+    onSelectFieldCount: (Int) -> Unit,
     isNewEvent: Boolean,
     onEventTypeSelected: (EventType) -> Unit,
     onAddCurrentUser: (Boolean) -> Unit
@@ -82,6 +83,8 @@ fun EditDetails(
     var isLoserPointsValid by remember { mutableStateOf(true) }
     var isLocationValid by remember { mutableStateOf(event.location.isNotBlank() && event.lat != 0.0 && event.long != 0.0) }
     var selectedDivisions by remember { mutableStateOf(emptyList<Division>()) }
+    var isFieldCountValid by remember { mutableStateOf(true) }
+    var fieldCount by remember { mutableStateOf(0) }
 
     LaunchedEffect(event) {
         isPriceValid = event.price >= 0
@@ -91,6 +94,7 @@ fun EditDetails(
         if (event is Tournament) {
             isWinnerSetCountValid = event.winnerSetCount > 0
             isWinnerPointsValid = event.winnerBracketPointsToVictory.all { it > 0 }
+            isFieldCountValid = fieldCount > 0
             if (event.doubleElimination) {
                 isLoserSetCountValid = event.loserSetCount > 0
                 isLoserPointsValid = event.loserBracketPointsToVictory.all { it > 0 }
@@ -259,6 +263,8 @@ fun EditDetails(
             isMoney = false,
             placeholder = "2-6"
         )
+
+
         Row(
             verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)
         ) {
@@ -300,6 +306,24 @@ fun EditDetails(
                 })
                 Text("Double Elimination")
             }
+            NumberInputField(
+                value = fieldCount.toString(),
+                onValueChange = { newValue ->
+                    if (newValue.all { it.isDigit() }) {
+                        if (newValue.isBlank()) {
+                            fieldCount = 0
+                            onSelectFieldCount(0)
+                        } else {
+                            fieldCount = newValue.toInt()
+                            onSelectFieldCount(newValue.toInt())
+                        }
+                    }
+                },
+                label = "Field Count",
+                isError = !isFieldCountValid,
+                isMoney = false,
+                errorMessage = stringResource(Res.string.value_too_low),
+            )
             NumberInputField(
                 value = event.winnerSetCount.toString(),
                 onValueChange = { newValue ->

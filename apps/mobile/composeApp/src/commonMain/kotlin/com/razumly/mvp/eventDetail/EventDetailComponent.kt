@@ -18,10 +18,7 @@ import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.IEventAbsRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
-import com.razumly.mvp.core.util.getCurrentLocation
 import com.razumly.mvp.eventDetail.data.IMatchRepository
-import dev.icerock.moko.geo.LatLng
-import dev.icerock.moko.geo.LocationTracker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
@@ -54,7 +51,6 @@ interface EventDetailComponent : ComponentContext {
     val validTeams: StateFlow<List<TeamWithPlayers>>
     val isHost: StateFlow<Boolean>
     val editedEvent: StateFlow<EventAbs>
-    val currentLocation: StateFlow<LatLng?>
     val isEditing: StateFlow<Boolean>
     val backCallback: BackCallback
 
@@ -74,6 +70,7 @@ interface EventDetailComponent : ComponentContext {
     fun createNewTeam()
     fun selectPlace(place: MVPPlace)
     fun onTypeSelected(type: EventType)
+    fun selectFieldCount(count: Int)
 }
 
 @Serializable
@@ -96,7 +93,6 @@ class DefaultEventDetailComponent(
     componentContext: ComponentContext,
     userRepository: IUserRepository,
     event: EventAbs,
-    locationTracker: LocationTracker,
     private val eventAbsRepository: IEventAbsRepository,
     private val matchRepository: IMatchRepository,
     private val teamRepository: ITeamRepository,
@@ -112,11 +108,10 @@ class DefaultEventDetailComponent(
     private val _editedEvent = MutableStateFlow(event)
     override var editedEvent = _editedEvent.asStateFlow()
 
-    private val _currentLocation = MutableStateFlow<LatLng?>(null)
-    override var currentLocation = _currentLocation.asStateFlow()
-
     private val _isEditing = MutableStateFlow(false)
     override var isEditing = _isEditing.asStateFlow()
+
+    private val _fieldCount = MutableStateFlow(0)
 
     override val backCallback = BackCallback {
         if (isEditing.value) {
@@ -212,7 +207,6 @@ class DefaultEventDetailComponent(
             }
         }
         scope.launch {
-            _currentLocation.value = locationTracker.getCurrentLocation()
             matchRepository.setIgnoreMatch(null)
             eventWithRelations.distinctUntilChanged { old, new -> old == new }.filterNotNull()
                 .collect { event ->
@@ -394,6 +388,10 @@ class DefaultEventDetailComponent(
         }
 
         _rounds.value = rounds.reversed()
+    }
+
+    override fun selectFieldCount(count: Int) {
+        _fieldCount.value = count
     }
 
     private fun validMatch(match: MatchWithRelations): Boolean {

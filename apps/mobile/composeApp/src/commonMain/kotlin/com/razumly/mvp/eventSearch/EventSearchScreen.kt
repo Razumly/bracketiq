@@ -151,14 +151,18 @@ fun EventSearchScreen(
                 Modifier.hazeSource(hazeState).fillMaxSize()
             ) {
                 EventList(
-                    component,
                     events,
                     firstElementPadding,
                     offsetNavPadding,
                     lazyListState,
-                ) { offset ->
-                    revealCenter = offset
-                }
+                    { offset, event ->
+                        revealCenter = offset
+                        component.onMapClick(event)
+                    },
+                    { event ->
+                        component.viewEvent(event)
+                    }
+                )
                 EventMap(
                     component = mapComponent,
                     onEventSelected = { event ->

@@ -47,8 +47,6 @@ fun CreateEventScreen(
     val newEventState by component.newEventState.collectAsState()
     val childStack by component.childStack.subscribeAsState()
     val isEditing = true
-    val currentLocation by component.currentLocation.collectAsState()
-    BindLocationTrackerEffect(component.locationTracker)
     BindLocationTrackerEffect(mapComponent.locationTracker)
 
     Scaffold(
@@ -114,7 +112,7 @@ fun CreateEventScreen(
                         isNewEvent = true,
                         onEventTypeSelected = { component.onTypeSelected(it) },
                         onAddCurrentUser = {},
-                        currentLocation = currentLocation
+                        onSelectFieldCount = { component.selectFieldCount(it) }
                     ) { isValid -> canProceed = isValid }
 
                     is CreateEventComponent.Child.Preview -> Preview(

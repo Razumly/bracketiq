@@ -188,7 +188,7 @@ class UserRepository(
             val docs = database.listDocuments(
                 DbConstants.DATABASE_NAME,
                 DbConstants.USER_DATA_COLLECTION,
-                listOf(query),
+                listOf(query, Query.limit(500)),
                 nestedType = UserDataDTO::class,
             )
             docs.documents.map { it.data.toUserData(it.id) }

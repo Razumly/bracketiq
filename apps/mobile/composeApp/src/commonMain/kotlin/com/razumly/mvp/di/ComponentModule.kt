@@ -10,6 +10,7 @@ import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.presentation.RootComponent
 import com.razumly.mvp.eventCreate.DefaultCreateEventComponent
 import com.razumly.mvp.eventDetail.DefaultEventDetailComponent
+import com.razumly.mvp.eventManagement.DefaultEventManagementComponent
 import com.razumly.mvp.eventSearch.DefaultSearchEventListComponent
 import com.razumly.mvp.home.DefaultHomeComponent
 import com.razumly.mvp.matchDetail.DefaultMatchContentComponent
@@ -69,24 +70,20 @@ val componentModule = module {
             matchRepository = get(),
             teamRepository = get(),
             onNavigateToTeamSettings = onNavigateToTeamSettings,
-            locationTracker = get()
         )
     }
 
     factory { (componentContext: ComponentContext, onCreatedEvent: () -> Unit) ->
         DefaultCreateEventComponent(
             componentContext = componentContext,
-            locationTracker = get(),
             onEventCreated = onCreatedEvent,
             userRepository = get(),
             eventRepository = get(),
+            fieldRepository = get()
         )
     }
 
-    factory { (
-                  componentContext: ComponentContext,
-                  onEventSelected: (event: EventAbs) -> Unit,
-              ) ->
+    factory { (componentContext: ComponentContext, onEventSelected: (event: EventAbs) -> Unit) ->
         DefaultSearchEventListComponent(
             componentContext = componentContext,
             locationTracker = get(),
@@ -115,13 +112,14 @@ val componentModule = module {
         )
     }
 
-    factory { (componentContext: ComponentContext, onNavigateToLogin: () -> Unit, onNavigateToTeamSettings: (List<String>, EventAbs?) -> Unit) ->
+    factory { (componentContext: ComponentContext, onNavigateToLogin: () -> Unit, onNavigateToTeamSettings: (List<String>, EventAbs?) -> Unit, onNavigateToEvents: () -> Unit) ->
         DefaultProfileComponent(
             componentContext = componentContext,
             onNavigateToLogin = onNavigateToLogin,
             onNavigateToTeamSettings = onNavigateToTeamSettings,
             userRepository = get(),
-            mvpDatabase = get()
+            mvpDatabase = get(),
+            onNavigateToEvents = onNavigateToEvents
         )
     }
 
@@ -132,6 +130,15 @@ val componentModule = module {
             userRepository = get(),
             freeAgents = freeAgents,
             selectedEvent = selectedEvent
+        )
+    }
+
+    factory { (componentContext: ComponentContext, onEventSelected: (event: EventAbs) -> Unit, onBack: () -> Unit) ->
+        DefaultEventManagementComponent(
+            componentContext = componentContext,
+            onEventSelected = onEventSelected,
+            eventAbsRepository = get(),
+            onBack = onBack,
         )
     }
 }

@@ -20,6 +20,7 @@ import com.razumly.mvp.eventCreate.CreateEventComponent
 import com.razumly.mvp.eventCreate.DefaultCreateEventComponent
 import com.razumly.mvp.eventDetail.DefaultEventDetailComponent
 import com.razumly.mvp.eventDetail.EventDetailComponent
+import com.razumly.mvp.eventManagement.DefaultEventManagementComponent
 import com.razumly.mvp.eventMap.MapComponent
 import com.razumly.mvp.eventSearch.DefaultSearchEventListComponent
 import com.razumly.mvp.home.HomeComponent.Child
@@ -29,7 +30,6 @@ import com.razumly.mvp.matchDetail.MatchContentComponent
 import com.razumly.mvp.profile.DefaultProfileComponent
 import com.razumly.mvp.profile.ProfileComponent
 import com.razumly.mvp.teamManagement.DefaultTeamManagementComponent
-import dev.icerock.moko.geo.LocationTracker
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -62,6 +62,7 @@ interface HomeComponent {
 
         data class Profile(val component: ProfileComponent) : Child()
         data class Teams(val component: DefaultTeamManagementComponent) : Child()
+        data class Events(val component: DefaultEventManagementComponent) : Child()
     }
 
     @Serializable
@@ -96,6 +97,9 @@ interface HomeComponent {
 
         @Serializable
         data class Teams(val freeAgents: List<String>, val event: EventAbs?) : Config()
+
+        @Serializable
+        data object Events : Config()
     }
 }
 
@@ -141,6 +145,7 @@ class DefaultHomeComponent(
                     }.value
                 )
             }
+
             is Config.EventDetail -> {
                 Child.EventContent(
                     _koin.inject<DefaultEventDetailComponent> {
@@ -156,11 +161,13 @@ class DefaultHomeComponent(
                     }.value
                 )
             }
+
             is Config.MatchDetail -> Child.MatchContent(
                 _koin.inject<DefaultMatchContentComponent> {
                     parametersOf(componentContext, config.match, config.tournament)
                 }.value
             )
+
             is Config.ChatList -> Child.ChatList(
                 _koin.inject<DefaultChatListComponent> {
                     parametersOf(componentContext, ::onNavigateToChat)
@@ -181,13 +188,15 @@ class DefaultHomeComponent(
                     parametersOf(componentContext)
                 }.value
             )
+
             is Config.Profile -> Child.Profile(
                 _koin.inject<DefaultProfileComponent> {
                     parametersOf(
                         componentContext,
                         onNavigateToLogin,
-                        ::onNavigateToTeamSettings
-                        )
+                        ::onNavigateToTeamSettings,
+                        ::onNavigateToEvents
+                    )
                 }.value
             )
 
@@ -198,6 +207,12 @@ class DefaultHomeComponent(
                         config.freeAgents,
                         config.event
                     )
+                }.value
+            )
+
+            Config.Events -> Child.Events(
+                _koin.inject<DefaultEventManagementComponent> {
+                    parametersOf(componentContext, ::onEventSelected, ::onBack)
                 }.value
             )
         }
@@ -222,6 +237,10 @@ class DefaultHomeComponent(
 
     private fun onNavigateToChat(chatGroup: ChatGroupWithRelations) {
         navigation.pushNew(Config.Chat(chatGroup))
+    }
+
+    private fun onNavigateToEvents() {
+        navigation.pushNew(Config.Events)
     }
 
     override fun onTabSelected(page: Config) {

@@ -151,7 +151,7 @@ interface TeamDao {
                 TeamPlayerCrossRef(team.id, playerId)
             })
         } catch (e: Exception) {
-            Napier.d("Failed to add user team crossRef for team: ${team.id}\n" +
+            Napier.d("Failed to add user team crossRef for team: ${team.id} players- ${team.players}\n" +
                     "${e.message}")
         }
         try {

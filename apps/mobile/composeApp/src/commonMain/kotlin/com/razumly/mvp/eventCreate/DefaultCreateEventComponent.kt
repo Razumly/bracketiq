@@ -7,7 +7,6 @@ import com.arkivanov.decompose.router.stack.childStack
 import com.arkivanov.decompose.router.stack.pop
 import com.arkivanov.decompose.router.stack.pushNew
 import com.arkivanov.decompose.value.Value
-import com.arkivanov.essenty.instancekeeper.InstanceKeeper
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.EventImp
@@ -16,12 +15,10 @@ import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.IEventAbsRepository
+import com.razumly.mvp.core.data.repositories.IFieldRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.eventCreate.CreateEventComponent.Child
 import com.razumly.mvp.eventCreate.CreateEventComponent.Config
-import dev.icerock.moko.geo.LatLng
-import dev.icerock.moko.geo.LocationTracker
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,8 +35,6 @@ interface CreateEventComponent {
     val selectedPlace: StateFlow<MVPPlace?>
     val errorMessage: StateFlow<String?>
     val defaultEvent: StateFlow<EventWithRelations>
-    val currentLocation: StateFlow<LatLng?>
-    val locationTracker: LocationTracker
 
     fun updateEventField(update: EventImp.() -> EventImp)
     fun updateTournamentField(update: Tournament.() -> Tournament)
@@ -52,6 +47,7 @@ interface CreateEventComponent {
     fun validateAndUpdateTeamSize(input: String, onError: (Boolean) -> Unit)
     fun validateAndUpdateMaxPlayers(input: String, onError: (Boolean) -> Unit)
     fun addUserToEvent(add: Boolean)
+    fun selectFieldCount(count: Int)
 
     sealed class Child {
         data object EventInfo : Child()
@@ -71,7 +67,7 @@ class DefaultCreateEventComponent(
     componentContext: ComponentContext,
     private val userRepository: IUserRepository,
     private val eventRepository: IEventAbsRepository,
-    override val locationTracker: LocationTracker,
+    private val fieldRepository: IFieldRepository,
     val onEventCreated: () -> Unit
 ) : CreateEventComponent, ComponentContext by componentContext {
     private val navigation = StackNavigation<Config>()
@@ -95,10 +91,9 @@ class DefaultCreateEventComponent(
     private val _errorMessage = MutableStateFlow<String?>(null)
     override val errorMessage = _errorMessage.asStateFlow()
 
-    private val _currentLocation = MutableStateFlow<LatLng?>(null)
-    override val currentLocation = _currentLocation.asStateFlow()
-
     private val _addUserToEvent = MutableStateFlow(false)
+
+    private val _fieldCount = MutableStateFlow(0)
 
     override val childStack = childStack(
         source = navigation,
@@ -110,17 +105,6 @@ class DefaultCreateEventComponent(
 
     init {
         childStack.subscribe {}
-        scope.launch {
-            locationTracker.startTracking()
-        }
-
-        instanceKeeper.put(CLEANUP_KEY, Cleanup(locationTracker))
-
-        scope.launch {
-            locationTracker.getLocationsFlow().collect {
-                _currentLocation.value = it
-            }
-        }
         scope.launch {
             userRepository.currentUser.collect { currentUser ->
                 updateEventField { copy(hostId = currentUser.getOrThrow().id) }
@@ -153,6 +137,9 @@ class DefaultCreateEventComponent(
                             )
                         }
                     }
+                }
+                if (_fieldCount.value > 0) {
+                    fieldRepository.createFields(newEventState.value.id, _fieldCount.value)
                 }
             }.onFailure {
                 _errorMessage.value = it.message
@@ -226,21 +213,15 @@ class DefaultCreateEventComponent(
         }
     }
 
+    override fun selectFieldCount(count: Int) {
+        _fieldCount.value = count
+    }
+
     private fun createChild(
         config: Config,
         componentContext: ComponentContext
     ): Child = when (config) {
         is Config.EventInfo -> Child.EventInfo
         is Config.Preview -> Child.Preview
-    }
-
-    class Cleanup(private val locationTracker: LocationTracker): InstanceKeeper.Instance {
-        override fun onDestroy() {
-            locationTracker.stopTracking()
-        }
-    }
-
-    companion object {
-        const val CLEANUP_KEY = "Cleanup_Create"
     }
 }

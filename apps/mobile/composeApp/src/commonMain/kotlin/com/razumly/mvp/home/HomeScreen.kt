@@ -9,7 +9,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.zIndex
 import com.arkivanov.decompose.ExperimentalDecomposeApi
 import com.arkivanov.decompose.extensions.compose.experimental.stack.ChildStack
 import com.arkivanov.decompose.extensions.compose.experimental.stack.animation.fade
@@ -18,14 +17,13 @@ import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import com.razumly.mvp.chat.ChatGroupScreen
 import com.razumly.mvp.chat.ChatListScreen
 import com.razumly.mvp.core.presentation.composables.MVPBottomNavBar
-import com.razumly.mvp.core.presentation.composables.PlatformBackButton
 import com.razumly.mvp.eventCreate.CreateEventScreen
 import com.razumly.mvp.eventDetail.EventDetailScreen
+import com.razumly.mvp.eventManagement.EventManagementScreen
 import com.razumly.mvp.eventSearch.EventSearchScreen
 import com.razumly.mvp.matchDetail.MatchDetailScreen
 import com.razumly.mvp.profile.ProfileScreen
 import com.razumly.mvp.teamManagement.TeamManagementScreen
-import dev.icerock.moko.geo.compose.BindLocationTrackerEffect
 import io.github.aakira.napier.Napier
 
 val LocalNavBarPadding = compositionLocalOf<PaddingValues> { error("No padding values provided") }
@@ -103,6 +101,11 @@ private fun HomeContent(
                     is HomeComponent.Child.Teams -> {
                         Napier.d(tag = "Navigation") { "Navigating to Team Management Screen" }
                         TeamManagementScreen(instance.component)
+                    }
+
+                    is HomeComponent.Child.Events -> {
+                        Napier.d(tag = "Navigation") { "Navigating to Events Screen" }
+                        EventManagementScreen(instance.component)
                     }
                 }
             }

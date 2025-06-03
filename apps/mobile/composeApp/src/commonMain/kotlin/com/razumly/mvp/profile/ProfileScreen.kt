@@ -33,6 +33,11 @@ fun ProfileScreen(component: ProfileComponent) {
                 Text("Clear Cache")
             }
             Button(
+                onClick = { component.manageEvents() },
+            ) {
+                Text("Manage Events")
+            }
+            Button(
                 onClick = { component.onLogout() },
             ) {
                 Text("Logout")

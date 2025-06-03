@@ -2,6 +2,7 @@ package com.razumly.mvp.core.data.dataTypes
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import io.appwrite.ID
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 
@@ -16,4 +17,17 @@ data class Field(
     @Transient
     @PrimaryKey
     override val id: String = "",
-) : MVPDocument
+) : MVPDocument {
+    companion object {
+        operator fun invoke(tournamentId: String, fieldNumber: Int): Field {
+            return Field(
+                inUse = false,
+                fieldNumber = fieldNumber,
+                divisions = listOf(),
+                matches = listOf(),
+                tournamentId = tournamentId,
+                id = ID.unique()
+            )
+        }
+    }
+}

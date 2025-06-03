@@ -29,6 +29,7 @@ interface IEventAbsRepository : IMVPRepository {
     suspend fun searchEvents(searchQuery: String, userLocation: LatLng): Result<List<EventAbs>>
     suspend fun addCurrentUserToEvent(event: EventAbs): Result<Unit>
     suspend fun addTeamToEvent(event: EventAbs, team: TeamWithPlayers): Result<Unit>
+    suspend fun getUsersEvents(): Result<List<EventAbs>>
 }
 
 class EventAbsRepository(
@@ -66,7 +67,7 @@ class EventAbsRepository(
         return getEvents(query, bounds.center)
     }
 
-    private suspend fun getEvents(query: String, userLocation: LatLng): Result<List<EventAbs>> {
+    private suspend fun getEvents(query: String, userLocation: LatLng?): Result<List<EventAbs>> {
         val eventResults = eventRepository.getEvents(query)
         val tournamentResults = tournamentRepository.getTournaments(query)
 
@@ -76,11 +77,19 @@ class EventAbsRepository(
             events + tournaments
         }
 
-        return result.map { events ->
-            events.sortedBy {
-                calcDistance(
-                    userLocation, LatLng(it.lat, it.long)
-                )
+        return if (userLocation != null) {
+            result.map { events ->
+                events.sortedBy {
+                    calcDistance(
+                        userLocation, LatLng(it.lat, it.long)
+                    )
+                }
+            }
+        } else {
+            result.map { events ->
+                events.sortedBy {
+                    it.start
+                }
             }
         }
     }
@@ -127,6 +136,11 @@ class EventAbsRepository(
                 tournamentRepository.updateTournament(event)
             }
         }.map{}
+    }
+
+    override suspend fun getUsersEvents(): Result<List<EventAbs>> {
+        val query = Query.equal("hostId", userRepository.currentUser.value.getOrThrow().id)
+        return getEvents(query, null)
     }
 
     override suspend fun searchEvents(searchQuery: String, userLocation: LatLng): Result<List<EventAbs>> {

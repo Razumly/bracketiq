@@ -24,12 +24,12 @@ import com.razumly.mvp.core.presentation.composables.EventCard
 
 @Composable
 fun EventList(
-    component: DefaultSearchEventListComponent,
     events: List<EventAbs>,
     firstElementPadding: PaddingValues,
     lastElementPadding: PaddingValues,
     lazyListState: LazyListState = rememberLazyListState(),
-    onMapClick: (Offset) -> Unit
+    onMapClick: (Offset, EventAbs) -> Unit,
+    onEventClick: (EventAbs) -> Unit
 ) {
     LazyColumn(
         state = lazyListState,
@@ -54,7 +54,7 @@ fun EventList(
                 modifier = Modifier.padding(padding).padding(horizontal = 16.dp, vertical = 8.dp)
                     .clickable(onClick = {
                         isExpanded = !isExpanded
-                        component.viewEvent(event)
+                        onEventClick(event)
                     }).fillMaxWidth(),
                 elevation = CardDefaults.cardElevation(4.dp),
                 shape = RoundedCornerShape(12.dp),
@@ -64,8 +64,7 @@ fun EventList(
                     Modifier.padding(8.dp),
                     navPadding = PaddingValues(bottom = 16.dp),
                     onMapClick = { offset ->
-                        onMapClick(offset)
-                        component.onMapClick(event)
+                        onMapClick(offset, event)
                     },
                 )
             }

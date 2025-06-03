@@ -11,12 +11,10 @@ import com.razumly.mvp.core.util.getBounds
 import dev.icerock.moko.geo.LatLng
 import dev.icerock.moko.geo.LocationTracker
 import io.github.aakira.napier.Napier
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -209,7 +207,7 @@ class DefaultSearchEventListComponent(
     }
 
 
-    class Cleanup(private val locationTracker: LocationTracker): InstanceKeeper.Instance {
+    private class Cleanup(private val locationTracker: LocationTracker): InstanceKeeper.Instance {
         override fun onDestroy() {
             locationTracker.stopTracking()
         }

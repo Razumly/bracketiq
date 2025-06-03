@@ -9,11 +9,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
@@ -23,7 +21,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -70,7 +67,6 @@ fun EventDetailScreen(
     val isHost by component.isHost.collectAsState()
     val isEditing by component.isEditing.collectAsState()
     val editedEvent by component.editedEvent.collectAsState()
-    val currentLocation by component.currentLocation.collectAsState()
 
     val isUserInEvent =
         (currentUser.eventIds + currentUser.tournamentIds).contains(selectedEvent.event.id) || (selectedEvent.event.waitList + selectedEvent.event.freeAgents).contains(
@@ -111,7 +107,7 @@ fun EventDetailScreen(
                         isNewEvent = false,
                         onEventTypeSelected = { component.onTypeSelected(it) },
                         onAddCurrentUser = {},
-                        currentLocation = currentLocation,
+                        onSelectFieldCount = { component.selectFieldCount(it) }
                     ) { isValid ->
                         Column(
                             verticalArrangement = Arrangement.spacedBy(8.dp),
