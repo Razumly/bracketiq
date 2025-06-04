@@ -70,6 +70,7 @@ val componentModule = module {
             userRepository = get(),
             matchRepository = get(),
             teamRepository = get(),
+            fieldRepository = get(),
             onNavigateToTeamSettings = onNavigateToTeamSettings,
             onBack = onBack
         )

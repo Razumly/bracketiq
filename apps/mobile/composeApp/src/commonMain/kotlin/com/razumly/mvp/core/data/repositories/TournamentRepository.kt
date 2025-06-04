@@ -58,10 +58,25 @@ class TournamentRepository(
             val result = getTournament(tournamentId)
             result.onSuccess {
                 fieldRepository.getFieldsInTournament(tournamentId)
+                    .onFailure { error ->
+                        trySend(Result.failure(error))
+                    }
                 userRepository.getUsersOfTournament(tournamentId)
+                    .onFailure { error ->
+                        trySend(Result.failure(error))
+                    }
                 userRepository.getUsers(listOf(it.hostId))
+                    .onFailure { error ->
+                        trySend(Result.failure(error))
+                    }
                 teamRepository.getTeamsOfTournament(tournamentId)
+                    .onFailure { error ->
+                        trySend(Result.failure(error))
+                    }
                 matchRepository.getMatchesOfTournament(tournamentId)
+                    .onFailure { error ->
+                        trySend(Result.failure(error))
+                    }
             }.onFailure { error ->
                 trySend(Result.failure(error))
             }

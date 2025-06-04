@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.presentation.matchCard
@@ -48,6 +49,7 @@ fun MatchCard(
     val textModifier = Modifier.width(70.dp)
     val teams by component.divisionTeams.collectAsState()
     val matches by component.divisionMatches.collectAsState()
+    val fields by component.divisionFields.collectAsState()
     val matchCardColor = if (match != null && match.match.losersBracket == losersBracket) {
         matchCard
     } else {
@@ -83,7 +85,7 @@ fun MatchCard(
                 )
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    MatchInfoSection(match)
+                    MatchInfoSection(match, fields)
                     VerticalDivider()
                     TeamsSection(
                         team1 = teams[match.match.team1],
@@ -138,7 +140,7 @@ private fun FloatingBox(modifier: Modifier, color: Color, content: @Composable (
 }
 
 @Composable
-private fun MatchInfoSection(match: MatchWithRelations) {
+private fun MatchInfoSection(match: MatchWithRelations, fields: List<FieldWithMatches>) {
     Column(
         modifier = Modifier
             .padding(8.dp)
@@ -147,7 +149,7 @@ private fun MatchInfoSection(match: MatchWithRelations) {
     ) {
         Text("M: ${match.match.matchNumber}")
         HorizontalDivider()
-        Text("F: ${match.field?.fieldNumber}")
+        Text("F: ${fields.find{ it.field.id == match.match.field}?.field?.fieldNumber}")
     }
 }
 

@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.Flow
 interface IFieldRepository : IMVPRepository {
     suspend fun createFields(tournamentId: String, count: Int)
 
-    suspend fun getFieldsInTournamentWithMatchesFlow(tournamentId: String): Flow<List<FieldWithMatches>>
+    fun getFieldsInTournamentWithMatchesFlow(tournamentId: String): Flow<List<FieldWithMatches>>
 
     suspend fun getFieldsInTournament(tournamentId: String): Result<List<Field>>
 }
@@ -33,8 +33,8 @@ class FieldRepository(
         }
     }
 
-    override suspend fun getFieldsInTournamentWithMatchesFlow(tournamentId: String): Flow<List<FieldWithMatches>> {
-        TODO("Not yet implemented")
+    override fun getFieldsInTournamentWithMatchesFlow(tournamentId: String): Flow<List<FieldWithMatches>> {
+        return mvpDatabase.getFieldDao.getFieldsByTournamentId(tournamentId)
     }
 
     override suspend fun getFieldsInTournament(tournamentId: String): Result<List<Field>> =

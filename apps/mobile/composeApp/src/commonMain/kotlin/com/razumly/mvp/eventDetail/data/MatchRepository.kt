@@ -8,6 +8,7 @@ import com.razumly.mvp.core.data.dataTypes.crossRef.MatchTeamCrossRef
 import com.razumly.mvp.core.data.dataTypes.dtos.MatchDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.toMatch
 import com.razumly.mvp.core.data.dataTypes.toMatchDTO
+import com.razumly.mvp.core.data.repositories.IMVPRepository
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResponse
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
 import com.razumly.mvp.core.util.DbConstants
@@ -21,11 +22,25 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
+
+interface IMatchRepository : IMVPRepository {
+    suspend fun getMatch(matchId: String): Result<MatchMVP>
+    fun getMatchFlow(matchId: String): Flow<Result<MatchWithRelations>>
+    suspend fun updateMatch(match: MatchMVP): Result<Unit>
+    fun getMatchesOfTournamentFlow(tournamentId: String): Flow<Result<List<MatchWithRelations>>>
+    suspend fun updateMatchFinished(match: MatchMVP, time: Instant): Result<Unit>
+    suspend fun getMatchesOfTournament(tournamentId: String): Result<List<MatchMVP>>
+    suspend fun subscribeToMatches(): Result<Unit>
+    suspend fun unsubscribeFromRealtime(): Result<Unit>
+    fun setIgnoreMatch(match: MatchMVP?): Result<Unit>
+}
 
 class MatchRepository(
     private val database: Databases,
@@ -56,42 +71,55 @@ class MatchRepository(
         return localFlow
     }
 
-    override suspend fun updateMatch(match: MatchMVP): Result<Unit> =
-        singleResponse(networkCall = {
-            database.updateDocument(
-                databaseId = DbConstants.DATABASE_NAME,
-                collectionId = DbConstants.MATCHES_COLLECTION,
-                documentId = match.id,
-                data = match.toMatchDTO(),
-                nestedType = MatchDTO::class
-            ).data.toMatch(match.id)
-        }, saveCall = { updatedMatch ->
-            mvpDatabase.getMatchDao.upsertMatch(updatedMatch)
-        }, onReturn = { })
+    override suspend fun updateMatch(match: MatchMVP): Result<Unit> = singleResponse(networkCall = {
+        database.updateDocument(
+            databaseId = DbConstants.DATABASE_NAME,
+            collectionId = DbConstants.MATCHES_COLLECTION,
+            documentId = match.id,
+            data = match.toMatchDTO(),
+            nestedType = MatchDTO::class
+        ).data.toMatch(match.id)
+    }, saveCall = { updatedMatch ->
+        mvpDatabase.getMatchDao.upsertMatch(updatedMatch)
+    }, onReturn = { })
 
-    override fun getMatchesOfTournamentFlow(tournamentId: String): Flow<Result<List<MatchWithRelations>>> {
-        val localMatchesFlow = mvpDatabase.getMatchDao.getMatchesFlowOfTournament(tournamentId)
-            .map { Result.success(it) }
+    override fun getMatchesOfTournamentFlow(tournamentId: String): Flow<Result<List<MatchWithRelations>>> =
+        callbackFlow {
+            val localJob = launch {
+                mvpDatabase.getMatchDao.getMatchesFlowOfTournament(tournamentId)
+                    .collect { trySend(Result.success(it)) }
+            }
 
-        scope.launch {
-            multiResponse(getRemoteData = {
-                database.listDocuments(
-                    DbConstants.DATABASE_NAME, DbConstants.MATCHES_COLLECTION, queries = listOf(
-                        Query.equal(DbConstants.TOURNAMENT_ATTRIBUTE, tournamentId),
-                        Query.limit(200)
-                    ), nestedType = MatchDTO::class
-                ).documents.map { dtoDoc ->
-                    dtoDoc.convert { it.toMatch(dtoDoc.id) }.data
+            val remoteJob = launch {
+                multiResponse(getRemoteData = {
+                    database.listDocuments(
+                        DbConstants.DATABASE_NAME,
+                        DbConstants.MATCHES_COLLECTION,
+                        queries = listOf(
+                            Query.equal(DbConstants.TOURNAMENT_ATTRIBUTE, tournamentId),
+                            Query.limit(200)
+                        ),
+                        nestedType = MatchDTO::class
+                    ).documents.map { dtoDoc ->
+                        dtoDoc.convert { it.toMatch(dtoDoc.id) }.data
+                    }
+                },
+                    getLocalData = {
+                        mvpDatabase.getMatchDao.getMatchesOfTournament(tournamentId)
+                    },
+                    saveData = { matches ->
+                        mvpDatabase.getMatchDao.upsertMatches(matches)
+                    },
+                    deleteData = { mvpDatabase.getMatchDao.deleteMatchesById(it) }).onFailure { error ->
+                    trySend(Result.failure(error))
                 }
-            }, getLocalData = {
-                mvpDatabase.getMatchDao.getMatchesOfTournament(tournamentId)
-            }, saveData = { matches ->
-                mvpDatabase.getMatchDao.upsertMatches(matches)
-            }, deleteData = { mvpDatabase.getMatchDao.deleteMatchesById(it) })
-        }
+            }
 
-        return localMatchesFlow
-    }
+            awaitClose {
+                localJob.cancel()
+                remoteJob.cancel()
+            }
+        }
 
     override suspend fun updateMatchFinished(match: MatchMVP, time: Instant): Result<Unit> {
         val updatedMatch = match.copy(end = time)
@@ -155,9 +183,8 @@ class MatchRepository(
         return Result.success(Unit)
     }
 
-    override suspend fun unsubscribeFromRealtime(): Result<Unit> = 
+    override suspend fun unsubscribeFromRealtime(): Result<Unit> =
         runCatching { matchSubscription?.close() }
 
-    override fun setIgnoreMatch(match: MatchMVP?) =
-        runCatching{ _ignoreMatch.value = match }
+    override fun setIgnoreMatch(match: MatchMVP?) = runCatching { _ignoreMatch.value = match }
 }

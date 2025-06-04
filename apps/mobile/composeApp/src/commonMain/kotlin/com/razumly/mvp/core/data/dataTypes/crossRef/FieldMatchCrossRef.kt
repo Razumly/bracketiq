@@ -13,13 +13,13 @@ import com.razumly.mvp.core.data.dataTypes.MatchMVP
         ForeignKey(
             entity = MatchMVP::class,
             parentColumns = ["id"],
-            childColumns = ["fieldId"],
+            childColumns = ["matchId"],
             onDelete = ForeignKey.CASCADE
         ),
         ForeignKey(
             entity = Field::class,
             parentColumns = ["id"],
-            childColumns = ["matchId"],
+            childColumns = ["fieldId"],
             onDelete = ForeignKey.CASCADE
         )
     ],

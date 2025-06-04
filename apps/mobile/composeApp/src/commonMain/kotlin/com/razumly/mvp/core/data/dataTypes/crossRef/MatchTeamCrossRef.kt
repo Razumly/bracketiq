@@ -3,8 +3,8 @@ package com.razumly.mvp.core.data.dataTypes.crossRef
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
-import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.dataTypes.Team
 
 
 @Entity(
@@ -14,13 +14,13 @@ import com.razumly.mvp.core.data.dataTypes.MatchMVP
         ForeignKey(
             entity = MatchMVP::class,
             parentColumns = ["id"],
-            childColumns = ["teamId"],
+            childColumns = ["matchId"],
             onDelete = ForeignKey.CASCADE
         ),
         ForeignKey(
-            entity = EventImp::class,
+            entity = Team::class,
             parentColumns = ["id"],
-            childColumns = ["matchId"],
+            childColumns = ["teamId"],
             onDelete = ForeignKey.CASCADE
         )
     ],

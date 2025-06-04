@@ -7,6 +7,7 @@ import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.EventAbsWithRelations
 import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
+import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
@@ -16,6 +17,7 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.Division
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.IEventAbsRepository
+import com.razumly.mvp.core.data.repositories.IFieldRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.eventDetail.data.IMatchRepository
@@ -41,6 +43,7 @@ interface EventDetailComponent : ComponentContext {
     val divisionMatches: StateFlow<Map<String, MatchWithRelations>>
     val divisionTeams: StateFlow<Map<String, TeamWithPlayers>>
     val selectedDivision: StateFlow<Division?>
+    val divisionFields: StateFlow<List<FieldWithMatches>>
     val isBracketView: StateFlow<Boolean>
     val rounds: StateFlow<List<List<MatchWithRelations?>>>
     val losersBracket: StateFlow<Boolean>
@@ -91,6 +94,7 @@ fun EventAbsWithRelations.toEventWithFullRelations(
 class DefaultEventDetailComponent(
     componentContext: ComponentContext,
     userRepository: IUserRepository,
+    fieldRepository: IFieldRepository,
     event: EventAbs,
     onBack: () -> Unit,
     private val eventAbsRepository: IEventAbsRepository,
@@ -138,19 +142,20 @@ class DefaultEventDetailComponent(
         combine(matchRepository.getMatchesOfTournamentFlow(eventWithPlayers.event.id)
             .map { result ->
                 result.getOrElse {
-                    _errorState.value = "Failed to load matches: ${it.message}"; emptyList()
+                    _errorState.value = "Error loading matches: ${it.message}"; emptyList()
                 }
             }, when (eventWithPlayers) {
-            is TournamentWithRelations -> teamRepository.getTeamsOfTournamentFlow(
-                eventWithPlayers.event.id
-            )
+                is TournamentWithRelations -> teamRepository.getTeamsOfTournamentFlow(
+                    eventWithPlayers.event.id
+                )
 
-            is EventWithRelations -> teamRepository.getTeamsOfEventFlow(eventWithPlayers.event.id)
-        }.map { result ->
-            result.getOrElse {
-                _errorState.value = "Failed to load teams: ${it.message}"; emptyList()
+                is EventWithRelations -> teamRepository.getTeamsOfEventFlow(eventWithPlayers.event.id)
+            }.map { result ->
+                result.getOrElse {
+                    _errorState.value = "Failed to load teams: ${it.message}"; emptyList()
+                }
             }
-        }) { matches, teams ->
+        ) { matches, teams ->
             eventWithPlayers.toEventWithFullRelations(matches, teams)
         }
     }.stateIn(
@@ -158,6 +163,10 @@ class DefaultEventDetailComponent(
             Tournament(), emptyList(), emptyList(), emptyList()
         )
     )
+
+    override val divisionFields =
+        fieldRepository.getFieldsInTournamentWithMatchesFlow(event.id).map { fields -> fields.filter { it.field.divisions.contains(selectedDivision.value?.name) } }
+            .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     private val _divisionMatches = MutableStateFlow<Map<String, MatchWithRelations>>(emptyMap())
     override val divisionMatches = _divisionMatches.asStateFlow()
@@ -212,8 +221,7 @@ class DefaultEventDetailComponent(
             eventWithRelations.distinctUntilChanged { old, new -> old == new }.filterNotNull()
                 .collect { event ->
                     matchRepository.subscribeToMatches()
-                    _userInTournament.value =
-                        event.players.contains(currentUser) == true
+                    _userInTournament.value = event.players.contains(currentUser) == true
                     if (_userInTournament.value) {
                         _usersTeam.value =
                             event.teams.find { it.team.players.contains(currentUser.id) }
@@ -223,8 +231,8 @@ class DefaultEventDetailComponent(
         }
         scope.launch {
             selectedDivision.collect { _ ->
-                    _selectedDivision.value?.let { selectDivision(it) }
-                }
+                _selectedDivision.value?.let { selectDivision(it) }
+            }
         }
         scope.launch {
             _divisionMatches.collect { generateRounds() }
@@ -273,12 +281,10 @@ class DefaultEventDetailComponent(
 
     override fun leaveEvent() {
         scope.launch {
-            val userInFreeAgents =
-                selectedEvent.value.event.freeAgents.contains(currentUser.id)
-            val userInEvent =
-                (currentUser.eventIds + currentUser.tournamentIds).contains(
-                    selectedEvent.value.event.id
-                )
+            val userInFreeAgents = selectedEvent.value.event.freeAgents.contains(currentUser.id)
+            val userInEvent = (currentUser.eventIds + currentUser.tournamentIds).contains(
+                selectedEvent.value.event.id
+            )
             if (!selectedEvent.value.event.teamSignup || userInFreeAgents || (userInEvent && _usersTeam.value == null)) {
                 eventAbsRepository.removeCurrentUserFromEvent(selectedEvent.value.event)
             } else if (_usersTeam.value != null) {
@@ -296,6 +302,7 @@ class DefaultEventDetailComponent(
     override fun toggleDetails() {
         _showDetails.value = !_showDetails.value
     }
+
     override fun toggleEdit() {
         _editedEvent.value = selectedEvent.value.event
         _isEditing.value = !_isEditing.value
@@ -330,7 +337,7 @@ class DefaultEventDetailComponent(
     }
 
     override fun onTypeSelected(type: EventType) {
-        _editedEvent.value = when(type) {
+        _editedEvent.value = when (type) {
             EventType.TOURNAMENT -> Tournament().updateTournamentFromEvent(_editedEvent.value as EventImp)
             EventType.EVENT -> (_editedEvent.value as Tournament).toEvent()
         }
