@@ -28,6 +28,7 @@
 		058557D8273AAEEB004C7B11 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
 		1E7DB94D2DEF5BC8006E07CF /* NativeDatePicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeDatePicker.swift; sourceTree = "<group>"; };
 		1E7DB9512DEF5D83006E07CF /* IOSNativeViewFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSNativeViewFactory.swift; sourceTree = "<group>"; };
+		1E7DB9532DF0AC89006E07CF /* iosAppRelease.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = iosAppRelease.entitlements; sourceTree = "<group>"; };
 		1EB972752DDE59850009F818 /* EventMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventMap.swift; sourceTree = "<group>"; };
 		1EB972772DE38D750009F818 /* iosApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = iosApp.entitlements; sourceTree = "<group>"; };
 		1EBA84702D27456400059C7F /* location.gpx */ = {isa = PBXFileReference; lastKnownFileType = text; path = location.gpx; sourceTree = "<group>"; };
@@ -100,6 +101,7 @@
 		7555FF7D242A565900829871 /* iosApp */ = {
 			isa = PBXGroup;
 			children = (
+				1E7DB9532DF0AC89006E07CF /* iosAppRelease.entitlements */,
 				1EB972772DE38D750009F818 /* iosApp.entitlements */,
 				1EBA84702D27456400059C7F /* location.gpx */,
 				058557BA273AAA24004C7B11 /* Assets.xcassets */,
@@ -465,7 +467,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				BUNDLE_ID = com.razumly.mvp;
-				CODE_SIGN_ENTITLEMENTS = iosApp/iosApp.entitlements;
+				CODE_SIGN_ENTITLEMENTS = iosApp/iosAppRelease.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_ASSET_PATHS = "\"iosApp/Preview Content\"";

@@ -87,7 +87,6 @@ fun EventAbsWithRelations.toEventWithFullRelations(
     event = this.event, players = this.players, matches = matches, teams = teams
 )
 
-
 @OptIn(ExperimentalCoroutinesApi::class)
 class DefaultEventDetailComponent(
     componentContext: ComponentContext,

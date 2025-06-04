@@ -246,7 +246,9 @@ class PushNotificationsRepository(
 
     override suspend fun removeDeviceAsTarget(): Result<Unit> = runCatching {
         if (_pushTarget.value.isBlank()) return Result.failure(Exception("No push target found"))
-        account.deletePushTarget(_pushTarget.value)
+        runCatching {
+            account.deletePushTarget(_pushTarget.value)
+        }
         userDataSource.savePushTarget("")
     }
 }

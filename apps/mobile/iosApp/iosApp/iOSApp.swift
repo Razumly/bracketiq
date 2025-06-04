@@ -28,8 +28,15 @@ class AppDelegate: NSObject, UIApplicationDelegate {
             notificationSoundName: nil
           )
       )
-      
-    return true
+      UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
+          if granted {
+              DispatchQueue.main.async {
+                  application.registerForRemoteNotifications()
+              }
+          }
+      }
+
+      return true
   }
 
   func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {

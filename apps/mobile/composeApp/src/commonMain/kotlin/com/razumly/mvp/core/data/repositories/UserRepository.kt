@@ -133,6 +133,10 @@ class UserRepository(
             mvpDatabase.getUserDataDao.upsertUserData(user)
             currentUserDataSource.saveUserId(user.id)
 
+            if (_pushToken.value.isNotBlank() && _pushTarget.value.isBlank()) {
+                pushNotificationsRepository.addDeviceAsTarget()
+            }
+
             val fresh = mvpDatabase.getUserDataDao.getUserDataById(user.id)
             if (fresh == null) {
                 _currentUser.value = Result.failure(Exception("No User"))
