@@ -9,6 +9,7 @@ import com.razumly.mvp.eventMap.MapComponent
 import dev.icerock.moko.geo.LatLng
 import kotlinx.cinterop.CValue
 import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.datetime.Instant
 import platform.CoreGraphics.CGPoint
 import platform.CoreGraphics.CGPointMake
 import platform.UIKit.UIViewController
@@ -36,5 +37,13 @@ interface NativeViewFactory {
         focusedEvent: EventAbs?,
         revealCenterX: Double,
         revealCenterY: Double
+    )
+
+    fun createNativePlatformDatePicker(
+        initialDate: Instant,
+        minDate: Instant,
+        maxDate: Instant,
+        onDateSelected: (Instant?) -> Unit,
+        onDismissRequest: () -> Unit
     )
 }

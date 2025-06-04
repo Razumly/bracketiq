@@ -68,7 +68,6 @@ import com.razumly.mvp.core.presentation.util.teamSizeFormat
 import com.razumly.mvp.core.presentation.util.toDivisionCase
 import com.razumly.mvp.core.presentation.util.toTitleCase
 import com.razumly.mvp.eventDetail.EditDetails
-import com.razumly.mvp.eventDetail.composables.DateTimePickerDialog
 import com.razumly.mvp.eventDetail.composables.SelectEventImage
 import com.razumly.mvp.eventMap.EventMap
 import com.razumly.mvp.eventMap.MapComponent
@@ -82,6 +81,7 @@ import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.materials.CupertinoMaterials
 import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
 import dev.icerock.moko.geo.LatLng
+import kotlinx.datetime.Clock
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.format
 import kotlinx.datetime.toLocalDateTime
@@ -253,23 +253,27 @@ fun EventDetails(
                         Spacer(Modifier.height(32.dp))
                     }
                 }
-
-                if (showStartPicker) {
-                    DateTimePickerDialog(onDateTimeSelected = { selectedInstant ->
-                        onEditEvent { copy(start = selectedInstant) }
-                        showStartPicker = false
-                    }, onDismissRequest = { showStartPicker = false })
-                }
-
-                // Similarly for the end date/time.
-                if (showEndPicker) {
-                    DateTimePickerDialog(onDateTimeSelected = { selectedInstant ->
-                        onEditEvent { copy(end = selectedInstant) }
-                        showEndPicker = false
-                    }, onDismissRequest = { showEndPicker = false })
-                }
             }
         }
+
+        PlatformDateTimePicker(
+            onDateSelected = { selectedInstant ->
+                onEditEvent { copy(start = selectedInstant ?: Clock.System.now()) }
+                showStartPicker = false
+            },
+            onDismissRequest = { showStartPicker = false },
+            showPicker = showStartPicker,
+        )
+
+        PlatformDateTimePicker(
+            onDateSelected = { selectedInstant ->
+                onEditEvent { copy(end = selectedInstant ?: Clock.System.now()) }
+                showEndPicker = false
+            },
+            onDismissRequest = { showEndPicker = false },
+            showPicker = showEndPicker,
+        )
+
         EventMap(
             component = mapComponent,
             onEventSelected = {

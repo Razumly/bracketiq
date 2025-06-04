@@ -11,6 +11,8 @@
 		058557D9273AAEEB004C7B11 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 058557D8273AAEEB004C7B11 /* Preview Assets.xcassets */; };
 		1E0CF9B12DD5601E00A89255 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1E0CF9B02DD5601E00A89255 /* FirebaseCore */; };
 		1E0CF9B32DD5601E00A89255 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = 1E0CF9B22DD5601E00A89255 /* FirebaseMessaging */; };
+		1E7DB94E2DEF5BC8006E07CF /* NativeDatePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E7DB94D2DEF5BC8006E07CF /* NativeDatePicker.swift */; };
+		1E7DB9522DEF5D83006E07CF /* IOSNativeViewFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E7DB9512DEF5D83006E07CF /* IOSNativeViewFactory.swift */; };
 		1EB972762DDE59850009F818 /* EventMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EB972752DDE59850009F818 /* EventMap.swift */; };
 		1EBA84712D27457000059C7F /* location.gpx in Resources */ = {isa = PBXBuildFile; fileRef = 1EBA84702D27456400059C7F /* location.gpx */; };
 		1ECBBF622DD6BBAB0048A444 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 1ECBBF612DD6BBAB0048A444 /* GoogleService-Info.plist */; };
@@ -24,6 +26,8 @@
 /* Begin PBXFileReference section */
 		058557BA273AAA24004C7B11 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		058557D8273AAEEB004C7B11 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
+		1E7DB94D2DEF5BC8006E07CF /* NativeDatePicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeDatePicker.swift; sourceTree = "<group>"; };
+		1E7DB9512DEF5D83006E07CF /* IOSNativeViewFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSNativeViewFactory.swift; sourceTree = "<group>"; };
 		1EB972752DDE59850009F818 /* EventMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventMap.swift; sourceTree = "<group>"; };
 		1EB972772DE38D750009F818 /* iosApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = iosApp.entitlements; sourceTree = "<group>"; };
 		1EBA84702D27456400059C7F /* location.gpx */ = {isa = PBXFileReference; lastKnownFileType = text; path = location.gpx; sourceTree = "<group>"; };
@@ -105,6 +109,8 @@
 				058557D7273AAEEB004C7B11 /* Preview Content */,
 				1ECBBF6A2DD8409D0048A444 /* Secrets.plist */,
 				1EB972752DDE59850009F818 /* EventMap.swift */,
+				1E7DB9512DEF5D83006E07CF /* IOSNativeViewFactory.swift */,
+				1E7DB94D2DEF5BC8006E07CF /* NativeDatePicker.swift */,
 			);
 			path = iosApp;
 			sourceTree = "<group>";
@@ -271,6 +277,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1E7DB9522DEF5D83006E07CF /* IOSNativeViewFactory.swift in Sources */,
+				1E7DB94E2DEF5BC8006E07CF /* NativeDatePicker.swift in Sources */,
 				1EB972762DDE59850009F818 /* EventMap.swift in Sources */,
 				2152FB042600AC8F00CF470E /* iOSApp.swift in Sources */,
 				7555FF83242A565900829871 /* ContentView.swift in Sources */,

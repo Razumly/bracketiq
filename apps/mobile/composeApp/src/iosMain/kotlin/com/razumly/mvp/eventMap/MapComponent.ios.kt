@@ -6,10 +6,6 @@ import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.repositories.IEventAbsRepository
 import com.razumly.mvp.core.util.getBounds
-import com.razumly.mvp.core.util.getCurrentLocation
-import com.razumly.mvp.eventCreate.DefaultCreateEventComponent
-import com.razumly.mvp.eventCreate.DefaultCreateEventComponent.Cleanup
-import com.razumly.mvp.eventCreate.DefaultCreateEventComponent.Companion
 import dev.icerock.moko.geo.LatLng
 import dev.icerock.moko.geo.LocationTracker
 import io.github.aakira.napier.Napier

@@ -105,7 +105,7 @@ kotlin {
                 api(libs.napier)
                 api(libs.permissions)
                 api(libs.geo)
-                api("io.github.camka14.appwrite:sdk-for-kmp:0.2.0")
+                api("io.github.camka14.appwrite:sdk-for-kmp:v0.2.1")
             }
         }
 

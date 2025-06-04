@@ -1,6 +1,7 @@
 package com.razumly.mvp.eventDetail
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Arrangement
@@ -15,6 +16,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -174,24 +176,26 @@ fun EditDetails(
     }
     EditCardSection(hazeState) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(value = event.start.toLocalDateTime(TimeZone.currentSystemDefault())
-                .format(
-                    dateTimeFormat
-                ),
+            OutlinedTextField(
+                value = event.start.toLocalDateTime(TimeZone.currentSystemDefault())
+                    .format(dateTimeFormat),
                 onValueChange = {},
                 label = { Text("Start Date & Time") },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable(onClick = onShowStartPicker),
                 readOnly = true,
-                interactionSource = remember { MutableInteractionSource() }.also { interactionSource ->
-                    LaunchedEffect(interactionSource) {
-                        interactionSource.interactions.collect {
-                            if (it is PressInteraction.Release) {
-                                onShowStartPicker()
-                            }
-                        }
-                    }
-                },
-                singleLine = true
+                singleLine = true,
+                enabled = false,
+                colors = OutlinedTextFieldDefaults.colors(
+                    disabledContainerColor = OutlinedTextFieldDefaults.colors().focusedContainerColor,
+                    disabledTextColor = OutlinedTextFieldDefaults.colors().focusedTextColor,
+                    disabledLabelColor = OutlinedTextFieldDefaults.colors().focusedLabelColor,
+                    disabledLeadingIconColor = OutlinedTextFieldDefaults.colors().focusedLeadingIconColor,
+                    disabledTrailingIconColor = OutlinedTextFieldDefaults.colors().focusedTrailingIconColor,
+                    disabledPlaceholderColor = OutlinedTextFieldDefaults.colors().focusedPlaceholderColor,
+                    disabledBorderColor = OutlinedTextFieldDefaults.colors().unfocusedIndicatorColor,
+                )
             )
 
             OutlinedTextField(value = event.end.toLocalDateTime(TimeZone.currentSystemDefault())
@@ -201,17 +205,19 @@ fun EditDetails(
                 onValueChange = { },
                 label = { Text("End Date & Time") },
                 readOnly = true,
-                modifier = Modifier.weight(1f),
-                interactionSource = remember { MutableInteractionSource() }.also { interactionSource ->
-                    LaunchedEffect(interactionSource) {
-                        interactionSource.interactions.collect {
-                            if (it is PressInteraction.Release) {
-                                onShowEndPicker()
-                            }
-                        }
-                    }
-                },
-                singleLine = true
+                modifier = Modifier.weight(1f)
+                    .clickable(onClick = onShowEndPicker),
+                singleLine = true,
+                enabled = false,
+                colors = OutlinedTextFieldDefaults.colors(
+                    disabledContainerColor = OutlinedTextFieldDefaults.colors().focusedContainerColor,
+                    disabledTextColor = OutlinedTextFieldDefaults.colors().focusedTextColor,
+                    disabledLabelColor = OutlinedTextFieldDefaults.colors().focusedLabelColor,
+                    disabledLeadingIconColor = OutlinedTextFieldDefaults.colors().focusedLeadingIconColor,
+                    disabledTrailingIconColor = OutlinedTextFieldDefaults.colors().focusedTrailingIconColor,
+                    disabledPlaceholderColor = OutlinedTextFieldDefaults.colors().focusedPlaceholderColor,
+                    disabledBorderColor = OutlinedTextFieldDefaults.colors().unfocusedIndicatorColor,
+                )
             )
         }
     }

@@ -297,6 +297,7 @@ class DefaultEventDetailComponent(
     }
     override fun toggleEdit() {
         _editedEvent.value = selectedEvent.value.event
+        _isEditing.value = !_isEditing.value
     }
 
     override fun editEventField(update: EventImp.() -> EventImp) {
