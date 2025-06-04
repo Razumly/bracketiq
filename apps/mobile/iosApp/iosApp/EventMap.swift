@@ -212,19 +212,24 @@ struct GoogleMapView: UIViewRepresentable {
     
     func updateUIView(_ mapView: GMSMapView, context: Context) {
         // 1) animate to newly focusedEvent or focusedLocation
+        
+        mapView.clear()
         if let fe = focusedEvent, context.coordinator.lastEventId != fe.id {
             let pos = CLLocationCoordinate2D(latitude: fe.lat, longitude: fe.long)
             mapView.animate(to: cameraPosition(for: pos))
             context.coordinator.lastEventId = fe.id
+            let coord = CLLocationCoordinate2D(latitude: fe.lat, longitude: fe.long)
+            let m = GMSMarker(position: coord)
+            m.title = fe.name
+            m.snippet = "\(fe.fieldType) – $\(fe.price)"
+            m.userData = fe
+            m.map = mapView
         } else if let fc = focusedLocation,
                   context.coordinator.lastFocus ?? (0.0, 0.0) != (fc.latitude, fc.longitude) {
             let pos = CLLocationCoordinate2D(latitude: fc.latitude, longitude: fc.longitude)
             mapView.animate(to: cameraPosition(for: pos))
             context.coordinator.lastFocus = (fc.latitude, fc.longitude)
         }
-        
-        // 2) clear & re-draw markers
-        mapView.clear()
         if !canClickPOI {
             for event in events {
                 let coord = CLLocationCoordinate2D(latitude: event.lat, longitude: event.long)

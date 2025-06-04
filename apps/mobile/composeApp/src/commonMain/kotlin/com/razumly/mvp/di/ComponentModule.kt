@@ -60,6 +60,7 @@ val componentModule = module {
                   event: EventAbs,
                   onMatchSelected: (MatchWithRelations, Tournament) -> Unit,
                   onNavigateToTeamSettings: (freeAgents: List<String>, event: EventAbs?) -> Unit,
+                  onBack: () -> Unit
               ) ->
         DefaultEventDetailComponent(
             componentContext = componentContext,
@@ -70,6 +71,7 @@ val componentModule = module {
             matchRepository = get(),
             teamRepository = get(),
             onNavigateToTeamSettings = onNavigateToTeamSettings,
+            onBack = onBack
         )
     }
 

@@ -153,7 +153,8 @@ class DefaultHomeComponent(
                             componentContext,
                             config.event,
                             ::onMatchSelected,
-                            ::onNavigateToTeamSettings
+                            ::onNavigateToTeamSettings,
+                            ::onBack,
                         )
                     }.value,
                     _koin.inject<MapComponent> {

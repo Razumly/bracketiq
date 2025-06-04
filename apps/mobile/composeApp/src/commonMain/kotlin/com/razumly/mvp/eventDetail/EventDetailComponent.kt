@@ -93,6 +93,7 @@ class DefaultEventDetailComponent(
     componentContext: ComponentContext,
     userRepository: IUserRepository,
     event: EventAbs,
+    onBack: () -> Unit,
     private val eventAbsRepository: IEventAbsRepository,
     private val matchRepository: IMatchRepository,
     private val teamRepository: ITeamRepository,
@@ -118,9 +119,10 @@ class DefaultEventDetailComponent(
             _isEditing.value = false
         } else if (showDetails.value) {
             _showDetails.value = false
+        } else {
+            onBack()
         }
     }
-
 
     override val selectedEvent: StateFlow<EventAbsWithRelations> =
         eventAbsRepository.getEventWithRelationsFlow(event).map { result ->

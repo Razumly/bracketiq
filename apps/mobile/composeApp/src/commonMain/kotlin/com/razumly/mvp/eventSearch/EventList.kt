@@ -65,6 +65,7 @@ fun EventList(
                     navPadding = PaddingValues(bottom = 16.dp),
                     onMapClick = { offset ->
                         onMapClick(offset, event)
+
                     },
                 )
             }

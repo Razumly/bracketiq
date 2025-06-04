@@ -2,6 +2,7 @@ package com.razumly.mvp.eventMap
 
 import android.content.Context
 import com.arkivanov.decompose.ComponentContext
+import com.arkivanov.essenty.backhandler.BackCallback
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.LatLngBounds
 import com.google.android.libraries.places.api.Places
@@ -52,6 +53,9 @@ actual class MapComponent(
 
     private val _currentRadiusMeters = MutableStateFlow(50.0)
 
+    private val _showMap = MutableStateFlow(false)
+    val showMap = _showMap.asStateFlow()
+
     private val placesClient: PlacesClient by lazy {
         if (!Places.isInitialized()) {
             Places.initializeWithNewPlacesApiEnabled(context, BuildConfig.MAPS_API_KEY)
@@ -59,7 +63,18 @@ actual class MapComponent(
         Places.createClient(context)
     }
 
+    private val _backCallback = BackCallback {
+        _showMap.value = false
+    }
+
     init {
+        backHandler.register(_backCallback)
+        _backCallback.priority = BackCallback.PRIORITY_MAX
+        scope.launch {
+            _showMap.collect {
+                _backCallback.isEnabled = it
+            }
+        }
         scope.launch {
             _currentLocation.value = locationTracker.getCurrentLocation()
         }
@@ -75,6 +90,10 @@ actual class MapComponent(
 
     actual fun setEvents(events: List<EventAbs>) {
         _events.value = events
+    }
+
+    actual fun toggleMap() {
+        _showMap.value = !_showMap.value
     }
 
     suspend fun getPlace(placeId: String): MVPPlace =

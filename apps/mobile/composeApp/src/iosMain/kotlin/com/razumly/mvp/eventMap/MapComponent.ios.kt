@@ -61,6 +61,9 @@ actual class MapComponent(
 
     private val _currentRadiusMeters = MutableStateFlow(50.0)
 
+    private val _showMap = MutableStateFlow(false)
+    val showMap = _showMap.asStateFlow()
+
     private val httpClient = HttpClient(Darwin) {
         install(ContentNegotiation) {
             json(io.appwrite.extensions.json)
@@ -255,6 +258,10 @@ actual class MapComponent(
 
     companion object {
         const val CLEANUP_KEY = "Cleanup_Map"
+    }
+
+    actual fun toggleMap() {
+        _showMap.value = !_showMap.value
     }
 }
 

@@ -3,7 +3,6 @@ package com.razumly.mvp.eventMap
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.DropdownMenuItem
@@ -54,11 +53,11 @@ actual fun EventMap(
     modifier: Modifier,
     focusedLocation: dev.icerock.moko.geo.LatLng?,
     focusedEvent: EventAbs?,
-    showMap: Boolean,
     revealCenter: Offset
 ) {
     val selectedPlace = remember { mutableStateOf<PointOfInterest?>(null) }
     val scope = rememberCoroutineScope()
+    val showMap by component.showMap.collectAsState()
     var places by remember { mutableStateOf<List<Place>>(listOf()) }
     val events by component.events.collectAsState()
     val defaultZoom = 12f

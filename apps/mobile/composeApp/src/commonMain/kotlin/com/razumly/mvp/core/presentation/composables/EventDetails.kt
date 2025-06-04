@@ -115,7 +115,6 @@ fun EventDetails(
     var showStartPicker by remember { mutableStateOf(false) }
     var showEndPicker by remember { mutableStateOf(false) }
     var revealCenter by remember { mutableStateOf(Offset.Zero) }
-    var showMapCard by remember { mutableStateOf(false) }
     var showImageSelector by rememberSaveable { mutableStateOf(false) }
     var selectedPlace by remember { mutableStateOf<MVPPlace?>(null) }
     val locationTracker by mapComponent.locationTracker.getLocationsFlow().collectAsState(null)
@@ -213,7 +212,7 @@ fun EventDetails(
 
                         Button(
                             onClick = {
-                                showMapCard = true
+                                mapComponent.toggleMap()
                             },
                             modifier = Modifier.align(Alignment.CenterHorizontally)
                                 .onGloballyPositioned {
@@ -294,7 +293,6 @@ fun EventDetails(
                 )
             } else LatLng(locationTracker?.latitude ?: 0.0, locationTracker?.longitude ?: 0.0),
             focusedEvent = if (editEvent.location.isNotBlank()) editEvent else event,
-            showMap = showMapCard,
             revealCenter = revealCenter
         )
 
@@ -313,7 +311,7 @@ fun EventDetails(
                             enabled = editEvent.imageUrl.isNotEmpty(),
                             onClick = {
                                 showImageSelector = false
-                                showMapCard = false
+                                mapComponent.toggleMap()
                                 selectedPlace = null
                             }
                         ) {

@@ -126,6 +126,7 @@ fun EventSearchScreen(
                     Button(onClick = {
                         revealCenter = fabOffset
                         component.onMapClick()
+                        mapComponent.toggleMap()
                     },
                         modifier = Modifier.padding(offsetNavPadding)
                             .onGloballyPositioned { layoutCoordinates ->
@@ -158,6 +159,7 @@ fun EventSearchScreen(
                     { offset, event ->
                         revealCenter = offset
                         component.onMapClick(event)
+                        mapComponent.toggleMap()
                     },
                     { event ->
                         component.viewEvent(event)
@@ -174,7 +176,6 @@ fun EventSearchScreen(
                         LatLng(it.lat, it.long)
                     } ?: currentLocation,
                     focusedEvent = null,
-                    showMap = showMapCard,
                     revealCenter = revealCenter
                 )
             }

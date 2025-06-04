@@ -4,6 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -22,10 +24,10 @@ actual fun EventMap(
     modifier: Modifier,
     focusedLocation: LatLng?,
     focusedEvent: EventAbs?,
-    showMap: Boolean,
     revealCenter: Offset
 ) {
     val factory = LocalNativeViewFactory.current
+    val showMap by component.showMap.collectAsState()
     LaunchedEffect(showMap) {
         if (showMap) {
             component.showMap()

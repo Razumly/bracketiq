@@ -1,6 +1,5 @@
 package com.razumly.mvp.eventMap
 
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -17,6 +16,5 @@ expect fun EventMap(
     modifier: Modifier = Modifier,
     focusedLocation: LatLng?,
     focusedEvent: EventAbs?,
-    showMap: Boolean,
     revealCenter: Offset
 )
