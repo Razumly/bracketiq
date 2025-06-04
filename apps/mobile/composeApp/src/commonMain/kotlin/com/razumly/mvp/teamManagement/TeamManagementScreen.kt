@@ -10,10 +10,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -27,6 +27,7 @@ import androidx.compose.ui.window.Dialog
 import com.razumly.mvp.core.presentation.composables.PlatformBackButton
 import com.razumly.mvp.core.presentation.composables.TeamCard
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TeamManagementScreen(component: TeamManagementComponent) {
     val currentTeams by component.currentTeams.collectAsState()
@@ -42,7 +43,16 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
     val teamInvites by component.teamInvites.collectAsState()
     val deleteEnabled by component.enableDeleteTeam.collectAsState()
 
-    Scaffold { paddingValues ->
+    Scaffold(
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text("Team Management") },
+                navigationIcon = { PlatformBackButton(
+                    onBack = { component.onBack() },
+                ) },
+            )
+        }
+    ) { paddingValues ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(paddingValues),
             state = lazyListState,

@@ -1,6 +1,5 @@
 package com.razumly.mvp.eventDetail.composables
 
-import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
@@ -27,6 +26,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,13 +34,15 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.presentation.util.getScreenWidth
+import com.razumly.mvp.core.presentation.util.isScrollingUp
 import com.razumly.mvp.core.util.ceilDiv
 import com.razumly.mvp.eventDetail.LocalTournamentComponent
 import com.razumly.mvp.home.LocalNavBarPadding
+import kotlinx.coroutines.flow.distinctUntilChanged
 
-@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 fun TournamentBracketView(
+    showFab: (Boolean) -> Unit,
     onMatchClick: (MatchWithRelations) -> Unit = {},
 ) {
     val component = LocalTournamentComponent.current
@@ -61,6 +63,26 @@ fun TournamentBracketView(
     val width = getScreenWidth() / 1.5
     val maxHeightIndex = remember { mutableIntStateOf(0) }
     val navBarPadding = LocalNavBarPadding.current.calculateBottomPadding()
+    var prevColumnScroll by remember { mutableStateOf(columnScrollState.value) }
+    var isScrollingUp by remember { mutableStateOf(true) }
+    val isScrollingLeft by lazyRowState.isScrollingUp()
+
+    LaunchedEffect(columnScrollState) {
+        snapshotFlow { columnScrollState.value }
+            .distinctUntilChanged()
+            .collect { currentScroll ->
+                isScrollingUp = currentScroll <= prevColumnScroll
+                prevColumnScroll = currentScroll
+            }
+    }
+
+    LaunchedEffect(isScrollingUp) {
+        showFab(isScrollingUp)
+    }
+
+    LaunchedEffect(isScrollingLeft) {
+        showFab(isScrollingLeft)
+    }
 
     LaunchedEffect(lazyRowState, roundsList, losersBracket) {
         snapshotFlow { lazyRowState.firstVisibleItemIndex }.collect { index ->

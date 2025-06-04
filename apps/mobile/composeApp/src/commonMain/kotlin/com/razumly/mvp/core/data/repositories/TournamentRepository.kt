@@ -15,7 +15,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -42,19 +44,33 @@ class TournamentRepository(
 ) : ITournamentRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    override fun getTournamentWithRelationsFlow(tournamentId: String): Flow<Result<TournamentWithRelations>> {
-        val localFlow = mvpDatabase.getTournamentDao.getTournamentWithRelationsFlow(tournamentId)
-            .map { Result.success(it) }
-        scope.launch {
-            getTournament(tournamentId).onSuccess {
+    override fun getTournamentWithRelationsFlow(tournamentId: String): Flow<Result<TournamentWithRelations>> = callbackFlow {
+        // Emit local data
+        val localJob = launch {
+            mvpDatabase.getTournamentDao.getTournamentWithRelationsFlow(tournamentId)
+                .collect { tournament ->
+                    trySend(Result.success(tournament))
+                }
+        }
+
+        // Fetch remote data and emit failure if needed
+        val remoteJob = launch {
+            val result = getTournament(tournamentId)
+            result.onSuccess {
                 fieldRepository.getFieldsInTournament(tournamentId)
                 userRepository.getUsersOfTournament(tournamentId)
                 userRepository.getUsers(listOf(it.hostId))
                 teamRepository.getTeamsOfTournament(tournamentId)
                 matchRepository.getMatchesOfTournament(tournamentId)
+            }.onFailure { error ->
+                trySend(Result.failure(error))
             }
         }
-        return localFlow
+
+        awaitClose {
+            localJob.cancel()
+            remoteJob.cancel()
+        }
     }
 
     override fun getTournamentFlow(tournamentId: String): Flow<Result<Tournament>> =

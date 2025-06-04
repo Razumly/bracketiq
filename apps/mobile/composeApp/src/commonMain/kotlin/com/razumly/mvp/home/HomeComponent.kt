@@ -206,7 +206,8 @@ class DefaultHomeComponent(
                     parametersOf(
                         componentContext,
                         config.freeAgents,
-                        config.event
+                        config.event,
+                        ::onBack
                     )
                 }.value
             )

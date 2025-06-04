@@ -2,7 +2,11 @@ package com.razumly.mvp.eventDetail
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -52,8 +56,7 @@ val LocalTournamentComponent =
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EventDetailScreen(
-    component: EventDetailComponent,
-    mapComponent: MapComponent
+    component: EventDetailComponent, mapComponent: MapComponent
 ) {
     val isBracketView by component.isBracketView.collectAsState()
     var showDropdownMenu by remember { mutableStateOf(false) }
@@ -67,6 +70,7 @@ fun EventDetailScreen(
     val isHost by component.isHost.collectAsState()
     val isEditing by component.isEditing.collectAsState()
     val editedEvent by component.editedEvent.collectAsState()
+    var showFab by remember { mutableStateOf(false) }
 
     val isUserInEvent =
         (currentUser.eventIds + currentUser.tournamentIds).contains(selectedEvent.event.id) || (selectedEvent.event.waitList + selectedEvent.event.freeAgents).contains(
@@ -79,22 +83,19 @@ fun EventDetailScreen(
     }
 
     CompositionLocalProvider(LocalTournamentComponent provides component) {
-        Scaffold(Modifier.fillMaxSize(),
-            topBar = {
-                CenterAlignedTopAppBar(
-                    title = { Text(selectedEvent.event.name) },
-                    navigationIcon = { PlatformBackButton({ component.backCallback.onBack() }) },
-                )
-            }
-        ) { innerPadding ->
+        Scaffold(Modifier.fillMaxSize(), topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text(selectedEvent.event.name) },
+                navigationIcon = { PlatformBackButton({ component.backCallback.onBack() }) },
+            )
+        }) { innerPadding ->
             Column(
                 Modifier.background(MaterialTheme.colorScheme.background).fillMaxSize()
             ) {
                 AnimatedVisibility(
                     !showDetails, enter = expandVertically(), exit = shrinkVertically()
                 ) {
-                    EventDetails(
-                        mapComponent = mapComponent,
+                    EventDetails(mapComponent = mapComponent,
                         eventWithRelations = selectedEvent,
                         editEvent = editedEvent,
                         onFavoriteClick = {},
@@ -107,8 +108,7 @@ fun EventDetailScreen(
                         isNewEvent = false,
                         onEventTypeSelected = { component.onTypeSelected(it) },
                         onAddCurrentUser = {},
-                        onSelectFieldCount = { component.selectFieldCount(it) }
-                    ) { isValid ->
+                        onSelectFieldCount = { component.selectFieldCount(it) }) { isValid ->
                         Column(
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
@@ -172,24 +172,36 @@ fun EventDetailScreen(
                             when (selectedEvent) {
                                 is TournamentWithRelations -> {
                                     if (isBracketView) {
-                                        TournamentBracketView { match ->
+                                        TournamentBracketView(showFab = {
+                                            showFab = it
+                                        }) { match ->
                                             component.matchSelected(match)
                                         }
                                     } else {
-                                        ParticipantsView()
+                                        ParticipantsView(showFab = {
+                                            showFab = it
+                                        })
                                     }
                                 }
 
                                 is EventWithRelations -> {
-                                    ParticipantsView()
+                                    ParticipantsView(showFab = {
+                                        showFab = it
+                                    })
                                 }
                             }
-                            Button(
-                                { component.toggleDetails() },
-                                Modifier.align(Alignment.BottomCenter)
-                                    .padding(LocalNavBarPadding.current).padding(bottom = 64.dp)
+                            androidx.compose.animation.AnimatedVisibility(
+                                visible = showFab,
+                                modifier = Modifier.align(Alignment.BottomCenter)
+                                    .padding(LocalNavBarPadding.current).padding(bottom = 64.dp),
+                                enter = slideInVertically() + fadeIn(),
+                                exit = slideOutVertically() + fadeOut()
                             ) {
-                                Text("Show Details")
+                                Button(
+                                    { component.toggleDetails() },
+                                ) {
+                                    Text("Show Details")
+                                }
                             }
                         }
                     }

@@ -125,13 +125,14 @@ val componentModule = module {
         )
     }
 
-    factory { (componentContext: ComponentContext, freeAgents: List<String>, selectedEvent: EventAbs?) ->
+    factory { (componentContext: ComponentContext, freeAgents: List<String>, selectedEvent: EventAbs?, onBack: () -> Unit) ->
         DefaultTeamManagementComponent(
             componentContext = componentContext,
             teamRepository = get(),
             userRepository = get(),
             freeAgents = freeAgents,
-            selectedEvent = selectedEvent
+            selectedEvent = selectedEvent,
+            onBack = onBack
         )
     }
 

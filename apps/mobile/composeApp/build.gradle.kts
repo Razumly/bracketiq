@@ -3,7 +3,6 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
 import java.io.ByteArrayOutputStream
 
-
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.kotlinCocoapods)
@@ -22,6 +21,8 @@ plugins {
 composeCompiler {
     includeSourceInformation = true
 }
+
+val mvpVersion = "0.1"
 kotlin {
     androidTarget {
         compilerOptions {
@@ -44,7 +45,7 @@ kotlin {
     }
 
     cocoapods {
-        version = "2.0"
+        version = mvpVersion
         summary = "MVP App for pick up Volleyball events"
         homepage = "https://example.com"
         ios.deploymentTarget = "15.3"
@@ -154,7 +155,7 @@ android {
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
         versionCode = 1
-        versionName = "1.0"
+        versionName = mvpVersion
     }
     buildTypes {
         getByName("release") {

@@ -1,7 +1,6 @@
 package com.razumly.mvp.teamManagement
 
 import com.arkivanov.decompose.ComponentContext
-import com.arkivanov.essenty.backhandler.BackCallback
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
@@ -32,6 +31,8 @@ interface TeamManagementComponent {
     val suggestedPlayers: StateFlow<List<UserData>>
     val freeAgentsFiltered: StateFlow<List<UserData>>
     val enableDeleteTeam: StateFlow<Boolean>
+    val onBack: () -> Unit
+
     fun selectTeam(team: TeamWithPlayers?)
     fun createTeam(team: Team)
     fun joinTeam(team: Team)
@@ -47,7 +48,8 @@ class DefaultTeamManagementComponent(
     private val teamRepository: ITeamRepository,
     private val userRepository: IUserRepository,
     private val freeAgents: List<String>,
-    override val selectedEvent: EventAbs?
+    override val selectedEvent: EventAbs?,
+    override val onBack: () -> Unit
 ) : ComponentContext by componentContext, TeamManagementComponent {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
