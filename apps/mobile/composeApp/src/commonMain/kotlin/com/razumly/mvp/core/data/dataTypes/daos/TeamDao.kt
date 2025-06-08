@@ -50,6 +50,18 @@ interface TeamDao {
     @Query("SELECT * FROM Team WHERE id in (:teamIds)")
     suspend fun getTeams(teamIds: List<String>): List<Team>
 
+    @Query("SELECT * FROM Team WHERE players LIKE '%' || :userId || '%'")
+    fun getTeamsForUser(userId: String): List<Team>
+
+    @Query("SELECT * FROM Team WHERE players LIKE '%' || :userId || '%'")
+    fun getTeamsForUserFlow(userId: String): Flow<List<TeamWithPlayers>>
+
+    @Query("SELECT * FROM Team WHERE pending LIKE '%' || :userId || '%'")
+    fun getTeamInvitesForUser(userId: String): List<Team>
+
+    @Query("SELECT * FROM Team WHERE pending LIKE '%' || :userId || '%'")
+    fun getTeamInvitesForUserFlow(userId: String): Flow<List<TeamWithPlayers>>
+
     @Query("DELETE FROM Team WHERE id IN (:ids)")
     suspend fun deleteTeamsByIds(ids: List<String>)
 

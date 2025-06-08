@@ -24,7 +24,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
       
       NotifierManager.shared.initialize(configuration: NotificationPlatformConfigurationIos(
             showPushNotification: true,
-            askNotificationPermissionOnStart: true,
+            askNotificationPermissionOnStart: false,
             notificationSoundName: nil
           )
       )

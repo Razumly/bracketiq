@@ -9,11 +9,9 @@ import androidx.compose.runtime.compositionLocalOf
 import com.arkivanov.decompose.retainedComponent
 import com.mmk.kmpnotifier.extensions.onCreateOrOnNewIntent
 import com.mmk.kmpnotifier.notification.NotifierManager
-import com.mmk.kmpnotifier.permission.permissionUtil
 import com.razumly.mvp.core.presentation.App
 import com.razumly.mvp.core.presentation.MVPTheme
 import com.razumly.mvp.core.presentation.RootComponent
-import org.koin.androidx.compose.KoinAndroidContext
 import org.koin.core.parameter.parametersOf
 import org.koin.mp.KoinPlatform.getKoin
 
@@ -26,8 +24,6 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val permissionUtil by permissionUtil()
-        permissionUtil.askNotificationPermission()
         NotifierManager.onCreateOrOnNewIntent(intent)
         setContent {
             MVPTheme {

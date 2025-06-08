@@ -6,7 +6,6 @@ import com.arkivanov.decompose.router.stack.childStack
 import com.arkivanov.decompose.router.stack.pop
 import com.arkivanov.decompose.router.stack.replaceCurrent
 import com.arkivanov.essenty.backhandler.BackHandler
-import com.arkivanov.essenty.instancekeeper.InstanceKeeper
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.home.DefaultHomeComponent
 import com.razumly.mvp.home.HomeComponent
@@ -17,7 +16,6 @@ import dev.icerock.moko.permissions.DeniedException
 import dev.icerock.moko.permissions.Permission
 import dev.icerock.moko.permissions.PermissionsController
 import io.github.aakira.napier.Napier
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
@@ -57,6 +55,13 @@ class RootComponent(
         scope.launch {
             try {
                 permissionsController.providePermission(Permission.LOCATION)
+            } catch (deniedAlways: DeniedAlwaysException) {
+                // Permission is always denied
+            } catch (denied: DeniedException) {
+                // Permission was denied
+            }
+            try {
+                permissionsController.providePermission(Permission.REMOTE_NOTIFICATION)
             } catch (deniedAlways: DeniedAlwaysException) {
                 // Permission is always denied
             } catch (denied: DeniedException) {

@@ -61,7 +61,7 @@ class DefaultTeamManagementComponent(
     override val friends = _friends.asStateFlow()
 
     override val currentTeams =
-        teamRepository.getTeamsWithPlayersFlow(currentUser.teamIds).map { team ->
+        teamRepository.getTeamsWithPlayersFlow(currentUser.id).map { team ->
             team.getOrElse {
                 _errorState.value = it.message
                 emptyList()
@@ -69,7 +69,7 @@ class DefaultTeamManagementComponent(
         }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     override val teamInvites =
-        teamRepository.getTeamsWithPlayersFlow(currentUser.teamInvites).map { team ->
+        teamRepository.getTeamInvitesWithPlayersFlow(currentUser.id).map { team ->
             team.getOrElse {
                 _errorState.value = it.message
                 emptyList()

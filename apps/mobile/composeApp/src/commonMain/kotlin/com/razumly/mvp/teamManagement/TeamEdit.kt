@@ -3,7 +3,6 @@ package com.razumly.mvp.teamManagement
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -17,8 +16,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonColors
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
@@ -42,6 +39,7 @@ import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.enums.Division
 import com.razumly.mvp.core.presentation.composables.InvitePlayerCard
 import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.SearchPlayerDialog
@@ -64,13 +62,14 @@ fun CreateOrEditTeamDialog(
     isNewTeam: Boolean
 ) {
     var teamName by remember { mutableStateOf(team.team.name ?: "") }
+    var teamDivision by remember { mutableStateOf(team.team.division) }
     var teamSize by remember { mutableStateOf(team.team.teamSize) }
     var showSearchDialog by remember { mutableStateOf(false) }
     var invitedPlayers by remember { mutableStateOf(team.pendingPlayers) }
     var playersInTeam by remember { mutableStateOf(team.players) }
     var showLeaveTeamDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
-    var showEditDetails = isCaptain || isNewTeam
+    val showEditDetails = isCaptain || isNewTeam
 
     Card(
         modifier = Modifier.fillMaxWidth().padding(16.dp),
@@ -100,6 +99,15 @@ fun CreateOrEditTeamDialog(
                 }
             }
 
+            Text("Select Team Division")
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(0, 1, 2, 3, 4, 5).forEach { divisionOrdinal ->
+                    val division = Division.entries.toTypedArray()[divisionOrdinal]
+                    FilterChip(enabled = showEditDetails, selected = division == teamDivision, onClick = {
+                        teamDivision = division
+                    }, label = { Text(division.name) })
+                }
+            }
             Spacer(modifier = Modifier.height(12.dp))
             Text("Players")
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -154,7 +162,8 @@ fun CreateOrEditTeamDialog(
                             team.team.copy(players = playersInTeam.map { it.id },
                                 pending = invitedPlayers.map { it.id },
                                 name = teamName,
-                                teamSize = teamSize
+                                teamSize = teamSize,
+                                division = teamDivision
                             )
                         )
                     }) {

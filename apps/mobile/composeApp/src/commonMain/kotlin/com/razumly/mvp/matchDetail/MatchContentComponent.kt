@@ -158,7 +158,7 @@ class DefaultMatchContentComponent(
     private val _currentUser = userRepository.currentUser.value.getOrThrow()
 
     private val _currentUserTeam =
-                teamRepository.getTeamsWithPlayersFlow(_currentUser.teamIds).map { teamResults ->
+                teamRepository.getTeamsWithPlayersFlow(_currentUser.id).map { teamResults ->
                     teamResults.getOrElse {
                         _errorState.value = it.message
                         emptyList()

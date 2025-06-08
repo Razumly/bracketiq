@@ -101,6 +101,14 @@ class UserRepository(
             currentUserDataSource.getUserId().first().takeIf(String::isNotBlank)
         }.getOrNull()
 
+        val sessionId = runCatching {
+            account.get().id
+        }.getOrNull()
+
+        if (sessionId.isNullOrBlank()) {
+            return
+        }
+
         if (!savedId.isNullOrBlank()) {
             val local = mvpDatabase.getUserDataDao.getUserDataById(savedId)
             if (local == null) {
@@ -108,14 +116,6 @@ class UserRepository(
             } else {
                 _currentUser.value = Result.success(local)
             }
-        }
-
-        val sessionId = runCatching {
-            account.get().id.takeIf(String::isNotBlank)
-        }.getOrNull()
-
-        if (sessionId.isNullOrBlank()) {
-            return
         }
 
         val remoteRes = runCatching {

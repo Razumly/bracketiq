@@ -12,6 +12,8 @@ object DbConstants {
     const val FIELDS_COLLECTION = "fields"
     const val TOURNAMENT_ATTRIBUTE = "tournamentId"
     const val TOURNAMENTS_ATTRIBUTE = "tournamentIds"
+    const val TEAMS_PLAYERS_ATTRIBUTE = "players"
+    const val TEAMS_PENDING_ATTRIBUTE = "pending"
     const val EVENTS_ATTRIBUTE = "eventIds"
     const val LAT_ATTRIBUTE = "lat"
     const val LONG_ATTRIBUTE = "long"

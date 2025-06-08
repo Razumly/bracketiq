@@ -36,7 +36,8 @@ interface ITeamRepository : IMVPRepository {
     suspend fun createTeam(newTeam: Team): Result<Team>
     suspend fun updateTeam(newTeam: Team): Result<Team>
     suspend fun deleteTeam(team: TeamWithPlayers): Result<Unit>
-    fun getTeamsWithPlayersFlow(ids: List<String>): Flow<Result<List<TeamWithPlayers>>>
+    fun getTeamsWithPlayersFlow(id: String): Flow<Result<List<TeamWithPlayers>>>
+    fun getTeamInvitesWithPlayersFlow(id: String): Flow<Result<List<TeamWithPlayers>>>
     fun getTeamWithPlayersFlow(id: String): Flow<Result<TeamWithRelations>>
 }
 
@@ -275,37 +276,59 @@ class TeamRepository(
         mvpDatabase.getTeamDao.deleteTeam(team.team)
     }
 
-    override fun getTeamsWithPlayersFlow(ids: List<String>): Flow<Result<List<TeamWithPlayers>>> {
-        val localTeamsFlow = mvpDatabase.getTeamDao.getTeamsWithPlayersFlowByIds(ids).map {
+    override fun getTeamsWithPlayersFlow(id: String): Flow<Result<List<TeamWithPlayers>>> {
+        val localTeamsFlow = mvpDatabase.getTeamDao.getTeamsForUserFlow(id).map {
             Result.success(it)
         }
 
         scope.launch {
-            multiResponse(getRemoteData = {
-                val teams = database.listDocuments(
-                    DbConstants.DATABASE_NAME,
-                    DbConstants.VOLLEYBALL_TEAMS_COLLECTION,
-                    queries = listOf(
-                        Query.equal("\$id", ids), Query.limit(200)
-                    ),
-                    TeamDTO::class,
-                ).documents.map { dtoDoc ->
-                    dtoDoc.convert { it.toTeam(dtoDoc.id) }.data
-                }
-                teams.forEach { team ->
-                    userRepository.getUsers(team.players)
-                }
-                teams
-            }, getLocalData = {
-                mvpDatabase.getTeamDao.getTeams(ids)
-            }, saveData = { teams ->
-                mvpDatabase.getTeamDao.upsertTeamsWithRelations(teams)
-            }, deleteData = { teamIds ->
-                mvpDatabase.getTeamDao.deleteTeamsByIds(teamIds)
-            })
+            fetchRemoteTeams(
+                query = Query.contains(DbConstants.TEAMS_PLAYERS_ATTRIBUTE, id),
+                getLocalData = { mvpDatabase.getTeamDao.getTeamsForUser(id) }
+            )
         }
 
         return localTeamsFlow
+    }
+
+    override fun getTeamInvitesWithPlayersFlow(id: String): Flow<Result<List<TeamWithPlayers>>> {
+        val localTeamsFlow = mvpDatabase.getTeamDao.getTeamInvitesForUserFlow(id).map {
+            Result.success(it)
+        }
+        scope.launch {
+            fetchRemoteTeams(
+                query = Query.contains(DbConstants.TEAMS_PENDING_ATTRIBUTE, id),
+                getLocalData = { mvpDatabase.getTeamDao.getTeamInvitesForUser(id) }
+            )
+        }
+
+        return localTeamsFlow
+    }
+
+    private suspend fun fetchRemoteTeams(
+        query: String,
+        getLocalData: suspend () -> List<Team>
+    ): Result<List<Team>> {
+        return multiResponse(getRemoteData = {
+            val teams = database.listDocuments(
+                DbConstants.DATABASE_NAME,
+                DbConstants.VOLLEYBALL_TEAMS_COLLECTION,
+                queries = listOf(query),
+                TeamDTO::class,
+            ).documents.map { dtoDoc ->
+                dtoDoc.convert { it.toTeam(dtoDoc.id) }.data
+            }
+            teams.forEach { team ->
+                userRepository.getUsers(team.players)
+            }
+            teams
+        }, getLocalData = {
+            getLocalData()
+        }, saveData = { teams ->
+            mvpDatabase.getTeamDao.upsertTeamsWithRelations(teams)
+        }, deleteData = { teamIds ->
+            mvpDatabase.getTeamDao.deleteTeamsByIds(teamIds)
+        })
     }
 
     override suspend fun getTeam(teamId: String): Result<Team> = singleResponse(

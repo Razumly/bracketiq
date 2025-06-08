@@ -190,7 +190,7 @@ class DefaultEventDetailComponent(
     override val showDetails = _showDetails.asStateFlow()
 
     private val _userTeams =
-        teamRepository.getTeamsWithPlayersFlow(currentUser.teamIds).map { result ->
+        teamRepository.getTeamsWithPlayersFlow(currentUser.id).map { result ->
             result.getOrElse {
                 emptyList()
             }
