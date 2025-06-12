@@ -22,7 +22,8 @@ composeCompiler {
     includeSourceInformation = true
 }
 
-val mvpVersion = "0.2"
+val mvpVersion = "0.3"
+val mvpVersionCode = 3
 kotlin {
     androidTarget {
         compilerOptions {
@@ -154,7 +155,7 @@ android {
         applicationId = "com.razumly.mvp"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
-        versionCode = 2
+        versionCode = mvpVersionCode
         versionName = mvpVersion
     }
     buildTypes {

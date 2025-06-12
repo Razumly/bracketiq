@@ -10,11 +10,7 @@ fun DefaultAuthComponent.oauth2Login(activity: ComponentActivity) {
         _loginState.value = LoginState.Loading
 
         userRepository.oauth2Login(activity).onSuccess {
-            if (_currentUser.value == null) {
-                _loginState.value = LoginState.Error("Invalid email or password")
-            } else {
-                _loginState.value = LoginState.Success
-            }
+            _loginState.value = LoginState.Success
         }.onFailure {
             _loginState.value = LoginState.Error("Failed To Login")
         }

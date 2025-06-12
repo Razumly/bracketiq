@@ -15,8 +15,10 @@ import com.razumly.mvp.core.util.DbConstants
 import com.razumly.mvp.core.util.DbConstants.MATCHES_CHANNEL
 import com.razumly.mvp.core.util.convert
 import io.appwrite.Query
+import io.appwrite.extensions.toJson
 import io.appwrite.models.RealtimeSubscription
 import io.appwrite.services.Databases
+import io.appwrite.services.Functions
 import io.appwrite.services.Realtime
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -28,6 +30,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 
 interface IMatchRepository : IMVPRepository {
@@ -45,7 +48,8 @@ interface IMatchRepository : IMVPRepository {
 class MatchRepository(
     private val database: Databases,
     private val mvpDatabase: MVPDatabase,
-    private val realtime: Realtime
+    private val realtime: Realtime,
+    private val functions: Functions,
 ) : IMatchRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var matchSubscription: RealtimeSubscription? = null
@@ -81,7 +85,13 @@ class MatchRepository(
         ).data.toMatch(match.id)
     }, saveCall = { updatedMatch ->
         mvpDatabase.getMatchDao.upsertMatch(updatedMatch)
-    }, onReturn = { })
+    }, onReturn = {
+        functions.createExecution(
+            functionId = DbConstants.UPDATE_MATCH_FUNCTION,
+            body = UpdateMatchArguments(Clock.System.now(), match.tournamentId, match.id).toJson(),
+            async = false,
+        )
+    })
 
     override fun getMatchesOfTournamentFlow(tournamentId: String): Flow<Result<List<MatchWithRelations>>> =
         callbackFlow {
@@ -188,3 +198,9 @@ class MatchRepository(
 
     override fun setIgnoreMatch(match: MatchMVP?) = runCatching { _ignoreMatch.value = match }
 }
+
+data class UpdateMatchArguments(
+    val time: Instant,
+    val tournament: String,
+    val matchId: String,
+)

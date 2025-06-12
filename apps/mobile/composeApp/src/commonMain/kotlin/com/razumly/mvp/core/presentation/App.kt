@@ -14,8 +14,6 @@ import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import com.razumly.mvp.core.presentation.util.backAnimation
 import com.razumly.mvp.home.HomeScreen
 import com.razumly.mvp.userAuth.AuthScreen
-import dev.icerock.moko.geo.compose.BindLocationTrackerEffect
-import dev.icerock.moko.permissions.compose.BindEffect
 import io.github.aakira.napier.DebugAntilog
 import io.github.aakira.napier.Napier
 import kotlinx.datetime.Clock
@@ -37,6 +35,10 @@ fun App(root: RootComponent) {
     var lastNavigationTime by remember { mutableStateOf(0L) }
     var lastInstance by remember { mutableStateOf<Any?>(null) }
 
+    LaunchedEffect(Unit) {
+        root.requestInitialPermissions()
+    }
+
     LaunchedEffect(childStack.active.instance) {
         val currentTime = Clock.System.now().toEpochMilliseconds()
         val currentInstance = childStack.active.instance
@@ -56,8 +58,6 @@ fun App(root: RootComponent) {
             .crossfade(true)
             .build()
     }
-    BindEffect(root.permissionsController)
-    BindLocationTrackerEffect(root.locationTracker)
 
     Children(
         stack = childStack,
@@ -85,15 +85,6 @@ fun App(root: RootComponent) {
             }
         }
     }
-}
-
-class RecompositionCounter(var value: Int)
-
-@Composable
-inline fun LogCompositions(tag: String, msg: String) {
-    val recompositionCounter = remember { RecompositionCounter(0) }
-    Napier.d(tag = tag) { "$msg Count=${recompositionCounter.value}" }
-    recompositionCounter.value++
 }
 
 

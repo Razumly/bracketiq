@@ -8,6 +8,7 @@ import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.presentation.RootComponent
+import com.razumly.mvp.core.presentation.RootComponent.DeepLinkNav
 import com.razumly.mvp.eventCreate.DefaultCreateEventComponent
 import com.razumly.mvp.eventDetail.DefaultEventDetailComponent
 import com.razumly.mvp.eventManagement.DefaultEventManagementComponent
@@ -20,11 +21,12 @@ import com.razumly.mvp.userAuth.DefaultAuthComponent
 import org.koin.dsl.module
 
 val componentModule = module {
-    single { (componentContext: ComponentContext) ->
+    single { (componentContext: ComponentContext, deepLinkNav: DeepLinkNav?) ->
         RootComponent(
             componentContext = componentContext,
             permissionsController = get(),
-            locationTracker = get()
+            locationTracker = get(),
+            deepLinkNav = deepLinkNav
         )
     }
 
@@ -36,10 +38,11 @@ val componentModule = module {
         )
     }
 
-    factory { (componentContext: ComponentContext, onNavigateToLogin: () -> Unit) ->
+    factory { (componentContext: ComponentContext, deepLinkNav: DeepLinkNav?, onNavigateToLogin: () -> Unit) ->
         DefaultHomeComponent(
             componentContext = componentContext,
             onNavigateToLogin = onNavigateToLogin,
+            deepLinkNav = deepLinkNav,
         )
     }
 
@@ -86,12 +89,16 @@ val componentModule = module {
         )
     }
 
-    factory { (componentContext: ComponentContext, onEventSelected: (event: EventAbs) -> Unit) ->
+    factory { (componentContext: ComponentContext, onEventSelected: (event: EventAbs) -> Unit, eventId: String?, tournamentId: String?) ->
         DefaultSearchEventListComponent(
             componentContext = componentContext,
             locationTracker = get(),
             onEventSelected = onEventSelected,
-            eventAbsRepository = get()
+            eventAbsRepository = get(),
+            eventRepository = get(),
+            tournamentRepository = get(),
+            eventId = eventId,
+            tournamentId = tournamentId
         )
     }
 

@@ -16,6 +16,7 @@ import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Tournament
+import com.razumly.mvp.core.presentation.RootComponent.DeepLinkNav
 import com.razumly.mvp.eventCreate.CreateEventComponent
 import com.razumly.mvp.eventCreate.DefaultCreateEventComponent
 import com.razumly.mvp.eventDetail.DefaultEventDetailComponent
@@ -93,7 +94,7 @@ interface HomeComponent {
         data object Profile : Config()
 
         @Serializable
-        data object Search : Config()
+        data class Search(val eventId: String? = null, val tournamentId: String? = null) : Config()
 
         @Serializable
         data class Teams(val freeAgents: List<String>, val event: EventAbs?) : Config()
@@ -106,22 +107,21 @@ interface HomeComponent {
 class DefaultHomeComponent(
     componentContext: ComponentContext,
     private val onNavigateToLogin: () -> Unit,
+    deepLinkNav: DeepLinkNav?,
 ) : HomeComponent, ComponentContext by componentContext {
-    init {
-        println("iOS Home: Component initialized")
-    }
-
     private val navigation = StackNavigation<Config>()
     private val _koin = getKoin()
-    private val _selectedPage = MutableStateFlow<Config>(Config.Search)
+    private val _selectedPage = MutableStateFlow<Config>(Config.Search())
     override val selectedPage = _selectedPage.asStateFlow()
 
     override val childStack = childStack(
-        source = navigation,
-        initialConfiguration = Config.Search,
-        serializer = Config.serializer(),
-        handleBackButton = true,
-        childFactory = ::createChild
+        source = navigation, initialConfiguration = when (deepLinkNav) {
+            is DeepLinkNav.Event -> Config.Search(eventId = deepLinkNav.eventId)
+            is DeepLinkNav.Tournament -> Config.Search(tournamentId = deepLinkNav.tournamentId)
+            is DeepLinkNav.Refresh -> Config.Profile
+            is DeepLinkNav.Return -> Config.Profile
+            else -> Config.Search()
+        }, serializer = Config.serializer(), handleBackButton = true, childFactory = ::createChild
     )
 
     override fun onBack() {
@@ -131,35 +131,30 @@ class DefaultHomeComponent(
     }
 
     private fun createChild(
-        config: Config,
-        componentContext: ComponentContext
+        config: Config, componentContext: ComponentContext
     ): Child {
         return when (config) {
             is Config.Search -> {
-                Child.Search(
-                    _koin.inject<DefaultSearchEventListComponent> {
-                        parametersOf(componentContext, ::onEventSelected)
-                    }.value,
-                    _koin.inject<MapComponent> {
-                        parametersOf(componentContext)
-                    }.value
+                Child.Search(_koin.inject<DefaultSearchEventListComponent> {
+                    parametersOf(componentContext, ::onEventSelected, config.eventId, config.tournamentId)
+                }.value, _koin.inject<MapComponent> {
+                    parametersOf(componentContext)
+                }.value
                 )
             }
 
             is Config.EventDetail -> {
-                Child.EventContent(
-                    _koin.inject<DefaultEventDetailComponent> {
-                        parametersOf(
-                            componentContext,
-                            config.event,
-                            ::onMatchSelected,
-                            ::onNavigateToTeamSettings,
-                            ::onBack,
-                        )
-                    }.value,
-                    _koin.inject<MapComponent> {
-                        parametersOf(componentContext)
-                    }.value
+                Child.EventContent(_koin.inject<DefaultEventDetailComponent> {
+                    parametersOf(
+                        componentContext,
+                        config.event,
+                        ::onMatchSelected,
+                        ::onNavigateToTeamSettings,
+                        ::onBack,
+                    )
+                }.value, _koin.inject<MapComponent> {
+                    parametersOf(componentContext)
+                }.value
                 )
             }
 
@@ -181,13 +176,11 @@ class DefaultHomeComponent(
                 }.value
             )
 
-            is Config.Create -> Child.Create(
-                _koin.inject<DefaultCreateEventComponent> {
-                    parametersOf(componentContext, ::onEventCreated)
-                }.value,
-                _koin.inject<MapComponent> {
-                    parametersOf(componentContext)
-                }.value
+            is Config.Create -> Child.Create(_koin.inject<DefaultCreateEventComponent> {
+                parametersOf(componentContext, ::onEventCreated)
+            }.value, _koin.inject<MapComponent> {
+                parametersOf(componentContext)
+            }.value
             )
 
             is Config.Profile -> Child.Profile(
@@ -204,10 +197,7 @@ class DefaultHomeComponent(
             is Config.Teams -> Child.Teams(
                 _koin.inject<DefaultTeamManagementComponent> {
                     parametersOf(
-                        componentContext,
-                        config.freeAgents,
-                        config.event,
-                        ::onBack
+                        componentContext, config.freeAgents, config.event, ::onBack
                     )
                 }.value
             )
@@ -229,8 +219,8 @@ class DefaultHomeComponent(
     }
 
     private fun onEventCreated() {
-        navigation.replaceAll(Config.Search)
-        _selectedPage.value = Config.Search
+        navigation.replaceAll(Config.Search())
+        _selectedPage.value = Config.Search()
     }
 
     private fun onNavigateToTeamSettings(freeAgents: List<String>, event: EventAbs?) {
@@ -248,7 +238,7 @@ class DefaultHomeComponent(
     override fun onTabSelected(page: Config) {
         _selectedPage.value = page
         when (page) {
-            Config.Search -> navigation.replaceAll(Config.Search)
+            Config.Search() -> navigation.replaceAll(Config.Search())
             Config.ChatList -> navigation.replaceAll(Config.ChatList)
             Config.Create -> navigation.replaceAll(Config.Create)
             Config.Profile -> navigation.replaceAll(Config.Profile)

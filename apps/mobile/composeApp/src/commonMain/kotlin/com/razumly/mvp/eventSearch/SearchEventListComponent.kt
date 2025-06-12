@@ -6,6 +6,8 @@ import com.arkivanov.essenty.instancekeeper.InstanceKeeper
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.repositories.IEventAbsRepository
+import com.razumly.mvp.core.data.repositories.IEventRepository
+import com.razumly.mvp.core.data.repositories.ITournamentRepository
 import com.razumly.mvp.core.util.calcDistance
 import com.razumly.mvp.core.util.getBounds
 import dev.icerock.moko.geo.LatLng
@@ -49,6 +51,10 @@ interface SearchEventListComponent {
 class DefaultSearchEventListComponent(
     componentContext: ComponentContext,
     private val eventAbsRepository: IEventAbsRepository,
+    private val eventRepository: IEventRepository,
+    private val tournamentRepository: ITournamentRepository,
+    eventId: String?,
+    tournamentId: String?,
     override val locationTracker: LocationTracker,
     override val onEventSelected: (event: EventAbs) -> Unit,
 ) : ComponentContext by componentContext, SearchEventListComponent {
@@ -98,6 +104,24 @@ class DefaultSearchEventListComponent(
     init {
         backHandler.register(backCallback)
 
+        if (eventId != null) {
+            scope.launch {
+                eventRepository.getEvent(eventId).onSuccess {
+                    onEventSelected(it.event)
+                }.onFailure { e ->
+                    _error.value = "Failed to fetch event: ${e.message}"
+                }
+            }
+        } else if (tournamentId != null) {
+            scope.launch {
+                tournamentRepository.getTournament(tournamentId).onSuccess {
+                    onEventSelected(it)
+                }.onFailure { e ->
+                    _error.value = "Failed to fetch tournament: ${e.message}"
+                }
+            }
+        }
+
         scope.launch {
             _showMapCard.collect {
                 backCallback.isEnabled = it
@@ -140,12 +164,6 @@ class DefaultSearchEventListComponent(
                     }
             } catch (e: Exception) {
                 _error.value = "Failed to update events: ${e.message}"
-            }
-        }
-
-        scope.launch {
-            events.collect {
-                Napier.d(tag = "Events", message = "Events: $it")
             }
         }
     }

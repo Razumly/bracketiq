@@ -26,7 +26,8 @@ import org.koin.mp.KoinPlatform.getKoin
 class RootComponent(
     componentContext: ComponentContext,
     val permissionsController: PermissionsController,
-    val locationTracker: LocationTracker
+    val locationTracker: LocationTracker,
+    val deepLinkNav: DeepLinkNav?
 ) : ComponentContext by componentContext {
 
     private val navigation = StackNavigation<Config>()
@@ -35,7 +36,6 @@ class RootComponent(
 
     override val backHandler: BackHandler = componentContext.backHandler
 
-    /** Called by your UI when user swipes back or taps the back button. */
     fun onBackClicked() {
         val stack = childStack.value
         if (stack.backStack.isNotEmpty()) {
@@ -47,22 +47,22 @@ class RootComponent(
         source = navigation,
         initialConfiguration = Config.Login,
         serializer = Config.serializer(),
-        handleBackButton = true, // Enable built-in back handling logic
+        handleBackButton = true,
         childFactory = ::createChild
     )
 
-    init {
+    fun requestInitialPermissions() {
         scope.launch {
             try {
                 permissionsController.providePermission(Permission.LOCATION)
-            } catch (deniedAlways: DeniedAlwaysException) {
+            } catch (deniedAlwaysException: DeniedAlwaysException) {
                 // Permission is always denied
             } catch (denied: DeniedException) {
                 // Permission was denied
             }
             try {
                 permissionsController.providePermission(Permission.REMOTE_NOTIFICATION)
-            } catch (deniedAlways: DeniedAlwaysException) {
+            } catch (deniedAlwaysException: DeniedAlwaysException) {
                 // Permission is always denied
             } catch (denied: DeniedException) {
                 // Permission was denied
@@ -72,29 +72,26 @@ class RootComponent(
             } else {
                 Napier.d(tag = "Permissions") { "Location permission not granted" }
             }
-            childStack.subscribe{}
         }
     }
 
     @Throws(Throwable::class)
     private fun createChild(
-        config: Config,
-        componentContext: ComponentContext
+        config: Config, componentContext: ComponentContext
     ): Child = when (config) {
         is Config.Login -> Child.Login(
             _koin.inject<DefaultAuthComponent> {
-                parametersOf(
-                    componentContext,
-                    { navigation.replaceCurrent(Config.Home) }
-                )
+                parametersOf(componentContext, {
+                    navigation.replaceCurrent(Config.Home)
+                })
             }.value
         )
+
         is Config.Home -> Child.Home(
             _koin.inject<DefaultHomeComponent> {
-                parametersOf(
-                    componentContext,
-                    { navigation.replaceCurrent(Config.Login)}
-                )
+                parametersOf(componentContext,
+                    deepLinkNav,
+                    { navigation.replaceCurrent(Config.Login) })
             }.value
         )
     }
@@ -111,5 +108,12 @@ class RootComponent(
 
         @Serializable
         data object Home : Config()
+    }
+
+    sealed class DeepLinkNav {
+        data class Event(val eventId: String) : DeepLinkNav()
+        data class Tournament(val tournamentId: String) : DeepLinkNav()
+        data object Refresh : DeepLinkNav()
+        data object Return : DeepLinkNav()
     }
 }
