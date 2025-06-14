@@ -53,7 +53,6 @@ class MainActivity : ComponentActivity() {
 
     private fun Uri.extractDeepLinkNav(): DeepLinkNav? {
         val pathSegments = pathSegments
-
         return when {
             pathSegments.size >= 2 && pathSegments[0] == "event" -> {
                 DeepLinkNav.Event(pathSegments[1])
@@ -66,7 +65,6 @@ class MainActivity : ComponentActivity() {
             pathSegments.size >= 2 && pathSegments[0] == "host" && pathSegments[1] == "onboarding" -> {
                 val isRefresh = getQueryParameter("refresh")?.toBoolean() == true
                 val isReturn = getQueryParameter("success")?.toBoolean() == true
-
                 when {
                     isRefresh -> DeepLinkNav.Refresh
                     isReturn -> DeepLinkNav.Return
