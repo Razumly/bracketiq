@@ -1,6 +1,6 @@
 package com.razumly.mvp.core.data.repositories
 
-import com.razumly.mvp.core.data.MVPDatabase
+import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
 import com.razumly.mvp.core.data.dataTypes.dtos.TournamentDTO
@@ -35,7 +35,7 @@ interface ITournamentRepository : IMVPRepository {
 }
 
 class TournamentRepository(
-    private val mvpDatabase: MVPDatabase,
+    private val databaseService: DatabaseService,
     private val database: Databases,
     private val teamRepository: ITeamRepository,
     private val userRepository: IUserRepository,
@@ -47,7 +47,7 @@ class TournamentRepository(
     override fun getTournamentWithRelationsFlow(tournamentId: String): Flow<Result<TournamentWithRelations>> = callbackFlow {
         // Emit local data
         val localJob = launch {
-            mvpDatabase.getTournamentDao.getTournamentWithRelationsFlow(tournamentId)
+            databaseService.getTournamentDao.getTournamentWithRelationsFlow(tournamentId)
                 .collect { tournament ->
                     trySend(Result.success(tournament))
                 }
@@ -89,7 +89,7 @@ class TournamentRepository(
     }
 
     override fun getTournamentFlow(tournamentId: String): Flow<Result<Tournament>> =
-        mvpDatabase.getTournamentDao.getTournamentFlowById(tournamentId)
+        databaseService.getTournamentDao.getTournamentFlowById(tournamentId)
             .map { Result.success(it) }
 
     override suspend fun getTournaments(query: String): Result<List<Tournament>> =
@@ -101,17 +101,17 @@ class TournamentRepository(
                 TournamentDTO::class
             ).documents.map { dtoDoc -> dtoDoc.convert { it.toTournament(dtoDoc.id) }.data }
         }, getLocalData = {
-            mvpDatabase.getTournamentDao.getAllCachedTournamentsFlow().first()
-        }, saveData = { mvpDatabase.getTournamentDao.upsertTournaments(it) },
+            databaseService.getTournamentDao.getAllCachedTournamentsFlow().first()
+        }, saveData = { databaseService.getTournamentDao.upsertTournaments(it) },
             deleteData = { tournaments ->
-                mvpDatabase.getTournamentDao.deleteTournamentsById(
+                databaseService.getTournamentDao.deleteTournamentsById(
                     tournaments
                 )
             })
 
     override fun getTournamentsFlow(query: String): Flow<Result<List<Tournament>>> {
         val localFlow =
-            mvpDatabase.getTournamentDao.getAllCachedTournamentsFlow().map { Result.success(it) }
+            databaseService.getTournamentDao.getAllCachedTournamentsFlow().map { Result.success(it) }
         scope.launch {
             getTournaments(query)
         }
@@ -128,9 +128,9 @@ class TournamentRepository(
                 queries = null
             ).data.toTournament(tournamentId)
         }, saveCall = { tournament ->
-            mvpDatabase.getTournamentDao.upsertTournamentWithRelations(tournament)
+            databaseService.getTournamentDao.upsertTournamentWithRelations(tournament)
         }, onReturn = {
-            mvpDatabase.getTournamentDao.getTournamentById(tournamentId)
+            databaseService.getTournamentDao.getTournamentById(tournamentId)
         })
 
     override suspend fun getTournamentWithRelations(tournamentId: String): Result<TournamentWithRelations> =
@@ -143,9 +143,9 @@ class TournamentRepository(
                 queries = null
             ).data.toTournament(tournamentId)
         }, saveCall = { tournament ->
-            mvpDatabase.getTournamentDao.upsertTournamentWithRelations(tournament)
+            databaseService.getTournamentDao.upsertTournamentWithRelations(tournament)
         }, onReturn = {
-            mvpDatabase.getTournamentDao.getTournamentWithRelations(tournamentId)
+            databaseService.getTournamentDao.getTournamentWithRelations(tournamentId)
         })
 
     override suspend fun createTournament(newTournament: Tournament): Result<Tournament> =
@@ -158,7 +158,7 @@ class TournamentRepository(
                 nestedType = TournamentDTO::class
             ).data.toTournament(newTournament.id)
         }, saveCall = { tournament ->
-            mvpDatabase.getTournamentDao.upsertTournament(tournament)
+            databaseService.getTournamentDao.upsertTournament(tournament)
         }, onReturn = { tournament ->
             tournament
         })
@@ -173,7 +173,7 @@ class TournamentRepository(
                 nestedType = TournamentDTO::class
             ).data.toTournament(newTournament.id)
         }, saveCall = { tournament ->
-            mvpDatabase.getTournamentDao.upsertTournament(tournament)
+            databaseService.getTournamentDao.upsertTournament(tournament)
         }, onReturn = { tournament ->
             tournament
         })
@@ -182,6 +182,6 @@ class TournamentRepository(
         database.deleteDocument(
             DbConstants.DATABASE_NAME, DbConstants.TOURNAMENT_COLLECTION, tournamentId
         )
-        mvpDatabase.getTournamentDao.deleteTournamentWithCrossRefs(tournamentId)
+        databaseService.getTournamentDao.deleteTournamentWithCrossRefs(tournamentId)
     }
 }

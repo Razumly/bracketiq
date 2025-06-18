@@ -2,7 +2,6 @@ package com.razumly.mvp.core.data
 
 import androidx.activity.ComponentActivity
 import com.razumly.mvp.core.data.dataTypes.dtos.UserDataDTO
-import com.razumly.mvp.core.data.dataTypes.dtos.toUserData
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.UserRepository
 import com.razumly.mvp.core.util.DbConstants
@@ -42,6 +41,7 @@ suspend fun UserRepository.oauth2Login(activity: ComponentActivity): Result<Unit
                 teamInvites = listOf(),
                 eventInvites = listOf(),
                 tournamentInvites = listOf(),
+                stripeAccountId = ""
             ),
             nestedType = UserDataDTO::class
         )

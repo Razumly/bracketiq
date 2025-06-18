@@ -1,6 +1,6 @@
 package com.razumly.mvp.core.data.repositories
 
-import com.razumly.mvp.core.data.MVPDatabase
+import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.dtos.EventDTO
@@ -29,14 +29,14 @@ interface IEventRepository : IMVPRepository {
 }
 
 class EventRepository(
-    private val mvpDatabase: MVPDatabase,
+    private val databaseService: DatabaseService,
     private val database: Databases,
     private val teamRepository: ITeamRepository,
     private val userRepository: IUserRepository,
 ): IEventRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     override fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>> {
-        val localFlow = mvpDatabase.getEventImpDao.getEventWithRelationsFlow(eventId)
+        val localFlow = databaseService.getEventImpDao.getEventWithRelationsFlow(eventId)
             .map { Result.success(it) }
         scope.launch{
             getEvent(eventId)
@@ -56,9 +56,9 @@ class EventRepository(
                 queries = null
             ).data.toEvent(eventId)
         }, saveCall = { event ->
-            mvpDatabase.getEventImpDao.upsertEvent(event)
+            databaseService.getEventImpDao.upsertEvent(event)
         }, onReturn = {
-            mvpDatabase.getEventImpDao.getEventWithRelationsById(eventId)
+            databaseService.getEventImpDao.getEventWithRelationsById(eventId)
         })
 
     override suspend fun createEvent(newEvent: EventImp): Result<EventImp> =
@@ -71,7 +71,7 @@ class EventRepository(
                 nestedType = EventDTO::class
             ).data.toEvent(newEvent.id)
         }, saveCall = { event ->
-            mvpDatabase.getEventImpDao.upsertEvent(event)
+            databaseService.getEventImpDao.upsertEvent(event)
         }, onReturn = { event ->
             event
         })
@@ -86,7 +86,7 @@ class EventRepository(
                 nestedType = EventDTO::class
             ).data.toEvent(newEvent.id)
         }, saveCall = { event ->
-            mvpDatabase.getEventImpDao.upsertEvent(event)
+            databaseService.getEventImpDao.upsertEvent(event)
         }, onReturn = { event ->
             event
         })
@@ -102,14 +102,14 @@ class EventRepository(
                 ).documents.map { dtoDoc -> dtoDoc.convert { it.toEvent(dtoDoc.id) }.data }
             },
             getLocalData = {
-                mvpDatabase.getEventImpDao.getAllCachedEvents().first()
+                databaseService.getEventImpDao.getAllCachedEvents().first()
             },
-            saveData = { mvpDatabase.getEventImpDao.upsertEvents(it) },
-            deleteData = { events -> mvpDatabase.getEventImpDao.deleteEventsById(events) }
+            saveData = { databaseService.getEventImpDao.upsertEvents(it) },
+            deleteData = { events -> databaseService.getEventImpDao.deleteEventsById(events) }
         )
 
     override fun getEventsFlow(query: String): Flow<Result<List<EventImp>>> {
-        val localFlow = mvpDatabase.getEventImpDao.getAllCachedEvents()
+        val localFlow = databaseService.getEventImpDao.getAllCachedEvents()
             .map { Result.success(it) }
 
         scope.launch {

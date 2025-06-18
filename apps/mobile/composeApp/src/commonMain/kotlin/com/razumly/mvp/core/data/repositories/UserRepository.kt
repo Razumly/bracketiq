@@ -1,7 +1,7 @@
 package com.razumly.mvp.core.data.repositories
 
 import com.razumly.mvp.core.data.CurrentUserDataSource
-import com.razumly.mvp.core.data.MVPDatabase
+import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TournamentUserCrossRef
@@ -47,11 +47,11 @@ interface IUserRepository : IMVPRepository {
 }
 
 class UserRepository(
-    internal val mvpDatabase: MVPDatabase,
+    internal val databaseService: DatabaseService,
     internal val account: Account,
     internal val database: Databases,
     private val currentUserDataSource: CurrentUserDataSource,
-    private val pushNotificationsRepository: PushNotificationsRepository
+    private val pushNotificationsRepository: IPushNotificationsRepository
 ) : IUserRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val _pushToken =
@@ -82,7 +82,7 @@ class UserRepository(
         if (_pushToken.value.isNotBlank() && _pushTarget.value.isBlank()) {
             pushNotificationsRepository.addDeviceAsTarget()
         }
-        mvpDatabase.getUserDataDao.upsertUserData(currentUser)
+        databaseService.getUserDataDao.upsertUserData(currentUser)
 
         _currentUser.value = Result.success(currentUser)
         return Result.success(currentUser)
@@ -110,7 +110,7 @@ class UserRepository(
         }
 
         if (!savedId.isNullOrBlank()) {
-            val local = mvpDatabase.getUserDataDao.getUserDataById(savedId)
+            val local = databaseService.getUserDataDao.getUserDataById(savedId)
             if (local == null) {
                 _currentUser.value = Result.failure(Exception("No User"))
             } else {
@@ -130,14 +130,14 @@ class UserRepository(
         remoteRes.onFailure { err ->
             _currentUser.value = Result.failure(err)
         }.onSuccess { user ->
-            mvpDatabase.getUserDataDao.upsertUserData(user)
+            databaseService.getUserDataDao.upsertUserData(user)
             currentUserDataSource.saveUserId(user.id)
 
             if (_pushToken.value.isNotBlank() && _pushTarget.value.isBlank()) {
                 pushNotificationsRepository.addDeviceAsTarget()
             }
 
-            val fresh = mvpDatabase.getUserDataDao.getUserDataById(user.id)
+            val fresh = databaseService.getUserDataDao.getUserDataById(user.id)
             if (fresh == null) {
                 _currentUser.value = Result.failure(Exception("No User"))
             } else {
@@ -149,9 +149,9 @@ class UserRepository(
     override suspend fun getUsersOfTournament(tournamentId: String): Result<List<UserData>> {
         val query = Query.contains(DbConstants.TOURNAMENTS_ATTRIBUTE, tournamentId)
         return getPlayers(query,
-            getLocalData = { mvpDatabase.getUserDataDao.getUsersInTournament(tournamentId) })
+            getLocalData = { databaseService.getUserDataDao.getUsersInTournament(tournamentId) })
             .onSuccess { remoteData ->
-                mvpDatabase.getUserDataDao.upsertUserTournamentCrossRefs(remoteData.map {
+                databaseService.getUserDataDao.upsertUserTournamentCrossRefs(remoteData.map {
                     TournamentUserCrossRef(it.id, tournamentId)
                 })
             }
@@ -160,9 +160,9 @@ class UserRepository(
     override suspend fun getUsersOfEvent(eventId: String): Result<List<UserData>> {
         val query = Query.contains(DbConstants.EVENTS_ATTRIBUTE, eventId)
         return getPlayers(query,
-            getLocalData = { mvpDatabase.getUserDataDao.getUsersInEvent(eventId) })
+            getLocalData = { databaseService.getUserDataDao.getUsersInEvent(eventId) })
             .onSuccess { remoteData ->
-                mvpDatabase.getUserDataDao.upsertUserEventCrossRefs(remoteData.map {
+                databaseService.getUserDataDao.upsertUserEventCrossRefs(remoteData.map {
                     EventUserCrossRef(it.id, eventId)
                 })
             }
@@ -171,11 +171,11 @@ class UserRepository(
     override suspend fun getUsers(userIds: List<String>): Result<List<UserData>> {
         val query = Query.equal("\$id", userIds)
         return getPlayers(query,
-            getLocalData = { mvpDatabase.getUserDataDao.getUserDatasById(userIds) })
+            getLocalData = { databaseService.getUserDataDao.getUserDatasById(userIds) })
     }
 
     override fun getUsersOfTournamentFlow(tournamentId: String): Flow<Result<List<UserData>>> {
-        val localUsersFlow = mvpDatabase.getUserDataDao.getUsersInTournamentFlow(tournamentId)
+        val localUsersFlow = databaseService.getUserDataDao.getUsersInTournamentFlow(tournamentId)
             .map { Result.success(it) }
 
         scope.launch {
@@ -198,10 +198,10 @@ class UserRepository(
             docs.documents.map { it.data.toUserData(it.id) }
         },
         saveData = { usersData ->
-            mvpDatabase.getUserDataDao.upsertUsersData(usersData)
+            databaseService.getUserDataDao.upsertUsersData(usersData)
         },
         getLocalData = getLocalData,
-        deleteData = { mvpDatabase.getUserDataDao.deleteUsersById(it) }
+        deleteData = { databaseService.getUserDataDao.deleteUsersById(it) }
     )
 
     override suspend fun searchPlayers(search: String): Result<List<UserData>> {
@@ -217,7 +217,7 @@ class UserRepository(
 
     override fun getUsersOfEventFlow(eventId: String): Flow<Result<List<UserData>>> {
         val localUsersFlow =
-            mvpDatabase.getUserDataDao.getUsersInEventFlow(eventId).map { Result.success(it) }
+            databaseService.getUserDataDao.getUsersInEventFlow(eventId).map { Result.success(it) }
 
         scope.launch {
             getUsersOfTournament(eventId)
@@ -256,7 +256,7 @@ class UserRepository(
                 nestedType = UserDataDTO::class
             ).data.toUserData(user.id)
         }, saveCall = { newData ->
-            mvpDatabase.getUserDataDao.upsertUserWithRelations(newData)
+            databaseService.getUserDataDao.upsertUserWithRelations(newData)
         }, onReturn = { data ->
             data
         })

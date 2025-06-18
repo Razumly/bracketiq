@@ -1,6 +1,6 @@
 package com.razumly.mvp.eventDetail.data
 
-import com.razumly.mvp.core.data.MVPDatabase
+import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.crossRef.FieldMatchCrossRef
@@ -47,7 +47,7 @@ interface IMatchRepository : IMVPRepository {
 
 class MatchRepository(
     private val database: Databases,
-    private val mvpDatabase: MVPDatabase,
+    private val databaseService: DatabaseService,
     private val realtime: Realtime,
     private val functions: Functions,
 ) : IMatchRepository {
@@ -64,11 +64,11 @@ class MatchRepository(
                 nestedType = MatchDTO::class
             ).data.toMatch(matchId)
         }, saveCall = { match ->
-            mvpDatabase.getMatchDao.upsertMatch(match)
+            databaseService.getMatchDao.upsertMatch(match)
         }, onReturn = { it })
 
     override fun getMatchFlow(matchId: String): Flow<Result<MatchWithRelations>> {
-        val localFlow = mvpDatabase.getMatchDao.getMatchFlowById(matchId).map { Result.success(it) }
+        val localFlow = databaseService.getMatchDao.getMatchFlowById(matchId).map { Result.success(it) }
         scope.launch {
             getMatch(matchId)
         }
@@ -84,7 +84,7 @@ class MatchRepository(
             nestedType = MatchDTO::class
         ).data.toMatch(match.id)
     }, saveCall = { updatedMatch ->
-        mvpDatabase.getMatchDao.upsertMatch(updatedMatch)
+        databaseService.getMatchDao.upsertMatch(updatedMatch)
     }, onReturn = {
         functions.createExecution(
             functionId = DbConstants.UPDATE_MATCH_FUNCTION,
@@ -96,7 +96,7 @@ class MatchRepository(
     override fun getMatchesOfTournamentFlow(tournamentId: String): Flow<Result<List<MatchWithRelations>>> =
         callbackFlow {
             val localJob = launch {
-                mvpDatabase.getMatchDao.getMatchesFlowOfTournament(tournamentId)
+                databaseService.getMatchDao.getMatchesFlowOfTournament(tournamentId)
                     .collect { trySend(Result.success(it)) }
             }
 
@@ -115,12 +115,12 @@ class MatchRepository(
                     }
                 },
                     getLocalData = {
-                        mvpDatabase.getMatchDao.getMatchesOfTournament(tournamentId)
+                        databaseService.getMatchDao.getMatchesOfTournament(tournamentId)
                     },
                     saveData = { matches ->
-                        mvpDatabase.getMatchDao.upsertMatches(matches)
+                        databaseService.getMatchDao.upsertMatches(matches)
                     },
-                    deleteData = { mvpDatabase.getMatchDao.deleteMatchesById(it) }).onFailure { error ->
+                    deleteData = { databaseService.getMatchDao.deleteMatchesById(it) }).onFailure { error ->
                     trySend(Result.failure(error))
                 }
             }
@@ -147,19 +147,19 @@ class MatchRepository(
                 dtoDoc.convert { it.toMatch(dtoDoc.id) }.data
             }
         }, getLocalData = {
-            mvpDatabase.getMatchDao.getMatchesOfTournament(tournamentId)
+            databaseService.getMatchDao.getMatchesOfTournament(tournamentId)
         }, saveData = { matches ->
-            mvpDatabase.getMatchDao.upsertMatches(matches)
-            mvpDatabase.getMatchDao.upsertMatchTeamCrossRefs(matches.flatMap { match ->
+            databaseService.getMatchDao.upsertMatches(matches)
+            databaseService.getMatchDao.upsertMatchTeamCrossRefs(matches.flatMap { match ->
                 val crossRefs = mutableListOf<MatchTeamCrossRef>()
                 match.team1?.let { crossRefs.add(MatchTeamCrossRef(it, match.id)) }
                 match.team2?.let { crossRefs.add(MatchTeamCrossRef(it, match.id)) }
                 crossRefs
             })
-            mvpDatabase.getMatchDao.upsertFieldMatchCrossRefs(matches.mapNotNull { match ->
+            databaseService.getMatchDao.upsertFieldMatchCrossRefs(matches.mapNotNull { match ->
                 match.field?.let { FieldMatchCrossRef(match.field, match.id) }
             })
-        }, deleteData = { mvpDatabase.getMatchDao.deleteMatchesById(it) })
+        }, deleteData = { databaseService.getMatchDao.deleteMatchesById(it) })
 
     override suspend fun subscribeToMatches(): Result<Unit> {
         matchSubscription?.close()
@@ -170,7 +170,7 @@ class MatchRepository(
             val matchUpdates = response.payload
             scope.launch(Dispatchers.IO) {
                 val id = response.channels.last().split(".").last()
-                val dbMatch = mvpDatabase.getMatchDao.getMatchById(id)
+                val dbMatch = databaseService.getMatchDao.getMatchById(id)
                 if (dbMatch?.match?.id == _ignoreMatch.value?.id) {
                     return@launch
                 }
@@ -186,7 +186,7 @@ class MatchRepository(
                             start = Instant.parse(matchUpdates.start),
                             end = matchUpdates.end?.let { Instant.parse(it) })
                     )
-                    mvpDatabase.getMatchDao.upsertMatch(updatedMatch.match)
+                    databaseService.getMatchDao.upsertMatch(updatedMatch.match)
                 }
             }
         }

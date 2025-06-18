@@ -18,18 +18,21 @@ import com.razumly.mvp.core.presentation.RootComponent
 import com.razumly.mvp.core.presentation.RootComponent.DeepLinkNav
 import dev.icerock.moko.geo.compose.BindLocationTrackerEffect
 import dev.icerock.moko.permissions.compose.BindEffect
+import io.github.aakira.napier.Napier
 import org.koin.core.parameter.parametersOf
 import org.koin.mp.KoinPlatform.getKoin
 
 val LocalRootComponent = compositionLocalOf<RootComponent> { error("No component provided") }
 
 class MainActivity : ComponentActivity() {
+    private lateinit var rootComponent: RootComponent
+
     @OptIn(ExperimentalDecomposeApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         NotifierManager.onCreateOrOnNewIntent(intent)
-        val rootComponent = handleDeepLink { uri ->
+        rootComponent = handleDeepLink { uri ->
             val deepLinkNav = uri?.extractDeepLinkNav()
             retainedComponent("RootRetainedComponent") {
                 getKoin().get<RootComponent> { parametersOf(it, deepLinkNav) }
@@ -49,22 +52,53 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         NotifierManager.onCreateOrOnNewIntent(intent)
+
+        // Handle deep links when app is already open
+        intent.data?.let { uri ->
+            Napier.d(tag = "DeepLink", message = "Received deep link in onNewIntent: $uri")
+            val deepLinkNav = uri.extractDeepLinkNav()
+            if (deepLinkNav != null) {
+                Napier.d(tag = "DeepLink", message = "Extracted DeepLinkNav: $deepLinkNav")
+                rootComponent.handleDeepLink(deepLinkNav)
+            } else {
+                Napier.w(tag = "DeepLink", message = "Failed to extract DeepLinkNav from URI: $uri")
+            }
+        } ?: run {
+            Napier.d(tag = "DeepLink", message = "No URI data in intent")
+        }
     }
 
     private fun Uri.extractDeepLinkNav(): DeepLinkNav? {
         val pathSegments = pathSegments
+        Napier.d(tag = "DeepLink", message = "Received URI: $this")
+        Napier.d(tag = "DeepLink", message = "Path segments: $pathSegments")
+
+        val effectiveSegments = if (pathSegments.isNotEmpty() && pathSegments[0] == "mvp") {
+            pathSegments.drop(1)
+        } else {
+            pathSegments
+        }
+
         return when {
-            pathSegments.size >= 2 && pathSegments[0] == "event" -> {
-                DeepLinkNav.Event(pathSegments[1])
+            effectiveSegments.size >= 2 && effectiveSegments[0] == "event" -> {
+                Napier.d(tag = "DeepLink", message = "Navigating to Event: ${effectiveSegments[1]}")
+                DeepLinkNav.Event(effectiveSegments[1])
             }
 
-            pathSegments.size >= 2 && pathSegments[0] == "tournament" -> {
-                DeepLinkNav.Tournament(pathSegments[1])
+            effectiveSegments.size >= 2 && effectiveSegments[0] == "tournament" -> {
+                Napier.d(
+                    tag = "DeepLink", message = "Navigating to Tournament: ${effectiveSegments[1]}"
+                )
+                DeepLinkNav.Tournament(effectiveSegments[1])
             }
 
-            pathSegments.size >= 2 && pathSegments[0] == "host" && pathSegments[1] == "onboarding" -> {
+            effectiveSegments.size >= 2 && effectiveSegments[0] == "host" && effectiveSegments[1] == "onboarding" -> {
                 val isRefresh = getQueryParameter("refresh")?.toBoolean() == true
                 val isReturn = getQueryParameter("success")?.toBoolean() == true
+                Napier.d(
+                    tag = "DeepLink",
+                    message = "Host Onboarding - Refresh: $isRefresh, Return: $isReturn"
+                )
                 when {
                     isRefresh -> DeepLinkNav.Refresh
                     isReturn -> DeepLinkNav.Return
@@ -72,7 +106,10 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            else -> null
+            else -> {
+                Napier.d(tag = "DeepLink", message = "No matching deep link pattern found")
+                null
+            }
         }
     }
 }

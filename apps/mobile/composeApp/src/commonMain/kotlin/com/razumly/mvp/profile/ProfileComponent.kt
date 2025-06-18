@@ -1,7 +1,7 @@
 package com.razumly.mvp.profile
 
 import com.arkivanov.decompose.ComponentContext
-import com.razumly.mvp.core.data.MVPDatabase
+import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import kotlinx.coroutines.CoroutineScope
@@ -21,7 +21,7 @@ interface ProfileComponent {
 class DefaultProfileComponent(
     private val componentContext: ComponentContext,
     private val userRepository: IUserRepository,
-    private val mvpDatabase: MVPDatabase,
+    private val databaseService: DatabaseService,
     private val onNavigateToLogin: () -> Unit,
     private val onNavigateToEvents: () -> Unit,
     private val onNavigateToTeamSettings: (freeAgents: List<String>, event: EventAbs?) -> Unit,

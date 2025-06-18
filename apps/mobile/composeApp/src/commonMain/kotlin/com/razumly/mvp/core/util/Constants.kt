@@ -19,6 +19,7 @@ object DbConstants {
     const val LONG_ATTRIBUTE = "long"
     const val UPDATE_MATCH_FUNCTION = "updateMatch"
     const val BUILD_BRACKET_FUNCTION = "buildBracket"
+    const val BILLING_FUNCTION = "mvpBilling"
     const val ERROR_TAG = "Database"
     const val MATCHES_CHANNEL = "databases.$DATABASE_NAME.collections.$MATCHES_COLLECTION.documents"
     const val CHAT_GROUPS_CHANNEL = "databases.$DATABASE_NAME.collections.$CHAT_GROUP_COLLECTION.documents"

@@ -2,20 +2,18 @@ package com.razumly.mvp.core.data
 
 import androidx.room.Room
 import androidx.room.RoomDatabase
-import androidx.room.RoomDatabaseConstructor
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.github.aakira.napier.Napier
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.coroutines.Dispatchers
 import platform.Foundation.NSDocumentDirectory
 import platform.Foundation.NSFileManager
-import platform.Foundation.NSHomeDirectory
 import platform.Foundation.NSUserDomainMask
 
 
-fun getDatabase() : RoomDatabase.Builder<MVPDatabase> {
+fun getDatabase() : RoomDatabase.Builder<DatabaseService> {
     return try {
-        Room.databaseBuilder<MVPDatabase>(
+        Room.databaseBuilder<DatabaseService>(
             name = documentDirectory() + "/tournament.db",
         )
             .setDriver(BundledSQLiteDriver())

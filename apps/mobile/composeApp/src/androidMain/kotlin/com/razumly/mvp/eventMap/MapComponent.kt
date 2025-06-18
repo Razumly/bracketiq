@@ -76,6 +76,7 @@ actual class MapComponent(
             }
         }
         scope.launch {
+            locationTracker.startTracking()
             _currentLocation.value = locationTracker.getCurrentLocation()
         }
     }

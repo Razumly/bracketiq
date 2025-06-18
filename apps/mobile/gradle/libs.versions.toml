@@ -10,8 +10,9 @@ assertk = "0.28.1"
 coil3 = "3.0.4"
 compose-multiplatform = "1.8.0-alpha03"
 concurrentFuturesKtx = "1.2.0"
+core = "1.6.1"
 coroutines = "1.10.1"
-datastore = "1.1.4"
+datastore = "1.1.7"
 decompose = "3.3.0-alpha02"
 firebaseMessaging = "24.1.1"
 foundationLayout = "1.8.0-alpha08"
@@ -25,7 +26,7 @@ kmpDateTimePicker = "1.0.5"
 kmpnotifier = "1.5.1"
 koin = "4.0.2"
 kotlin = "2.1.20"
-kotlinTest = "1.9.23"
+kotlinTest = "2.1.20"
 kotlinxDatetime = "0.6.1"
 kotlinx_datetime_ext = "1.3.1"
 kotlinxSerializationJson = "1.7.3"
@@ -36,22 +37,26 @@ lifecycleRuntimeComposeAndroid = "2.8.7"
 mapsCompose = "6.2.1"
 material = "1.8.0-alpha08"
 materialKolor = "2.0.2"
+mockk = "1.13.8"
 napier = "2.7.1"
 navigationCommonKtx = "2.8.9"
 permissions = "0.18.1"
-places = "4.2.0"
+places = "4.3.1"
 playServicesLocation = "21.3.0"
 playServicesMaps = "19.2.0"
+robolectric = "4.14.1"
 room = "2.7.1"
 runtimeSaveable = "1.7.3"
 secrets = "2.0.1"
 sqlite = "2.5.1"
+turbine = "1.0.0"
 vectorize = "1.0.2"
 animationAndroid = "1.7.8"
 
 
 
 [libraries]
+androidx-core = { module = "androidx.test:core", version.ref = "core" }
 firebase-messaging = { module = "com.google.firebase:firebase-messaging", version.ref = "firebaseMessaging" }
 kmpnotifier = { module = "io.github.mirzemehdi:kmpnotifier", version.ref = "kmpnotifier" }
 lifecycle = { module = "com.arkivanov.essenty:lifecycle", version.ref = "lifecycle" }
@@ -102,14 +107,17 @@ kotlinx-serialization-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 kotlinx_datetime_ext = { module = "com.raedghazal:kotlinx_datetime_ext", version.ref = "kotlinx_datetime_ext" }
 ktor-client-core = { group = "io.ktor", name = "ktor-client-core", version.ref = "ktor" }
 maps-compose = { module = "com.google.maps.android:maps-compose", version.ref = "mapsCompose" }
+mockk = { module = "io.mockk:mockk", version.ref = "mockk" }
 napier = { module = "io.github.aakira:napier", version.ref = "napier" }
 permissions = { module = "dev.icerock.moko:permissions", version.ref = "permissions" }
 permissions-compose = { module = "dev.icerock.moko:permissions-compose", version.ref = "permissions" }
 places = { module = "com.google.android.libraries.places:places", version.ref = "places" }
 play-services-location = { module = "com.google.android.gms:play-services-location", version.ref = "playServicesLocation" }
 play-services-maps = { module = "com.google.android.gms:play-services-maps", version.ref = "playServicesMaps" }
+robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
 runtime-saveable = { module = "org.jetbrains.compose.runtime:runtime-saveable", version.ref = "runtimeSaveable" }
 androidx-animation-android = { group = "androidx.compose.animation", name = "animation-android", version.ref = "animationAndroid" }
+turbine = { module = "app.cash.turbine:turbine", version.ref = "turbine" }
 ui-backhandler = { module = "org.jetbrains.compose.ui:ui-backhandler" }
 
 

@@ -16,6 +16,7 @@ data class UserDataDTO(
     val teamInvites: List<String>,
     val eventInvites: List<String>,
     val tournamentInvites: List<String>,
+    val stripeAccountId: String,
     @Transient val id: String = "",
 ) {
     companion object {
@@ -33,6 +34,7 @@ data class UserDataDTO(
                 listOf(),
                 listOf(),
                 listOf(),
+                "",
                 userId
             )
         }
@@ -51,6 +53,7 @@ fun UserDataDTO.toUserData(id: String): UserData {
         teamInvites,
         eventInvites,
         tournamentInvites,
+        stripeAccountId,
         id
     )
 }

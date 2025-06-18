@@ -103,7 +103,6 @@ actual fun EventMap(
             alpha = if (animationProgress > 0f) 1f else 0f
         }.clip(CircularRevealShape(animationProgress, revealCenter)),
     ) {
-        BindLocationTrackerEffect(component.locationTracker)
         LaunchedEffect(currentLocation) {
             currentLocation?.let { validLoc ->
                 val target = validLoc.toGoogle()

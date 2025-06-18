@@ -291,8 +291,16 @@ fun EventDetails(
                     it.lat,
                     it.long
                 )
-            } else LatLng(locationTracker?.latitude ?: 0.0, locationTracker?.longitude ?: 0.0),
-            focusedEvent = if (editEvent.location.isNotBlank()) editEvent else event,
+            } else {
+                LatLng(locationTracker?.latitude ?: 0.0, locationTracker?.longitude ?: 0.0)
+            },
+            focusedEvent = if (editEvent.location.isNotBlank()) {
+                editEvent
+            } else if (event.location.isNotBlank()) {
+                event
+            } else {
+                null
+            },
             revealCenter = revealCenter
         )
 

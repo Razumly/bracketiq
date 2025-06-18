@@ -1,4 +1,3 @@
-
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
 import java.io.ByteArrayOutputStream
@@ -14,6 +13,7 @@ plugins {
     alias(libs.plugins.room)
     alias(libs.plugins.compose.vectorize)
     alias(libs.plugins.secrets)
+    id("org.kodein.mock.mockmp") version "2.0.0"
     id("kotlin-parcelize")
     id("com.google.gms.google-services") version "4.4.2"
     id("co.touchlab.skie") version "0.10.2-preview.2.1.20"
@@ -22,8 +22,8 @@ composeCompiler {
     includeSourceInformation = true
 }
 
-val mvpVersion = "0.4"
-val mvpVersionCode = 4
+val mvpVersion = "0.4.1"
+val mvpVersionCode = 5
 kotlin {
     androidTarget {
         compilerOptions {
@@ -132,14 +132,30 @@ kotlin {
                 implementation(libs.firebase.messaging)
             }
         }
-    commonTest.dependencies {
-            implementation(libs.kotlin.test)
-            implementation(libs.assertk)
-            implementation(libs.koin.test)
-            implementation(libs.androidx.sqlite.bundled)
-            implementation(libs.kotlinx.coroutines.test)
-            implementation(kotlin("test-annotations-common"))
+        commonTest {
+            dependencies {
+                implementation(libs.turbine)
+                implementation(libs.kotlin.test)
+                implementation(libs.assertk)
+                implementation(libs.koin.test)
+                implementation(libs.androidx.sqlite.bundled)
+                implementation(libs.kotlinx.coroutines.test)
+                implementation(kotlin("test-annotations-common"))
+            }
         }
+        androidUnitTest {
+            dependencies {
+                implementation(libs.mockk)
+                implementation(libs.robolectric)
+                implementation(libs.androidx.core)
+            }
+        }
+    }
+}
+
+mockmp {
+    onTest {
+        withHelper()
     }
 }
 
@@ -210,7 +226,8 @@ dependencies {
     implementation(libs.androidx.material)
 }
 
-val deviceName = project.findProperty("iosDevice") as? String ?: "BE7968D4-D8CD-4F4F-A995-307A153AB31C"
+val deviceName =
+    project.findProperty("iosDevice") as? String ?: "BE7968D4-D8CD-4F4F-A995-307A153AB31C"
 
 tasks.register<Exec>("bootIOSSimulator") {
     isIgnoreExitValue = true

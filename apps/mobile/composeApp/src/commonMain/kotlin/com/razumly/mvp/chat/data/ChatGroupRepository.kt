@@ -1,6 +1,6 @@
 package com.razumly.mvp.chat.data
 
-import com.razumly.mvp.core.data.MVPDatabase
+import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.data.dataTypes.crossRef.ChatUserCrossRef
@@ -37,7 +37,7 @@ interface IChatGroupRepository : IMVPRepository {
 
 class ChatGroupRepository(
     private val databases: Databases,
-    private val mvpDatabase: MVPDatabase,
+    private val databaseService: DatabaseService,
     private val userRepository: IUserRepository,
     private val messageRepository: IMessageRepository,
     private val realtime: Realtime,
@@ -64,9 +64,9 @@ class ChatGroupRepository(
                             .contains(message.chatId)) return@subscribe
                     _scope.launch {
                         if (action == "create") {
-                            mvpDatabase.getMessageDao.upsertMessage(message.toMessageMVP(message.id))
+                            databaseService.getMessageDao.upsertMessage(message.toMessageMVP(message.id))
                         } else if (action == "delete") {
-                            mvpDatabase.getMessageDao.deleteMessageById(message.id)
+                            databaseService.getMessageDao.deleteMessageById(message.id)
                         }
                     }
                 }
@@ -78,7 +78,7 @@ class ChatGroupRepository(
                             .contains(chatGroup.id)) return@subscribe
                     _scope.launch {
                         userRepository.getUsers(chatGroup.userIds)
-                        mvpDatabase.getChatGroupDao.upsertChatGroupWithRelations(chatGroup)
+                        databaseService.getChatGroupDao.upsertChatGroupWithRelations(chatGroup)
                     }
                 }
             }
@@ -102,7 +102,7 @@ class ChatGroupRepository(
     private fun groupsFlow(): Flow<Result<List<ChatGroupWithRelations>>> {
         val userId = userRepository.currentUser.value.getOrThrow().id
         val localFlow =
-            mvpDatabase.getChatGroupDao.getChatGroupsFlowByUserId(userId).map { Result.success(it) }
+            databaseService.getChatGroupDao.getChatGroupsFlowByUserId(userId).map { Result.success(it) }
 
         _scope.launch {
             multiResponse(getRemoteData = {
@@ -113,7 +113,7 @@ class ChatGroupRepository(
                     queries = listOf(Query.contains("userIds", userId))
                 ).documents.map { it.data.copy(id = it.id) }
             }, getLocalData = {
-                mvpDatabase.getChatGroupDao.getChatGroupsByUserId(userId)
+                databaseService.getChatGroupDao.getChatGroupsByUserId(userId)
             }, saveData = {
                 _subscriptionList.value = it
 
@@ -124,9 +124,9 @@ class ChatGroupRepository(
                         Napier.e("Failed to get messages for chat group $chatGroupId", e)
                     }
                 }
-                mvpDatabase.getChatGroupDao.upsertChatGroupsWithRelations(it)
+                databaseService.getChatGroupDao.upsertChatGroupsWithRelations(it)
             }, deleteData = {
-                mvpDatabase.getChatGroupDao.deleteChatGroupsByIds(it)
+                databaseService.getChatGroupDao.deleteChatGroupsByIds(it)
             })
         }
 
@@ -158,7 +158,7 @@ class ChatGroupRepository(
                 throw it
             }
             _subscriptionList.value += chatGroup
-            mvpDatabase.getChatGroupDao.upsertChatGroupWithRelations(chatGroup)
+            databaseService.getChatGroupDao.upsertChatGroupWithRelations(chatGroup)
         }, onReturn = { })
 
     override suspend fun updateChatGroup(newChatGroup: ChatGroup): Result<ChatGroup> =
@@ -171,14 +171,14 @@ class ChatGroupRepository(
                 nestedType = ChatGroup::class
             ).data
         }, saveCall = { chatGroup ->
-            mvpDatabase.getChatGroupDao.upsertChatGroupWithRelations(chatGroup)
+            databaseService.getChatGroupDao.upsertChatGroupWithRelations(chatGroup)
         }, onReturn = { it })
 
     override suspend fun deleteUserFromChatGroup(
         chatGroup: ChatGroup, userId: String
     ): Result<Unit> {
         val newChatGroup = chatGroup.copy(userIds = chatGroup.userIds.filter { it != userId })
-        mvpDatabase.getChatGroupDao.deleteChatGroupUserCrossRef(
+        databaseService.getChatGroupDao.deleteChatGroupUserCrossRef(
             ChatUserCrossRef(
                 chatGroup.id, userId
             )
@@ -193,7 +193,7 @@ class ChatGroupRepository(
 
     override suspend fun addUserToChatGroup(chatGroup: ChatGroup, userId: String): Result<Unit> {
         val newChatGroup = chatGroup.copy(userIds = chatGroup.userIds + userId)
-        mvpDatabase.getChatGroupDao.upsertChatGroupUserCrossRef(
+        databaseService.getChatGroupDao.upsertChatGroupUserCrossRef(
             ChatUserCrossRef(
                 chatGroup.id, userId
             )

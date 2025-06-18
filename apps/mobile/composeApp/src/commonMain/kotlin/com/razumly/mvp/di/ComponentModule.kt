@@ -85,7 +85,7 @@ val componentModule = module {
             onEventCreated = onCreatedEvent,
             userRepository = get(),
             eventRepository = get(),
-            fieldRepository = get()
+            fieldRepository = get(),
         )
     }
 
@@ -128,7 +128,7 @@ val componentModule = module {
             onNavigateToLogin = onNavigateToLogin,
             onNavigateToTeamSettings = onNavigateToTeamSettings,
             userRepository = get(),
-            mvpDatabase = get(),
+            databaseService = get(),
             onNavigateToEvents = onNavigateToEvents
         )
     }

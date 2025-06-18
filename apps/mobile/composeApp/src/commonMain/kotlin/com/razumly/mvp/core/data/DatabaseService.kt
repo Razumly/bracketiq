@@ -53,17 +53,28 @@ import com.razumly.mvp.core.data.util.Converters
         FieldMatchCrossRef::class,
         TeamPendingPlayerCrossRef::class,
         ChatUserCrossRef::class,
-    ], version = 50
+    ], version = 52
 )
 @TypeConverters(Converters::class)
 @ConstructedBy(MVPDatabaseCtor::class)
-abstract class MVPDatabase : RoomDatabase() {
-    abstract val getTournamentDao: TournamentDao
-    abstract val getMatchDao: MatchDao
-    abstract val getTeamDao: TeamDao
-    abstract val getFieldDao: FieldDao
-    abstract val getUserDataDao: UserDataDao
-    abstract val getEventImpDao: EventImpDao
-    abstract val getChatGroupDao: ChatGroupDao
-    abstract val getMessageDao: MessageDao
+abstract class MVPDatabaseservice : RoomDatabase(), DatabaseService {
+    abstract override val getTournamentDao: TournamentDao
+    abstract override val getMatchDao: MatchDao
+    abstract override val getTeamDao: TeamDao
+    abstract override val getFieldDao: FieldDao
+    abstract override val getUserDataDao: UserDataDao
+    abstract override val getEventImpDao: EventImpDao
+    abstract override val getChatGroupDao: ChatGroupDao
+    abstract override val getMessageDao: MessageDao
+}
+
+interface DatabaseService {
+    val getTournamentDao: TournamentDao
+    val getMatchDao: MatchDao
+    val getTeamDao: TeamDao
+    val getFieldDao: FieldDao
+    val getUserDataDao: UserDataDao
+    val getEventImpDao: EventImpDao
+    val getChatGroupDao: ChatGroupDao
+    val getMessageDao: MessageDao
 }

@@ -43,6 +43,7 @@ interface HomeComponent {
     val selectedPage: StateFlow<Config>
 
     fun onTabSelected(page: Config)
+    fun handleDeepLink(deepLinkNav: DeepLinkNav?)
 
     fun onBack()
 
@@ -127,6 +128,17 @@ class DefaultHomeComponent(
     override fun onBack() {
         if (childStack.value.backStack.isNotEmpty()) {
             navigation.pop()
+        }
+    }
+    override fun handleDeepLink(deepLinkNav: DeepLinkNav?) {
+        when (deepLinkNav) {
+            is DeepLinkNav.Event -> navigation.pushNew(Config.Search(eventId = deepLinkNav.eventId))
+            is DeepLinkNav.Tournament -> navigation.pushNew(
+                Config.Search(tournamentId = deepLinkNav.tournamentId)
+            )
+            is DeepLinkNav.Refresh -> navigation.replaceAll(Config.Profile)
+            is DeepLinkNav.Return -> navigation.replaceAll(Config.Profile)
+            else -> {}
         }
     }
 

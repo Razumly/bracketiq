@@ -27,7 +27,7 @@ class RootComponent(
     componentContext: ComponentContext,
     val permissionsController: PermissionsController,
     val locationTracker: LocationTracker,
-    val deepLinkNav: DeepLinkNav?
+    private var deepLinkNav: DeepLinkNav?
 ) : ComponentContext by componentContext {
 
     private val navigation = StackNavigation<Config>()
@@ -50,6 +50,23 @@ class RootComponent(
         handleBackButton = true,
         childFactory = ::createChild
     )
+
+    fun handleDeepLink(deepLinkNav: DeepLinkNav?) {
+        this.deepLinkNav = deepLinkNav
+        val currentChild = childStack.value.active.instance
+        if (currentChild is Child.Home && deepLinkNav != null) {
+            Napier.d(
+                tag = "RootComponent",
+                message = "Updating existing HomeComponent with deep link: $deepLinkNav"
+            )
+            currentChild.component.handleDeepLink(deepLinkNav)
+        } else {
+            Napier.d(
+                tag = "RootComponent", message = "Navigating to Home with deep link: $deepLinkNav"
+            )
+            navigation.replaceCurrent(Config.Home)
+        }
+    }
 
     fun requestInitialPermissions() {
         scope.launch {
@@ -89,7 +106,8 @@ class RootComponent(
 
         is Config.Home -> Child.Home(
             _koin.inject<DefaultHomeComponent> {
-                parametersOf(componentContext,
+                parametersOf(
+                    componentContext,
                     deepLinkNav,
                     { navigation.replaceCurrent(Config.Login) })
             }.value
