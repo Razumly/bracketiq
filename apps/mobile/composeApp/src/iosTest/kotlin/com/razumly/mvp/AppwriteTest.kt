@@ -1,11 +1,9 @@
 package com.razumly.mvp
 
 import io.appwrite.Client
-import io.appwrite.WebAuthComponent
 import io.appwrite.models.InputFile
 import io.appwrite.services.Account
 import io.appwrite.services.Storage
-import io.appwrite.enums.OAuthProvider
 import platform.Foundation.*
 import kotlinx.cinterop.*
 import kotlinx.coroutines.test.runTest
@@ -14,7 +12,7 @@ import org.koin.core.component.inject
 import platform.Foundation.NSBundle
 import kotlin.test.Test
 
-class AppwriteTest: BaseTest(), KoinComponent {
+class AppwriteTest: ExceptBaseTest(), KoinComponent {
     private val client: Client by inject()
 
     @OptIn(ExperimentalForeignApi::class, BetaInteropApi::class)

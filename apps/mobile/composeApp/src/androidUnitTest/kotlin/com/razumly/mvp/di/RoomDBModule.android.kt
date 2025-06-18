@@ -1,15 +1,15 @@
 package com.razumly.mvp.di
 
 import androidx.room.Room
-import androidx.sqlite.driver.bundled.BundledSQLiteDriver
-import com.razumly.mvp.core.data.MVPDatabase
-import kotlinx.coroutines.Dispatchers
+import com.razumly.mvp.core.data.DatabaseService
+import com.razumly.mvp.core.data.MVPDatabaseservice
+import org.koin.dsl.bind
 import org.koin.dsl.module
 
 actual val roomDBModule = module {
     single {
-        Room.inMemoryDatabaseBuilder(get(), MVPDatabase::class.java)
+        Room.inMemoryDatabaseBuilder(get(), MVPDatabaseservice::class.java)
             .allowMainThreadQueries()
             .build()
-    }
+    } bind DatabaseService::class
 }
