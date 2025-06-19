@@ -167,7 +167,7 @@ fun EventDetailScreen(
                     enter = expandVertically(expandFrom = Alignment.Top),
                     exit = shrinkVertically(shrinkTowards = Alignment.Top)
                 ) {
-                    Column(Modifier.padding(innerPadding)) {
+                    Column(Modifier.padding(innerPadding).padding(top = 32.dp)) {
                         CollapsableHeader(component)
                         Box(Modifier.fillMaxSize()) {
                             when (selectedEvent) {
