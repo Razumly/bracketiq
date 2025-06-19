@@ -174,7 +174,7 @@ fun EventSearchScreen(
                     canClickPOI = false,
                     focusedLocation = selectedEvent?.let {
                         LatLng(it.lat, it.long)
-                    } ?: currentLocation,
+                    } ?: currentLocation ?: LatLng(0.0,0.0),
                     focusedEvent = null,
                     revealCenter = revealCenter
                 )

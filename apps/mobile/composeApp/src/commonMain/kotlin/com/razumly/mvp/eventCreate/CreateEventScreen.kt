@@ -47,7 +47,6 @@ fun CreateEventScreen(
     val newEventState by component.newEventState.collectAsState()
     val childStack by component.childStack.subscribeAsState()
     val isEditing = true
-    BindLocationTrackerEffect(mapComponent.locationTracker)
 
     Scaffold(
         modifier = Modifier.padding(LocalNavBarPadding.current),

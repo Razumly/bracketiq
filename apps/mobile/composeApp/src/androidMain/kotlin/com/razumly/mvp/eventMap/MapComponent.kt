@@ -35,12 +35,12 @@ actual class MapComponent(
     componentContext: ComponentContext,
     private val eventAbsRepository: IEventAbsRepository,
     context: Context,
-    actual val locationTracker: LocationTracker
+    val locationTracker: LocationTracker
 ) : ComponentContext by componentContext {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     private val _currentLocation = MutableStateFlow<dev.icerock.moko.geo.LatLng?>(null)
-    val currentLocation = _currentLocation.asStateFlow()
+    actual val currentLocation = _currentLocation.asStateFlow()
 
     private val _events = MutableStateFlow<List<EventAbs>>(emptyList())
     val events: StateFlow<List<EventAbs>> = _events.asStateFlow()

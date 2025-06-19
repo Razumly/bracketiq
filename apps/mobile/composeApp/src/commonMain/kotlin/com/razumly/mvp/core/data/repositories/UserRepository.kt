@@ -72,20 +72,20 @@ class UserRepository(
         val id = account.get().id
         currentUserDataSource.saveUserId(id)
         Napier.d("User logged in: $id")
-        val currentUser = database.getDocument(
+        val remoteUserData = database.getDocument(
             DbConstants.DATABASE_NAME,
             DbConstants.USER_DATA_COLLECTION,
             id,
             nestedType = UserDataDTO::class
         ).data.copy(id = id).toUserData(id)
-        Napier.d("User data: $currentUser")
+        Napier.d("User data: $remoteUserData")
         if (_pushToken.value.isNotBlank() && _pushTarget.value.isBlank()) {
             pushNotificationsRepository.addDeviceAsTarget()
         }
-        databaseService.getUserDataDao.upsertUserData(currentUser)
+        databaseService.getUserDataDao.upsertUserData(remoteUserData)
 
-        _currentUser.value = Result.success(currentUser)
-        return Result.success(currentUser)
+        _currentUser.value = Result.success(remoteUserData)
+        return Result.success(remoteUserData)
     }
 
     override suspend fun logout(): Result<Unit> = kotlin.runCatching {
@@ -247,7 +247,7 @@ class UserRepository(
     }
 
     override suspend fun updateUser(user: UserData): Result<UserData> {
-        return singleResponse(networkCall = {
+        val response = singleResponse(networkCall = {
             database.updateDocument(
                 DbConstants.DATABASE_NAME,
                 DbConstants.USER_DATA_COLLECTION,
@@ -260,5 +260,9 @@ class UserRepository(
         }, onReturn = { data ->
             data
         })
+        if (user.id == currentUser.value.getOrNull()?.id) {
+            _currentUser.value = Result.success(user)
+        }
+        return response
     }
 }

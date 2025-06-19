@@ -27,7 +27,11 @@ import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 
 @Composable
-fun SelectEventImage(modifier: Modifier = Modifier, selectedPlace: MVPPlace, onSelectedImage: (EventImp.() -> EventImp) -> Unit) {
+fun SelectEventImage(
+    modifier: Modifier = Modifier,
+    selectedPlace: MVPPlace,
+    onSelectedImage: (EventImp.() -> EventImp) -> Unit
+) {
     val imageUrls = selectedPlace.imageUrls
     val columnCount = 3
     val selected = remember { mutableStateOf<String?>(null) }
@@ -41,28 +45,21 @@ fun SelectEventImage(modifier: Modifier = Modifier, selectedPlace: MVPPlace, onS
         items(imageUrls) { url ->
             val painter = rememberAsyncImagePainter(model = url)
             val painterState = painter.state
-            Box(
-                modifier = Modifier
-                    .padding(4.dp)
-                    .aspectRatio(1f)
-                    .let { base ->
-                        if (selected.value == url) {
-                            base.border(
-                                width = 2.dp,
-                                color = MaterialTheme.colorScheme.primary,
-                                shape = RoundedCornerShape(4.dp)
-                            )
-                        } else base
-                    }
-                    .clickable {
-                        selected.value = url
-                       onSelectedImage { copy(imageUrl = url) }
-                    }
-            ) {
+            Box(modifier = Modifier.padding(4.dp).aspectRatio(1f).let { base ->
+                    if (selected.value == url) {
+                        base.border(
+                            width = 2.dp,
+                            color = MaterialTheme.colorScheme.primary,
+                            shape = RoundedCornerShape(4.dp)
+                        )
+                    } else base
+                }.clickable {
+                    selected.value = url
+                    onSelectedImage { copy(imageUrl = url) }
+                }) {
                 if (painterState.value is AsyncImagePainter.State.Loading) {
                     Box(
-                        modifier = Modifier
-                            .fillMaxSize()
+                        modifier = Modifier.fillMaxSize()
                             .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
                     )
                 }

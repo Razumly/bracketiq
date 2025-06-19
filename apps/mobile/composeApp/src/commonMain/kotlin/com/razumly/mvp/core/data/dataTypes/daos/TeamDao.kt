@@ -110,7 +110,7 @@ interface TeamDao {
     @RewriteQueriesToDropUnusedColumns
     @Transaction
     @Query("SELECT * FROM Team WHERE id = :teamId")
-    suspend fun getTeamWithPlayers(teamId: String): TeamWithRelations?
+    suspend fun getTeamWithPlayers(teamId: String): TeamWithPlayers
 
     @RewriteQueriesToDropUnusedColumns
     @Transaction

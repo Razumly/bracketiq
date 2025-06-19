@@ -3,7 +3,9 @@ package com.razumly.mvp.eventMap
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -51,7 +53,7 @@ actual fun EventMap(
     onPlaceSelected: (place: MVPPlace) -> Unit,
     canClickPOI: Boolean,
     modifier: Modifier,
-    focusedLocation: dev.icerock.moko.geo.LatLng?,
+    focusedLocation: dev.icerock.moko.geo.LatLng,
     focusedEvent: EventAbs?,
     revealCenter: Offset
 ) {
@@ -62,7 +64,7 @@ actual fun EventMap(
     val events by component.events.collectAsState()
     val defaultZoom = 12f
     val defaultDurationMs = 1000
-    val initCameraState = focusedLocation?.toGoogle()
+    val initCameraState = focusedLocation.toGoogle()
     val cameraPositionState = rememberCameraPositionState()
     val currentLocation by component.currentLocation.collectAsState()
 
@@ -71,22 +73,13 @@ actual fun EventMap(
     )
     BindLocationTrackerEffect(component.locationTracker)
 
-    LaunchedEffect(initCameraState, currentLocation) {
-        if (initCameraState != null) {
-            cameraPositionState.move(
-                CameraUpdateFactory.newLatLngZoom(
-                    initCameraState,
-                    defaultZoom
-                )
+    LaunchedEffect(initCameraState) {
+        cameraPositionState.move(
+            CameraUpdateFactory.newLatLngZoom(
+                initCameraState,
+                defaultZoom
             )
-        } else if (currentLocation != null) {
-            cameraPositionState.move(
-                CameraUpdateFactory.newLatLngZoom(
-                    currentLocation!!.toGoogle(),
-                    defaultZoom
-                )
-            )
-        }
+        )
     }
     var currentCameraState by remember { mutableStateOf(cameraPositionState) }
 
@@ -103,21 +96,10 @@ actual fun EventMap(
             alpha = if (animationProgress > 0f) 1f else 0f
         }.clip(CircularRevealShape(animationProgress, revealCenter)),
     ) {
-        LaunchedEffect(currentLocation) {
-            currentLocation?.let { validLoc ->
-                val target = validLoc.toGoogle()
-
-                if (focusedEvent == null) {
-                    cameraPositionState.animate(
-                        CameraUpdateFactory.newLatLngZoom(target, defaultZoom),
-                        defaultDurationMs
-                    )
-                }
-            }
-        }
         GoogleMap(
             modifier = Modifier
                 .fillMaxSize(),
+            contentPadding = PaddingValues(top = 160.dp),
             cameraPositionState = cameraPositionState,
             properties = MapProperties(isMyLocationEnabled = true),
             uiSettings = MapUiSettings(zoomControlsEnabled = false),
@@ -196,7 +178,8 @@ actual fun EventMap(
             currentCameraState.projection?.visibleRegion?.latLngBounds?.let {
                 MapSearchBar(
                     Modifier
-                        .padding(horizontal = 16.dp),
+                        .padding(horizontal = 16.dp)
+                        .fillMaxWidth(),
                     component,
                     currentCameraState.position.target,
                     it

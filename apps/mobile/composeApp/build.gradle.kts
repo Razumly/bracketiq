@@ -22,8 +22,8 @@ composeCompiler {
     includeSourceInformation = true
 }
 
-val mvpVersion = "0.4.1"
-val mvpVersionCode = 5
+val mvpVersion = "0.4.3"
+val mvpVersionCode = 7
 kotlin {
     androidTarget {
         compilerOptions {

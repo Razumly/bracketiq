@@ -19,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonColors
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -97,7 +98,7 @@ fun EventDetails(
     onFavoriteClick: () -> Unit,
     favoritesModifier: Modifier,
     navPadding: PaddingValues = PaddingValues(),
-    onPlaceSelected: (MVPPlace) -> Unit,
+    onPlaceSelected: (MVPPlace?) -> Unit,
     editView: Boolean,
     onEditEvent: (EventImp.() -> EventImp) -> Unit,
     onEditTournament: (Tournament.() -> Tournament) -> Unit,
@@ -117,7 +118,7 @@ fun EventDetails(
     var revealCenter by remember { mutableStateOf(Offset.Zero) }
     var showImageSelector by rememberSaveable { mutableStateOf(false) }
     var selectedPlace by remember { mutableStateOf<MVPPlace?>(null) }
-    val locationTracker by mapComponent.locationTracker.getLocationsFlow().collectAsState(null)
+    val currentLocation by mapComponent.currentLocation.collectAsState()
 
     val painter = rememberAsyncImagePainter(event.imageUrl)
     val painterLoader = rememberPainterLoader()
@@ -126,9 +127,8 @@ fun EventDetails(
         colorState.updateFrom(painter)
     }
 
-    val backgroundColor =
-        colorState.result?.paletteOrNull?.vibrantSwatch?.color
-            ?: MaterialTheme.colorScheme.background
+    val backgroundColor = colorState.result?.paletteOrNull?.vibrantSwatch?.color
+        ?: MaterialTheme.colorScheme.background
     val secondary =
         colorState.result?.paletteOrNull?.mutedSwatch?.color ?: MaterialTheme.colorScheme.secondary
     val onBackgroundColor = colorState.result?.paletteOrNull?.vibrantSwatch?.onColor
@@ -152,8 +152,7 @@ fun EventDetails(
         Column(Modifier.fillMaxSize().verticalScroll(scrollState)) {
             Box(Modifier.fillMaxSize()) {
                 BackgroundImage(
-                    Modifier.matchParentSize()
-                        .hazeSource(hazeState, key = "BackGround"),
+                    Modifier.matchParentSize().hazeSource(hazeState, key = "BackGround"),
                     if (!editView) event.imageUrl else editEvent.imageUrl,
                 )
 
@@ -273,8 +272,7 @@ fun EventDetails(
             showPicker = showEndPicker,
         )
 
-        EventMap(
-            component = mapComponent,
+        EventMap(component = mapComponent,
             onEventSelected = {
                 showImageSelector = true
             },
@@ -288,11 +286,10 @@ fun EventDetails(
             canClickPOI = editView,
             focusedLocation = if (editEvent.location.isNotBlank()) editEvent.let {
                 LatLng(
-                    it.lat,
-                    it.long
+                    it.lat, it.long
                 )
             } else {
-                LatLng(locationTracker?.latitude ?: 0.0, locationTracker?.longitude ?: 0.0)
+                currentLocation ?: LatLng(0.0, 0.0)
             },
             focusedEvent = if (editEvent.location.isNotBlank()) {
                 editEvent
@@ -301,8 +298,7 @@ fun EventDetails(
             } else {
                 null
             },
-            revealCenter = revealCenter
-        )
+            revealCenter = revealCenter)
 
         if (showImageSelector && selectedPlace != null) {
             Dialog(onDismissRequest = {
@@ -312,23 +308,30 @@ fun EventDetails(
                 Column(Modifier.fillMaxSize()) {
                     SelectEventImage(
                         selectedPlace = selectedPlace!!,
-                        onSelectedImage = { onEditEvent(it) }
-                    )
+                        onSelectedImage = { onEditEvent(it) })
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                         Button(
-                            enabled = editEvent.imageUrl.isNotEmpty(),
                             onClick = {
+                                showImageSelector = false
+                                onEditEvent { copy(imageUrl = "",) }
+                                onPlaceSelected(null)
+                            }, colors = ButtonColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer,
+                                contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                                disabledContainerColor = MaterialTheme.colorScheme.onSurface,
+                                disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        ) {
+                            Text("Cancel")
+                        }
+                        Button(
+                            enabled = editEvent.imageUrl.isNotEmpty(), onClick = {
                                 showImageSelector = false
                                 mapComponent.toggleMap()
                                 selectedPlace = null
                             }
                         ) {
                             Text("Confirm")
-                        }
-                        Button(onClick = {
-                            showImageSelector = false
-                        }) {
-                            Text("Cancel")
                         }
                     }
                 }
@@ -431,21 +434,19 @@ fun BackgroundImage(modifier: Modifier, imageUrl: String) {
             AsyncImage(
                 model = imageUrl,
                 contentDescription = "Event Image",
-                modifier = Modifier
-                    .height(imageHeight.dp),
+                modifier = Modifier.height(imageHeight.dp),
                 contentScale = ContentScale.Crop,
             )
 
             AsyncImage(model = imageUrl,
                 contentDescription = "Flipped Hazy Background",
-                modifier = Modifier.fillMaxSize()
-                    .graphicsLayer {
-                        clip = true
-                        rotationX = 180f
-                    }.graphicsLayer {
-                        transformOrigin = TransformOrigin(0.5f, 1f)
-                        scaleY = 50f
-                    }.blur(32.dp),
+                modifier = Modifier.fillMaxSize().graphicsLayer {
+                    clip = true
+                    rotationX = 180f
+                }.graphicsLayer {
+                    transformOrigin = TransformOrigin(0.5f, 1f)
+                    scaleY = 50f
+                }.blur(32.dp),
                 contentScale = ContentScale.Crop,
                 clipToBounds = true
             )

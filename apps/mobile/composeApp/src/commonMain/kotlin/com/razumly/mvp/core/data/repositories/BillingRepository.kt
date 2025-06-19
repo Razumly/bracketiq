@@ -22,7 +22,7 @@ class DefaultBillingRepository(
             is Tournament -> true
             else -> false
         }
-        if (user.stripeAccountId.isBlank()) {
+        if (user.stripeAccountId.isNullOrBlank()) {
             createAccount()
         } else {
             functions.createExecution(

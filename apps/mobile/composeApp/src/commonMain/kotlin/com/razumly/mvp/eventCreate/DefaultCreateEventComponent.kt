@@ -42,7 +42,7 @@ interface CreateEventComponent {
     fun nextStep()
     fun previousStep()
     fun onTypeSelected(type: EventType)
-    fun selectPlace(place: MVPPlace)
+    fun selectPlace(place: MVPPlace?)
     fun validateAndUpdatePrice(input: String, onError: (Boolean) -> Unit)
     fun validateAndUpdateTeamSize(input: String, onError: (Boolean) -> Unit)
     fun validateAndUpdateMaxPlayers(input: String, onError: (Boolean) -> Unit)
@@ -57,9 +57,10 @@ interface CreateEventComponent {
     @Serializable
     sealed class Config {
         @Serializable
-        data object EventInfo: Config()
+        data object EventInfo : Config()
+
         @Serializable
-        data object Preview: Config()
+        data object Preview : Config()
     }
 }
 
@@ -77,7 +78,12 @@ class DefaultCreateEventComponent(
     override val newEventState = _newEventState.asStateFlow()
 
     override val defaultEvent =
-        MutableStateFlow(EventWithRelations(EventImp(), userRepository.currentUser.value.getOrThrow()))
+        MutableStateFlow(
+            EventWithRelations(
+                EventImp(),
+                userRepository.currentUser.value.getOrThrow()
+            )
+        )
 
     private val _currentEventType = MutableStateFlow(EventType.EVENT)
     override val currentEventType = _currentEventType.asStateFlow()
@@ -168,15 +174,22 @@ class DefaultCreateEventComponent(
             EventType.TOURNAMENT -> {
                 Tournament().updateTournamentFromEvent(_newEventState.value as EventImp)
             }
+
             EventType.EVENT -> {
                 (_newEventState.value as Tournament).toEvent()
             }
         }
     }
 
-    override fun selectPlace(place: MVPPlace) {
+    override fun selectPlace(place: MVPPlace?) {
         _selectedPlace.value = place
-        updateEventField { copy(lat = place.lat, long = place.long, location = place.name) }
+        updateEventField {
+            copy(
+                lat = place?.lat ?: 0.0,
+                long = place?.long ?: 0.0,
+                location = place?.name ?: ""
+            )
+        }
     }
 
     override fun validateAndUpdatePrice(input: String, onError: (Boolean) -> Unit) {

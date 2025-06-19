@@ -143,7 +143,7 @@ class TournamentRepository(
                 queries = null
             ).data.toTournament(tournamentId)
         }, saveCall = { tournament ->
-            databaseService.getTournamentDao.upsertTournamentWithRelations(tournament)
+            databaseService.getTournamentDao.upsertTournament(tournament)
         }, onReturn = {
             databaseService.getTournamentDao.getTournamentWithRelations(tournamentId)
         })

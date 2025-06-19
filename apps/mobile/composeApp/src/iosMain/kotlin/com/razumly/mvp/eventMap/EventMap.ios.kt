@@ -22,7 +22,7 @@ actual fun EventMap(
     onPlaceSelected: (place: MVPPlace) -> Unit,
     canClickPOI: Boolean,
     modifier: Modifier,
-    focusedLocation: LatLng?,
+    focusedLocation: LatLng,
     focusedEvent: EventAbs?,
     revealCenter: Offset
 ) {

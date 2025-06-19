@@ -9,12 +9,14 @@ actual fun PlatformBackButton(
     onBack: () -> Unit,
     modifier: Modifier,
     text: String,
-    tintColor: Color
+    tintColor: Color,
+    arrow: Boolean
 ) {
     BackButton(
         onBack = onBack,
         modifier = modifier,
         text = text,
-        tintColor = tintColor
+        tintColor = tintColor,
+        arrow = arrow
     )
 }

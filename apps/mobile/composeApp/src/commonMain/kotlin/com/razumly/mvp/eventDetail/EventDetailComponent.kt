@@ -56,6 +56,7 @@ interface EventDetailComponent : ComponentContext {
     val editedEvent: StateFlow<EventAbs>
     val isEditing: StateFlow<Boolean>
     val backCallback: BackCallback
+    val isUserInEvent: StateFlow<Boolean>
 
     fun matchSelected(selectedMatch: MatchWithRelations)
     fun selectDivision(division: Division)
@@ -71,7 +72,7 @@ interface EventDetailComponent : ComponentContext {
     fun editTournamentField(update: Tournament.() -> Tournament)
     fun updateEvent()
     fun createNewTeam()
-    fun selectPlace(place: MVPPlace)
+    fun selectPlace(place: MVPPlace?)
     fun onTypeSelected(type: EventType)
     fun selectFieldCount(count: Int)
 }
@@ -95,7 +96,7 @@ class DefaultEventDetailComponent(
     componentContext: ComponentContext,
     userRepository: IUserRepository,
     fieldRepository: IFieldRepository,
-    event: EventAbs,
+    private val event: EventAbs,
     onBack: () -> Unit,
     private val eventAbsRepository: IEventAbsRepository,
     private val matchRepository: IMatchRepository,
@@ -127,6 +128,9 @@ class DefaultEventDetailComponent(
         }
     }
 
+    private val _isUserInEvent: MutableStateFlow<Boolean> = MutableStateFlow(false)
+    override val isUserInEvent = _isUserInEvent.asStateFlow()
+
     override val selectedEvent: StateFlow<EventAbsWithRelations> =
         eventAbsRepository.getEventWithRelationsFlow(event).map { result ->
             result.getOrElse {
@@ -145,17 +149,16 @@ class DefaultEventDetailComponent(
                     _errorState.value = "Error loading matches: ${it.message}"; emptyList()
                 }
             }, when (eventWithPlayers) {
-                is TournamentWithRelations -> teamRepository.getTeamsOfTournamentFlow(
-                    eventWithPlayers.event.id
-                )
+            is TournamentWithRelations -> teamRepository.getTeamsOfTournamentFlow(
+                eventWithPlayers.event.id
+            )
 
-                is EventWithRelations -> teamRepository.getTeamsOfEventFlow(eventWithPlayers.event.id)
-            }.map { result ->
-                result.getOrElse {
-                    _errorState.value = "Failed to load teams: ${it.message}"; emptyList()
-                }
+            is EventWithRelations -> teamRepository.getTeamsOfEventFlow(eventWithPlayers.event.id)
+        }.map { result ->
+            result.getOrElse {
+                _errorState.value = "Failed to load teams: ${it.message}"; emptyList()
             }
-        ) { matches, teams ->
+        }) { matches, teams ->
             eventWithPlayers.toEventWithFullRelations(matches, teams)
         }
     }.stateIn(
@@ -164,9 +167,9 @@ class DefaultEventDetailComponent(
         )
     )
 
-    override val divisionFields =
-        fieldRepository.getFieldsInTournamentWithMatchesFlow(event.id).map { fields -> fields.filter { it.field.divisions.contains(selectedDivision.value?.name) } }
-            .stateIn(scope, SharingStarted.Eagerly, emptyList())
+    override val divisionFields = fieldRepository.getFieldsInTournamentWithMatchesFlow(event.id)
+        .map { fields -> fields.filter { it.field.divisions.contains(selectedDivision.value?.name) } }
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     private val _divisionMatches = MutableStateFlow<Map<String, MatchWithRelations>>(emptyMap())
     override val divisionMatches = _divisionMatches.asStateFlow()
@@ -189,20 +192,17 @@ class DefaultEventDetailComponent(
     private val _showDetails = MutableStateFlow(false)
     override val showDetails = _showDetails.asStateFlow()
 
-    private val _userTeams =
-        teamRepository.getTeamsWithPlayersFlow(currentUser.id).map { result ->
-            result.getOrElse {
-                emptyList()
-            }
-        }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+    private val _userTeams = teamRepository.getTeamsWithPlayersFlow(currentUser.id).map { result ->
+        result.getOrElse {
+            emptyList()
+        }
+    }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     private val _usersTeam = MutableStateFlow<TeamWithPlayers?>(null)
 
     override val validTeams = _userTeams.flatMapLatest { teams ->
         flowOf(teams.filter { it.players.size == event.teamSizeLimit })
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
-
-    private val _userInTournament = MutableStateFlow(false)
 
     init {
         backHandler.register(backCallback)
@@ -221,10 +221,17 @@ class DefaultEventDetailComponent(
             eventWithRelations.distinctUntilChanged { old, new -> old == new }.filterNotNull()
                 .collect { event ->
                     matchRepository.subscribeToMatches()
-                    _userInTournament.value = event.players.contains(currentUser) == true
-                    if (_userInTournament.value) {
+                    _isUserInEvent.value = checkIsUserInEvent()
+                    if (_isUserInEvent.value) {
                         _usersTeam.value =
                             event.teams.find { it.team.players.contains(currentUser.id) }
+                                ?: event.event.waitList.find { waitlisted ->
+                                    currentUser.teamIds.contains(
+                                        waitlisted
+                                    )
+                                }?.let {
+                                    teamRepository.getTeamWithPlayers(it).getOrNull()
+                                }
                     }
                     event.event.divisions.firstOrNull()?.let { selectDivision(it) }
                 }
@@ -269,25 +276,28 @@ class DefaultEventDetailComponent(
 
     override fun joinEvent() {
         scope.launch {
-            eventAbsRepository.addCurrentUserToEvent(selectedEvent.value.event)
+            eventAbsRepository.addCurrentUserToEvent(selectedEvent.value.event).onSuccess {
+                _isUserInEvent.value = true
+            }
         }
     }
 
     override fun joinEventAsTeam(team: TeamWithPlayers) {
         scope.launch {
-            eventAbsRepository.addTeamToEvent(selectedEvent.value.event, team)
+            eventAbsRepository.addTeamToEvent(selectedEvent.value.event, team).onSuccess {
+                _isUserInEvent.value = true
+            }
         }
     }
 
     override fun leaveEvent() {
         scope.launch {
-            val userInFreeAgents = selectedEvent.value.event.freeAgents.contains(currentUser.id)
-            val userInEvent = (currentUser.eventIds + currentUser.tournamentIds).contains(
-                selectedEvent.value.event.id
-            )
-            if (!selectedEvent.value.event.teamSignup || userInFreeAgents || (userInEvent && _usersTeam.value == null)) {
+            if (!_isUserInEvent.value) {
+                return@launch
+            }
+            if (!selectedEvent.value.event.teamSignup || checkIsUserFreeAgent()) {
                 eventAbsRepository.removeCurrentUserFromEvent(selectedEvent.value.event)
-            } else if (_usersTeam.value != null) {
+            } else {
                 eventAbsRepository.removeTeamFromEvent(
                     selectedEvent.value.event, _usersTeam.value!!
                 )
@@ -332,8 +342,12 @@ class DefaultEventDetailComponent(
         onNavigateToTeamSettings(selectedEvent.value.event.freeAgents, selectedEvent.value.event)
     }
 
-    override fun selectPlace(place: MVPPlace) {
-        editEventField { copy(lat = place.lat, long = place.long, location = place.name) }
+    override fun selectPlace(place: MVPPlace?) {
+        editEventField {
+            copy(
+                lat = place?.lat ?: 0.0, long = place?.long ?: 0.0, location = place?.name ?: ""
+            )
+        }
     }
 
     override fun onTypeSelected(type: EventType) {
@@ -416,5 +430,29 @@ class DefaultEventDetailComponent(
         } else {
             match.match.losersBracket == losersBracket.value
         }
+    }
+
+    private fun checkIsUserWaitListed(): Boolean {
+        return selectedEvent.value.event.waitList.any { participant ->
+            (currentUser.id + currentUser.teamIds).contains(
+                participant
+            )
+        }
+    }
+
+    private fun checkIsUserFreeAgent(): Boolean {
+        return selectedEvent.value.event.freeAgents.any { participant ->
+            (currentUser.id + currentUser.teamIds).contains(
+                participant
+            )
+        }
+    }
+
+    private fun checkIsUserParticipant(): Boolean {
+        return (currentUser.eventIds + currentUser.tournamentIds).contains(event.id)
+    }
+
+    private fun checkIsUserInEvent(): Boolean {
+        return checkIsUserParticipant() || checkIsUserFreeAgent() || checkIsUserWaitListed()
     }
 }

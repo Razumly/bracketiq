@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -27,24 +28,34 @@ fun BackButton(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     text: String,
-    tintColor: Color
+    tintColor: Color,
+    arrow: Boolean
 ) {
     Row(
         modifier = modifier
             .clickable(
-                indication = null, // Remove ripple effect for iOS feel
+                indication = null,
                 interactionSource = remember { MutableInteractionSource() }
             ) { onBack() }
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Start
     ) {
-        Icon(
-            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-            contentDescription = "Back",
-            tint = tintColor,
-            modifier = Modifier.size(20.dp)
-        )
+        if (arrow) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = "Back",
+                tint = tintColor,
+                modifier = Modifier.size(20.dp)
+            )
+        } else {
+            Icon(
+                imageVector = Icons.Default.Close,
+                contentDescription = "Close",
+                tint = tintColor,
+                modifier = Modifier.size(20.dp)
+            )
+        }
 
         Spacer(modifier = Modifier.width(4.dp))
 
@@ -65,7 +76,8 @@ expect fun PlatformBackButton(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     text: String = "Back",
-    tintColor: Color = Color(0xFF007AFF)
+    tintColor: Color = Color(0xFF007AFF),
+    arrow: Boolean,
 )
 
 

@@ -49,6 +49,7 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
                 title = { Text("Team Management") },
                 navigationIcon = { PlatformBackButton(
                     onBack = { component.onBack() },
+                    arrow = true,
                 ) },
             )
         }

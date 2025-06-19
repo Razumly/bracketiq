@@ -28,7 +28,7 @@ import kotlinx.coroutines.launch
 interface ITeamRepository : IMVPRepository {
     fun getTeamsOfTournamentFlow(tournamentId: String): Flow<Result<List<TeamWithPlayers>>>
     suspend fun getTeamsOfEventFlow(eventId: String): Flow<Result<List<TeamWithPlayers>>>
-    suspend fun getTeam(teamId: String): Result<Team>
+    suspend fun getTeamWithPlayers(teamId: String): Result<TeamWithPlayers>
     suspend fun getTeamsOfTournament(tournamentId: String): Result<List<Team>>
     suspend fun getTeamsOfEvent(eventId: String): Result<List<Team>>
     suspend fun addPlayerToTeam(team: Team, player: UserData): Result<Unit>
@@ -331,7 +331,7 @@ class TeamRepository(
         })
     }
 
-    override suspend fun getTeam(teamId: String): Result<Team> = singleResponse(
+    override suspend fun getTeamWithPlayers(teamId: String): Result<TeamWithPlayers> = singleResponse(
         networkCall = {
             database.getDocument(
                 DbConstants.DATABASE_NAME,
@@ -341,13 +341,13 @@ class TeamRepository(
             ).data.toTeam(teamId)
         },
         saveCall = { team -> databaseService.getTeamDao.upsertTeam(team) },
-        onReturn = { team -> team },
+        onReturn = { _ -> databaseService.getTeamDao.getTeamWithPlayers(teamId) },
     )
 
     override fun getTeamWithPlayersFlow(id: String): Flow<Result<TeamWithRelations>> {
         val localFlow = databaseService.getTeamDao.getTeamWithPlayersFlow(id).map { Result.success(it) }
         scope.launch {
-            getTeam(id)
+            getTeamWithPlayers(id)
         }
         return localFlow
     }

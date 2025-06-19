@@ -20,7 +20,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -72,10 +71,7 @@ fun EventDetailScreen(
     val editedEvent by component.editedEvent.collectAsState()
     var showFab by remember { mutableStateOf(false) }
 
-    val isUserInEvent =
-        (currentUser.eventIds + currentUser.tournamentIds).contains(selectedEvent.event.id) || (selectedEvent.event.waitList + selectedEvent.event.freeAgents).contains(
-            currentUser.id
-        )
+    val isUserInEvent by component.isUserInEvent.collectAsState()
 
     LaunchedEffect(Unit) {
         delay(300)
@@ -84,10 +80,15 @@ fun EventDetailScreen(
 
     CompositionLocalProvider(LocalTournamentComponent provides component) {
         Scaffold(Modifier.fillMaxSize(), topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text(selectedEvent.event.name) },
-                navigationIcon = { PlatformBackButton({ component.backCallback.onBack() }) },
-            )
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Start,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                PlatformBackButton(
+                    { component.backCallback.onBack() }, text = "", arrow = false
+                )
+            }
         }) { innerPadding ->
             Column(
                 Modifier.background(MaterialTheme.colorScheme.background).fillMaxSize()

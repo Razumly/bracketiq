@@ -53,7 +53,7 @@ import com.razumly.mvp.core.data.util.Converters
         FieldMatchCrossRef::class,
         TeamPendingPlayerCrossRef::class,
         ChatUserCrossRef::class,
-    ], version = 52
+    ], version = 53
 )
 @TypeConverters(Converters::class)
 @ConstructedBy(MVPDatabaseCtor::class)

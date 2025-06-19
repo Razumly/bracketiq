@@ -25,7 +25,7 @@ fun EventManagementScreen(component: EventManagementComponent) {
 
     Scaffold(topBar = {
         CenterAlignedTopAppBar(title = { Text("Event Management") },
-            navigationIcon = { PlatformBackButton(onBack = component.onBack) },
+            navigationIcon = { PlatformBackButton(onBack = component.onBack, arrow = true) },
             scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
         )
     }) { paddingValues ->
