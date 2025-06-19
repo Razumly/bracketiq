@@ -15,7 +15,7 @@ data class TournamentWithRelations (
         parentColumn = "hostId",
         entityColumn = "id",
     )
-    override val host: UserData,
+    override val host: UserData?,
 
     @Relation(
         parentColumn = "id",

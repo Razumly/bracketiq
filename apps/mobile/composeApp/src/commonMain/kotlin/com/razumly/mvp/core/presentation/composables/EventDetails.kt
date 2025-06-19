@@ -3,6 +3,7 @@ package com.razumly.mvp.core.presentation.composables
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -96,7 +97,6 @@ fun EventDetails(
     eventWithRelations: EventAbsWithRelations,
     editEvent: EventAbs,
     onFavoriteClick: () -> Unit,
-    favoritesModifier: Modifier,
     navPadding: PaddingValues = PaddingValues(),
     onPlaceSelected: (MVPPlace?) -> Unit,
     editView: Boolean,
@@ -106,6 +106,7 @@ fun EventDetails(
     onAddCurrentUser: (Boolean) -> Unit,
     onEventTypeSelected: (EventType) -> Unit,
     onSelectFieldCount: (Int) -> Unit,
+    onBack: () -> Unit,
     joinButton: @Composable (isValid: Boolean) -> Unit
 ) {
     val event = eventWithRelations.event
@@ -156,13 +157,21 @@ fun EventDetails(
                     if (!editView) event.imageUrl else editEvent.imageUrl,
                 )
 
-                IconButton(
-                    onClick = onFavoriteClick, modifier = favoritesModifier.align(Alignment.TopEnd)
-                ) {
-                    Icon(
-                        painter = rememberVectorPainter(Icons.Default.AddCircle),
-                        contentDescription = "Favorite",
+                if (!editView) {
+                    PlatformBackButton(
+                        { onBack() },
+                        modifier = Modifier.padding(top = 32.dp, start = 8.dp).align(Alignment.TopStart),
+                        text = "",
+                        arrow = false
                     )
+                    IconButton(
+                        onClick = onFavoriteClick, modifier = Modifier.padding(top = 32.dp, end = 8.dp).align(Alignment.TopEnd)
+                    ) {
+                        Icon(
+                            painter = rememberVectorPainter(Icons.Default.AddCircle),
+                            contentDescription = "Favorite",
+                        )
+                    }
                 }
 
                 Column(
@@ -342,9 +351,9 @@ fun EventDetails(
 
 @OptIn(ExperimentalHazeMaterialsApi::class)
 @Composable
-fun NormalDetails(host: UserData, event: EventAbs, hazeState: HazeState, dateRangeText: String) {
+fun NormalDetails(host: UserData?, event: EventAbs, hazeState: HazeState, dateRangeText: String) {
     CardSection(
-        "Hosted by ${host.firstName.toTitleCase()} ${host.lastName.toTitleCase()}",
+        "Hosted by ${host?.firstName?.toTitleCase()} ${host?.lastName?.toTitleCase()}",
         event.description,
         hazeState
     )

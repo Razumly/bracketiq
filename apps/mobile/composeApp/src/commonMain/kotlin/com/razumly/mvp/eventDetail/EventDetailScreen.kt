@@ -79,28 +79,18 @@ fun EventDetailScreen(
     }
 
     CompositionLocalProvider(LocalTournamentComponent provides component) {
-        Scaffold(Modifier.fillMaxSize(), topBar = {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Start,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                PlatformBackButton(
-                    { component.backCallback.onBack() }, text = "", arrow = false
-                )
-            }
-        }) { innerPadding ->
+        Scaffold(Modifier.fillMaxSize()) { innerPadding ->
             Column(
                 Modifier.background(MaterialTheme.colorScheme.background).fillMaxSize()
             ) {
                 AnimatedVisibility(
                     !showDetails, enter = expandVertically(), exit = shrinkVertically()
                 ) {
-                    EventDetails(mapComponent = mapComponent,
+                    EventDetails(
+                        mapComponent = mapComponent,
                         eventWithRelations = selectedEvent,
                         editEvent = editedEvent,
                         onFavoriteClick = {},
-                        favoritesModifier = Modifier.padding(top = 64.dp, end = 8.dp),
                         navPadding = LocalNavBarPadding.current,
                         onPlaceSelected = { component.selectPlace(it) },
                         editView = isEditing,
@@ -109,6 +99,7 @@ fun EventDetailScreen(
                         isNewEvent = false,
                         onEventTypeSelected = { component.onTypeSelected(it) },
                         onAddCurrentUser = {},
+                        onBack = { component.backCallback.onBack() },
                         onSelectFieldCount = { component.selectFieldCount(it) }) { isValid ->
                         Column(
                             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -159,8 +150,8 @@ fun EventDetailScreen(
                                 }
                             }
                         }
-
                     }
+
                 }
                 AnimatedVisibility(
                     showDetails,

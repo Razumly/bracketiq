@@ -4,7 +4,7 @@ sealed interface EventAbsWithRelations {
     val event: EventAbs
     val players: List<UserData>
     val teams: List<Team>
-    val host: UserData
+    val host: UserData?
 
     companion object {
         fun getEmptyEvent(event: EventAbs): EventAbsWithRelations =

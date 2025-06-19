@@ -38,14 +38,14 @@ import kotlinx.serialization.json.jsonObject
 actual class MapComponent(
     componentContext: ComponentContext,
     private val eventAbsRepository: IEventAbsRepository,
-    actual val locationTracker: LocationTracker,
+    val locationTracker: LocationTracker,
     private val apiKey: String,
     private val bundleId: String
 ) : ComponentContext by componentContext {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     private val _currentLocation = MutableStateFlow<LatLng?>(null)
-    val currentLocation = _currentLocation.asStateFlow()
+    actual val currentLocation = _currentLocation.asStateFlow()
 
     private val _events = MutableStateFlow<List<EventAbs>>(emptyList())
     val events: StateFlow<List<EventAbs>> = _events.asStateFlow()

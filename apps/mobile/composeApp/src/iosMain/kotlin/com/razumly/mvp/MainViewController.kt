@@ -72,6 +72,7 @@ fun MainViewController(
                         ),
                         permissionsController = permissionsController,
                         locationTracker = getKoin().get<LocationTracker>(),
+                        deepLinkNav = null
                     ).also { component ->
                         Napier.d(tag = "Root") { "Component created" }
                         component.childStack.subscribe { stack ->

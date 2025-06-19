@@ -102,7 +102,6 @@ fun CreateEventScreen(
                         eventWithRelations = defaultEvent,
                         editEvent = newEventState,
                         onFavoriteClick = {},
-                        favoritesModifier = Modifier.padding(top = 64.dp, end = 8.dp),
                         navPadding = LocalNavBarPadding.current,
                         onPlaceSelected = { component.selectPlace(it) },
                         editView = isEditing,
@@ -111,6 +110,7 @@ fun CreateEventScreen(
                         isNewEvent = true,
                         onEventTypeSelected = { component.onTypeSelected(it) },
                         onAddCurrentUser = {},
+                        onBack = {},
                         onSelectFieldCount = { component.selectFieldCount(it) }
                     ) { isValid -> canProceed = isValid }
 

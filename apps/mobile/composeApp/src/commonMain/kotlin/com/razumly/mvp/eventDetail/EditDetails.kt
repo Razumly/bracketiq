@@ -63,7 +63,7 @@ import org.jetbrains.compose.resources.stringResource
 
 @Composable
 fun EditDetails(
-    host: UserData,
+    host: UserData?,
     event: EventAbs,
     hazeState: HazeState,
     onEditEvent: (EventImp.() -> EventImp) -> Unit,
@@ -122,7 +122,7 @@ fun EditDetails(
     }
 
     CardSection(
-        "Hosted by ${host.firstName.toTitleCase()} ${host.lastName.toTitleCase()}",
+        "Hosted by ${host?.firstName?.toTitleCase()} ${host?.lastName?.toTitleCase()}",
         event.description,
         hazeState
     )
