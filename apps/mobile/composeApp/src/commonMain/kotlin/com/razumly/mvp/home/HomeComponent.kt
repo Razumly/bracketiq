@@ -130,12 +130,21 @@ class DefaultHomeComponent(
             navigation.pop()
         }
     }
+
     override fun handleDeepLink(deepLinkNav: DeepLinkNav?) {
         when (deepLinkNav) {
-            is DeepLinkNav.Event -> navigation.pushNew(Config.Search(eventId = deepLinkNav.eventId))
-            is DeepLinkNav.Tournament -> navigation.pushNew(
-                Config.Search(tournamentId = deepLinkNav.tournamentId)
-            )
+            is DeepLinkNav.Event -> {
+                navigation.replaceAll(Config.Search())
+                navigation.replaceAll(Config.Search(eventId = deepLinkNav.eventId))
+            }
+
+            is DeepLinkNav.Tournament -> {
+                navigation.replaceAll(Config.Search())
+                navigation.replaceAll(
+                    Config.Search(tournamentId = deepLinkNav.tournamentId)
+                )
+            }
+
             is DeepLinkNav.Refresh -> navigation.replaceAll(Config.Profile)
             is DeepLinkNav.Return -> navigation.replaceAll(Config.Profile)
             else -> {}
@@ -148,7 +157,9 @@ class DefaultHomeComponent(
         return when (config) {
             is Config.Search -> {
                 Child.Search(_koin.inject<DefaultSearchEventListComponent> {
-                    parametersOf(componentContext, ::onEventSelected, config.eventId, config.tournamentId)
+                    parametersOf(
+                        componentContext, ::onEventSelected, config.eventId, config.tournamentId
+                    )
                 }.value, _koin.inject<MapComponent> {
                     parametersOf(componentContext)
                 }.value

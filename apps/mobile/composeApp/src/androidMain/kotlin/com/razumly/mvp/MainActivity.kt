@@ -51,6 +51,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        setIntent(intent)
         NotifierManager.onCreateOrOnNewIntent(intent)
 
         // Handle deep links when app is already open
