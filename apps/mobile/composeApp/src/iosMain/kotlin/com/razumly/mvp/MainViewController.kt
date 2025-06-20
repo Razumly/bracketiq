@@ -34,9 +34,10 @@ val LocalNativeViewFactory = staticCompositionLocalOf<NativeViewFactory> {
 @ObjCName("MainViewController")
 @OptIn(ExperimentalObjCName::class, ExperimentalDecomposeApi::class)
 fun MainViewController(
-    nativeViewFactory: NativeViewFactory
+    nativeViewFactory: NativeViewFactory,
+    deepLinkNav: RootComponent.DeepLinkNav? = null
 ) = ComposeUIViewController {
-    Napier.d(tag = "Lifecycle") { "Creating MainViewController" }
+    Napier.d(tag = "Lifecycle") { "Creating MainViewController with deepLink: $deepLinkNav" }
 
     CompositionLocalProvider(LocalNativeViewFactory provides nativeViewFactory) {
         MVPTheme(darkTheme = isSystemInDarkTheme()) {
@@ -44,13 +45,11 @@ fun MainViewController(
             val backDispatcher = remember { BackDispatcher() }
 
             DisposableEffect(Unit) {
-                Napier.d(tag = "Lifecycle") { "onCreate" }
                 lifecycle.onCreate()
                 lifecycle.onStart()
                 lifecycle.onResume()
 
                 onDispose {
-                    Napier.d(tag = "Lifecycle") { "Disposing MainViewController" }
                     lifecycle.onPause()
                     lifecycle.onStop()
                     lifecycle.onDestroy()
@@ -59,26 +58,17 @@ fun MainViewController(
 
             val root = remember {
                 try {
-                    Napier.d(tag = "DI") { "Starting component creation" }
-
-                    val permissionsController = getKoin().get<PermissionsController>().also {
-                        Napier.d(tag = "Permissions") { "Controller initialized" }
-                    }
+                    val permissionsController = getKoin().get<PermissionsController>()
 
                     RootComponent(
                         componentContext = DefaultComponentContext(
                             lifecycle = lifecycle,
-                            backHandler = backDispatcher  // Pass backDispatcher here
+                            backHandler = backDispatcher
                         ),
                         permissionsController = permissionsController,
                         locationTracker = getKoin().get<LocationTracker>(),
-                        deepLinkNav = null
-                    ).also { component ->
-                        Napier.d(tag = "Root") { "Component created" }
-                        component.childStack.subscribe { stack ->
-                            Napier.d(tag = "Navigation") { "Stack changed to $stack" }
-                        }
-                    }
+                        deepLinkNav = deepLinkNav
+                    )
                 } catch (e: Exception) {
                     Napier.e(tag = "Root", throwable = e) { "Component creation failed" }
                     null
@@ -87,13 +77,9 @@ fun MainViewController(
 
             PredictiveBackGestureOverlay(
                 backDispatcher = backDispatcher,
-                backIcon = { progress, edge ->
-                    // Optional: Implement custom back icon animation based on progress and edge
-                },
+                backIcon = { progress, edge -> },
                 modifier = Modifier,
-                onClose = {
-                    // Optional: Handle close event
-                }
+                onClose = { }
             ) {
                 root?.let {
                     App(it)
@@ -107,9 +93,3 @@ fun MainViewController(
         }
     }
 }
-
-
-
-
-
-

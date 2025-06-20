@@ -30,7 +30,22 @@
 				<string>appwrite-callback-6656a4d60016b753f942</string>
 			</array>
 		</dict>
+        <dict>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>CFBundleURLName</key>
+            <string>com.razumly.mvp.deeplink</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>mvp</string>
+            </array>
+        </dict>
 	</array>
+	<key>com.apple.developer.associated-domains</key>
+    <array>
+        <string>applinks:www.razumly.com</string>
+        <string>applinks:razumly.com</string>
+    </array>
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>LSRequiresIPhoneOS</key>

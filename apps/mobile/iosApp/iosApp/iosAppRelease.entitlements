@@ -4,5 +4,10 @@
 <dict>
 	<key>aps-environment</key>
 	<string>development</string>
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:www.razumly.com</string>
+		<string>applinks:razumly.com</string>
+	</array>
 </dict>
 </plist>
