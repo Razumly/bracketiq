@@ -1,5 +1,5 @@
 PODS:
-  - composeApp (0.4.3):
+  - composeApp (0.4.3.1):
     - GooglePlaces
   - GooglePlaces (9.4.1)
 
@@ -15,7 +15,7 @@ EXTERNAL SOURCES:
     :path: "../composeApp"
 
 SPEC CHECKSUMS:
-  composeApp: e86442256fabc64c6e98057d7c47944d9485dbd8
+  composeApp: d139f5f1cdf4f8a07c5a684c389e024916e29f06
   GooglePlaces: 8afca6c4e946472e91298589d1640d614b51749a
 
 PODFILE CHECKSUM: 94a36af959c63e8b7ff7802532a2d2c201020e01

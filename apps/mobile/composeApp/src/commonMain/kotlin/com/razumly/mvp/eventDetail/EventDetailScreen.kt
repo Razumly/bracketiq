@@ -40,7 +40,7 @@ import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
 import com.razumly.mvp.core.presentation.composables.EventDetails
-import com.razumly.mvp.core.presentation.composables.PlatformBackButton
+import com.razumly.mvp.core.presentation.composables.MakePurchaseButton
 import com.razumly.mvp.core.presentation.composables.TeamCard
 import com.razumly.mvp.eventDetail.composables.CollapsableHeader
 import com.razumly.mvp.eventDetail.composables.ParticipantsView
@@ -132,15 +132,31 @@ fun EventDetailScreen(
                                 if (!isUserInEvent) {
                                     val individual =
                                         if (teamSignup) "Join as Free Agent" else "Join"
-                                    Button(onClick = {
-                                        component.joinEvent()
-                                        showDropdownMenu = false
-                                    }) { Text(individual) }
-                                    if (teamSignup) {
-                                        Button(onClick = {
-                                            showTeamSelectionDialog = true
+                                    if (selectedEvent.event.price > 0 && !teamSignup) {
+                                        MakePurchaseButton({
+                                            component.joinEvent()
                                             showDropdownMenu = false
-                                        }) { Text("Join as Team") }
+                                        }, component, "Purchase Ticket")
+                                    } else {
+                                        Button(onClick = {
+                                            component.joinEvent()
+                                            showDropdownMenu = false
+                                        }) { Text(individual) }
+                                    }
+                                    if (teamSignup) {
+                                        if (selectedEvent.event.price > 0) {
+                                            MakePurchaseButton(onClick = {
+                                                showTeamSelectionDialog = true
+                                                showDropdownMenu = false
+                                            }, component,
+                                                "Purchase Ticket for Team"
+                                            )
+                                        } else {
+                                            Button(onClick = {
+                                                showTeamSelectionDialog = true
+                                                showDropdownMenu = false
+                                            }) { Text("Join as Team") }
+                                        }
                                     }
                                 } else {
                                     Button(onClick = {

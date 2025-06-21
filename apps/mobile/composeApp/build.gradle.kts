@@ -107,7 +107,7 @@ kotlin {
                 api(libs.napier)
                 api(libs.permissions)
                 api(libs.geo)
-                api("io.github.camka14.appwrite:sdk-for-kmp:0.2.1")
+                api(libs.sdk.for1.kmp)
             }
         }
 
@@ -130,6 +130,9 @@ kotlin {
                 implementation(libs.google.http.client.gson)
                 implementation(libs.google.api.services.oauth2)
                 implementation(libs.firebase.messaging)
+                implementation(libs.stripe.android)
+                implementation(libs.financial.connections)
+                implementation(libs.androidx.browser)
             }
         }
         commonTest {

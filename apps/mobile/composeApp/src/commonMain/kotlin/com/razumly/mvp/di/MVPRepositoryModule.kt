@@ -4,6 +4,8 @@ import com.razumly.mvp.chat.data.ChatGroupRepository
 import com.razumly.mvp.chat.data.IChatGroupRepository
 import com.razumly.mvp.chat.data.IMessageRepository
 import com.razumly.mvp.chat.data.MessageRepository
+import com.razumly.mvp.core.data.repositories.IBillingRepository
+import com.razumly.mvp.core.data.repositories.BillingRepository
 import com.razumly.mvp.core.data.repositories.EventAbsRepository
 import com.razumly.mvp.core.data.repositories.EventRepository
 import com.razumly.mvp.core.data.repositories.FieldRepository
@@ -54,4 +56,7 @@ val MVPRepositoryModule = module {
     single {
         ChatGroupRepository(get(), get(), get(), get(), get(), get())
     } bind IChatGroupRepository::class
+    single {
+        BillingRepository(get(), get())
+    } bind IBillingRepository::class
 }

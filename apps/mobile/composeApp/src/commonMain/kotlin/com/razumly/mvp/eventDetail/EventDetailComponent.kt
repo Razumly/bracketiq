@@ -16,10 +16,14 @@ import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.Division
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IEventAbsRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.presentation.IPaymentProcessor
+import com.razumly.mvp.core.presentation.PaymentProcessor
+import com.razumly.mvp.core.util.UrlHandler
 import com.razumly.mvp.eventDetail.data.IMatchRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -38,7 +42,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 
-interface EventDetailComponent : ComponentContext {
+interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val selectedEvent: StateFlow<EventAbsWithRelations>
     val divisionMatches: StateFlow<Map<String, MatchWithRelations>>
     val divisionTeams: StateFlow<Map<String, TeamWithPlayers>>
@@ -96,6 +100,7 @@ class DefaultEventDetailComponent(
     componentContext: ComponentContext,
     userRepository: IUserRepository,
     fieldRepository: IFieldRepository,
+    private val billingRepository: IBillingRepository,
     private val event: EventAbs,
     onBack: () -> Unit,
     private val eventAbsRepository: IEventAbsRepository,
@@ -103,7 +108,7 @@ class DefaultEventDetailComponent(
     private val teamRepository: ITeamRepository,
     private val onMatchSelected: (MatchWithRelations, Tournament) -> Unit,
     private val onNavigateToTeamSettings: (freeAgents: List<String>, event: EventAbs?) -> Unit
-) : EventDetailComponent, ComponentContext by componentContext {
+) : EventDetailComponent, PaymentProcessor(), ComponentContext by componentContext {
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
     override val currentUser = userRepository.currentUser.value.getOrThrow()
 
@@ -276,17 +281,49 @@ class DefaultEventDetailComponent(
 
     override fun joinEvent() {
         scope.launch {
-            eventAbsRepository.addCurrentUserToEvent(selectedEvent.value.event).onSuccess {
-                _isUserInEvent.value = true
+            if (event.price == 0.0 || event.teamSignup) {
+                eventAbsRepository.addCurrentUserToEvent(selectedEvent.value.event).onSuccess {
+                    _isUserInEvent.value = true
+                }
+            } else {
+                if (currentUser.stripeAccountId?.isNotBlank() == true) {
+                    billingRepository.createPurchaseIntent(event).getOrNull()
+                        ?.let { setPaymentIntent(it) }
+                    presentPaymentSheet()
+                } else {
+                    handleStripeAccountCreation()
+                }
             }
         }
     }
 
     override fun joinEventAsTeam(team: TeamWithPlayers) {
         scope.launch {
-            eventAbsRepository.addTeamToEvent(selectedEvent.value.event, team).onSuccess {
-                _isUserInEvent.value = true
+            if (event.price == 0.0) {
+                eventAbsRepository.addTeamToEvent(selectedEvent.value.event, team).onSuccess {
+                    _isUserInEvent.value = true
+                }
+            } else {
+                if (currentUser.stripeAccountId?.isNotBlank() == true) {
+                    billingRepository.createPurchaseIntent(event, team.team.id).getOrNull()?.let {
+                        setPaymentIntent(it)
+                    }
+                    presentPaymentSheet()
+                } else {
+                    handleStripeAccountCreation()
+                }
             }
+        }
+    }
+
+    private suspend fun handleStripeAccountCreation() {
+        billingRepository.createAccount().onSuccess { onboardingUrl ->
+            // Open the Stripe onboarding URL
+            urlHandler?.openUrlInWebView(
+                url = onboardingUrl,
+            )
+        }.onFailure { error ->
+            _errorState.value = error.message
         }
     }
 

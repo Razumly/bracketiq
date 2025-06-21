@@ -75,7 +75,8 @@ val componentModule = module {
             teamRepository = get(),
             fieldRepository = get(),
             onNavigateToTeamSettings = onNavigateToTeamSettings,
-            onBack = onBack
+            onBack = onBack,
+            billingRepository = get()
         )
     }
 
