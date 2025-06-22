@@ -23,7 +23,6 @@ import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentProcessor
-import com.razumly.mvp.core.util.UrlHandler
 import com.razumly.mvp.eventDetail.data.IMatchRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -206,7 +205,7 @@ class DefaultEventDetailComponent(
     private val _usersTeam = MutableStateFlow<TeamWithPlayers?>(null)
 
     override val validTeams = _userTeams.flatMapLatest { teams ->
-        flowOf(teams.filter { it.players.size == event.teamSizeLimit })
+        flowOf(teams.filter { it.team.teamSize == event.teamSizeLimit })
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     init {
@@ -287,9 +286,12 @@ class DefaultEventDetailComponent(
                 }
             } else {
                 if (currentUser.stripeAccountId?.isNotBlank() == true) {
-                    billingRepository.createPurchaseIntent(event).getOrNull()
-                        ?.let { setPaymentIntent(it) }
-                    presentPaymentSheet()
+                    billingRepository.createPurchaseIntent(event).onSuccess {
+                        it?.let { setPaymentIntent(it) }
+                        presentPaymentSheet()
+                    }.onFailure {
+                        _errorState.value = it.message
+                    }
                 } else {
                     handleStripeAccountCreation()
                 }
@@ -305,10 +307,12 @@ class DefaultEventDetailComponent(
                 }
             } else {
                 if (currentUser.stripeAccountId?.isNotBlank() == true) {
-                    billingRepository.createPurchaseIntent(event, team.team.id).getOrNull()?.let {
-                        setPaymentIntent(it)
+                    billingRepository.createPurchaseIntent(event, team.team.id).onSuccess {
+                        it?.let { setPaymentIntent(it) }
+                        presentPaymentSheet()
+                    }.onFailure {
+                        _errorState.value = it.message
                     }
-                    presentPaymentSheet()
                 } else {
                     handleStripeAccountCreation()
                 }

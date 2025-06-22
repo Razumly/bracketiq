@@ -21,14 +21,16 @@ actual open class PaymentProcessor: IPaymentProcessor {
     actual override var urlHandler: UrlHandler? = null
 
     actual override fun presentPaymentSheet() {
-        paymentSheet.value?.presentWithPaymentIntent(
-            purchaseIntent.value!!.paymentIntent,
-            PaymentSheet.Configuration(
-                merchantDisplayName = "MVP",
-                customer = _customerConfig,
-                allowsDelayedPaymentMethods = true
+        purchaseIntent.value?.let {
+            paymentSheet.value?.presentWithPaymentIntent(
+                it. paymentIntent,
+                PaymentSheet.Configuration(
+                    merchantDisplayName = "MVP",
+                    customer = _customerConfig,
+                    allowsDelayedPaymentMethods = true
+                )
             )
-        )
+        }
     }
 
     actual override suspend fun setPaymentIntent(intent: PurchaseIntent) {
