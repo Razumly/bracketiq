@@ -2,8 +2,6 @@ package com.razumly.mvp.eventDetail
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -33,17 +31,17 @@ import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.razumly.mvp.core.data.dataTypes.Tournament
-import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.Division
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.enums.FieldType
-import com.razumly.mvp.core.presentation.composables.CardSection
+import com.razumly.mvp.core.presentation.IPaymentProcessor
+import com.razumly.mvp.core.presentation.composables.PaymentProcessorButton
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
-import com.razumly.mvp.core.presentation.util.toTitleCase
 import com.razumly.mvp.eventDetail.composables.DropdownField
 import com.razumly.mvp.eventDetail.composables.MultiSelectDropdownField
 import com.razumly.mvp.eventDetail.composables.NumberInputField
 import com.razumly.mvp.eventDetail.composables.PointsTextField
+import com.razumly.mvp.eventDetail.composables.TextInputField
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.materials.CupertinoMaterials
@@ -63,7 +61,9 @@ import org.jetbrains.compose.resources.stringResource
 
 @Composable
 fun EditDetails(
-    host: UserData?,
+    paymentProcessor: IPaymentProcessor,
+    hostHasAccount: Boolean,
+    onHostCreateAccount: () -> Unit,
     event: EventAbs,
     hazeState: HazeState,
     onEditEvent: (EventImp.() -> EventImp) -> Unit,
@@ -121,11 +121,18 @@ fun EditDetails(
         )
     }
 
-    CardSection(
-        "Hosted by ${host?.firstName?.toTitleCase()} ${host?.lastName?.toTitleCase()}",
-        event.description,
+    EditCardSection(
         hazeState
-    )
+    ) {
+        TextInputField(
+            value = event.description,
+            label = "Description",
+            onValueChange = { onEditEvent { copy(description = it) } },
+            isError = false,
+            errorMessage = "",
+            supportingText = "Add a Description of the Event",
+        )
+    }
 
     EditCardSection(hazeState) {
         Row(
@@ -157,9 +164,17 @@ fun EditDetails(
     }
 
     EditCardSection(hazeState) {
+        if (!hostHasAccount) {
+            PaymentProcessorButton(
+                onClick = onHostCreateAccount,
+                paymentProcessor,
+                "Create Stripe Connect Account to Change Price"
+            )
+        }
         NumberInputField(
             value = (event.price * 100).toInt().toString(),
             label = "",
+            enabled = hostHasAccount,
             onValueChange = { newText ->
                 if (newText.isBlank()) {
                     onEditEvent { copy(price = 0.0) }
@@ -198,10 +213,11 @@ fun EditDetails(
                 )
             )
 
-            OutlinedTextField(value = event.end.toLocalDateTime(TimeZone.currentSystemDefault())
-                .format(
-                    dateTimeFormat
-                ),
+            OutlinedTextField(
+                value = event.end.toLocalDateTime(TimeZone.currentSystemDefault())
+                    .format(
+                        dateTimeFormat
+                    ),
                 onValueChange = { },
                 label = { Text("End Date & Time") },
                 readOnly = true,

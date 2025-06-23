@@ -10,45 +10,37 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.VisualTransformation
-import com.razumly.mvp.core.util.CurrencyAmountInputVisualTransformation
 
 @Composable
-fun NumberInputField(
+fun TextInputField(
     modifier: Modifier = Modifier,
     value: String,
     label: String,
     onValueChange: (String) -> Unit,
     isError: Boolean,
-    isMoney: Boolean,
     errorMessage: String? = null,
-    keyboardType: KeyboardType = KeyboardType.Number,
     supportingText: String? = null,
     placeholder: String? = null,
-    enabled: Boolean = true
 ) {
     Column(modifier = modifier) {
         OutlinedTextField(
-            value = if (value == "0") "" else value,
+            value = value,
             onValueChange = onValueChange,
-            enabled = enabled,
             label = { Text(label, maxLines = 1) },
             keyboardOptions = KeyboardOptions(
-                keyboardType = keyboardType,
+                keyboardType = KeyboardType.Text,
                 imeAction = ImeAction.Done
             ),
             singleLine = true,
             isError = isError,
             modifier = Modifier.fillMaxWidth(),
-            visualTransformation = if (isMoney) CurrencyAmountInputVisualTransformation() else VisualTransformation.None,
             supportingText = {
                 if (isError && errorMessage != null) {
                     Text(
                         text = errorMessage,
                         color = MaterialTheme.colorScheme.error,
                     )
-                }
-                else if (supportingText != null) {
+                } else if (supportingText != null) {
                     Text(supportingText)
                 }
             },

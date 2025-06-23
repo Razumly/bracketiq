@@ -16,7 +16,7 @@ data class UserDataDTO(
     val teamInvites: List<String>,
     val eventInvites: List<String>,
     val tournamentInvites: List<String>,
-    val stripeAccountId: String?,
+    val stripeAccountId: String,
     @Transient val id: String = "",
 ) {
     companion object {

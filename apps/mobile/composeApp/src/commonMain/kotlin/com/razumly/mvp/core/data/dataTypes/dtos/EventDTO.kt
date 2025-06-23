@@ -31,6 +31,7 @@ data class EventDTO(
     val singleDivision: Boolean,
     val waitList: List<String>,
     val freeAgents: List<String>,
+    val cancellationRefundHours: Int,
 )
 
 fun EventDTO.toEvent(id: String): EventImp {
@@ -56,5 +57,6 @@ fun EventDTO.toEvent(id: String): EventImp {
         singleDivision = singleDivision,
         waitList = waitList,
         freeAgents = freeAgents,
+        cancellationRefundHours = cancellationRefundHours
     )
 }

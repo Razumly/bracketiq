@@ -29,6 +29,7 @@ sealed interface EventAbs : MVPDocument {
     val singleDivision: Boolean
     val waitList: List<String>
     val freeAgents: List<String>
+    val cancellationRefundHours: Int
     override val id: String
 }
 

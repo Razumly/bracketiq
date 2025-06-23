@@ -10,10 +10,13 @@ import com.razumly.mvp.core.data.dataTypes.dtos.toUserData
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResponse
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
 import com.razumly.mvp.core.util.DbConstants
+import com.razumly.mvp.core.util.DbConstants.USER_CHANNEL
 import io.appwrite.ID
 import io.appwrite.Query
+import io.appwrite.models.RealtimeSubscription
 import io.appwrite.services.Account
 import io.appwrite.services.Databases
+import io.appwrite.services.Realtime
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -51,7 +54,8 @@ class UserRepository(
     internal val account: Account,
     internal val database: Databases,
     private val currentUserDataSource: CurrentUserDataSource,
-    private val pushNotificationsRepository: IPushNotificationsRepository
+    private val pushNotificationsRepository: IPushNotificationsRepository,
+    realtime: Realtime
 ) : IUserRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val _pushToken =
@@ -61,9 +65,22 @@ class UserRepository(
 
     private var _currentUser = MutableStateFlow(Result.failure<UserData>(Exception("No User")))
     override val currentUser: StateFlow<Result<UserData>> = _currentUser.asStateFlow()
+    private lateinit var _userSubscription: RealtimeSubscription
 
     init {
         scope.launch { loadCurrentUser() }
+        scope.launch {
+            val channels = listOf(USER_CHANNEL)
+            _userSubscription = realtime.subscribe(
+                channels, payloadType = UserDataDTO::class
+            ) { response ->
+                val userUpdates = response.payload
+                scope.launch {
+                    databaseService.getUserDataDao.upsertUserData(userUpdates.toUserData(userUpdates.id))
+                    _currentUser.value = Result.success(userUpdates.toUserData(currentUser.value.getOrThrow().id))
+                }
+            }
+        }
     }
 
     override suspend fun login(email: String, password: String): Result<UserData> = runCatching {
@@ -149,8 +166,7 @@ class UserRepository(
     override suspend fun getUsersOfTournament(tournamentId: String): Result<List<UserData>> {
         val query = Query.contains(DbConstants.TOURNAMENTS_ATTRIBUTE, tournamentId)
         return getPlayers(query,
-            getLocalData = { databaseService.getUserDataDao.getUsersInTournament(tournamentId) })
-            .onSuccess { remoteData ->
+            getLocalData = { databaseService.getUserDataDao.getUsersInTournament(tournamentId) }).onSuccess { remoteData ->
                 databaseService.getUserDataDao.upsertUserTournamentCrossRefs(remoteData.map {
                     TournamentUserCrossRef(it.id, tournamentId)
                 })
@@ -159,9 +175,9 @@ class UserRepository(
 
     override suspend fun getUsersOfEvent(eventId: String): Result<List<UserData>> {
         val query = Query.contains(DbConstants.EVENTS_ATTRIBUTE, eventId)
-        return getPlayers(query,
-            getLocalData = { databaseService.getUserDataDao.getUsersInEvent(eventId) })
-            .onSuccess { remoteData ->
+        return getPlayers(
+            query,
+            getLocalData = { databaseService.getUserDataDao.getUsersInEvent(eventId) }).onSuccess { remoteData ->
                 databaseService.getUserDataDao.upsertUserEventCrossRefs(remoteData.map {
                     EventUserCrossRef(it.id, eventId)
                 })
@@ -170,7 +186,8 @@ class UserRepository(
 
     override suspend fun getUsers(userIds: List<String>): Result<List<UserData>> {
         val query = Query.equal("\$id", userIds)
-        return getPlayers(query,
+        return getPlayers(
+            query,
             getLocalData = { databaseService.getUserDataDao.getUserDatasById(userIds) })
     }
 
@@ -187,22 +204,20 @@ class UserRepository(
 
     private suspend fun getPlayers(
         query: String, getLocalData: suspend () -> List<UserData>
-    ): Result<List<UserData>> = multiResponse(
-        getRemoteData = {
-            val docs = database.listDocuments(
-                DbConstants.DATABASE_NAME,
-                DbConstants.USER_DATA_COLLECTION,
-                listOf(query, Query.limit(500)),
-                nestedType = UserDataDTO::class,
-            )
-            docs.documents.map { it.data.toUserData(it.id) }
-        },
+    ): Result<List<UserData>> = multiResponse(getRemoteData = {
+        val docs = database.listDocuments(
+            DbConstants.DATABASE_NAME,
+            DbConstants.USER_DATA_COLLECTION,
+            listOf(query, Query.limit(500)),
+            nestedType = UserDataDTO::class,
+        )
+        docs.documents.map { it.data.toUserData(it.id) }
+    },
         saveData = { usersData ->
             databaseService.getUserDataDao.upsertUsersData(usersData)
         },
         getLocalData = getLocalData,
-        deleteData = { databaseService.getUserDataDao.deleteUsersById(it) }
-    )
+        deleteData = { databaseService.getUserDataDao.deleteUsersById(it) })
 
     override suspend fun searchPlayers(search: String): Result<List<UserData>> {
         val query = Query.or(

@@ -20,7 +20,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -39,8 +38,7 @@ import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
-import com.razumly.mvp.core.presentation.composables.EventDetails
-import com.razumly.mvp.core.presentation.composables.MakePurchaseButton
+import com.razumly.mvp.core.presentation.composables.PaymentProcessorButton
 import com.razumly.mvp.core.presentation.composables.TeamCard
 import com.razumly.mvp.eventDetail.composables.CollapsableHeader
 import com.razumly.mvp.eventDetail.composables.ParticipantsView
@@ -52,7 +50,6 @@ import kotlinx.coroutines.delay
 val LocalTournamentComponent =
     compositionLocalOf<EventDetailComponent> { error("No tournament provided") }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EventDetailScreen(
     component: EventDetailComponent, mapComponent: MapComponent
@@ -61,7 +58,7 @@ fun EventDetailScreen(
     var showDropdownMenu by remember { mutableStateOf(false) }
     val selectedEvent by component.selectedEvent.collectAsState()
     val teamSignup = selectedEvent.event.teamSignup
-    val currentUser = component.currentUser
+    val currentUser by component.currentUser.collectAsState()
     var showTeamSelectionDialog by remember { mutableStateOf(false) }
     val validTeams by component.validTeams.collectAsState()
     val showDetails by component.showDetails.collectAsState()
@@ -87,7 +84,10 @@ fun EventDetailScreen(
                     !showDetails, enter = expandVertically(), exit = shrinkVertically()
                 ) {
                     EventDetails(
+                        paymentProcessor = component,
                         mapComponent = mapComponent,
+                        hostHasAccount = currentUser.stripeAccountId.isNotBlank(),
+                        onHostCreateAccount = { component.onHostCreateAccount() },
                         eventWithRelations = selectedEvent,
                         editEvent = editedEvent,
                         onFavoriteClick = {},
@@ -133,7 +133,7 @@ fun EventDetailScreen(
                                     val individual =
                                         if (teamSignup) "Join as Free Agent" else "Join"
                                     if (selectedEvent.event.price > 0 && !teamSignup) {
-                                        MakePurchaseButton({
+                                        PaymentProcessorButton({
                                             component.joinEvent()
                                             showDropdownMenu = false
                                         }, component, "Purchase Ticket")
@@ -145,7 +145,8 @@ fun EventDetailScreen(
                                     }
                                     if (teamSignup) {
                                         if (selectedEvent.event.price > 0) {
-                                            MakePurchaseButton(onClick = {
+                                            PaymentProcessorButton(
+                                                onClick = {
                                                 showTeamSelectionDialog = true
                                                 showDropdownMenu = false
                                             }, component,

@@ -25,11 +25,10 @@ import androidx.compose.ui.unit.dp
 import com.arkivanov.decompose.ExperimentalDecomposeApi
 import com.arkivanov.decompose.extensions.compose.experimental.stack.ChildStack
 import com.arkivanov.decompose.extensions.compose.subscribeAsState
-import com.razumly.mvp.core.presentation.composables.EventDetails
 import com.razumly.mvp.eventCreate.steps.Preview
+import com.razumly.mvp.eventDetail.EventDetails
 import com.razumly.mvp.eventMap.MapComponent
 import com.razumly.mvp.home.LocalNavBarPadding
-import dev.icerock.moko.geo.compose.BindLocationTrackerEffect
 import mvp.composeapp.generated.resources.Res
 import mvp.composeapp.generated.resources.create_tournament
 import mvp.composeapp.generated.resources.next
@@ -47,6 +46,7 @@ fun CreateEventScreen(
     val newEventState by component.newEventState.collectAsState()
     val childStack by component.childStack.subscribeAsState()
     val isEditing = true
+    val currentUser by component.currentUser.collectAsState()
 
     Scaffold(
         modifier = Modifier.padding(LocalNavBarPadding.current),
@@ -98,6 +98,9 @@ fun CreateEventScreen(
             ChildStack(childStack) { child ->
                 when (child.instance) {
                     is CreateEventComponent.Child.EventInfo -> EventDetails(
+                        paymentProcessor = component,
+                        hostHasAccount = currentUser?.stripeAccountId?.isNotBlank() == true,
+                        onHostCreateAccount = { component.createAccount() },
                         mapComponent = mapComponent,
                         eventWithRelations = defaultEvent,
                         editEvent = newEventState,

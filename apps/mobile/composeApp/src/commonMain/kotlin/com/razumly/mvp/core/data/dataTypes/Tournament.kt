@@ -40,6 +40,7 @@ data class Tournament(
     override val singleDivision: Boolean,
     override val freeAgents: List<String>,
     override val waitList: List<String>,
+    override val cancellationRefundHours: Int,
     @Transient override val eventType: EventType = EventType.TOURNAMENT,
     @Transient override val lastUpdated: Instant = Clock.System.now(),
     override val maxParticipants: Int,
@@ -75,6 +76,7 @@ data class Tournament(
                 teamSignup = true,
                 waitList = listOf(),
                 freeAgents = listOf(),
+                cancellationRefundHours = 0
             )
         }
     }
@@ -100,6 +102,7 @@ data class Tournament(
             teamSignup = event.teamSignup,
             waitList = event.waitList,
             freeAgents = event.freeAgents,
+            cancellationRefundHours = 0,
         )
     }
     fun toEvent(): EventImp {
@@ -125,6 +128,7 @@ data class Tournament(
             teamSignup = teamSignup,
             waitList = waitList,
             freeAgents = freeAgents,
+            cancellationRefundHours = cancellationRefundHours
         )
     }
     fun toTournamentDTO(): TournamentDTO {
@@ -156,6 +160,7 @@ data class Tournament(
             teamSignup = teamSignup,
             waitList = waitList,
             freeAgents = freeAgents,
+            cancellationRefundHours = cancellationRefundHours
         )
     }
 }

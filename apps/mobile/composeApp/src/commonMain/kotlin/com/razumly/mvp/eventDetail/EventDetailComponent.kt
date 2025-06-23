@@ -53,7 +53,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val showDetails: StateFlow<Boolean>
     val errorState: StateFlow<String?>
     val eventWithRelations: StateFlow<EventWithFullRelations>
-    val currentUser: UserData
+    val currentUser: StateFlow<UserData>
     val validTeams: StateFlow<List<TeamWithPlayers>>
     val isHost: StateFlow<Boolean>
     val editedEvent: StateFlow<EventAbs>
@@ -62,6 +62,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val isUserInEvent: StateFlow<Boolean>
 
     fun matchSelected(selectedMatch: MatchWithRelations)
+    fun onHostCreateAccount()
     fun selectDivision(division: Division)
     fun toggleBracketView()
     fun toggleLosersBracket()
@@ -109,7 +110,8 @@ class DefaultEventDetailComponent(
     private val onNavigateToTeamSettings: (freeAgents: List<String>, event: EventAbs?) -> Unit
 ) : EventDetailComponent, PaymentProcessor(), ComponentContext by componentContext {
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
-    override val currentUser = userRepository.currentUser.value.getOrThrow()
+    override val currentUser = userRepository.currentUser.map { it.getOrThrow() }
+        .stateIn(scope, SharingStarted.Eagerly, UserData())
 
     private val _errorState = MutableStateFlow<String?>(null)
     override val errorState = _errorState.asStateFlow()
@@ -143,7 +145,7 @@ class DefaultEventDetailComponent(
             }
         }.stateIn(scope, SharingStarted.Eagerly, EventAbsWithRelations.getEmptyEvent(event))
 
-    override val isHost = selectedEvent.map { it.event.hostId == currentUser.id }
+    override val isHost = selectedEvent.map { it.event.hostId == currentUser.value.id }
         .stateIn(scope, SharingStarted.Eagerly, false)
 
     override val eventWithRelations = selectedEvent.flatMapLatest { eventWithPlayers ->
@@ -196,11 +198,12 @@ class DefaultEventDetailComponent(
     private val _showDetails = MutableStateFlow(false)
     override val showDetails = _showDetails.asStateFlow()
 
-    private val _userTeams = teamRepository.getTeamsWithPlayersFlow(currentUser.id).map { result ->
-        result.getOrElse {
-            emptyList()
-        }
-    }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+    private val _userTeams =
+        teamRepository.getTeamsWithPlayersFlow(currentUser.value.id).map { result ->
+            result.getOrElse {
+                emptyList()
+            }
+        }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     private val _usersTeam = MutableStateFlow<TeamWithPlayers?>(null)
 
@@ -228,14 +231,16 @@ class DefaultEventDetailComponent(
                     _isUserInEvent.value = checkIsUserInEvent()
                     if (_isUserInEvent.value) {
                         _usersTeam.value =
-                            event.teams.find { it.team.players.contains(currentUser.id) }
-                                ?: event.event.waitList.find { waitlisted ->
-                                    currentUser.teamIds.contains(
-                                        waitlisted
-                                    )
-                                }?.let {
-                                    teamRepository.getTeamWithPlayers(it).getOrNull()
-                                }
+                            event.teams.find { it.team.players.contains(currentUser.value.id) }
+                                ?.let {
+                                    teamRepository.getTeamWithPlayers(it.team.id).getOrNull()
+                                } ?: event.event.waitList.find { waitlisted ->
+                                currentUser.value.teamIds.contains(
+                                    waitlisted
+                                )
+                            }?.let {
+                                teamRepository.getTeamWithPlayers(it).getOrNull()
+                            }
                     }
                     event.event.divisions.firstOrNull()?.let { selectDivision(it) }
                 }
@@ -269,6 +274,12 @@ class DefaultEventDetailComponent(
                 .associateBy { it.match.id }
     }
 
+    override fun onHostCreateAccount() {
+        scope.launch {
+            billingRepository.createAccount()
+        }
+    }
+
     override fun toggleBracketView() {
         _isBracketView.value = !_isBracketView.value
     }
@@ -285,7 +296,7 @@ class DefaultEventDetailComponent(
                     _isUserInEvent.value = true
                 }
             } else {
-                if (currentUser.stripeAccountId?.isNotBlank() == true) {
+                if (currentUser.value.stripeAccountId?.isNotBlank() == true) {
                     billingRepository.createPurchaseIntent(event).onSuccess {
                         it?.let { setPaymentIntent(it) }
                         presentPaymentSheet()
@@ -306,7 +317,7 @@ class DefaultEventDetailComponent(
                     _isUserInEvent.value = true
                 }
             } else {
-                if (currentUser.stripeAccountId?.isNotBlank() == true) {
+                if (currentUser.value.stripeAccountId?.isNotBlank() == true) {
                     billingRepository.createPurchaseIntent(event, team.team.id).onSuccess {
                         it?.let { setPaymentIntent(it) }
                         presentPaymentSheet()
@@ -322,7 +333,6 @@ class DefaultEventDetailComponent(
 
     private suspend fun handleStripeAccountCreation() {
         billingRepository.createAccount().onSuccess { onboardingUrl ->
-            // Open the Stripe onboarding URL
             urlHandler?.openUrlInWebView(
                 url = onboardingUrl,
             )
@@ -475,7 +485,7 @@ class DefaultEventDetailComponent(
 
     private fun checkIsUserWaitListed(): Boolean {
         return selectedEvent.value.event.waitList.any { participant ->
-            (currentUser.id + currentUser.teamIds).contains(
+            (currentUser.value.id + currentUser.value.teamIds).contains(
                 participant
             )
         }
@@ -483,14 +493,14 @@ class DefaultEventDetailComponent(
 
     private fun checkIsUserFreeAgent(): Boolean {
         return selectedEvent.value.event.freeAgents.any { participant ->
-            (currentUser.id + currentUser.teamIds).contains(
+            (currentUser.value.id + currentUser.value.teamIds).contains(
                 participant
             )
         }
     }
 
     private fun checkIsUserParticipant(): Boolean {
-        return (currentUser.eventIds + currentUser.tournamentIds).contains(event.id)
+        return (currentUser.value.eventIds + currentUser.value.tournamentIds).contains(event.id)
     }
 
     private fun checkIsUserInEvent(): Boolean {

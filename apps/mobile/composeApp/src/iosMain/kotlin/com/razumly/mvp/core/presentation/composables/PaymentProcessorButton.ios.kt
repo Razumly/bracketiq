@@ -4,7 +4,7 @@ import androidx.compose.runtime.Composable
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 
 @Composable
-actual fun MakePurchaseButton(
+actual fun PaymentProcessorButton(
     onClick: () -> Unit,
     paymentProcessor: IPaymentProcessor,
     text: String

@@ -4,6 +4,7 @@ import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.util.DbConstants
 import io.appwrite.services.Functions
+import kotlinx.datetime.Instant
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
@@ -17,6 +18,7 @@ interface IBillingRepository : IMVPRepository {
 
     suspend fun createAccount(): Result<String>
     suspend fun createCustomer(): Result<String>
+    suspend fun getOnboardingLink(): Result<String>
 }
 
 class BillingRepository(
@@ -30,7 +32,7 @@ class BillingRepository(
             is Tournament -> true
             else -> false
         }
-        if (user.stripeAccountId.isNullOrBlank()) {
+        if (user.stripeAccountId.isBlank()) {
             createAccount()
             null
         } else {
@@ -75,6 +77,23 @@ class BillingRepository(
         userRepository.updateUser(user.copy(stripeAccountId = response.accountId))
         response.onboardingUrl
     }
+
+    override suspend fun getOnboardingLink(): Result<String> = runCatching {
+        val user = userRepository.currentUser.value.getOrThrow()
+        if (user.stripeAccountId.isBlank()) throw Exception("User has no stripe account")
+
+        val response = Json.decodeFromString<CreateAccountResponse>(
+            functions.createExecution(
+                functionId = DbConstants.BILLING_FUNCTION,
+                body = Json.encodeToString(
+                    GetHostOnboardingLink(user.stripeAccountId)
+                ),
+                async = false,
+            ).responseBody
+        )
+        userRepository.updateUser(user.copy(stripeAccountId = response.accountId))
+        response.onboardingUrl
+        }
 }
 
 @OptIn(ExperimentalSerializationApi::class)
@@ -101,12 +120,23 @@ private data class CreateCustomer(
     @EncodeDefault val command: String = "create_customer",
 )
 
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+private data class GetHostOnboardingLink(
+    val accountId: String,
+    @EncodeDefault val command: String = "get_host_onboarding_link",
+)
+
 @Serializable
 private data class CreateAccountResponse(
     val accountId: String,
     val onboardingUrl: String,
-    val expiresAt: String,
-)
+    val expiresAt: Long,
+) {
+    fun getExpirationDate(): String {
+        return Instant.fromEpochSeconds(expiresAt).toString()
+    }
+}
 
 @Serializable
 data class PurchaseIntent(

@@ -12,6 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.razumly.mvp.core.presentation.composables.PaymentProcessorButton
 import com.razumly.mvp.home.LocalNavBarPadding
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -46,6 +47,9 @@ fun ProfileScreen(component: ProfileComponent) {
             ) {
                 Text("Manage Events")
             }
+            PaymentProcessorButton(
+                onClick = { component.manageStripeAccount() }, component,"Manage Stripe Account"
+            )
             Button(
                 onClick = { component.onLogout() },
             ) {

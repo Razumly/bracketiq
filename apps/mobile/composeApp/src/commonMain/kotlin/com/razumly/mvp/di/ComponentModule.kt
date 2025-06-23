@@ -87,6 +87,7 @@ val componentModule = module {
             userRepository = get(),
             eventRepository = get(),
             fieldRepository = get(),
+            billingRepository = get()
         )
     }
 
@@ -130,7 +131,8 @@ val componentModule = module {
             onNavigateToTeamSettings = onNavigateToTeamSettings,
             userRepository = get(),
             databaseService = get(),
-            onNavigateToEvents = onNavigateToEvents
+            onNavigateToEvents = onNavigateToEvents,
+            billingRepository = get()
         )
     }
 

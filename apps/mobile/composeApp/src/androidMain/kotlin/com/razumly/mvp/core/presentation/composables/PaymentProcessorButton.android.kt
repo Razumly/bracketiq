@@ -13,7 +13,7 @@ import com.stripe.android.paymentsheet.PaymentSheet
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-actual fun MakePurchaseButton(
+actual fun PaymentProcessorButton(
     onClick: () -> Unit,
     paymentProcessor: IPaymentProcessor,
     text: String

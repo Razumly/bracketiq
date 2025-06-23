@@ -13,21 +13,28 @@ import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.Tournament
+import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IEventAbsRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.presentation.IPaymentProcessor
+import com.razumly.mvp.core.presentation.PaymentProcessor
 import com.razumly.mvp.eventCreate.CreateEventComponent.Child
 import com.razumly.mvp.eventCreate.CreateEventComponent.Config
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 
-interface CreateEventComponent {
+interface CreateEventComponent: IPaymentProcessor {
     val newEventState: StateFlow<EventAbs>
     val currentEventType: StateFlow<EventType>
     val childStack: Value<ChildStack<Config, Child>>
@@ -35,6 +42,7 @@ interface CreateEventComponent {
     val selectedPlace: StateFlow<MVPPlace?>
     val errorMessage: StateFlow<String?>
     val defaultEvent: StateFlow<EventWithRelations>
+    val currentUser: StateFlow<UserData?>
 
     fun updateEventField(update: EventImp.() -> EventImp)
     fun updateTournamentField(update: Tournament.() -> Tournament)
@@ -48,6 +56,7 @@ interface CreateEventComponent {
     fun validateAndUpdateMaxPlayers(input: String, onError: (Boolean) -> Unit)
     fun addUserToEvent(add: Boolean)
     fun selectFieldCount(count: Int)
+    fun createAccount()
 
     sealed class Child {
         data object EventInfo : Child()
@@ -69,8 +78,9 @@ class DefaultCreateEventComponent(
     private val userRepository: IUserRepository,
     private val eventRepository: IEventAbsRepository,
     private val fieldRepository: IFieldRepository,
+    private val billingRepository: IBillingRepository,
     val onEventCreated: () -> Unit
-) : CreateEventComponent, ComponentContext by componentContext {
+) : CreateEventComponent, PaymentProcessor(), ComponentContext by componentContext {
     private val navigation = StackNavigation<Config>()
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
 
@@ -98,6 +108,9 @@ class DefaultCreateEventComponent(
     override val errorMessage = _errorMessage.asStateFlow()
 
     private val _addUserToEvent = MutableStateFlow(false)
+
+    override val currentUser = userRepository.currentUser.map { it.getOrThrow() }
+        .stateIn(scope, SharingStarted.Eagerly, null)
 
     private val _fieldCount = MutableStateFlow(0)
 
@@ -153,6 +166,12 @@ class DefaultCreateEventComponent(
         }
     }
 
+    override fun createAccount() {
+        scope.launch {
+            handleStripeAccountCreation()
+        }
+    }
+
     override fun updateEventField(update: EventImp.() -> EventImp) {
         when (_newEventState.value) {
             is EventImp -> _newEventState.value = (_newEventState.value as EventImp).update()
@@ -160,6 +179,16 @@ class DefaultCreateEventComponent(
                 (_newEventState.value as Tournament).updateTournamentFromEvent(
                     (_newEventState.value as Tournament).toEvent().update()
                 )
+        }
+    }
+
+    private suspend fun handleStripeAccountCreation() {
+        billingRepository.createAccount().onSuccess { onboardingUrl ->
+            urlHandler?.openUrlInWebView(
+                url = onboardingUrl,
+            )
+        }.onFailure { error ->
+            _errorMessage.value = error.message
         }
     }
 

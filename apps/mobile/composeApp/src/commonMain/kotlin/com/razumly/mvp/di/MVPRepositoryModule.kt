@@ -4,11 +4,11 @@ import com.razumly.mvp.chat.data.ChatGroupRepository
 import com.razumly.mvp.chat.data.IChatGroupRepository
 import com.razumly.mvp.chat.data.IMessageRepository
 import com.razumly.mvp.chat.data.MessageRepository
-import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.BillingRepository
 import com.razumly.mvp.core.data.repositories.EventAbsRepository
 import com.razumly.mvp.core.data.repositories.EventRepository
 import com.razumly.mvp.core.data.repositories.FieldRepository
+import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IEventAbsRepository
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
@@ -42,7 +42,7 @@ val MVPRepositoryModule = module {
         TournamentRepository(get(), get(), get(), get(), get(), get())
     } bind ITournamentRepository::class
     single {
-        UserRepository(get(), get(), get(), get(), get())
+        UserRepository(get(), get(), get(), get(), get(), get())
     } bind IUserRepository::class
     single {
         MatchRepository(get(), get(), get(), get())

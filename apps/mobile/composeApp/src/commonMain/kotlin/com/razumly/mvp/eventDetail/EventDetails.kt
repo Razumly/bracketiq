@@ -1,9 +1,8 @@
-package com.razumly.mvp.core.presentation.composables
+package com.razumly.mvp.eventDetail
 
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -63,13 +62,15 @@ import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.presentation.IPaymentProcessor
+import com.razumly.mvp.core.presentation.composables.PlatformBackButton
+import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
 import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.getScreenHeight
 import com.razumly.mvp.core.presentation.util.moneyFormat
 import com.razumly.mvp.core.presentation.util.teamSizeFormat
 import com.razumly.mvp.core.presentation.util.toDivisionCase
 import com.razumly.mvp.core.presentation.util.toTitleCase
-import com.razumly.mvp.eventDetail.EditDetails
 import com.razumly.mvp.eventDetail.composables.SelectEventImage
 import com.razumly.mvp.eventMap.EventMap
 import com.razumly.mvp.eventMap.MapComponent
@@ -93,7 +94,10 @@ import kotlinx.datetime.toLocalDateTime
 )
 @Composable
 fun EventDetails(
+    paymentProcessor: IPaymentProcessor,
     mapComponent: MapComponent,
+    hostHasAccount: Boolean,
+    onHostCreateAccount: () -> Unit,
     eventWithRelations: EventAbsWithRelations,
     editEvent: EventAbs,
     onFavoriteClick: () -> Unit,
@@ -241,7 +245,9 @@ fun EventDetails(
 
                         if (editView) {
                             EditDetails(
-                                host = host,
+                                paymentProcessor = paymentProcessor,
+                                hostHasAccount = hostHasAccount,
+                                onHostCreateAccount = onHostCreateAccount,
                                 event = editEvent,
                                 hazeState = hazeState,
                                 onEventTypeSelected = onEventTypeSelected,
