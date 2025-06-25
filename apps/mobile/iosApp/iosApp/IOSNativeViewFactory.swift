@@ -10,6 +10,7 @@ import Foundation
 import ComposeApp
 import UIKit
 import SwiftUI
+import StripePaymentSheet
 
 class IOSNativeViewFactory: NativeViewFactory {
     static var shared = IOSNativeViewFactory()
@@ -110,4 +111,63 @@ class IOSNativeViewFactory: NativeViewFactory {
 
         window.rootViewController?.present(vc, animated: true)
     }
+        
+    func presentStripePaymentSheet(
+        publishableKey: String,
+        customerId: String,
+        ephemeralKey: String,
+        paymentIntent: String,
+        onPaymentResult: @escaping (PaymentResult) -> Void
+    ) {
+        // Configure Stripe
+        STPAPIClient.shared.publishableKey = publishableKey
+        
+        var configuration = PaymentSheet.Configuration()
+        configuration.merchantDisplayName = "MVP"
+        configuration.customer = .init(id: customerId, ephemeralKeySecret: ephemeralKey)
+        configuration.allowsDelayedPaymentMethods = true
+        
+        let paymentSheet = PaymentSheet(
+            paymentIntentClientSecret: paymentIntent,
+            configuration: configuration
+        )
+        
+        // Get the presenting view controller
+        guard let presentingViewController = self.getTopViewController() else {
+            onPaymentResult(PaymentResult.Failed(error: "No presenting view controller found"))
+            return
+        }
+        
+        DispatchQueue.main.async {
+            paymentSheet.present(from: presentingViewController) { result in
+                let paymentResult = self.convertPaymentSheetResult(result)
+                onPaymentResult(paymentResult)
+            }
+        }
+    }
+    
+    private func getTopViewController() -> UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes
+        guard let windowScene = scenes.first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
+              let window = windowScene.windows.first(where: \.isKeyWindow)
+        else { return nil }
+        
+        var topViewController = window.rootViewController
+        while let presentedViewController = topViewController?.presentedViewController {
+            topViewController = presentedViewController
+        }
+        return topViewController
+    }
+    
+    private func convertPaymentSheetResult(_ result: PaymentSheetResult) -> PaymentResult {
+        switch result {
+        case .completed:
+            return PaymentResult.Completed()
+        case .canceled:
+            return PaymentResult.Canceled()
+        case .failed(let error):
+            return PaymentResult.Failed(error: error.localizedDescription)
+        }
+    }
+
 }

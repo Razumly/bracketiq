@@ -14,3 +14,9 @@ expect open class PaymentProcessor(): IPaymentProcessor {
     override fun presentPaymentSheet()
     override suspend fun setPaymentIntent(intent: PurchaseIntent)
 }
+
+sealed class PaymentResult {
+    object Completed : PaymentResult()
+    object Canceled : PaymentResult()
+    data class Failed(val error: String) : PaymentResult()
+}

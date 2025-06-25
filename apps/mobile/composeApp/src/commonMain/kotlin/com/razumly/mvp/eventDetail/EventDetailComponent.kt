@@ -198,12 +198,13 @@ class DefaultEventDetailComponent(
     private val _showDetails = MutableStateFlow(false)
     override val showDetails = _showDetails.asStateFlow()
 
-    private val _userTeams =
-        teamRepository.getTeamsWithPlayersFlow(currentUser.value.id).map { result ->
+    private val _userTeams = currentUser.flatMapLatest {
+        teamRepository.getTeamsWithPlayersFlow(it.id).map { result ->
             result.getOrElse {
                 emptyList()
             }
-        }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+        }
+    }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     private val _usersTeam = MutableStateFlow<TeamWithPlayers?>(null)
 
@@ -296,7 +297,7 @@ class DefaultEventDetailComponent(
                     _isUserInEvent.value = true
                 }
             } else {
-                if (currentUser.value.stripeAccountId?.isNotBlank() == true) {
+                if (currentUser.value.stripeAccountId.isNotBlank()) {
                     billingRepository.createPurchaseIntent(event).onSuccess {
                         it?.let { setPaymentIntent(it) }
                         presentPaymentSheet()
@@ -317,7 +318,7 @@ class DefaultEventDetailComponent(
                     _isUserInEvent.value = true
                 }
             } else {
-                if (currentUser.value.stripeAccountId?.isNotBlank() == true) {
+                if (currentUser.value.stripeAccountId.isNotBlank()) {
                     billingRepository.createPurchaseIntent(event, team.team.id).onSuccess {
                         it?.let { setPaymentIntent(it) }
                         presentPaymentSheet()

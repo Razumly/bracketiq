@@ -45,7 +45,7 @@ suspend fun UserRepository.oauth2Login(): Result<Unit> = kotlin.runCatching {
                     teamInvites = listOf(),
                     eventInvites = listOf(),
                     tournamentInvites = listOf(),
-                    stripeAccountId = null
+                    stripeAccountId = ""
                 ),
                 nestedType = UserDataDTO::class
             ).data.toUserData(id)
