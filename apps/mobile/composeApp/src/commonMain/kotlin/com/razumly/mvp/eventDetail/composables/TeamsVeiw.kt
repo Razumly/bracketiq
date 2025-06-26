@@ -14,6 +14,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.razumly.mvp.core.data.dataTypes.EventImp
+import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.TeamCard
 import com.razumly.mvp.core.presentation.util.isScrollingUp
@@ -24,7 +26,9 @@ import com.razumly.mvp.home.LocalNavBarPadding
 fun ParticipantsView(showFab: (Boolean) -> Unit) {
     val component = LocalTournamentComponent.current
     val divisionTeams by component.divisionTeams.collectAsState()
-    val selectedEvent by component.selectedEvent.collectAsState()
+    val actualEvent by component.selectedEvent.collectAsState()
+
+    val selectedEvent = actualEvent ?: EventWithRelations(EventImp(), null)
     val participants = selectedEvent.players
     val teamSignup = selectedEvent.event.teamSignup
     val navPadding = LocalNavBarPadding.current

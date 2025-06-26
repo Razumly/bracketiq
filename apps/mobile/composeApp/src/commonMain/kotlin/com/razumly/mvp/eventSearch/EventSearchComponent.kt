@@ -8,6 +8,7 @@ import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.repositories.IEventAbsRepository
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.ITournamentRepository
+import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.calcDistance
 import com.razumly.mvp.core.util.getBounds
 import dev.icerock.moko.geo.LatLng
@@ -29,11 +30,11 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-interface SearchEventListComponent {
+interface EventSearchComponent {
     val locationTracker: LocationTracker
     val onEventSelected: (event: EventAbs) -> Unit
     val currentRadius: StateFlow<Double>
-    val error: StateFlow<String?>
+    val errorState: StateFlow<ErrorMessage?>
     val isLoading: StateFlow<Boolean>
     val suggestedEvents: StateFlow<List<EventAbs>>
     val currentLocation: StateFlow<LatLng?>
@@ -48,7 +49,7 @@ interface SearchEventListComponent {
     fun filterEvents(searchQuery: String)
 }
 
-class DefaultSearchEventListComponent(
+class DefaultEventSearchComponent(
     componentContext: ComponentContext,
     private val eventAbsRepository: IEventAbsRepository,
     private val eventRepository: IEventRepository,
@@ -57,14 +58,14 @@ class DefaultSearchEventListComponent(
     tournamentId: String?,
     override val locationTracker: LocationTracker,
     override val onEventSelected: (event: EventAbs) -> Unit,
-) : ComponentContext by componentContext, SearchEventListComponent {
+) : ComponentContext by componentContext, EventSearchComponent {
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
 
     private val _currentRadius = MutableStateFlow(50.0)
     override val currentRadius: StateFlow<Double> = _currentRadius.asStateFlow()
 
-    private val _error = MutableStateFlow<String?>(null)
-    override val error: StateFlow<String?> = _error.asStateFlow()
+    private val _errorState = MutableStateFlow<ErrorMessage?>(null)
+    override val errorState: StateFlow<ErrorMessage?> = _errorState.asStateFlow()
 
     private val _isLoading = MutableStateFlow(false)
     override val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
@@ -84,7 +85,7 @@ class DefaultSearchEventListComponent(
     }.debounce(200L).flatMapLatest { bounds ->
             eventAbsRepository.getEventsInBoundsFlow(bounds).map { result ->
                     result.getOrElse {
-                        _error.value = "Failed to fetch events: ${it.message}"
+                        _errorState.value = ErrorMessage("Failed to fetch events: ${it.message}")
                         Napier.e("Failed to fetch events: ${it.message}")
                         emptyList()
                     }
@@ -109,7 +110,7 @@ class DefaultSearchEventListComponent(
                 eventRepository.getEvent(eventId).onSuccess {
                     onEventSelected(it.event)
                 }.onFailure { e ->
-                    _error.value = "Failed to fetch event: ${e.message}"
+                    _errorState.value = ErrorMessage("Failed to fetch event: ${e.message}")
                 }
             }
         } else if (tournamentId != null) {
@@ -117,7 +118,7 @@ class DefaultSearchEventListComponent(
                 tournamentRepository.getTournament(tournamentId).onSuccess {
                     onEventSelected(it)
                 }.onFailure { e ->
-                    _error.value = "Failed to fetch tournament: ${e.message}"
+                    _errorState.value = ErrorMessage("Failed to fetch tournament: ${e.message}")
                 }
             }
         }
@@ -138,7 +139,7 @@ class DefaultSearchEventListComponent(
             try {
                 _locationStateFlow.collect {
                     if (it == null) {
-                        _error.value = "Location not available"
+                        _errorState.value = ErrorMessage("Location not available")
                         return@collect
                     }
                     if (_currentLocation.value == null) {
@@ -151,7 +152,7 @@ class DefaultSearchEventListComponent(
                     }
                 }
             } catch (e: Exception) {
-                _error.value = "Failed to track location: ${e.message}"
+                _errorState.value = ErrorMessage("Failed to track location: ${e.message}")
             }
         }
 
@@ -163,7 +164,7 @@ class DefaultSearchEventListComponent(
                         }
                     }
             } catch (e: Exception) {
-                _error.value = "Failed to update events: ${e.message}"
+                _errorState.value = ErrorMessage("Failed to update events: ${e.message}")
             }
         }
     }
@@ -189,7 +190,7 @@ class DefaultSearchEventListComponent(
                     _suggestedEvents.value = it
                     _isLoading.value = false
                 }.onFailure { e ->
-                    _error.value = "Failed to fetch events: ${e.message}"
+                    _errorState.value = ErrorMessage("Failed to fetch events: ${e.message}")
                 }
         }
     }
@@ -201,18 +202,18 @@ class DefaultSearchEventListComponent(
                     _suggestedEvents.value = it
                     _isLoading.value = false
                 }.onFailure { e ->
-                    _error.value = "Failed to fetch events: ${e.message}"
+                    _errorState.value = ErrorMessage("Failed to fetch events: ${e.message}")
                 }
         }
     }
 
     private suspend fun getEvents() {
         _isLoading.value = true
-        _error.value = null
+        _errorState.value = null
 
         val radius = _currentRadius.value
         val currentLocation = _currentLocation.value ?: run {
-            _error.value = "Location not available"
+            _errorState.value = ErrorMessage("Location not available")
             return
         }
         val currentBounds = getBounds(radius, currentLocation.latitude, currentLocation.longitude)
@@ -220,7 +221,7 @@ class DefaultSearchEventListComponent(
         eventAbsRepository.getEventsInBounds(currentBounds).onSuccess {
             _isLoading.value = false
         }.onFailure { e ->
-            _error.value = "Failed to fetch events: ${e.message}"
+            _errorState.value = ErrorMessage("Failed to fetch events: ${e.message}")
         }
     }
 

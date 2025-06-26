@@ -41,7 +41,8 @@ suspend fun UserRepository.oauth2Login(activity: ComponentActivity): Result<Unit
                 teamInvites = listOf(),
                 eventInvites = listOf(),
                 tournamentInvites = listOf(),
-                stripeAccountId = ""
+                stripeAccountId = "",
+                stripeCustomerId = ""
             ),
             nestedType = UserDataDTO::class
         )

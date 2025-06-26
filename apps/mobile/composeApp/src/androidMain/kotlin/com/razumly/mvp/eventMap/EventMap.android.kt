@@ -21,6 +21,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
@@ -55,7 +56,8 @@ actual fun EventMap(
     modifier: Modifier,
     focusedLocation: dev.icerock.moko.geo.LatLng,
     focusedEvent: EventAbs?,
-    revealCenter: Offset
+    revealCenter: Offset,
+    onBackPressed: (() -> Unit)?
 ) {
     val selectedPlace = remember { mutableStateOf<PointOfInterest?>(null) }
     val scope = rememberCoroutineScope()
@@ -213,6 +215,16 @@ actual fun EventMap(
                     places = newPlaces
                 }
             }
+        }
+
+        if (onBackPressed != null) {
+            MapFloatingActionButton(
+                isVisible = showMap,
+                onCloseMap = onBackPressed,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 128.dp)
+            )
         }
     }
 }

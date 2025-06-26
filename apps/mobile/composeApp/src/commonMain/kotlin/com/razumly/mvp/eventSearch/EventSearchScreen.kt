@@ -48,6 +48,7 @@ import com.razumly.mvp.core.presentation.composables.SearchBox
 import com.razumly.mvp.core.presentation.composables.SearchOverlay
 import com.razumly.mvp.core.presentation.util.isScrollingUp
 import com.razumly.mvp.core.presentation.util.toTitleCase
+import com.razumly.mvp.core.util.LocalErrorHandler
 import com.razumly.mvp.eventMap.EventMap
 import com.razumly.mvp.eventMap.MapComponent
 import com.razumly.mvp.home.LocalNavBarPadding
@@ -62,9 +63,10 @@ import dev.icerock.moko.geo.compose.BindLocationTrackerEffect
 @OptIn(ExperimentalHazeMaterialsApi::class)
 @Composable
 fun EventSearchScreen(
-    component: DefaultSearchEventListComponent,
+    component: DefaultEventSearchComponent,
     mapComponent: MapComponent,
 ) {
+    val errorHandler = LocalErrorHandler.current
     val events by component.events.collectAsState()
     val showMapCard by component.showMapCard.collectAsState()
     val selectedEvent by component.selectedEvent.collectAsState()
@@ -176,7 +178,7 @@ fun EventSearchScreen(
                         LatLng(it.lat, it.long)
                     } ?: currentLocation ?: LatLng(0.0,0.0),
                     focusedEvent = null,
-                    revealCenter = revealCenter
+                    revealCenter = revealCenter,
                 )
             }
         }

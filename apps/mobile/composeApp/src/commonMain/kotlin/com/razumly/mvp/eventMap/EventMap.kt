@@ -16,5 +16,6 @@ expect fun EventMap(
     modifier: Modifier = Modifier,
     focusedLocation: LatLng,
     focusedEvent: EventAbs?,
-    revealCenter: Offset
+    revealCenter: Offset,
+    onBackPressed: (() -> Unit)? = null
 )

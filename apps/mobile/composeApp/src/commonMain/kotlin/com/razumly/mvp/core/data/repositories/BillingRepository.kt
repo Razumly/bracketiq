@@ -17,7 +17,7 @@ interface IBillingRepository : IMVPRepository {
     ): Result<PurchaseIntent?>
 
     suspend fun createAccount(): Result<String>
-    suspend fun createCustomer(): Result<String>
+    suspend fun createCustomer(): Result<Unit>
     suspend fun getOnboardingLink(): Result<String>
 }
 
@@ -63,7 +63,7 @@ class BillingRepository(
         response.onboardingUrl
     }
 
-    override suspend fun createCustomer(): Result<String> = runCatching {
+    override suspend fun createCustomer(): Result<Unit> = runCatching {
         val user = userRepository.currentUser.value.getOrThrow()
         val response = Json.decodeFromString<CreateAccountResponse>(
             functions.createExecution(
@@ -74,8 +74,7 @@ class BillingRepository(
                 async = false,
             ).responseBody
         )
-        userRepository.updateUser(user.copy(stripeAccountId = response.accountId))
-        response.onboardingUrl
+        userRepository.updateUser(user.copy(stripeCustomerId = response.accountId))
     }
 
     override suspend fun getOnboardingLink(): Result<String> = runCatching {

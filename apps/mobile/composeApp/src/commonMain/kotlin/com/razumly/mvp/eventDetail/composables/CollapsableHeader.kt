@@ -23,6 +23,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.razumly.mvp.core.data.dataTypes.EventImp
+import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
 import com.razumly.mvp.eventDetail.EventDetailComponent
 import com.razumly.mvp.icons.MVPIcons
@@ -33,22 +35,23 @@ fun CollapsableHeader(
     component: EventDetailComponent
 ) {
     val selectedDivision by component.selectedDivision.collectAsState()
-    val event by component.selectedEvent.collectAsState()
     val losersBracket by component.losersBracket.collectAsState()
     val isBracketView by component.isBracketView.collectAsState()
-    val selectedEvent by component.selectedEvent.collectAsState()
+    val actualEvent by component.selectedEvent.collectAsState()
+
+    val selectedEvent = actualEvent ?: EventWithRelations(EventImp(), null)
     val singleDivision = selectedEvent.event.singleDivision
 
     Column(Modifier.fillMaxWidth()) {
         if (!singleDivision) {
-            event.event.divisions.indexOf(selectedDivision).let {
+            selectedEvent.event.divisions.indexOf(selectedDivision).let {
                 ScrollableTabRow(
                     selectedTabIndex = it.coerceAtLeast(0),
                     modifier = Modifier
                         .fillMaxWidth(),
                     edgePadding = 0.dp
                 ) {
-                    event.event.divisions.forEach { division ->
+                    selectedEvent.event.divisions.forEach { division ->
                         Tab(
                             selected = division == selectedDivision,
                             onClick = { component.selectDivision(division) },

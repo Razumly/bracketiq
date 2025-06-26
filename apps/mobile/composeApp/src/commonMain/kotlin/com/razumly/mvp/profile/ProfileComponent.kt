@@ -7,19 +7,25 @@ import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentProcessor
+import com.razumly.mvp.core.util.ErrorMessage
+import com.razumly.mvp.core.util.LoadingHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 interface ProfileComponent: IPaymentProcessor {
+    val errorState: StateFlow<ErrorMessage?>
     fun onLogout()
     fun manageTeams()
     fun manageEvents()
     fun clearCache()
     fun manageStripeAccount()
+    fun setLoadingHandler(loadingHandler: LoadingHandler)
 }
 
 class DefaultProfileComponent(
@@ -33,11 +39,20 @@ class DefaultProfileComponent(
 ) : ProfileComponent, PaymentProcessor(), ComponentContext by componentContext {
     private val scopeMain = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private val scopeIO = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    private val _error = MutableStateFlow("")
+
+    private val _errorState = MutableStateFlow<ErrorMessage?>(null)
+    override val errorState = _errorState.asStateFlow()
+
+    private lateinit var loadingHandler: LoadingHandler
+
+    override fun setLoadingHandler(handler: LoadingHandler) {
+        loadingHandler = handler
+    }
+
     override fun onLogout() {
         scopeMain.launch {
             userRepository.logout().onFailure {
-                _error.value = it.message.toString()
+                _errorState.value = ErrorMessage(it.message?: "")
             }
             onNavigateToLogin()
         }
@@ -53,11 +68,15 @@ class DefaultProfileComponent(
 
     override fun manageStripeAccount() {
         scopeMain.launch {
+            loadingHandler.showLoading("Redirecting to Stripe ...")
             billingRepository.getOnboardingLink().onSuccess { onboardingUrl ->
                 urlHandler?.openUrlInWebView(
                     url = onboardingUrl,
                 )
+            }.onFailure {
+                _errorState.value = ErrorMessage(it.message ?: "")
             }
+            loadingHandler.hideLoading()
         }
     }
 

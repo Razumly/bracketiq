@@ -23,6 +23,8 @@ import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentProcessor
+import com.razumly.mvp.core.util.ErrorMessage
+import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.eventDetail.data.IMatchRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -42,7 +44,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 
 interface EventDetailComponent : ComponentContext, IPaymentProcessor {
-    val selectedEvent: StateFlow<EventAbsWithRelations>
+    val selectedEvent: StateFlow<EventAbsWithRelations?>
     val divisionMatches: StateFlow<Map<String, MatchWithRelations>>
     val divisionTeams: StateFlow<Map<String, TeamWithPlayers>>
     val selectedDivision: StateFlow<Division?>
@@ -51,7 +53,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val rounds: StateFlow<List<List<MatchWithRelations?>>>
     val losersBracket: StateFlow<Boolean>
     val showDetails: StateFlow<Boolean>
-    val errorState: StateFlow<String?>
+    val errorState: StateFlow<ErrorMessage?>
     val eventWithRelations: StateFlow<EventWithFullRelations>
     val currentUser: StateFlow<UserData>
     val validTeams: StateFlow<List<TeamWithPlayers>>
@@ -64,6 +66,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun matchSelected(selectedMatch: MatchWithRelations)
     fun onHostCreateAccount()
     fun selectDivision(division: Division)
+    fun setLoadingHandler(loadingHandler: LoadingHandler)
     fun toggleBracketView()
     fun toggleLosersBracket()
     fun toggleDetails()
@@ -113,8 +116,14 @@ class DefaultEventDetailComponent(
     override val currentUser = userRepository.currentUser.map { it.getOrThrow() }
         .stateIn(scope, SharingStarted.Eagerly, UserData())
 
-    private val _errorState = MutableStateFlow<String?>(null)
+    private val _errorState = MutableStateFlow<ErrorMessage?>(null)
     override val errorState = _errorState.asStateFlow()
+
+    private lateinit var loadingHandler: LoadingHandler
+
+    override fun setLoadingHandler(handler: LoadingHandler) {
+        loadingHandler = handler
+    }
 
     private val _editedEvent = MutableStateFlow(event)
     override var editedEvent = _editedEvent.asStateFlow()
@@ -137,35 +146,42 @@ class DefaultEventDetailComponent(
     private val _isUserInEvent: MutableStateFlow<Boolean> = MutableStateFlow(false)
     override val isUserInEvent = _isUserInEvent.asStateFlow()
 
-    override val selectedEvent: StateFlow<EventAbsWithRelations> =
+    override val selectedEvent: StateFlow<EventAbsWithRelations?> =
         eventAbsRepository.getEventWithRelationsFlow(event).map { result ->
             result.getOrElse {
-                _errorState.value = it.message
+                _errorState.value = ErrorMessage(it.message ?: "")
                 EventAbsWithRelations.getEmptyEvent(event)
             }
-        }.stateIn(scope, SharingStarted.Eagerly, EventAbsWithRelations.getEmptyEvent(event))
+        }.stateIn(scope, SharingStarted.Eagerly, null)
 
-    override val isHost = selectedEvent.map { it.event.hostId == currentUser.value.id }
+    override val isHost = selectedEvent.map { it?.event?.hostId == currentUser.value.id }
         .stateIn(scope, SharingStarted.Eagerly, false)
 
     override val eventWithRelations = selectedEvent.flatMapLatest { eventWithPlayers ->
-        combine(matchRepository.getMatchesOfTournamentFlow(eventWithPlayers.event.id)
-            .map { result ->
-                result.getOrElse {
-                    _errorState.value = "Error loading matches: ${it.message}"; emptyList()
-                }
-            }, when (eventWithPlayers) {
-            is TournamentWithRelations -> teamRepository.getTeamsOfTournamentFlow(
-                eventWithPlayers.event.id
-            )
+        if (eventWithPlayers == null) {
+            flowOf(EventWithFullRelations(Tournament(), emptyList(), emptyList(), emptyList()))
+        } else {
+            combine(
+                matchRepository.getMatchesOfTournamentFlow(eventWithPlayers.event.id)
+                    .map { result ->
+                        result.getOrElse {
+                            _errorState.value =
+                                ErrorMessage("Error loading matches: ${it.message}"); emptyList()
+                        }
+                    }, when (eventWithPlayers) {
+                    is TournamentWithRelations -> teamRepository.getTeamsOfTournamentFlow(
+                        eventWithPlayers.event.id
+                    )
 
-            is EventWithRelations -> teamRepository.getTeamsOfEventFlow(eventWithPlayers.event.id)
-        }.map { result ->
-            result.getOrElse {
-                _errorState.value = "Failed to load teams: ${it.message}"; emptyList()
+                    is EventWithRelations -> teamRepository.getTeamsOfEventFlow(eventWithPlayers.event.id)
+                }.map { result ->
+                    result.getOrElse {
+                        _errorState.value =
+                            ErrorMessage("Failed to load teams: ${it.message}"); emptyList()
+                    }
+                }) { matches, teams ->
+                eventWithPlayers.toEventWithFullRelations(matches, teams)
             }
-        }) { matches, teams ->
-            eventWithPlayers.toEventWithFullRelations(matches, teams)
         }
     }.stateIn(
         scope, SharingStarted.Eagerly, EventWithFullRelations(
@@ -257,15 +273,17 @@ class DefaultEventDetailComponent(
     }
 
     override fun matchSelected(selectedMatch: MatchWithRelations) {
-        when (selectedEvent.value.event) {
-            is Tournament -> onMatchSelected(selectedMatch, selectedEvent.value.event as Tournament)
+        if (selectedEvent.value == null) return
+        when (selectedEvent.value!!.event) {
+            is Tournament -> onMatchSelected(selectedMatch, selectedEvent.value!!.event as Tournament)
             else -> Unit
         }
     }
 
     override fun selectDivision(division: Division) {
+        if (selectedEvent.value == null) return
         _selectedDivision.value = division
-        _divisionTeams.value = if (!selectedEvent.value.event.singleDivision) {
+        _divisionTeams.value = if (!selectedEvent.value!!.event.singleDivision) {
             eventWithRelations.value.teams.filter { it.team.division == division }
         } else {
             eventWithRelations.value.teams
@@ -277,7 +295,15 @@ class DefaultEventDetailComponent(
 
     override fun onHostCreateAccount() {
         scope.launch {
-            billingRepository.createAccount()
+            loadingHandler.showLoading("Redirecting to Stripe On Boarding ...")
+            billingRepository.createAccount().onSuccess { onBoardingUrl ->
+                urlHandler?.openUrlInWebView(
+                    url = onBoardingUrl,
+                )
+            }.onFailure {
+                _errorState.value = ErrorMessage(it.message ?: "")
+            }
+            loadingHandler.hideLoading()
         }
     }
 
@@ -292,66 +318,60 @@ class DefaultEventDetailComponent(
 
     override fun joinEvent() {
         scope.launch {
+            if (selectedEvent.value == null) return@launch
             if (event.price == 0.0 || event.teamSignup) {
-                eventAbsRepository.addCurrentUserToEvent(selectedEvent.value.event).onSuccess {
+                loadingHandler.showLoading("Joining Event ...")
+                eventAbsRepository.addCurrentUserToEvent(selectedEvent.value!!.event).onSuccess {
                     _isUserInEvent.value = true
                 }
             } else {
-                if (currentUser.value.stripeAccountId.isNotBlank()) {
-                    billingRepository.createPurchaseIntent(event).onSuccess {
-                        it?.let { setPaymentIntent(it) }
-                        presentPaymentSheet()
-                    }.onFailure {
-                        _errorState.value = it.message
-                    }
-                } else {
-                    handleStripeAccountCreation()
+                loadingHandler.showLoading("Creating Purchase Request ...")
+                billingRepository.createPurchaseIntent(event).onSuccess {
+                    it?.let { setPaymentIntent(it) }
+                    loadingHandler.showLoading("Waiting for Payment Completion ..")
+                    presentPaymentSheet()
+                }.onFailure {
+                    _errorState.value = ErrorMessage(it.message ?: "")
                 }
             }
+            loadingHandler.hideLoading()
         }
     }
 
     override fun joinEventAsTeam(team: TeamWithPlayers) {
         scope.launch {
+            if (selectedEvent.value == null) return@launch
             if (event.price == 0.0) {
-                eventAbsRepository.addTeamToEvent(selectedEvent.value.event, team).onSuccess {
+                loadingHandler.showLoading("Joining Event ...")
+                eventAbsRepository.addTeamToEvent(selectedEvent.value!!.event, team).onSuccess {
                     _isUserInEvent.value = true
+                }.onFailure {
+                    _errorState.value = ErrorMessage(it.message ?: "")
                 }
             } else {
-                if (currentUser.value.stripeAccountId.isNotBlank()) {
-                    billingRepository.createPurchaseIntent(event, team.team.id).onSuccess {
-                        it?.let { setPaymentIntent(it) }
-                        presentPaymentSheet()
-                    }.onFailure {
-                        _errorState.value = it.message
-                    }
-                } else {
-                    handleStripeAccountCreation()
+                loadingHandler.showLoading("Creating Purchase Request ...")
+                billingRepository.createPurchaseIntent(event, team.team.id).onSuccess {
+                    it?.let { setPaymentIntent(it) }
+                    loadingHandler.showLoading("Waiting for Payment Completion ..")
+                    presentPaymentSheet()
+                }.onFailure {
+                    _errorState.value = ErrorMessage(it.message ?: "")
                 }
             }
-        }
-    }
-
-    private suspend fun handleStripeAccountCreation() {
-        billingRepository.createAccount().onSuccess { onboardingUrl ->
-            urlHandler?.openUrlInWebView(
-                url = onboardingUrl,
-            )
-        }.onFailure { error ->
-            _errorState.value = error.message
+            loadingHandler.hideLoading()
         }
     }
 
     override fun leaveEvent() {
         scope.launch {
-            if (!_isUserInEvent.value) {
+            if (!_isUserInEvent.value || selectedEvent.value == null) {
                 return@launch
             }
-            if (!selectedEvent.value.event.teamSignup || checkIsUserFreeAgent()) {
-                eventAbsRepository.removeCurrentUserFromEvent(selectedEvent.value.event)
+            if (!selectedEvent.value!!.event.teamSignup || checkIsUserFreeAgent()) {
+                eventAbsRepository.removeCurrentUserFromEvent(selectedEvent.value!!.event)
             } else {
                 eventAbsRepository.removeTeamFromEvent(
-                    selectedEvent.value.event, _usersTeam.value!!
+                    selectedEvent.value!!.event, _usersTeam.value!!
                 )
             }
         }
@@ -366,7 +386,8 @@ class DefaultEventDetailComponent(
     }
 
     override fun toggleEdit() {
-        _editedEvent.value = selectedEvent.value.event
+        if (selectedEvent.value == null) return
+        _editedEvent.value = selectedEvent.value!!.event
         _isEditing.value = !_isEditing.value
     }
 
@@ -385,13 +406,14 @@ class DefaultEventDetailComponent(
     override fun updateEvent() {
         scope.launch {
             eventAbsRepository.updateEvent(_editedEvent.value).onFailure {
-                _errorState.value = it.message
+                _errorState.value = ErrorMessage(it.message ?: "")
             }
         }
     }
 
     override fun createNewTeam() {
-        onNavigateToTeamSettings(selectedEvent.value.event.freeAgents, selectedEvent.value.event)
+        if (selectedEvent.value == null) return
+        onNavigateToTeamSettings(selectedEvent.value!!.event.freeAgents, selectedEvent.value!!.event)
     }
 
     override fun selectPlace(place: MVPPlace?) {
@@ -485,19 +507,19 @@ class DefaultEventDetailComponent(
     }
 
     private fun checkIsUserWaitListed(): Boolean {
-        return selectedEvent.value.event.waitList.any { participant ->
+        return selectedEvent.value?.event?.waitList?.any { participant ->
             (currentUser.value.id + currentUser.value.teamIds).contains(
                 participant
             )
-        }
+        } == true
     }
 
     private fun checkIsUserFreeAgent(): Boolean {
-        return selectedEvent.value.event.freeAgents.any { participant ->
+        return selectedEvent.value?.event?.freeAgents?.any { participant ->
             (currentUser.value.id + currentUser.value.teamIds).contains(
                 participant
             )
-        }
+        } == true
     }
 
     private fun checkIsUserParticipant(): Boolean {

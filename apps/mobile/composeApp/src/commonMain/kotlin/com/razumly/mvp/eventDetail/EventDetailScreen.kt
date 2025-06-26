@@ -1,5 +1,6 @@
 package com.razumly.mvp.eventDetail
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -35,11 +36,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.razumly.mvp.core.data.dataTypes.EventAbsWithRelations
+import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
 import com.razumly.mvp.core.presentation.composables.PaymentProcessorButton
 import com.razumly.mvp.core.presentation.composables.TeamCard
+import com.razumly.mvp.core.presentation.util.buttonTransitionSpec
+import com.razumly.mvp.core.util.LocalErrorHandler
+import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.eventDetail.composables.CollapsableHeader
 import com.razumly.mvp.eventDetail.composables.ParticipantsView
 import com.razumly.mvp.eventDetail.composables.TournamentBracketView
@@ -54,10 +60,10 @@ val LocalTournamentComponent =
 fun EventDetailScreen(
     component: EventDetailComponent, mapComponent: MapComponent
 ) {
+    val errorHandler = LocalErrorHandler.current
     val isBracketView by component.isBracketView.collectAsState()
     var showDropdownMenu by remember { mutableStateOf(false) }
-    val selectedEvent by component.selectedEvent.collectAsState()
-    val teamSignup = selectedEvent.event.teamSignup
+    val actualEvent by component.selectedEvent.collectAsState()
     val currentUser by component.currentUser.collectAsState()
     var showTeamSelectionDialog by remember { mutableStateOf(false) }
     val validTeams by component.validTeams.collectAsState()
@@ -67,8 +73,32 @@ fun EventDetailScreen(
     val isEditing by component.isEditing.collectAsState()
     val editedEvent by component.editedEvent.collectAsState()
     var showFab by remember { mutableStateOf(false) }
+    val loadingHandler = LocalLoadingHandler.current
 
     val isUserInEvent by component.isUserInEvent.collectAsState()
+
+    val selectedEvent = actualEvent ?: EventWithRelations(EventImp(), null)
+    val teamSignup = selectedEvent.event.teamSignup
+
+    LaunchedEffect(Unit) {
+        component.setLoadingHandler(loadingHandler)
+    }
+
+    LaunchedEffect(actualEvent) {
+        if (actualEvent == null) {
+            loadingHandler.showLoading("Loading Event")
+        } else {
+            loadingHandler.hideLoading()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        component.errorState.collect { error ->
+            if (error != null) {
+                errorHandler.showError(error.message)
+            }
+        }
+    }
 
     LaunchedEffect(Unit) {
         delay(300)
@@ -101,74 +131,79 @@ fun EventDetailScreen(
                         onAddCurrentUser = {},
                         onBack = { component.backCallback.onBack() },
                         onSelectFieldCount = { component.selectFieldCount(it) }) { isValid ->
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            if (isEditing) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Button(onClick = {
-                                        component.updateEvent()
-                                        component.toggleEdit()
-                                    }, enabled = isValid) {
-                                        Text("Confirm")
-                                    }
-                                    Button(onClick = {
-                                        component.toggleEdit()
-                                    }) {
-                                        Text("Cancel")
-                                    }
-                                }
-                            } else {
-                                if (isHost) {
-                                    Button(onClick = { component.toggleEdit() }) {
-                                        Text("Edit")
-                                    }
-                                }
-                                Button(onClick = {
-                                    component.viewEvent()
-                                    showDropdownMenu = false
-                                }) { Text("View") }
-                                if (!isUserInEvent) {
-                                    val individual =
-                                        if (teamSignup) "Join as Free Agent" else "Join"
-                                    if (selectedEvent.event.price > 0 && !teamSignup) {
-                                        PaymentProcessorButton({
-                                            component.joinEvent()
-                                            showDropdownMenu = false
-                                        }, component, "Purchase Ticket")
-                                    } else {
+                        AnimatedContent(
+                            targetState = isEditing,
+                            transitionSpec = { buttonTransitionSpec() },
+                            label = "buttonTransition"
+                        ) { editMode ->
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                if (editMode) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         Button(onClick = {
-                                            component.joinEvent()
-                                            showDropdownMenu = false
-                                        }) { Text(individual) }
-                                    }
-                                    if (teamSignup) {
-                                        if (selectedEvent.event.price > 0) {
-                                            PaymentProcessorButton(
-                                                onClick = {
-                                                showTeamSelectionDialog = true
-                                                showDropdownMenu = false
-                                            }, component,
-                                                "Purchase Ticket for Team"
-                                            )
-                                        } else {
-                                            Button(onClick = {
-                                                showTeamSelectionDialog = true
-                                                showDropdownMenu = false
-                                            }) { Text("Join as Team") }
+                                            component.updateEvent()
+                                            component.toggleEdit()
+                                        }, enabled = isValid) {
+                                            Text("Confirm")
+                                        }
+                                        Button(onClick = {
+                                            component.toggleEdit()
+                                        }) {
+                                            Text("Cancel")
                                         }
                                     }
                                 } else {
+                                    if (isHost) {
+                                        Button(onClick = { component.toggleEdit() }) {
+                                            Text("Edit")
+                                        }
+                                    }
                                     Button(onClick = {
-                                        component.leaveEvent()
+                                        component.viewEvent()
                                         showDropdownMenu = false
-                                    }) { Text("Leave") }
+                                    }) { Text("View") }
+                                    if (!isUserInEvent) {
+                                        val individual =
+                                            if (teamSignup) "Join as Free Agent" else "Join"
+                                        if (selectedEvent.event.price > 0 && !teamSignup) {
+                                            PaymentProcessorButton({
+                                                component.joinEvent()
+                                                showDropdownMenu = false
+                                            }, component, "Purchase Ticket")
+                                        } else {
+                                            Button(onClick = {
+                                                component.joinEvent()
+                                                showDropdownMenu = false
+                                            }) { Text(individual) }
+                                        }
+                                        if (teamSignup) {
+                                            if (selectedEvent.event.price > 0) {
+                                                PaymentProcessorButton(
+                                                    onClick = {
+                                                        showTeamSelectionDialog = true
+                                                        showDropdownMenu = false
+                                                    }, component,
+                                                    "Purchase Ticket for Team"
+                                                )
+                                            } else {
+                                                Button(onClick = {
+                                                    showTeamSelectionDialog = true
+                                                    showDropdownMenu = false
+                                                }) { Text("Join as Team") }
+                                            }
+                                        }
+                                    } else {
+                                        Button(onClick = {
+                                            component.leaveEvent()
+                                            showDropdownMenu = false
+                                        }) { Text("Leave") }
+                                    }
                                 }
                             }
                         }
                     }
-
                 }
                 AnimatedVisibility(
                     showDetails,

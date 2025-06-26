@@ -12,7 +12,7 @@ import com.razumly.mvp.core.presentation.RootComponent.DeepLinkNav
 import com.razumly.mvp.eventCreate.DefaultCreateEventComponent
 import com.razumly.mvp.eventDetail.DefaultEventDetailComponent
 import com.razumly.mvp.eventManagement.DefaultEventManagementComponent
-import com.razumly.mvp.eventSearch.DefaultSearchEventListComponent
+import com.razumly.mvp.eventSearch.DefaultEventSearchComponent
 import com.razumly.mvp.home.DefaultHomeComponent
 import com.razumly.mvp.matchDetail.DefaultMatchContentComponent
 import com.razumly.mvp.profile.DefaultProfileComponent
@@ -92,7 +92,7 @@ val componentModule = module {
     }
 
     factory { (componentContext: ComponentContext, onEventSelected: (event: EventAbs) -> Unit, eventId: String?, tournamentId: String?) ->
-        DefaultSearchEventListComponent(
+        DefaultEventSearchComponent(
             componentContext = componentContext,
             locationTracker = get(),
             onEventSelected = onEventSelected,

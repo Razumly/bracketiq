@@ -20,6 +20,7 @@ data class UserData(
     val eventInvites: List<String>,
     val tournamentInvites: List<String>,
     val stripeAccountId: String,
+    val stripeCustomerId: String,
     @PrimaryKey override val id: String,
 ) : MVPDocument {
     companion object {
@@ -36,6 +37,7 @@ data class UserData(
                 eventInvites = emptyList(),
                 tournamentInvites = emptyList(),
                 stripeAccountId = "",
+                stripeCustomerId = "",
                 id = ""
             )
         }
@@ -57,6 +59,7 @@ data class UserData(
             eventInvites,
             tournamentInvites,
             stripeAccountId,
+            stripeCustomerId,
             id
         )
     }

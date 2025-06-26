@@ -58,3 +58,8 @@ suspend fun LocationTracker.getCurrentLocation(): LatLng {
         return LatLng(0.0, 0.0)
     }
 }
+
+expect object Platform {
+    val name: String
+    val isIOS: Boolean
+}

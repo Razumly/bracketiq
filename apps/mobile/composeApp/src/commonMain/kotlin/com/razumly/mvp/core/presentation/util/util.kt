@@ -1,5 +1,19 @@
 package com.razumly.mvp.core.presentation.util
 
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.EaseInCubic
+import androidx.compose.animation.core.EaseInQuart
+import androidx.compose.animation.core.EaseOutCubic
+import androidx.compose.animation.core.EaseOutQuart
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
@@ -112,3 +126,64 @@ fun Double.moneyFormat(): String {
     val fraction = abs(rounded % 100)
     return "$$whole.${if (fraction < 10) "0" else ""}$fraction"
 }
+
+fun AnimatedContentTransitionScope<Boolean>.transitionSpec(animationDelay: Int) = if (targetState) {
+    slideInVertically(
+        initialOffsetY = { it / 4 },
+        animationSpec = tween(300, delayMillis = animationDelay, easing = EaseOutCubic)
+    ) + fadeIn(
+        animationSpec = tween(300, delayMillis = animationDelay + 100)
+    ) + expandVertically(
+        animationSpec = tween(300, delayMillis = animationDelay, easing = EaseOutCubic)
+    ) togetherWith slideOutVertically(
+        targetOffsetY = { -it / 4 },
+        animationSpec = tween(200, easing = EaseInCubic)
+    ) + fadeOut(
+        animationSpec = tween(200)
+    ) + shrinkVertically(
+        animationSpec = tween(200, easing = EaseInCubic)
+    )
+} else {
+    slideInVertically(
+        initialOffsetY = { -it / 4 },
+        animationSpec = tween(300, delayMillis = animationDelay, easing = EaseOutCubic)
+    ) + fadeIn(
+        animationSpec = tween(300, delayMillis = animationDelay + 100)
+    ) + expandVertically(
+        animationSpec = tween(300, delayMillis = animationDelay, easing = EaseOutCubic)
+    ) togetherWith slideOutVertically(
+        targetOffsetY = { it / 4 },
+        animationSpec = tween(200, easing = EaseInCubic)
+    ) + fadeOut(
+        animationSpec = tween(200)
+    ) + shrinkVertically(
+        animationSpec = tween(200, easing = EaseInCubic)
+    )
+}.using(SizeTransform(clip = false))
+
+fun AnimatedContentTransitionScope<Boolean>.buttonTransitionSpec() =
+    if (targetState) {
+        slideInVertically(
+            initialOffsetY = { it / 8 },
+            animationSpec = tween(200, easing = EaseOutQuart)
+        ) + fadeIn(
+            animationSpec = tween(150, delayMillis = 50)
+        ) togetherWith slideOutVertically(
+            targetOffsetY = { -it / 8 },
+            animationSpec = tween(150, easing = EaseInQuart)
+        ) + fadeOut(
+            animationSpec = tween(100)
+        )
+    } else {
+        slideInVertically(
+            initialOffsetY = { -it / 8 },
+            animationSpec = tween(200, easing = EaseOutQuart)
+        ) + fadeIn(
+            animationSpec = tween(150, delayMillis = 50)
+        ) togetherWith slideOutVertically(
+            targetOffsetY = { it / 8 },
+            animationSpec = tween(150, easing = EaseInQuart)
+        ) + fadeOut(
+            animationSpec = tween(100)
+        )
+    }.using(SizeTransform(clip = false))

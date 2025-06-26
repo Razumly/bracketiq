@@ -23,7 +23,7 @@ import com.razumly.mvp.eventDetail.DefaultEventDetailComponent
 import com.razumly.mvp.eventDetail.EventDetailComponent
 import com.razumly.mvp.eventManagement.DefaultEventManagementComponent
 import com.razumly.mvp.eventMap.MapComponent
-import com.razumly.mvp.eventSearch.DefaultSearchEventListComponent
+import com.razumly.mvp.eventSearch.DefaultEventSearchComponent
 import com.razumly.mvp.home.HomeComponent.Child
 import com.razumly.mvp.home.HomeComponent.Config
 import com.razumly.mvp.matchDetail.DefaultMatchContentComponent
@@ -49,7 +49,7 @@ interface HomeComponent {
 
     sealed class Child {
         data class Search(
-            val component: DefaultSearchEventListComponent, val mapComponent: MapComponent
+            val component: DefaultEventSearchComponent, val mapComponent: MapComponent
         ) : Child()
 
         data class EventContent(
@@ -156,7 +156,7 @@ class DefaultHomeComponent(
     ): Child {
         return when (config) {
             is Config.Search -> {
-                Child.Search(_koin.inject<DefaultSearchEventListComponent> {
+                Child.Search(_koin.inject<DefaultEventSearchComponent> {
                     parametersOf(
                         componentContext, ::onEventSelected, config.eventId, config.tournamentId
                     )
