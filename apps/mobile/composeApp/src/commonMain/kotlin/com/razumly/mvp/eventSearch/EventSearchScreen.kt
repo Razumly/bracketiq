@@ -49,6 +49,7 @@ import com.razumly.mvp.core.presentation.composables.SearchOverlay
 import com.razumly.mvp.core.presentation.util.isScrollingUp
 import com.razumly.mvp.core.presentation.util.toTitleCase
 import com.razumly.mvp.core.util.LocalErrorHandler
+import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.eventMap.EventMap
 import com.razumly.mvp.eventMap.MapComponent
 import com.razumly.mvp.home.LocalNavBarPadding
@@ -66,7 +67,6 @@ fun EventSearchScreen(
     component: DefaultEventSearchComponent,
     mapComponent: MapComponent,
 ) {
-    val errorHandler = LocalErrorHandler.current
     val events by component.events.collectAsState()
     val showMapCard by component.showMapCard.collectAsState()
     val selectedEvent by component.selectedEvent.collectAsState()
@@ -82,10 +82,28 @@ fun EventSearchScreen(
     var showSearchOverlay by remember { mutableStateOf(false) }
     var searchBoxPosition by remember { mutableStateOf(Offset.Zero) }
     var searchBoxSize by remember { mutableStateOf(IntSize.Zero) }
+    val isLoadingMore by component.isLoadingMore.collectAsState()
+    val hasMoreEvents by component.hasMoreEvents.collectAsState()
+    val currentFilter by component.filter.collectAsState()
+
+    val loadingHandler = LocalLoadingHandler.current
+    val errorHandler = LocalErrorHandler.current
 
     if (showMapCard) {
         LaunchedEffect(events) {
             mapComponent.setEvents(events)
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        component.setLoadingHandler(loadingHandler)
+    }
+
+    LaunchedEffect(Unit) {
+        component.errorState.collect { error ->
+            if (error != null) {
+                errorHandler.showError(error.message)
+            }
         }
     }
 
@@ -117,7 +135,9 @@ fun EventSearchScreen(
                         onPositionChange = { position, size ->
                             searchBoxPosition = position
                             searchBoxSize = size
-                        }
+                        },
+                        onFilterChange = { update -> component.updateFilter(update) },
+                        currentFilter = currentFilter,
                     )
                 }
             },
@@ -154,16 +174,19 @@ fun EventSearchScreen(
                 Modifier.hazeSource(hazeState).fillMaxSize()
             ) {
                 EventList(
-                    events,
-                    firstElementPadding,
-                    offsetNavPadding,
-                    lazyListState,
-                    { offset, event ->
+                    events = events,
+                    firstElementPadding = firstElementPadding,
+                    lastElementPadding = offsetNavPadding,
+                    lazyListState = lazyListState,
+                    isLoadingMore = isLoadingMore,
+                    hasMoreEvents = hasMoreEvents,
+                    onLoadMore = { component.loadMoreEvents() },
+                    onMapClick = { offset, event ->
                         revealCenter = offset
                         component.onMapClick(event)
                         mapComponent.toggleMap()
                     },
-                    { event ->
+                    onEventClick = { event ->
                         component.viewEvent(event)
                     }
                 )

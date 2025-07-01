@@ -30,43 +30,42 @@
 				<string>appwrite-callback-6656a4d60016b753f942</string>
 			</array>
 		</dict>
-        <dict>
-            <key>CFBundleTypeRole</key>
-            <string>Editor</string>
-            <key>CFBundleURLName</key>
-            <string>com.razumly.mvp.deeplink</string>
-            <key>CFBundleURLSchemes</key>
-            <array>
-                <string>mvp</string>
-            </array>
-        </dict>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.razumly.mvp.deeplink</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>mvp</string>
+			</array>
+		</dict>
 	</array>
-	<key>com.apple.developer.associated-domains</key>
-    <array>
-        <string>applinks:www.razumly.com</string>
-        <string>applinks:razumly.com</string>
-    </array>
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>This app does not access bluetooth, but a third-party library may require this permission for compatibility.</string>
 	<key>NSContactsUsageDescription</key>
-    <string>This app does not access your contacts, but a third-party library may require this permission for compatibility.</string>
-	<key>NSMotionUsageDescription</key>
-    <string>This app does not access motion, but a third-party library may require this permission for compatibility.</string>
-    <key>NSBluetoothAlwaysUsageDescription</key>
-    <string>This app does not access bluetooth, but a third-party library may require this permission for compatibility.</string>
+	<string>This app does not access your contacts, but a third-party library may require this permission for compatibility.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>This app needs access to location when in the background to track your position.</string>
 	<key>NSLocationAlwaysUsageDescription</key>
 	<string>This app needs access to location when in the background for continuous location updates.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>This app needs access to location when open to show your current location on the map.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>This app does not access motion, but a third-party library may require this permission for compatibility.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
 		<false/>
 	</dict>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UIRequiredDeviceCapabilities</key>
@@ -85,6 +84,11 @@
 		<string>UIInterfaceOrientationPortraitUpsideDown</string>
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:www.razumly.com</string>
+		<string>applinks:razumly.com</string>
 	</array>
 </dict>
 </plist>

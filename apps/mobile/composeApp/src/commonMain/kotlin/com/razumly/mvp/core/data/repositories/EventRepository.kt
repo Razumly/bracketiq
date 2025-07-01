@@ -9,6 +9,7 @@ import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResp
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
 import com.razumly.mvp.core.util.DbConstants
 import com.razumly.mvp.core.util.convert
+import io.appwrite.Query
 import io.appwrite.services.Databases
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -21,6 +22,7 @@ import kotlinx.coroutines.launch
 
 interface IEventRepository : IMVPRepository {
     fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>>
+    fun resetCursor()
     suspend fun getEvent(eventId: String): Result<EventWithRelations>
     suspend fun createEvent(newEvent: EventImp): Result<EventImp>
     suspend fun updateEvent(newEvent: EventImp): Result<EventImp>
@@ -35,6 +37,12 @@ class EventRepository(
     private val userRepository: IUserRepository,
 ): IEventRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var lastDocumentId = ""
+
+    override fun resetCursor() {
+        lastDocumentId = ""
+    }
+
     override fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>> {
         val localFlow = databaseService.getEventImpDao.getEventWithRelationsFlow(eventId)
             .map { Result.success(it) }
@@ -91,13 +99,18 @@ class EventRepository(
             event
         })
 
-    override suspend fun getEvents(query: String): Result<List<EventImp>> =
-        multiResponse(
+    override suspend fun getEvents(query: String): Result<List<EventImp>> {
+        val combinedQuery = if (lastDocumentId.isNotEmpty()) {
+            listOf(query, Query.cursorAfter(lastDocumentId))
+        } else {
+            listOf(query)
+        }
+        val response = multiResponse(
             getRemoteData = {
                 database.listDocuments(
                     DbConstants.DATABASE_NAME,
                     DbConstants.EVENT_COLLECTION,
-                    queries = listOf(query),
+                    queries = combinedQuery,
                     EventDTO::class
                 ).documents.map { dtoDoc -> dtoDoc.convert { it.toEvent(dtoDoc.id) }.data }
             },
@@ -105,8 +118,14 @@ class EventRepository(
                 databaseService.getEventImpDao.getAllCachedEvents().first()
             },
             saveData = { databaseService.getEventImpDao.upsertEvents(it) },
-            deleteData = { events -> databaseService.getEventImpDao.deleteEventsById(events) }
+            deleteData = { }
         )
+
+        if (response.isSuccess) {
+            lastDocumentId = response.getOrNull()?.lastOrNull()?.id ?: ""
+        }
+        return response
+    }
 
     override fun getEventsFlow(query: String): Flow<Result<List<EventImp>>> {
         val localFlow = databaseService.getEventImpDao.getAllCachedEvents()

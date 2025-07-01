@@ -8,10 +8,13 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.presentation.composables.PlatformBackButton
+import com.razumly.mvp.core.util.LocalErrorHandler
+import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.eventSearch.EventList
 import com.razumly.mvp.home.LocalNavBarPadding
 
@@ -22,6 +25,23 @@ fun EventManagementScreen(component: EventManagementComponent) {
     val offsetNavPadding =
         PaddingValues(bottom = LocalNavBarPadding.current.calculateBottomPadding().plus(32.dp))
     val lazyListState = rememberLazyListState()
+    val isLoadingMore by component.isLoadingMore.collectAsState()
+    val hasMoreEvents by component.hasMoreEvents.collectAsState()
+
+    val errorHandler = LocalErrorHandler.current
+    val loadingHandler = LocalLoadingHandler.current
+
+    LaunchedEffect(Unit) {
+        component.setLoadingHandler(loadingHandler)
+    }
+
+    LaunchedEffect(Unit) {
+        component.errorState.collect { error ->
+            if (error != null) {
+                errorHandler.showError(error.message)
+            }
+        }
+    }
 
     Scaffold(topBar = {
         CenterAlignedTopAppBar(title = { Text("Event Management") },
@@ -30,11 +50,16 @@ fun EventManagementScreen(component: EventManagementComponent) {
         )
     }) { paddingValues ->
         val firstElementPadding = PaddingValues(top = paddingValues.calculateTopPadding())
-        EventList(events = events,
+        EventList(
+            events = events,
             firstElementPadding = firstElementPadding,
             lastElementPadding = offsetNavPadding,
             lazyListState = lazyListState,
-            onMapClick = { _, _ -> }) { event ->
+            onMapClick = { _, _ -> },
+            isLoadingMore = isLoadingMore,
+            hasMoreEvents = hasMoreEvents,
+            onLoadMore = { component.loadMoreEvents() }
+        ) { event ->
             component.onEventSelected(event)
         }
     }

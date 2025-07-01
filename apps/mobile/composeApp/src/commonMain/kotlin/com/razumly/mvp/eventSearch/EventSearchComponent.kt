@@ -9,8 +9,10 @@ import com.razumly.mvp.core.data.repositories.IEventAbsRepository
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.ITournamentRepository
 import com.razumly.mvp.core.util.ErrorMessage
+import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.util.calcDistance
 import com.razumly.mvp.core.util.getBounds
+import com.razumly.mvp.eventSearch.util.EventFilter
 import dev.icerock.moko.geo.LatLng
 import dev.icerock.moko.geo.LocationTracker
 import io.github.aakira.napier.Napier
@@ -38,15 +40,21 @@ interface EventSearchComponent {
     val isLoading: StateFlow<Boolean>
     val suggestedEvents: StateFlow<List<EventAbs>>
     val currentLocation: StateFlow<LatLng?>
+    val isLoadingMore: StateFlow<Boolean>
+    val hasMoreEvents: StateFlow<Boolean>
+    val filter: StateFlow<EventFilter>
 
     val events: StateFlow<List<EventAbs>>
     val selectedEvent: StateFlow<EventAbs?>
     val showMapCard: StateFlow<Boolean>
+
+    fun setLoadingHandler(handler: LoadingHandler)
+    fun loadMoreEvents()
     fun selectRadius(radius: Double)
     fun onMapClick(event: EventAbs? = null)
     fun viewEvent(event: EventAbs)
     fun suggestEvents(searchQuery: String)
-    fun filterEvents(searchQuery: String)
+    fun updateFilter(update: EventFilter.() -> EventFilter)
 }
 
 class DefaultEventSearchComponent(
@@ -79,18 +87,56 @@ class DefaultEventSearchComponent(
     private val _suggestedEvents = MutableStateFlow<List<EventAbs>>(emptyList())
     override val suggestedEvents: StateFlow<List<EventAbs>> = _suggestedEvents.asStateFlow()
 
-    @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
-    override val events = combine(_currentLocation.filterNotNull(), _currentRadius) { location, radius ->
-        getBounds(radius, location.latitude, location.longitude)
-    }.debounce(200L).flatMapLatest { bounds ->
-            eventAbsRepository.getEventsInBoundsFlow(bounds).map { result ->
-                    result.getOrElse {
-                        _errorState.value = ErrorMessage("Failed to fetch events: ${it.message}")
-                        Napier.e("Failed to fetch events: ${it.message}")
-                        emptyList()
-                    }
+    private val _isLoadingMore = MutableStateFlow(false)
+    override val isLoadingMore: StateFlow<Boolean> = _isLoadingMore.asStateFlow()
+
+    private val _hasMoreEvents = MutableStateFlow(true)
+    override val hasMoreEvents: StateFlow<Boolean> = _hasMoreEvents.asStateFlow()
+
+    private val _filter = MutableStateFlow(EventFilter())
+    override val filter = _filter.asStateFlow()
+
+    private lateinit var loadingHandler: LoadingHandler
+
+    override fun setLoadingHandler(handler: LoadingHandler) {
+        loadingHandler = handler
+    }
+
+    override fun loadMoreEvents() {
+        if (_isLoadingMore.value || !_hasMoreEvents.value || _isLoading.value) return
+
+        scope.launch {
+            _isLoadingMore.value = true
+
+            val radius = _currentRadius.value
+            val currentLocation = _currentLocation.value ?: return@launch
+            val currentBounds = getBounds(radius, currentLocation.latitude, currentLocation.longitude)
+
+            eventAbsRepository.getEventsInBounds(currentBounds)
+                .onSuccess { (_, hasMore) ->
+                    _hasMoreEvents.value = hasMore
                 }
-        }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+                .onFailure { e ->
+                    _errorState.value = ErrorMessage("Failed to load more events: ${e.message}")
+                }
+            _isLoadingMore.value = false
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
+    override val events = combine(_currentLocation.filterNotNull(), _currentRadius, _filter) { location, radius, eventFilter ->
+        getBounds(radius, location.latitude, location.longitude) to eventFilter
+    }.debounce(200L).flatMapLatest { (bounds, eventFilter) ->
+        eventAbsRepository.getEventsInBoundsFlow(bounds).map { result ->
+            result.getOrElse {
+                _errorState.value = ErrorMessage("Failed to fetch events: ${it.message}")
+                Napier.e("Failed to fetch events: ${it.message}")
+                emptyList()
+            }.filter { event ->
+                eventFilter.filter(event)
+            }
+        }
+    }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     private val _selectedEvent = MutableStateFlow<EventAbs?>(null)
     override val selectedEvent: StateFlow<EventAbs?> = _selectedEvent.asStateFlow()
@@ -144,6 +190,7 @@ class DefaultEventSearchComponent(
                     }
                     if (_currentLocation.value == null) {
                         _currentLocation.value = it
+                        eventRepository.resetCursor()
                         getEvents()
                     }
                     if (calcDistance(_currentLocation.value!!, it) > 50) {
@@ -187,7 +234,7 @@ class DefaultEventSearchComponent(
             if (_currentLocation.value == null) return@launch
             eventAbsRepository.searchEvents(searchQuery, _currentLocation.value!!)
                 .onSuccess {
-                    _suggestedEvents.value = it
+                    _suggestedEvents.value = it.first
                     _isLoading.value = false
                 }.onFailure { e ->
                     _errorState.value = ErrorMessage("Failed to fetch events: ${e.message}")
@@ -195,16 +242,8 @@ class DefaultEventSearchComponent(
         }
     }
 
-    override fun filterEvents(searchQuery: String) {
-        scope.launch {
-            eventAbsRepository.searchEvents(searchQuery, _currentLocation.value!!)
-                .onSuccess {
-                    _suggestedEvents.value = it
-                    _isLoading.value = false
-                }.onFailure { e ->
-                    _errorState.value = ErrorMessage("Failed to fetch events: ${e.message}")
-                }
-        }
+    override fun updateFilter(update: EventFilter.() -> EventFilter) {
+        _filter.value = _filter.value.update()
     }
 
     private suspend fun getEvents() {

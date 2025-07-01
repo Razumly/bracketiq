@@ -271,7 +271,7 @@ fun EventDetails(
                         Modifier.fillMaxWidth().hazeEffect(hazeState) {
                             inputScale = HazeInputScale.Fixed(0.5f)
                             style = HazeStyle(
-                                backgroundColor = Color.White,
+                                backgroundColor = backgroundColor,
                                 tint = null,
                                 blurRadius = 64.dp,
                                 noiseFactor = 0f

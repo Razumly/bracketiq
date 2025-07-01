@@ -84,7 +84,8 @@ fun SearchPlayerDialog(
                         onPositionChange = { position, size ->
                             searchBoxPosition = position
                             searchBoxSize = size
-                        }
+                        },
+                        onFilterChange = { }
                     )
                 }
             }

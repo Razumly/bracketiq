@@ -10,6 +10,7 @@ import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleRes
 import com.razumly.mvp.core.util.DbConstants
 import com.razumly.mvp.core.util.convert
 import com.razumly.mvp.eventDetail.data.IMatchRepository
+import io.appwrite.Query
 import io.appwrite.services.Databases
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -25,8 +26,9 @@ import kotlinx.coroutines.launch
 interface ITournamentRepository : IMVPRepository {
     fun getTournamentWithRelationsFlow(tournamentId: String): Flow<Result<TournamentWithRelations>>
     fun getTournamentFlow(tournamentId: String): Flow<Result<Tournament>>
-    suspend fun getTournamentWithRelations(tournamentId: String): Result<TournamentWithRelations>
     fun getTournamentsFlow(query: String): Flow<Result<List<Tournament>>>
+    fun resetCursor()
+    suspend fun getTournamentWithRelations(tournamentId: String): Result<TournamentWithRelations>
     suspend fun getTournament(tournamentId: String): Result<Tournament>
     suspend fun getTournaments(query: String): Result<List<Tournament>>
     suspend fun createTournament(newTournament: Tournament): Result<Tournament>
@@ -43,6 +45,11 @@ class TournamentRepository(
     private val fieldRepository: IFieldRepository
 ) : ITournamentRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var lastDocumentId = ""
+
+    override fun resetCursor() {
+        lastDocumentId = ""
+    }
 
     override fun getTournamentWithRelationsFlow(tournamentId: String): Flow<Result<TournamentWithRelations>> = callbackFlow {
         // Emit local data
@@ -92,22 +99,29 @@ class TournamentRepository(
         databaseService.getTournamentDao.getTournamentFlowById(tournamentId)
             .map { Result.success(it) }
 
-    override suspend fun getTournaments(query: String): Result<List<Tournament>> =
-        multiResponse(getRemoteData = {
+    override suspend fun getTournaments(query: String): Result<List<Tournament>> {
+        val combinedQuery = if (lastDocumentId.isNotEmpty()) {
+            listOf(query, Query.cursorAfter(lastDocumentId))
+        } else {
+            listOf(query)
+        }
+        val response = multiResponse(
+            getRemoteData = {
             database.listDocuments(
                 DbConstants.DATABASE_NAME,
                 DbConstants.TOURNAMENT_COLLECTION,
-                queries = listOf(query),
+                queries = combinedQuery,
                 TournamentDTO::class
             ).documents.map { dtoDoc -> dtoDoc.convert { it.toTournament(dtoDoc.id) }.data }
         }, getLocalData = {
             databaseService.getTournamentDao.getAllCachedTournamentsFlow().first()
         }, saveData = { databaseService.getTournamentDao.upsertTournaments(it) },
-            deleteData = { tournaments ->
-                databaseService.getTournamentDao.deleteTournamentsById(
-                    tournaments
-                )
-            })
+            deleteData = { }
+        )
+
+        lastDocumentId = response.getOrNull()?.lastOrNull()?.id ?: lastDocumentId
+        return response
+    }
 
     override fun getTournamentsFlow(query: String): Flow<Result<List<Tournament>>> {
         val localFlow =

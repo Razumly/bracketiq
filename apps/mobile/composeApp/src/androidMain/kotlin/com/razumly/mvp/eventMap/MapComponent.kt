@@ -186,9 +186,10 @@ actual class MapComponent(
             currentLocation.longitude
         )
 
-        _events.value = eventAbsRepository.getEventsInBounds(currentBounds).getOrElse {
+        eventAbsRepository.getEventsInBounds(currentBounds).onSuccess {
+            _events.value = it.first
+        }.onFailure {
             _error.value = "Failed to fetch events: ${it.message}"
-            emptyList()
         }
 
         _isLoading.value = false
