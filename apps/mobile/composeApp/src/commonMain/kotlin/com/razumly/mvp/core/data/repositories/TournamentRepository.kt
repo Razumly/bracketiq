@@ -47,6 +47,12 @@ class TournamentRepository(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var lastDocumentId = ""
 
+    init {
+        scope.launch {
+            databaseService.getTournamentDao.deleteAllTournaments()
+        }
+    }
+
     override fun resetCursor() {
         lastDocumentId = ""
     }
@@ -107,18 +113,17 @@ class TournamentRepository(
         }
         val response = multiResponse(
             getRemoteData = {
-            database.listDocuments(
-                DbConstants.DATABASE_NAME,
-                DbConstants.TOURNAMENT_COLLECTION,
-                queries = combinedQuery,
-                TournamentDTO::class
-            ).documents.map { dtoDoc -> dtoDoc.convert { it.toTournament(dtoDoc.id) }.data }
-        }, getLocalData = {
-            databaseService.getTournamentDao.getAllCachedTournamentsFlow().first()
-        }, saveData = { databaseService.getTournamentDao.upsertTournaments(it) },
+                database.listDocuments(
+                    DbConstants.DATABASE_NAME,
+                    DbConstants.TOURNAMENT_COLLECTION,
+                    queries = combinedQuery,
+                    TournamentDTO::class
+                ).documents.map { dtoDoc -> dtoDoc.convert { it.toTournament(dtoDoc.id) }.data }
+            },
+            getLocalData = { emptyList() },
+            saveData = { databaseService.getTournamentDao.upsertTournaments(it) },
             deleteData = { }
         )
-
         lastDocumentId = response.getOrNull()?.lastOrNull()?.id ?: lastDocumentId
         return response
     }
@@ -126,9 +131,6 @@ class TournamentRepository(
     override fun getTournamentsFlow(query: String): Flow<Result<List<Tournament>>> {
         val localFlow =
             databaseService.getTournamentDao.getAllCachedTournamentsFlow().map { Result.success(it) }
-        scope.launch {
-            getTournaments(query)
-        }
         return localFlow
     }
 

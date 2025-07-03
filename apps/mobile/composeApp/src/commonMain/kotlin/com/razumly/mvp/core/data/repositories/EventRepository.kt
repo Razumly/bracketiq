@@ -39,6 +39,12 @@ class EventRepository(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var lastDocumentId = ""
 
+    init {
+        scope.launch {
+            databaseService.getEventImpDao.deleteAllEvents()
+        }
+    }
+
     override fun resetCursor() {
         lastDocumentId = ""
     }
@@ -114,9 +120,7 @@ class EventRepository(
                     EventDTO::class
                 ).documents.map { dtoDoc -> dtoDoc.convert { it.toEvent(dtoDoc.id) }.data }
             },
-            getLocalData = {
-                databaseService.getEventImpDao.getAllCachedEvents().first()
-            },
+            getLocalData = { emptyList() },
             saveData = { databaseService.getEventImpDao.upsertEvents(it) },
             deleteData = { }
         )
@@ -130,10 +134,6 @@ class EventRepository(
     override fun getEventsFlow(query: String): Flow<Result<List<EventImp>>> {
         val localFlow = databaseService.getEventImpDao.getAllCachedEvents()
             .map { Result.success(it) }
-
-        scope.launch {
-            getEvents(query)
-        }
         return localFlow
     }
 }

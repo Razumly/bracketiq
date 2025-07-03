@@ -102,27 +102,6 @@ class DefaultEventSearchComponent(
         loadingHandler = handler
     }
 
-    override fun loadMoreEvents() {
-        if (_isLoadingMore.value || !_hasMoreEvents.value || _isLoading.value) return
-
-        scope.launch {
-            _isLoadingMore.value = true
-
-            val radius = _currentRadius.value
-            val currentLocation = _currentLocation.value ?: return@launch
-            val currentBounds = getBounds(radius, currentLocation.latitude, currentLocation.longitude)
-
-            eventAbsRepository.getEventsInBounds(currentBounds)
-                .onSuccess { (_, hasMore) ->
-                    _hasMoreEvents.value = hasMore
-                }
-                .onFailure { e ->
-                    _errorState.value = ErrorMessage("Failed to load more events: ${e.message}")
-                }
-            _isLoadingMore.value = false
-        }
-    }
-
     @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
     override val events = combine(_currentLocation.filterNotNull(), _currentRadius, _filter) { location, radius, eventFilter ->
         getBounds(radius, location.latitude, location.longitude) to eventFilter
@@ -150,6 +129,7 @@ class DefaultEventSearchComponent(
 
     init {
         backHandler.register(backCallback)
+        eventAbsRepository.resetCursor()
 
         if (eventId != null) {
             scope.launch {
@@ -168,7 +148,6 @@ class DefaultEventSearchComponent(
                 }
             }
         }
-
         scope.launch {
             _showMapCard.collect {
                 backCallback.isEnabled = it
@@ -191,11 +170,11 @@ class DefaultEventSearchComponent(
                     if (_currentLocation.value == null) {
                         _currentLocation.value = it
                         eventRepository.resetCursor()
-                        getEvents()
+                        loadMoreEvents()
                     }
                     if (calcDistance(_currentLocation.value!!, it) > 50) {
                         _currentLocation.value = it
-                        getEvents()
+                        loadMoreEvents()
                     }
                 }
             } catch (e: Exception) {
@@ -207,7 +186,7 @@ class DefaultEventSearchComponent(
             try {
                 currentRadius.collect {
                         if (_locationStateFlow.value != null) {
-                            getEvents()
+                            loadMoreEvents()
                         }
                     }
             } catch (e: Exception) {
@@ -242,28 +221,30 @@ class DefaultEventSearchComponent(
         }
     }
 
+    override fun loadMoreEvents() {
+        if (_isLoadingMore.value || !_hasMoreEvents.value || _isLoading.value) return
+
+        scope.launch {
+            _isLoadingMore.value = true
+
+            val radius = _currentRadius.value
+            val currentLocation = _currentLocation.value ?: return@launch
+            val currentBounds = getBounds(radius, currentLocation.latitude, currentLocation.longitude)
+
+            eventAbsRepository.getEventsInBounds(currentBounds)
+                .onSuccess { (_, hasMore) ->
+                    _hasMoreEvents.value = hasMore
+                }
+                .onFailure { e ->
+                    _errorState.value = ErrorMessage("Failed to load more events: ${e.message}")
+                }
+            _isLoadingMore.value = false
+        }
+    }
+
     override fun updateFilter(update: EventFilter.() -> EventFilter) {
         _filter.value = _filter.value.update()
     }
-
-    private suspend fun getEvents() {
-        _isLoading.value = true
-        _errorState.value = null
-
-        val radius = _currentRadius.value
-        val currentLocation = _currentLocation.value ?: run {
-            _errorState.value = ErrorMessage("Location not available")
-            return
-        }
-        val currentBounds = getBounds(radius, currentLocation.latitude, currentLocation.longitude)
-
-        eventAbsRepository.getEventsInBounds(currentBounds).onSuccess {
-            _isLoading.value = false
-        }.onFailure { e ->
-            _errorState.value = ErrorMessage("Failed to fetch events: ${e.message}")
-        }
-    }
-
 
     private class Cleanup(private val locationTracker: LocationTracker): InstanceKeeper.Instance {
         override fun onDestroy() {

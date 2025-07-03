@@ -20,6 +20,9 @@ interface TournamentDao {
     @Delete
     suspend fun deleteTournament(tournament: Tournament)
 
+    @Query("DELETE FROM Tournament")
+    suspend fun deleteAllTournaments()
+
     @Query("DELETE FROM Tournament WHERE id = :id")
     suspend fun deleteTournamentById(id: String)
 
