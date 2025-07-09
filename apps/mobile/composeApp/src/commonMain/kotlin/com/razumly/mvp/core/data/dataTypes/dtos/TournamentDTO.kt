@@ -38,6 +38,8 @@ data class TournamentDTO(
     val singleDivision: Boolean,
     val freeAgents: List<String>,
     val waitList: List<String>,
+    val playerIds: List<String>,
+    val teamIds: List<String>,
     val cancellationRefundHours: Int,
 )
 
@@ -71,6 +73,8 @@ fun TournamentDTO.toTournament(id: String): Tournament {
         singleDivision = singleDivision,
         waitList = waitList,
         freeAgents = freeAgents,
+        playerIds = playerIds,
+        teamIds = teamIds,
         cancellationRefundHours = cancellationRefundHours
     )
 }

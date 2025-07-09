@@ -16,7 +16,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
@@ -53,9 +52,9 @@ class EventRepository(
         val localFlow = databaseService.getEventImpDao.getEventWithRelationsFlow(eventId)
             .map { Result.success(it) }
         scope.launch{
-            getEvent(eventId)
-            userRepository.getUsersOfEvent(eventId)
-            teamRepository.getTeamsOfEventFlow(eventId)
+            val event = getEvent(eventId)
+            userRepository.getUsers(event.getOrNull()?.event?.playerIds ?: listOf())
+            teamRepository.getTeams(event.getOrNull()?.event?.teamIds ?: listOf())
         }
         return localFlow
     }

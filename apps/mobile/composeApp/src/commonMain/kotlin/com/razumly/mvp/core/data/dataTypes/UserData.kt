@@ -11,8 +11,6 @@ import kotlinx.serialization.Serializable
 data class UserData(
     val firstName: String,
     val lastName: String,
-    val tournamentIds: List<String>,
-    val eventIds: List<String>,
     val teamIds: List<String>,
     val friendIds: List<String>,
     val userName: String,
@@ -28,8 +26,6 @@ data class UserData(
             return UserData(
                 firstName = "",
                 lastName = "",
-                tournamentIds = emptyList(),
-                eventIds = emptyList(),
                 teamIds = emptyList(),
                 friendIds = emptyList(),
                 userName = "",
@@ -50,8 +46,6 @@ data class UserData(
         return UserDataDTO(
             firstName,
             lastName,
-            tournamentIds,
-            eventIds,
             teamIds,
             friendIds,
             userName,

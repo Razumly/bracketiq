@@ -10,8 +10,13 @@ import com.razumly.mvp.core.util.getBounds
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 interface EventManagementComponent {
@@ -35,8 +40,12 @@ class DefaultEventManagementComponent(
 ) : ComponentContext by componentContext, EventManagementComponent {
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
 
-    private val _events = MutableStateFlow<List<EventAbs>>(emptyList())
-    override val events = _events.asStateFlow()
+    override val events: StateFlow<List<EventAbs>> = eventAbsRepository.getUsersEventsFlow().map { result ->
+        result.getOrElse {
+            _errorState.value = ErrorMessage("Failed to load events: ${it.message}")
+            emptyList()
+        }
+    }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     private val _isLoadingMore = MutableStateFlow(false)
     override val isLoadingMore: StateFlow<Boolean> = _isLoadingMore.asStateFlow()
@@ -60,10 +69,9 @@ class DefaultEventManagementComponent(
         scope.launch {
             _isLoadingMore.value = true
             eventAbsRepository.getUsersEvents().onSuccess {
-                _events.value = it.first
                 _hasMoreEvents.value = it.second
             }.onFailure {
-                _events.value = emptyList()
+                _errorState.value = ErrorMessage("Failed to load more events: ${it.message}")
             }
             _isLoadingMore.value = false
         }

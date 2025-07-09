@@ -4,6 +4,7 @@ import com.razumly.mvp.core.data.dataTypes.Bounds
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.EventAbsWithRelations
 import com.razumly.mvp.core.data.dataTypes.EventImp
+import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.UserData
@@ -12,9 +13,14 @@ import com.razumly.mvp.core.util.DbConstants
 import com.razumly.mvp.core.util.calcDistance
 import dev.icerock.moko.geo.LatLng
 import io.appwrite.Query
+import io.appwrite.extensions.toJson
+import io.appwrite.services.Functions
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 interface IEventAbsRepository : IMVPRepository {
     fun getEventWithRelationsFlow(event: EventAbs): Flow<Result<EventAbsWithRelations>>
@@ -30,7 +36,7 @@ interface IEventAbsRepository : IMVPRepository {
     suspend fun getEventsInBounds(bounds: Bounds): Result<Pair<List<EventAbs>, Boolean>>
     suspend fun searchEvents(searchQuery: String, userLocation: LatLng): Result<Pair<List<EventAbs>, Boolean>>
     suspend fun addCurrentUserToEvent(event: EventAbs): Result<Unit>
-    suspend fun addTeamToEvent(event: EventAbs, team: TeamWithPlayers): Result<Unit>
+    suspend fun addTeamToEvent(event: EventAbs, team: Team): Result<Unit>
     suspend fun getUsersEvents(): Result<Pair<List<EventAbs>, Boolean>>
 }
 
@@ -39,6 +45,7 @@ class EventAbsRepository(
     private val tournamentRepository: ITournamentRepository,
     private val userRepository: IUserRepository,
     private val teamRepository: ITeamRepository,
+    private val functions: Functions,
 ): IEventAbsRepository {
     override fun resetCursor() {
         eventRepository.resetCursor()
@@ -166,63 +173,41 @@ class EventAbsRepository(
 
     override suspend fun removeTeamFromEvent(event: EventAbs, teamWithPlayers: TeamWithPlayers): Result<Unit> {
         val team = teamWithPlayers.team
-        return when(event) {
-            is EventImp -> {
-                if (event.waitList.contains(team.id)) {
-                    eventRepository.updateEvent(event.copy(waitList = event.waitList - team.id))
-                } else {
-                    teamRepository.updateTeam(team.copy(eventIds = team.eventIds - event.id))
-                }
-            }
-            is Tournament -> {
-                if (event.waitList.contains(team.id)) {
-                    tournamentRepository.updateTournament(event.copy(waitList = event.waitList - team.id))
-                } else {
-                    teamRepository.updateTeam(team.copy(tournamentIds = team.tournamentIds - event.id))
-                }
-            }
-        }.onSuccess {
-            teamWithPlayers.players.forEach { player ->
-                when (event) {
-                    is EventImp -> {
-                        userRepository.updateUser(player.copy(eventIds = player.eventIds - event.id))
-                    }
-                    is Tournament -> {
-                        userRepository.updateUser(player.copy(tournamentIds = player.tournamentIds - event.id))
-                    }
-                }.onFailure {
-                    Napier.e("Failed to remove player from event: player-${player.id}, ${event.eventType}-${event.id}")
-                    return Result.failure(it)
-                }
-            }
-        }.map {}
+        val response = functions.createExecution(
+            DbConstants.EDIT_EVENT_FUNCTION,
+            Json.encodeToString(EditEventRequest(
+                eventId = event.id,
+                teamId = team.id,
+                isTournament = (event.eventType.name == "TOURNAMENT"),
+                command = "removeParticipant"
+            ))
+        )
+
+        val editEventResponse = Json.decodeFromString<EditEventResponse>(response.responseBody)
+        return if (editEventResponse.error.isNullOrBlank()) {
+            Result.success(Unit)
+        } else {
+            Result.failure(Exception("Failed to add user to event"))
+        }
     }
 
     private suspend fun removePlayerFromEvent(event: EventAbs, player: UserData): Result<Unit> {
-        return when (event) {
-            is EventImp -> {
-                if (event.waitList.contains(player.id)) {
-                    eventRepository.updateEvent(event.copy(waitList = event.waitList - player.id))
-                } else if (event.freeAgents.contains(player.id)) {
-                    eventRepository.updateEvent(event.copy(freeAgents = event.freeAgents - player.id))
-                } else if (player.eventIds.contains(event.id)){
-                    userRepository.updateUser(player.copy(eventIds = player.eventIds - event.id))
-                } else {
-                    Result.failure(Exception("Player not in event"))
-                }
-            }
-            is Tournament -> {
-                if (event.waitList.contains(player.id)) {
-                    tournamentRepository.updateTournament(event.copy(waitList = event.waitList - player.id))
-                } else if (event.freeAgents.contains(player.id)) {
-                    tournamentRepository.updateTournament(event.copy(freeAgents = event.freeAgents - player.id))
-                } else if (player.tournamentIds.contains(event.id)){
-                    userRepository.updateUser(player.copy(tournamentIds = player.tournamentIds - event.id))
-                } else {
-                    Result.failure(Exception("Player not in tournament"))
-                }
-            }
-        }.map {}
+        val response = functions.createExecution(
+            DbConstants.EDIT_EVENT_FUNCTION,
+            Json.encodeToString(EditEventRequest(
+                eventId = event.id,
+                userId = player.id,
+                isTournament = (event.eventType.name == "TOURNAMENT"),
+                command = "removeParticipant"
+            ))
+        )
+
+        val editEventResponse = Json.decodeFromString<EditEventResponse>(response.responseBody)
+        return if (editEventResponse.error.isNullOrBlank()) {
+            Result.success(Unit)
+        } else {
+            Result.failure(Exception("Failed to add user to event"))
+        }
     }
 
     override suspend fun removeCurrentUserFromEvent(event: EventAbs): Result<Unit> {
@@ -233,100 +218,60 @@ class EventAbsRepository(
 
     override suspend fun addCurrentUserToEvent(event: EventAbs): Result<Unit> {
         val currentUser = userRepository.currentUser.value.getOrThrow()
-        when (event) {
-            is EventImp -> {
-                eventRepository.getEvent(event.id).onSuccess { eventWithRelations ->
-                    val participants = if (event.teamSignup) eventWithRelations.teams.size else eventWithRelations.players.size
-                    if (participants >= eventWithRelations.event.maxParticipants) {
-                        eventRepository.updateEvent(event.copy(waitList = event.waitList + currentUser.id))
-                    }
-                    if (event.teamSignup) {
-                        eventRepository.updateEvent(event.copy(freeAgents = event.freeAgents + currentUser.id))
-                    }
-                }
-            }
+        val response = functions.createExecution(
+            DbConstants.EDIT_EVENT_FUNCTION,
+            Json.encodeToString(EditEventRequest(
+                eventId = event.id,
+                userId = currentUser.id,
+                isTournament = (event.eventType.name == "TOURNAMENT"),
+                command = "addParticipant"
+            ))
+        )
 
-            is Tournament -> {
-                tournamentRepository.getTournamentWithRelations(event.id).onSuccess { tournamentWithPlayers ->
-                    val participants = if (event.teamSignup) tournamentWithPlayers.teams.size else tournamentWithPlayers.players.size
-                    if (participants >= tournamentWithPlayers.event.maxParticipants) {
-                        tournamentRepository.updateTournament(event.copy(waitList = event.waitList + currentUser.id))
-                    }
-                    if (event.teamSignup) {
-                        tournamentRepository.updateTournament(event.copy(freeAgents = event.freeAgents + currentUser.id))
-                    }
-                }
-            }
-        }.onFailure {
-            return Result.failure(it)
+        val editEventResponse = Json.decodeFromString<EditEventResponse>(response.responseBody)
+        return if (editEventResponse.error.isNullOrBlank()) {
+            Result.success(Unit)
+        } else {
+            Result.failure(Exception("Failed to add user to event"))
         }
-
-        val updatedUser = when (event.eventType) {
-            EventType.EVENT -> {
-                currentUser.copy(eventIds = currentUser.eventIds + event.id)
-            }
-
-            EventType.TOURNAMENT -> {
-                currentUser.copy(tournamentIds = currentUser.tournamentIds + event.id)
-            }
-        }
-        return userRepository.updateUser(updatedUser).map {}
     }
 
-    override suspend fun addTeamToEvent(event: EventAbs, team: TeamWithPlayers): Result<Unit> {
-        if (event.waitList.contains(team.team.id)) {
+    override suspend fun addTeamToEvent(event: EventAbs, team: Team): Result<Unit> {
+        if (event.waitList.contains(team.id)) {
             return Result.failure(Exception("Team already in waitlist"))
         }
-        return getEvent(event).onSuccess { eventWithPlayers ->
-            if (eventWithPlayers.players.size >= eventWithPlayers.event.maxParticipants) {
-                val waitlist = event.waitList + team.team.id
-                val result = when (event) {
-                    is EventImp -> {
-                        eventRepository.updateEvent(event.copy(waitList = waitlist))
 
-                    }
-                    is Tournament -> {
-                        tournamentRepository.updateTournament(event.copy(waitList = event.waitList + team.team.id))
-                    }
-                }
-                return result.map {}
-            }
-            team.players.forEach { player ->
-                if (eventWithPlayers.players.contains(player)) {
-                    return Result.failure(Exception("Player already in event: ${player.firstName}, ${player.lastName}"))
-                }
-                val updatedPlayer = when (event) {
-                    is EventImp -> {
-                        if (event.freeAgents.contains(player.id)) {
-                            eventRepository.updateEvent(event.copy(freeAgents = event.freeAgents - player.id))
-                        }
-                        player.copy(eventIds = player.tournamentIds + event.id)
-                    }
+        val response = functions.createExecution(
+            DbConstants.EDIT_EVENT_FUNCTION,
+            Json.encodeToString(EditEventRequest(
+                teamId = team.id,
+                eventId = event.id,
+                isTournament = (event.eventType.name == "TOURNAMENT"),
+                command = "addParticipant"
+            ))
+        )
 
-                    is Tournament -> {
-                        if (event.freeAgents.contains(player.id)) {
-                            tournamentRepository.updateTournament(event.copy(freeAgents = event.freeAgents - player.id))
-                        }
-                        player.copy(tournamentIds = player.tournamentIds + event.id)
-                    }
-                }
-
-                userRepository.updateUser(updatedPlayer).onFailure {
-                    Napier.e("Failed to add player to event: player-${player.id}, ${event.eventType}-${event.id}")
-                }
-            }
-
-            val updatedTeam = when (event) {
-                is EventImp -> {
-                    team.team.copy(eventIds = team.team.eventIds + event.id)
-                }
-
-                is Tournament -> {
-                    team.team.copy(tournamentIds = team.team.tournamentIds + event.id)
-                }
-            }
-
-            teamRepository.updateTeam(updatedTeam)
-        }.map {}
+        val editEventResponse = Json.decodeFromString<EditEventResponse>(response.responseBody)
+        return if (editEventResponse.error.isNullOrBlank()) {
+            Result.success(Unit)
+        } else {
+            Result.failure(Exception("Failed to add team to event"))
+        }
     }
 }
+
+@Serializable
+data class EditEventRequest(
+    val task: String = "editEvent",
+    val eventId: String,
+    val userId: String? = null,
+    val teamId: String? = null,
+    val isTournament: Boolean,
+    val command: String
+)
+
+@Serializable
+data class EditEventResponse(
+    val message: String?,
+    val error: String?
+)

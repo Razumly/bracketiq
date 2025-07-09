@@ -22,38 +22,16 @@ interface TeamDao {
     @Upsert
     suspend fun upsertTeam(team: Team)
 
-    @RewriteQueriesToDropUnusedColumns
-    @Query(
-        """
-    SELECT * FROM Team 
-    INNER JOIN tournament_team_cross_ref 
-    ON Team.id = tournament_team_cross_ref.teamId 
-    WHERE tournament_team_cross_ref.tournamentId = :tournamentId
-"""
-    )
-    suspend fun getTeamsInTournament(tournamentId: String): List<Team>
-
-    @RewriteQueriesToDropUnusedColumns
-    @Query(
-        """
-    SELECT * FROM Team 
-    INNER JOIN event_team_cross_ref 
-    ON Team.id = event_team_cross_ref.teamId 
-    WHERE event_team_cross_ref.eventId = :eventId
-"""
-    )
-    suspend fun getTeamsInEvent(eventId: String): List<Team>
-
     @Query("SELECT * FROM Team WHERE id = :teamId")
     suspend fun getTeam(teamId: String): Team
 
     @Query("SELECT * FROM Team WHERE id in (:teamIds)")
     suspend fun getTeams(teamIds: List<String>): List<Team>
 
-    @Query("SELECT * FROM Team WHERE players LIKE '%' || :userId || '%'")
+    @Query("SELECT * FROM Team WHERE playerIds LIKE '%' || :userId || '%'")
     suspend fun getTeamsForUser(userId: String): List<Team>
 
-    @Query("SELECT * FROM Team WHERE players LIKE '%' || :userId || '%'")
+    @Query("SELECT * FROM Team WHERE playerIds LIKE '%' || :userId || '%'")
     fun getTeamsForUserFlow(userId: String): Flow<List<TeamWithPlayers>>
 
     @Query("SELECT * FROM Team WHERE pending LIKE '%' || :userId || '%'")
@@ -124,62 +102,21 @@ interface TeamDao {
 
     @RewriteQueriesToDropUnusedColumns
     @Transaction
-    @Query(
-        """
-    SELECT * FROM Team 
-    INNER JOIN tournament_team_cross_ref 
-    ON Team.id = tournament_team_cross_ref.teamId 
-    WHERE tournament_team_cross_ref.tournamentId = :tournamentId
-"""
-    )
-    fun getTeamsInTournamentFlow(tournamentId: String): Flow<List<TeamWithPlayers>>
-
-    @RewriteQueriesToDropUnusedColumns
-    @Transaction
-    @Query(
-        """
-    SELECT * FROM Team 
-    INNER JOIN event_team_cross_ref 
-    ON Team.id = event_team_cross_ref.teamId 
-    WHERE event_team_cross_ref.eventId = :eventId
-"""
-    )
-    fun getTeamsInEventFlow(eventId: String): Flow<List<TeamWithPlayers>>
-
-    @RewriteQueriesToDropUnusedColumns
-    @Transaction
     @Query("SELECT * FROM Team WHERE id In (:ids)")
     fun getTeamsWithPlayersFlowByIds(ids: List<String>): Flow<List<TeamWithPlayers>>
 
     @Transaction
     suspend fun upsertTeamWithRelations(team: Team) {
         deleteTeamPlayerCrossRefsByTeamId(team.id)
-        deleteTournamentTeamCrossRefsByTeamId(team.id)
-        deleteEventTeamCrossRefsByTeamId(team.id)
         deleteTeamPendingPlayerCrossRefsByTeamId(team.id)
         upsertTeam(team)
         try {
-            upsertTeamPlayerCrossRefs(team.players.map { playerId ->
+            upsertTeamPlayerCrossRefs(team.playerIds.map { playerId ->
                 TeamPlayerCrossRef(team.id, playerId)
             })
         } catch (e: Exception) {
-            Napier.d("Failed to add user team crossRef for team: ${team.id} players- ${team.players}\n" +
+            Napier.d("Failed to add user team crossRef for team: ${team.id} players- ${team.playerIds}\n" +
                     "${e.message}")
-        }
-        try {
-            upsertEventTeamCrossRefs(team.eventIds.map { eventId ->
-                EventTeamCrossRef(team.id, eventId)
-            })
-        } catch (e: Exception) {
-            Napier.d("Failed to add event team crossRef for team: ${team.id}\n" +
-                    "${e.message}")
-        }
-        try {
-            upsertTournamentTeamCrossRefs(team.tournamentIds.map { tournamentId ->
-                TournamentTeamCrossRef(tournamentId, team.id)
-            })
-        } catch (e: Exception) {
-            Napier.d("Failed to add tournament team crossRef for team: ${team.id}\n${e.message}")
         }
         try {
             upsertTeamPendingPlayerCrossRefs(team.pending.map { playerId ->

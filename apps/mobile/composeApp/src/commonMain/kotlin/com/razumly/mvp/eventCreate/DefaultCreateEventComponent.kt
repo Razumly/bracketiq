@@ -144,19 +144,6 @@ class DefaultCreateEventComponent(
         scope.launch {
             eventRepository.createEvent(newEventState.value).onSuccess {
                 onEventCreated()
-                if (_addUserToEvent.value) {
-                    userRepository.currentUser.value.getOrThrow().let { it1 ->
-                        when (currentEventType.value) {
-                            EventType.TOURNAMENT -> userRepository.updateUser(
-                                it1.copy(tournamentIds = listOf(newEventState.value.id))
-                            )
-
-                            EventType.EVENT -> userRepository.updateUser(
-                                it1.copy(eventIds = listOf(newEventState.value.id))
-                            )
-                        }
-                    }
-                }
                 if (_fieldCount.value > 0) {
                     fieldRepository.createFields(newEventState.value.id, _fieldCount.value)
                 }
@@ -233,6 +220,11 @@ class DefaultCreateEventComponent(
 
     override fun addUserToEvent(add: Boolean) {
         _addUserToEvent.value = add
+        if (add) {
+            updateEventField { copy(playerIds = listOf(currentUser.value?.id!!)) }
+        } else {
+            updateEventField { copy(playerIds = listOf()) }
+        }
     }
 
     override fun validateAndUpdateTeamSize(input: String, onError: (Boolean) -> Unit) {

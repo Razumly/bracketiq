@@ -8,8 +8,6 @@ import kotlinx.serialization.Transient
 data class UserDataDTO(
     val firstName: String,
     val lastName: String,
-    val tournamentIds: List<String>,
-    val eventIds: List<String>,
     val teamIds: List<String>,
     val friendIds: List<String>,
     val userName: String,
@@ -29,8 +27,6 @@ data class UserDataDTO(
                 lastName,
                 listOf(),
                 listOf(),
-                listOf(),
-                listOf(),
                 userName,
                 listOf(),
                 listOf(),
@@ -47,8 +43,6 @@ fun UserDataDTO.toUserData(id: String): UserData {
     return UserData(
         firstName,
         lastName,
-        tournamentIds,
-        eventIds,
         teamIds,
         friendIds,
         userName,

@@ -159,7 +159,7 @@ fun CreateOrEditTeamDialog(
                 if (showEditDetails) {
                     Button(onClick = {
                         onFinish(
-                            team.team.copy(players = playersInTeam.map { it.id },
+                            team.team.copy(playerIds = playersInTeam.map { it.id },
                                 pending = invitedPlayers.map { it.id },
                                 name = teamName,
                                 teamSize = teamSize,
@@ -215,7 +215,7 @@ fun CreateOrEditTeamDialog(
                 Text("Are you sure you want to leave this team?")
                 Button(onClick = {
                     onFinish(
-                        team.team.copy(players = (playersInTeam - currentUser).map { it.id },
+                        team.team.copy(playerIds = (playersInTeam - currentUser).map { it.id },
                             pending = invitedPlayers.map { it.id },
                             name = teamName,
                             teamSize = teamSize

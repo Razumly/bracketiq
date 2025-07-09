@@ -163,7 +163,7 @@ class DefaultMatchContentComponent(
                         _errorState.value = it.message
                         emptyList()
                     }.find { team ->
-                        tournament.value?.id != null && team.team.tournamentIds.contains(tournament.value?.id)
+                        tournament.value?.id != null && tournament.value!!.teamIds.contains(team.team.id)
                     }
                 }.stateIn(scope, SharingStarted.Eagerly, null)
 

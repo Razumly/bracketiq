@@ -35,6 +35,8 @@ data class EventImp(
     override val singleDivision: Boolean,
     override val waitList: List<String>,
     override val freeAgents: List<String>,
+    override val playerIds: List<String>,
+    override val teamIds: List<String>,
     override val cancellationRefundHours: Int,
     @Transient override val eventType: EventType = EventType.EVENT,
     @Transient override val lastUpdated: Instant = Clock.System.now(),
@@ -62,6 +64,8 @@ data class EventImp(
                 teamSignup = false,
                 waitList = listOf(),
                 freeAgents = listOf(),
+                playerIds = listOf(),
+                teamIds = listOf(),
                 cancellationRefundHours = 0
             )
         }
@@ -89,6 +93,8 @@ data class EventImp(
             teamSignup = teamSignup,
             waitList = waitList,
             freeAgents = freeAgents,
+            playerIds = playerIds,
+            teamIds = teamIds,
             cancellationRefundHours = cancellationRefundHours,
         )
     }

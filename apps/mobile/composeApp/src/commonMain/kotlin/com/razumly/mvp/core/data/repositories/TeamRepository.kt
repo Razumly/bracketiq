@@ -26,11 +26,9 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 interface ITeamRepository : IMVPRepository {
-    fun getTeamsOfTournamentFlow(tournamentId: String): Flow<Result<List<TeamWithPlayers>>>
-    suspend fun getTeamsOfEventFlow(eventId: String): Flow<Result<List<TeamWithPlayers>>>
+    fun getTeamsFlow(ids: List<String>): Flow<Result<List<TeamWithPlayers>>>
     suspend fun getTeamWithPlayers(teamId: String): Result<TeamWithPlayers>
-    suspend fun getTeamsOfTournament(tournamentId: String): Result<List<Team>>
-    suspend fun getTeamsOfEvent(eventId: String): Result<List<Team>>
+    suspend fun getTeams(ids: List<String>): Result<List<Team>>
     suspend fun addPlayerToTeam(team: Team, player: UserData): Result<Unit>
     suspend fun removePlayerFromTeam(team: Team, player: UserData): Result<Unit>
     suspend fun createTeam(newTeam: Team): Result<Team>
@@ -48,64 +46,40 @@ class TeamRepository(
     private val pushNotificationRepository: PushNotificationsRepository
 ) : ITeamRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    override fun getTeamsOfTournamentFlow(tournamentId: String): Flow<Result<List<TeamWithPlayers>>> =
+    override fun getTeamsFlow(ids: List<String>): Flow<Result<List<TeamWithPlayers>>> =
         channelFlow {
             val localJob = launch {
-                databaseService.getTeamDao.getTeamsInTournamentFlow(tournamentId).collect { teams ->
+                databaseService.getTeamDao.getTeamsWithPlayersFlowByIds(ids).collect { teams ->
                     send(Result.success(teams))
                 }
             }
 
-            getTeamsOfTournament(tournamentId).onFailure { remoteResult ->
+            getTeams(ids).onFailure { remoteResult ->
                 send(Result.failure(remoteResult))
             }
 
             awaitClose { localJob.cancel() }
         }
 
-    override suspend fun getTeamsOfEventFlow(eventId: String): Flow<Result<List<TeamWithPlayers>>> {
-        val localFlow =
-            databaseService.getTeamDao.getTeamsInEventFlow(eventId).map { Result.success(it) }
-        scope.launch {
-            getTeamsOfEvent(eventId)
-        }
-        return localFlow
-    }
-
-    override suspend fun getTeamsOfTournament(tournamentId: String): Result<List<Team>> =
+    override suspend fun getTeams(ids: List<String>): Result<List<Team>> =
         multiResponse(getRemoteData = {
             database.listDocuments(
                 DbConstants.DATABASE_NAME,
                 DbConstants.VOLLEYBALL_TEAMS_COLLECTION,
                 queries = listOf(
-                    Query.contains(DbConstants.TOURNAMENTS_ATTRIBUTE, tournamentId),
+                    Query.equal("\$id", ids),
                     Query.limit(200)
                 ),
                 TeamDTO::class,
             ).documents.map { dtoDoc -> dtoDoc.convert { it.toTeam(dtoDoc.id) }.data }
         },
-            getLocalData = { databaseService.getTeamDao.getTeamsInTournament(tournamentId) },
+            getLocalData = { databaseService.getTeamDao.getTeams(ids) },
             saveData = { teams ->
                 databaseService.getTeamDao.upsertTeamsWithRelations(teams)
             },
             deleteData = { teamIds ->
                 databaseService.getTeamDao.deleteTeamsByIds(teamIds)
             })
-
-    override suspend fun getTeamsOfEvent(eventId: String): Result<List<Team>> = multiResponse(
-        getRemoteData = {
-            database.listDocuments(
-                DbConstants.DATABASE_NAME,
-                DbConstants.VOLLEYBALL_TEAMS_COLLECTION,
-                queries = listOf(
-                    Query.contains(DbConstants.EVENTS_ATTRIBUTE, eventId), Query.limit(200)
-                ),
-                TeamDTO::class,
-            ).documents.map { dtoDoc -> dtoDoc.convert { it.toTeam(dtoDoc.id) }.data }
-        },
-        getLocalData = { databaseService.getTeamDao.getTeamsInEvent(eventId) },
-        saveData = { teams -> databaseService.getTeamDao.upsertTeamsWithRelations(teams) },
-        deleteData = { teamIds -> databaseService.getTeamDao.deleteTeamsByIds(teamIds) })
 
     override suspend fun addPlayerToTeam(team: Team, player: UserData): Result<Unit> {
         val addResult = runCatching {
@@ -116,9 +90,9 @@ class TeamRepository(
             )
         }
 
-        if (!team.players.contains(player.id) || team.pending.contains(player.id)) {
+        if (!team.playerIds.contains(player.id) || team.pending.contains(player.id)) {
             val updatedTeam =
-                team.copy(players = team.players + player.id, pending = team.pending - player.id)
+                team.copy(playerIds = team.playerIds + player.id, pending = team.pending - player.id)
             updateTeam(updatedTeam).onFailure {
                 databaseService.getTeamDao.deleteTeamPlayerCrossRef(
                     TeamPlayerCrossRef(
@@ -151,8 +125,8 @@ class TeamRepository(
         val deleteResult = runCatching {
             databaseService.getTeamDao.deleteTeamPlayerCrossRef(TeamPlayerCrossRef(team.id, player.id))
         }
-        if (team.players.contains(player.id)) {
-            val updatedTeam = team.copy(players = team.players - player.id)
+        if (team.playerIds.contains(player.id)) {
+            val updatedTeam = team.copy(playerIds = team.playerIds - player.id)
             updateTeam(updatedTeam).onFailure {
                 databaseService.getTeamDao.upsertTeamPlayerCrossRef(
                     TeamPlayerCrossRef(
@@ -228,8 +202,8 @@ class TeamRepository(
     }, saveCall = { newData ->
         val oldTeam = databaseService.getTeamDao.getTeam(newData.id)
         databaseService.getTeamDao.upsertTeamWithRelations(newData)
-        userRepository.getUsers(oldTeam.players.filterNot {
-            newTeam.players.contains(it)
+        userRepository.getUsers(oldTeam.playerIds.filterNot {
+            newTeam.playerIds.contains(it)
         }).onSuccess { removedPlayers ->
             removedPlayers.forEach { player ->
                 removePlayerFromTeam(newData, player)
@@ -261,8 +235,6 @@ class TeamRepository(
             userRepository.updateUser(
                 player.copy(
                     teamIds = player.teamIds - team.team.id,
-                    eventIds = player.eventIds - team.team.eventIds.toSet(),
-                    tournamentIds = player.tournamentIds - team.team.tournamentIds.toSet()
                 )
             )
         }
@@ -319,7 +291,7 @@ class TeamRepository(
                 dtoDoc.convert { it.toTeam(dtoDoc.id) }.data
             }
             teams.forEach { team ->
-                userRepository.getUsers(team.players)
+                userRepository.getUsers(team.playerIds)
             }
             teams
         }, getLocalData = {

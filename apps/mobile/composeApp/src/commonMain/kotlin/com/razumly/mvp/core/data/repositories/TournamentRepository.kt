@@ -19,7 +19,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
@@ -74,7 +73,7 @@ class TournamentRepository(
                     .onFailure { error ->
                         trySend(Result.failure(error))
                     }
-                userRepository.getUsersOfTournament(tournamentId)
+                userRepository.getUsers(result.getOrNull()?.playerIds ?: listOf())
                     .onFailure { error ->
                         trySend(Result.failure(error))
                     }
@@ -82,7 +81,7 @@ class TournamentRepository(
                     .onFailure { error ->
                         trySend(Result.failure(error))
                     }
-                teamRepository.getTeamsOfTournament(tournamentId)
+                teamRepository.getTeams(result.getOrNull()?.teamIds ?: listOf())
                     .onFailure { error ->
                         trySend(Result.failure(error))
                     }

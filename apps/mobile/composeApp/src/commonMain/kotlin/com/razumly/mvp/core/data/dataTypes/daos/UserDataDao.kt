@@ -21,18 +21,6 @@ interface UserDataDao {
     @Upsert
     suspend fun upsertUsersData(usersData: List<UserData>)
 
-    @Query("SELECT * FROM UserData WHERE eventIds LIKE '%' || :eventId || '%'")
-    suspend fun getUsersInEvent(eventId: String): List<UserData>
-
-    @Query("SELECT * FROM UserData WHERE eventIds LIKE '%' || :eventId || '%'")
-    fun getUsersInEventFlow(eventId: String): Flow<List<UserData>>
-
-    @Query("SELECT * FROM UserData WHERE tournamentIds LIKE '%' || :tournamentId || '%'")
-    suspend fun getUsersInTournament(tournamentId: String): List<UserData>
-
-    @Query("SELECT * FROM UserData WHERE tournamentIds LIKE '%' || :tournamentId || '%'")
-    fun getUsersInTournamentFlow(tournamentId: String): Flow<List<UserData>>
-
     @Query("DELETE FROM UserData WHERE id IN (:ids)")
     suspend fun deleteUsersById(ids: List<String>)
 
@@ -69,27 +57,13 @@ interface UserDataDao {
     @Query("SELECT * FROM UserData WHERE id in (:ids)")
     suspend fun getUserDatasById(ids: List<String>): List<UserData>
 
+    @Query("SELECT * FROM UserData WHERE id in (:ids)")
+    fun getUserDatasByIdFlow(ids: List<String>): Flow<List<UserData>>
+
     @Transaction
     suspend fun upsertUserWithRelations(userData: UserData) {
-        deleteTournamentCrossRefById(listOf(userData.id))
-        deleteEventCrossRefById(listOf(userData.id))
         deleteTeamCrossRefById(listOf(userData.id))
         upsertUserData(userData)
-        try {
-            upsertUserTournamentCrossRefs(userData.tournamentIds.map {
-                TournamentUserCrossRef(
-                    userData.id,
-                    it
-                )
-            })
-        } catch(e: Exception) {
-            Napier.d("Failed to add user tournament crossRef for user: ${userData.id}")
-        }
-        try {
-            upsertUserEventCrossRefs(userData.eventIds.map { EventUserCrossRef(userData.id, it) })
-        } catch(e: Exception) {
-            Napier.d("Failed to add user event crossRef for user: ${userData.id}")
-        }
         try {
             upsertUserTeamCrossRefs(userData.teamIds.map { TeamPlayerCrossRef(it, userData.id) })
         } catch(e: Exception) {

@@ -5,6 +5,7 @@ import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.repositories.IEventAbsRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import kotlinx.coroutines.CoroutineScope
@@ -15,6 +16,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
@@ -47,6 +49,7 @@ class DefaultTeamManagementComponent(
     componentContext: ComponentContext,
     private val teamRepository: ITeamRepository,
     private val userRepository: IUserRepository,
+    private val eventAbsRepository: IEventAbsRepository,
     private val freeAgents: List<String>,
     override val selectedEvent: EventAbs?,
     override val onBack: () -> Unit
@@ -99,8 +102,11 @@ class DefaultTeamManagementComponent(
         }
         .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
-    override val enableDeleteTeam = selectedTeam.map { team ->
-        team?.team?.eventIds?.isEmpty() == true && team.team.tournamentIds.isEmpty()
+    override val enableDeleteTeam = combine(selectedTeam, eventAbsRepository.getUsersEventsFlow()) { team, events ->
+        if (events.getOrNull()?.any { it.teamIds.contains(team?.team?.id)} == true)
+            false
+        else
+            team != null
     }.stateIn(scope, SharingStarted.Eagerly, false)
 
     init {

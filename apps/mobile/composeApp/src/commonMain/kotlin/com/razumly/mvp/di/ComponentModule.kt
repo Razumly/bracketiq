@@ -143,7 +143,8 @@ val componentModule = module {
             userRepository = get(),
             freeAgents = freeAgents,
             selectedEvent = selectedEvent,
-            onBack = onBack
+            onBack = onBack,
+            eventAbsRepository = get()
         )
     }
 

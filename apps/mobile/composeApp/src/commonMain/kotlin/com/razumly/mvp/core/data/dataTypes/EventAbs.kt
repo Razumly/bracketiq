@@ -29,6 +29,8 @@ sealed interface EventAbs : MVPDocument {
     val singleDivision: Boolean
     val waitList: List<String>
     val freeAgents: List<String>
+    val playerIds: List<String>
+    val teamIds: List<String>
     val cancellationRefundHours: Int
     override val id: String
 }

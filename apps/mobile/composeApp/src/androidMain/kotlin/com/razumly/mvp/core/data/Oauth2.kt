@@ -34,8 +34,6 @@ suspend fun UserRepository.oauth2Login(activity: ComponentActivity): Result<Unit
                 lastName = userInfo.familyName,
                 userName = "${userInfo.givenName}${ID.unique()}",
                 id = id,
-                tournamentIds = listOf(),
-                eventIds = listOf(),
                 teamIds = listOf(),
                 friendIds = listOf(),
                 teamInvites = listOf(),

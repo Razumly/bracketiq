@@ -1,6 +1,7 @@
 package com.razumly.mvp.core.data.repositories
 
 import com.razumly.mvp.core.data.dataTypes.EventAbs
+import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.util.DbConstants
 import io.appwrite.services.Functions
@@ -19,6 +20,7 @@ interface IBillingRepository : IMVPRepository {
     suspend fun createAccount(): Result<String>
     suspend fun createCustomer(): Result<Unit>
     suspend fun getOnboardingLink(): Result<String>
+    suspend fun leaveAndRefundEvent(event: EventAbs): Result<Unit>
 }
 
 class BillingRepository(
@@ -47,6 +49,8 @@ class BillingRepository(
             )
         }
     }
+
+
 
     override suspend fun createAccount(): Result<String> = runCatching {
         val user = userRepository.currentUser.value.getOrThrow()
@@ -93,6 +97,22 @@ class BillingRepository(
         userRepository.updateUser(user.copy(stripeAccountId = response.accountId))
         response.onboardingUrl
         }
+
+    override suspend fun leaveAndRefundEvent(event: EventAbs): Result<Unit> =
+    runCatching {
+        val response = functions.createExecution(
+            "eventManager",
+            Json.encodeToString(RefundRequest(
+                eventId = event.id,
+                userId = userRepository.currentUser.value.getOrThrow().id,
+            ))
+        )
+
+        val editEventResponse = Json.decodeFromString<EditEventResponse>(response.responseBody)
+        if (!editEventResponse.error.isNullOrBlank()) {
+            throw Exception("Failed to add user to event")
+        }
+    }
 }
 
 @OptIn(ExperimentalSerializationApi::class)
@@ -143,4 +163,11 @@ data class PurchaseIntent(
     val ephemeralKey: String,
     val customer: String,
     val publishableKey: String,
+)
+
+@Serializable
+data class RefundRequest(
+    val command: String = "refund_payment",
+    val userId: String,
+    val eventId: String,
 )

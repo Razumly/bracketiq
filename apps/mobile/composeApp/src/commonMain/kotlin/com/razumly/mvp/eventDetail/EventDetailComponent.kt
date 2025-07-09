@@ -6,13 +6,11 @@ import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.EventAbsWithRelations
 import com.razumly.mvp.core.data.dataTypes.EventImp
-import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.Tournament
-import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.Division
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
@@ -168,18 +166,16 @@ class DefaultEventDetailComponent(
                             _errorState.value =
                                 ErrorMessage("Error loading matches: ${it.message}"); emptyList()
                         }
-                    }, when (eventWithPlayers) {
-                    is TournamentWithRelations -> teamRepository.getTeamsOfTournamentFlow(
-                        eventWithPlayers.event.id
-                    )
-
-                    is EventWithRelations -> teamRepository.getTeamsOfEventFlow(eventWithPlayers.event.id)
-                }.map { result ->
+                    },
+                teamRepository.getTeamsFlow(
+                    eventWithPlayers.event.teamIds
+                ).map { result ->
                     result.getOrElse {
                         _errorState.value =
-                            ErrorMessage("Failed to load teams: ${it.message}"); emptyList()
+                        ErrorMessage("Failed to load teams: ${it.message}"); emptyList()
                     }
-                }) { matches, teams ->
+                }
+            ) { matches, teams ->
                 eventWithPlayers.toEventWithFullRelations(matches, teams)
             }
         }
@@ -248,7 +244,7 @@ class DefaultEventDetailComponent(
                     _isUserInEvent.value = checkIsUserInEvent()
                     if (_isUserInEvent.value) {
                         _usersTeam.value =
-                            event.teams.find { it.team.players.contains(currentUser.value.id) }
+                            event.teams.find { it.team.playerIds.contains(currentUser.value.id) }
                                 ?.let {
                                     teamRepository.getTeamWithPlayers(it.team.id).getOrNull()
                                 } ?: event.event.waitList.find { waitlisted ->
@@ -343,7 +339,7 @@ class DefaultEventDetailComponent(
             if (selectedEvent.value == null) return@launch
             if (event.price == 0.0) {
                 loadingHandler.showLoading("Joining Event ...")
-                eventAbsRepository.addTeamToEvent(selectedEvent.value!!.event, team).onSuccess {
+                eventAbsRepository.addTeamToEvent(selectedEvent.value!!.event, team.team).onSuccess {
                     _isUserInEvent.value = true
                 }.onFailure {
                     _errorState.value = ErrorMessage(it.message ?: "")
@@ -367,13 +363,22 @@ class DefaultEventDetailComponent(
             if (!_isUserInEvent.value || selectedEvent.value == null) {
                 return@launch
             }
-            if (!selectedEvent.value!!.event.teamSignup || checkIsUserFreeAgent()) {
+            if (selectedEvent.value!!.event.price > 0) {
+                loadingHandler.showLoading("Requesting Refund ...")
+                billingRepository.leaveAndRefundEvent(selectedEvent.value!!.event).onFailure {
+                    _errorState.value = ErrorMessage(it.message ?: "")
+                }
+            } else if (!selectedEvent.value!!.event.teamSignup || checkIsUserFreeAgent()) {
+                loadingHandler.showLoading("Leaving Event ...")
                 eventAbsRepository.removeCurrentUserFromEvent(selectedEvent.value!!.event)
+                    .onFailure { _errorState.value = ErrorMessage(it.message ?: "") }
             } else {
+                loadingHandler.showLoading("Team Leaving Event ...")
                 eventAbsRepository.removeTeamFromEvent(
                     selectedEvent.value!!.event, _usersTeam.value!!
-                )
+                ).onFailure { _errorState.value = ErrorMessage(it.message ?: "") }
             }
+            loadingHandler.hideLoading()
         }
     }
 
@@ -523,7 +528,7 @@ class DefaultEventDetailComponent(
     }
 
     private fun checkIsUserParticipant(): Boolean {
-        return (currentUser.value.eventIds + currentUser.value.tournamentIds).contains(event.id)
+        return event.playerIds.contains(currentUser.value.id)
     }
 
     private fun checkIsUserInEvent(): Boolean {

@@ -27,7 +27,7 @@ import org.koin.dsl.module
 
 val MVPRepositoryModule = module {
     single {
-        EventAbsRepository(get(), get(), get(), get())
+        EventAbsRepository(get(), get(), get(), get(), get())
     } bind IEventAbsRepository::class
     single {
         EventRepository(get(), get(), get(), get())

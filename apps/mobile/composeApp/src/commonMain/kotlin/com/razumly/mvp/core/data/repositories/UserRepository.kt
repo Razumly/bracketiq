@@ -36,11 +36,8 @@ interface IUserRepository : IMVPRepository {
     val currentUser: StateFlow<Result<UserData>>
     suspend fun login(email: String, password: String): Result<UserData>
     suspend fun logout(): Result<Unit>
-    suspend fun getUsersOfTournament(tournamentId: String): Result<List<UserData>>
-    suspend fun getUsersOfEvent(eventId: String): Result<List<UserData>>
     suspend fun getUsers(userIds: List<String>): Result<List<UserData>>
-    fun getUsersOfEventFlow(eventId: String): Flow<Result<List<UserData>>>
-    fun getUsersOfTournamentFlow(tournamentId: String): Flow<Result<List<UserData>>>
+    fun getUsersFlow(userIds: List<String>): Flow<Result<List<UserData>>>
     suspend fun searchPlayers(search: String): Result<List<UserData>>
     suspend fun createNewUser(
         email: String, password: String, firstName: String, lastName: String, userName: String
@@ -163,27 +160,6 @@ class UserRepository(
         }
     }
 
-    override suspend fun getUsersOfTournament(tournamentId: String): Result<List<UserData>> {
-        val query = Query.contains(DbConstants.TOURNAMENTS_ATTRIBUTE, tournamentId)
-        return getPlayers(query,
-            getLocalData = { databaseService.getUserDataDao.getUsersInTournament(tournamentId) }).onSuccess { remoteData ->
-                databaseService.getUserDataDao.upsertUserTournamentCrossRefs(remoteData.map {
-                    TournamentUserCrossRef(it.id, tournamentId)
-                })
-            }
-    }
-
-    override suspend fun getUsersOfEvent(eventId: String): Result<List<UserData>> {
-        val query = Query.contains(DbConstants.EVENTS_ATTRIBUTE, eventId)
-        return getPlayers(
-            query,
-            getLocalData = { databaseService.getUserDataDao.getUsersInEvent(eventId) }).onSuccess { remoteData ->
-                databaseService.getUserDataDao.upsertUserEventCrossRefs(remoteData.map {
-                    EventUserCrossRef(it.id, eventId)
-                })
-            }
-    }
-
     override suspend fun getUsers(userIds: List<String>): Result<List<UserData>> {
         val query = Query.equal("\$id", userIds)
         return getPlayers(
@@ -191,12 +167,12 @@ class UserRepository(
             getLocalData = { databaseService.getUserDataDao.getUserDatasById(userIds) })
     }
 
-    override fun getUsersOfTournamentFlow(tournamentId: String): Flow<Result<List<UserData>>> {
-        val localUsersFlow = databaseService.getUserDataDao.getUsersInTournamentFlow(tournamentId)
+    override fun getUsersFlow(userIds: List<String>): Flow<Result<List<UserData>>> {
+        val localUsersFlow = databaseService.getUserDataDao.getUserDatasByIdFlow(userIds)
             .map { Result.success(it) }
 
         scope.launch {
-            getUsersOfTournament(tournamentId)
+            getUsers(userIds)
         }
 
         return localUsersFlow
@@ -229,18 +205,6 @@ class UserRepository(
         )
         return getPlayers(query, getLocalData = { emptyList() })
     }
-
-    override fun getUsersOfEventFlow(eventId: String): Flow<Result<List<UserData>>> {
-        val localUsersFlow =
-            databaseService.getUserDataDao.getUsersInEventFlow(eventId).map { Result.success(it) }
-
-        scope.launch {
-            getUsersOfTournament(eventId)
-        }
-
-        return localUsersFlow
-    }
-
 
     override suspend fun createNewUser(
         email: String, password: String, firstName: String, lastName: String, userName: String
