@@ -103,7 +103,7 @@ data class Tournament(
             teamSizeLimit = event.teamSizeLimit,
             hostId = event.hostId,
             singleDivision = event.singleDivision,
-            teamSignup = event.teamSignup,
+            teamSignup = true,
             waitList = event.waitList,
             freeAgents = event.freeAgents,
             playerIds = event.playerIds,

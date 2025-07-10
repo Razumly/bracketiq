@@ -63,10 +63,36 @@ fun HomeScreen(component: HomeComponent) {
     val loadingHandler = remember { LoadingHandlerImpl() }
     val loadingState by loadingHandler.loadingState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+    val coroutineScope = rememberCoroutineScope()
+
+    LaunchedEffect(errorHandler) {
+        errorHandler.errorState.collect { error ->
+            error?.let { errorMessage ->
+                Napier.e(tag = "ErrorHandler") { "Showing error: ${errorMessage.message}" }
+
+                coroutineScope.launch {
+                    try {
+                        val result = snackbarHostState.showSnackbar(
+                            message = errorMessage.message,
+                            actionLabel = errorMessage.actionLabel,
+                            duration = errorMessage.duration
+                        )
+
+                        if (result == SnackbarResult.ActionPerformed) {
+                            errorMessage.action?.invoke()
+                        }
+                    } catch (e: Exception) {
+                        Napier.e(tag = "ErrorHandler") { "Failed to show error: ${e.message}" }
+                    } finally {
+                        errorHandler.clearError()
+                    }
+                }
+            }
+        }
+    }
 
     CompositionLocalProvider(
-        LocalErrorHandler provides errorHandler,
-        LocalLoadingHandler provides loadingHandler
+        LocalErrorHandler provides errorHandler, LocalLoadingHandler provides loadingHandler
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             MVPBottomNavBar(
@@ -76,14 +102,12 @@ fun HomeScreen(component: HomeComponent) {
                     component.onTabSelected(it)
                 },
             ) { paddingValues ->
-                Scaffold(
-                    snackbarHost = {
-                        SnackbarHost(
-                            hostState = snackbarHostState,
-                            modifier = Modifier.padding(paddingValues)
-                        )
-                    }
-                ) { innerPadding ->
+                Scaffold(snackbarHost = {
+                    SnackbarHost(
+                        hostState = snackbarHostState,
+                        modifier = Modifier.padding(paddingValues)
+                    )
+                }) { innerPadding ->
                     HomeContent(paddingValues, component)
                 }
             }
@@ -103,8 +127,7 @@ fun HomeScreen(component: HomeComponent) {
 @OptIn(ExperimentalDecomposeApi::class)
 @Composable
 private fun HomeContent(
-    paddingValues: PaddingValues,
-    component: HomeComponent
+    paddingValues: PaddingValues, component: HomeComponent
 ) {
     val childStack by component.childStack.subscribeAsState()
     Napier.d(tag = "HomeScreen") { "Current tab: ${childStack.active.configuration}" }
@@ -120,8 +143,7 @@ private fun HomeContent(
                     is HomeComponent.Child.Search -> {
                         Napier.d(tag = "Navigation") { "Navigating to Search Screen" }
                         EventSearchScreen(
-                            instance.component,
-                            instance.mapComponent
+                            instance.component, instance.mapComponent
                         )
                     }
 
@@ -172,13 +194,10 @@ private fun HomeContent(
 
 @Composable
 fun LoadingOverlay(
-    message: String,
-    progress: Float? = null,
-    modifier: Modifier = Modifier
+    message: String, progress: Float? = null, modifier: Modifier = Modifier
 ) {
     Box(
-        modifier = modifier
-            .background(Color.Black.copy(alpha = 0.6f))
+        modifier = modifier.background(Color.Black.copy(alpha = 0.6f))
             .clickable(enabled = false) { }, // Prevent interaction
         contentAlignment = Alignment.Center
     ) {

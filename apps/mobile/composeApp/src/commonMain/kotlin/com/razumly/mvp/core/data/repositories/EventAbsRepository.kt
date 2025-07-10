@@ -13,9 +13,7 @@ import com.razumly.mvp.core.util.DbConstants
 import com.razumly.mvp.core.util.calcDistance
 import dev.icerock.moko.geo.LatLng
 import io.appwrite.Query
-import io.appwrite.extensions.toJson
 import io.appwrite.services.Functions
-import io.github.aakira.napier.Napier
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.serialization.Serializable
@@ -216,7 +214,7 @@ class EventAbsRepository(
         return removePlayerFromEvent(event, currentUser)
     }
 
-    override suspend fun addCurrentUserToEvent(event: EventAbs): Result<Unit> {
+    override suspend fun addCurrentUserToEvent(event: EventAbs): Result<Unit> = runCatching {
         val currentUser = userRepository.currentUser.value.getOrThrow()
         val response = functions.createExecution(
             DbConstants.EDIT_EVENT_FUNCTION,
@@ -236,9 +234,9 @@ class EventAbsRepository(
         }
     }
 
-    override suspend fun addTeamToEvent(event: EventAbs, team: Team): Result<Unit> {
+    override suspend fun addTeamToEvent(event: EventAbs, team: Team): Result<Unit> = runCatching {
         if (event.waitList.contains(team.id)) {
-            return Result.failure(Exception("Team already in waitlist"))
+            throw Exception("Team already in waitlist")
         }
 
         val response = functions.createExecution(
@@ -252,10 +250,10 @@ class EventAbsRepository(
         )
 
         val editEventResponse = Json.decodeFromString<EditEventResponse>(response.responseBody)
-        return if (editEventResponse.error.isNullOrBlank()) {
-            Result.success(Unit)
+        if (editEventResponse.error.isNullOrBlank()) {
+            return@runCatching
         } else {
-            Result.failure(Exception("Failed to add team to event"))
+           throw Exception("Failed to add team to event")
         }
     }
 }
@@ -272,6 +270,6 @@ data class EditEventRequest(
 
 @Serializable
 data class EditEventResponse(
-    val message: String?,
-    val error: String?
+    val message: String? = "",
+    val error: String? = ""
 )

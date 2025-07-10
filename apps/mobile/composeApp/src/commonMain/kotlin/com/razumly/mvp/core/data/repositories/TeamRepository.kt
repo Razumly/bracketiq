@@ -19,9 +19,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
@@ -47,19 +45,8 @@ class TeamRepository(
 ) : ITeamRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     override fun getTeamsFlow(ids: List<String>): Flow<Result<List<TeamWithPlayers>>> =
-        channelFlow {
-            val localJob = launch {
-                databaseService.getTeamDao.getTeamsWithPlayersFlowByIds(ids).collect { teams ->
-                    send(Result.success(teams))
-                }
-            }
-
-            getTeams(ids).onFailure { remoteResult ->
-                send(Result.failure(remoteResult))
-            }
-
-            awaitClose { localJob.cancel() }
-        }
+        databaseService.getTeamDao.getTeamsWithPlayersFlowByIds(ids)
+            .map { teams -> Result.success(teams) }
 
     override suspend fun getTeams(ids: List<String>): Result<List<Team>> =
         multiResponse(getRemoteData = {
@@ -67,19 +54,15 @@ class TeamRepository(
                 DbConstants.DATABASE_NAME,
                 DbConstants.VOLLEYBALL_TEAMS_COLLECTION,
                 queries = listOf(
-                    Query.equal("\$id", ids),
-                    Query.limit(200)
+                    Query.equal("\$id", ids), Query.limit(200)
                 ),
                 TeamDTO::class,
             ).documents.map { dtoDoc -> dtoDoc.convert { it.toTeam(dtoDoc.id) }.data }
-        },
-            getLocalData = { databaseService.getTeamDao.getTeams(ids) },
-            saveData = { teams ->
-                databaseService.getTeamDao.upsertTeamsWithRelations(teams)
-            },
-            deleteData = { teamIds ->
-                databaseService.getTeamDao.deleteTeamsByIds(teamIds)
-            })
+        }, getLocalData = { databaseService.getTeamDao.getTeams(ids) }, saveData = { teams ->
+            databaseService.getTeamDao.upsertTeams(teams)
+        }, deleteData = { teamIds ->
+            databaseService.getTeamDao.deleteTeamsByIds(teamIds)
+        })
 
     override suspend fun addPlayerToTeam(team: Team, player: UserData): Result<Unit> {
         val addResult = runCatching {
@@ -91,8 +74,9 @@ class TeamRepository(
         }
 
         if (!team.playerIds.contains(player.id) || team.pending.contains(player.id)) {
-            val updatedTeam =
-                team.copy(playerIds = team.playerIds + player.id, pending = team.pending - player.id)
+            val updatedTeam = team.copy(
+                playerIds = team.playerIds + player.id, pending = team.pending - player.id
+            )
             updateTeam(updatedTeam).onFailure {
                 databaseService.getTeamDao.deleteTeamPlayerCrossRef(
                     TeamPlayerCrossRef(
@@ -104,8 +88,7 @@ class TeamRepository(
         }
         if (!player.teamIds.contains(team.id) || player.teamInvites.contains(team.id)) {
             val updatedUserData = player.copy(
-                teamIds = player.teamIds + team.id,
-                teamInvites = player.teamInvites - team.id
+                teamIds = player.teamIds + team.id, teamInvites = player.teamInvites - team.id
             )
             userRepository.updateUser(updatedUserData).onFailure {
                 databaseService.getTeamDao.deleteTeamPlayerCrossRef(
@@ -123,7 +106,11 @@ class TeamRepository(
 
     override suspend fun removePlayerFromTeam(team: Team, player: UserData): Result<Unit> {
         val deleteResult = runCatching {
-            databaseService.getTeamDao.deleteTeamPlayerCrossRef(TeamPlayerCrossRef(team.id, player.id))
+            databaseService.getTeamDao.deleteTeamPlayerCrossRef(
+                TeamPlayerCrossRef(
+                    team.id, player.id
+                )
+            )
         }
         if (team.playerIds.contains(player.id)) {
             val updatedTeam = team.copy(playerIds = team.playerIds - player.id)
@@ -151,9 +138,7 @@ class TeamRepository(
         pushNotificationRepository.unsubscribeUserFromTeamNotifications(player.id, team.id)
         if (player.id != userRepository.currentUser.value.getOrThrow().id) {
             pushNotificationRepository.sendUserNotification(
-                player.id,
-                team.name ?: "Team Update",
-                "You have been removed from a team"
+                player.id, team.name ?: "Team Update", "You have been removed from a team"
             )
         }
         return deleteResult
@@ -182,9 +167,7 @@ class TeamRepository(
                         player.copy(teamInvites = player.teamInvites + newTeam.id)
                     )
                     pushNotificationRepository.sendUserNotification(
-                        player.id,
-                        "Team Invite",
-                        "You have been invited to a team"
+                        player.id, "Team Invite", "You have been invited to a team"
                     )
                 }
             }
@@ -215,9 +198,7 @@ class TeamRepository(
                     player.copy(teamInvites = player.teamInvites + newData.id)
                 )
                 pushNotificationRepository.sendUserNotification(
-                    player.id,
-                    "Team Invite",
-                    "You have been invited to a team"
+                    player.id, "Team Invite", "You have been invited to a team"
                 )
             }
         }
@@ -254,10 +235,8 @@ class TeamRepository(
         }
 
         scope.launch {
-            fetchRemoteTeams(
-                query = Query.contains(DbConstants.TEAMS_PLAYERS_ATTRIBUTE, id),
-                getLocalData = { databaseService.getTeamDao.getTeamsForUser(id) }
-            )
+            fetchRemoteTeams(query = Query.contains(DbConstants.TEAMS_PLAYERS_ATTRIBUTE, id),
+                getLocalData = { databaseService.getTeamDao.getTeamsForUser(id) })
         }
 
         return localTeamsFlow
@@ -268,18 +247,15 @@ class TeamRepository(
             Result.success(it)
         }
         scope.launch {
-            fetchRemoteTeams(
-                query = Query.contains(DbConstants.TEAMS_PENDING_ATTRIBUTE, id),
-                getLocalData = { databaseService.getTeamDao.getTeamInvitesForUser(id) }
-            )
+            fetchRemoteTeams(query = Query.contains(DbConstants.TEAMS_PENDING_ATTRIBUTE, id),
+                getLocalData = { databaseService.getTeamDao.getTeamInvitesForUser(id) })
         }
 
         return localTeamsFlow
     }
 
     private suspend fun fetchRemoteTeams(
-        query: String,
-        getLocalData: suspend () -> List<Team>
+        query: String, getLocalData: suspend () -> List<Team>
     ): Result<List<Team>> {
         return multiResponse(getRemoteData = {
             val teams = database.listDocuments(
@@ -303,21 +279,23 @@ class TeamRepository(
         })
     }
 
-    override suspend fun getTeamWithPlayers(teamId: String): Result<TeamWithPlayers> = singleResponse(
-        networkCall = {
-            database.getDocument(
-                DbConstants.DATABASE_NAME,
-                DbConstants.VOLLEYBALL_TEAMS_COLLECTION,
-                teamId,
-                nestedType = TeamDTO::class,
-            ).data.toTeam(teamId)
-        },
-        saveCall = { team -> databaseService.getTeamDao.upsertTeam(team) },
-        onReturn = { _ -> databaseService.getTeamDao.getTeamWithPlayers(teamId) },
-    )
+    override suspend fun getTeamWithPlayers(teamId: String): Result<TeamWithPlayers> =
+        singleResponse(
+            networkCall = {
+                database.getDocument(
+                    DbConstants.DATABASE_NAME,
+                    DbConstants.VOLLEYBALL_TEAMS_COLLECTION,
+                    teamId,
+                    nestedType = TeamDTO::class,
+                ).data.toTeam(teamId)
+            },
+            saveCall = { team -> databaseService.getTeamDao.upsertTeam(team) },
+            onReturn = { _ -> databaseService.getTeamDao.getTeamWithPlayers(teamId) },
+        )
 
     override fun getTeamWithPlayersFlow(id: String): Flow<Result<TeamWithRelations>> {
-        val localFlow = databaseService.getTeamDao.getTeamWithPlayersFlow(id).map { Result.success(it) }
+        val localFlow =
+            databaseService.getTeamDao.getTeamWithPlayersFlow(id).map { Result.success(it) }
         scope.launch {
             getTeamWithPlayers(id)
         }

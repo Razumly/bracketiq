@@ -21,6 +21,7 @@ import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentProcessor
+import com.razumly.mvp.core.presentation.PaymentResult
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.eventDetail.data.IMatchRepository
@@ -102,7 +103,7 @@ class DefaultEventDetailComponent(
     userRepository: IUserRepository,
     fieldRepository: IFieldRepository,
     private val billingRepository: IBillingRepository,
-    private val event: EventAbs,
+    event: EventAbs,
     onBack: () -> Unit,
     private val eventAbsRepository: IEventAbsRepository,
     private val matchRepository: IMatchRepository,
@@ -159,23 +160,20 @@ class DefaultEventDetailComponent(
         if (eventWithPlayers == null) {
             flowOf(EventWithFullRelations(Tournament(), emptyList(), emptyList(), emptyList()))
         } else {
-            combine(
-                matchRepository.getMatchesOfTournamentFlow(eventWithPlayers.event.id)
-                    .map { result ->
-                        result.getOrElse {
-                            _errorState.value =
-                                ErrorMessage("Error loading matches: ${it.message}"); emptyList()
-                        }
-                    },
-                teamRepository.getTeamsFlow(
-                    eventWithPlayers.event.teamIds
-                ).map { result ->
+            combine(matchRepository.getMatchesOfTournamentFlow(eventWithPlayers.event.id)
+                .map { result ->
                     result.getOrElse {
                         _errorState.value =
-                        ErrorMessage("Failed to load teams: ${it.message}"); emptyList()
+                            ErrorMessage("Error loading matches: ${it.message}"); emptyList()
                     }
+                }, teamRepository.getTeamsFlow(
+                eventWithPlayers.event.teamIds
+            ).map { result ->
+                result.getOrElse {
+                    _errorState.value =
+                        ErrorMessage("Failed to load teams: ${it.message}"); emptyList()
                 }
-            ) { matches, teams ->
+            }) { matches, teams ->
                 eventWithPlayers.toEventWithFullRelations(matches, teams)
             }
         }
@@ -237,6 +235,40 @@ class DefaultEventDetailComponent(
             }
         }
         scope.launch {
+            paymentResult.collect {
+                if (it != null) {
+                    when (it) {
+                        PaymentResult.Canceled -> {
+                            _errorState.value = ErrorMessage("Payment Canceled")
+                        }
+
+                        is PaymentResult.Failed -> {
+                            _errorState.value = ErrorMessage(it.error)
+                        }
+
+                        PaymentResult.Completed -> {
+                            val teams =
+                                if (event.teamSignup) event.teamIds + _usersTeam.value?.team?.id else emptyList()
+                            val players =
+                                event.playerIds + if (event.teamSignup) _usersTeam.value?.team?.playerIds.orEmpty() else listOf(
+                                    currentUser.value.id
+                                )
+                            val update = when (selectedEvent.value?.event!!) {
+                                is Tournament -> (selectedEvent.value?.event as Tournament).copy(
+                                    teamIds = teams.filterNotNull(), playerIds = players
+                                )
+
+                                is EventImp -> (selectedEvent.value?.event as EventImp).copy(
+                                    teamIds = teams.filterNotNull(), playerIds = players
+                                )
+                            }
+                            eventAbsRepository.updateEvent(update)
+                        }
+                    }
+                }
+            }
+        }
+        scope.launch {
             matchRepository.setIgnoreMatch(null)
             eventWithRelations.distinctUntilChanged { old, new -> old == new }.filterNotNull()
                 .collect { event ->
@@ -271,7 +303,10 @@ class DefaultEventDetailComponent(
     override fun matchSelected(selectedMatch: MatchWithRelations) {
         if (selectedEvent.value == null) return
         when (selectedEvent.value!!.event) {
-            is Tournament -> onMatchSelected(selectedMatch, selectedEvent.value!!.event as Tournament)
+            is Tournament -> onMatchSelected(
+                selectedMatch, selectedEvent.value!!.event as Tournament
+            )
+
             else -> Unit
         }
     }
@@ -315,14 +350,14 @@ class DefaultEventDetailComponent(
     override fun joinEvent() {
         scope.launch {
             if (selectedEvent.value == null) return@launch
-            if (event.price == 0.0 || event.teamSignup) {
+            if (selectedEvent.value!!.event.price == 0.0 || selectedEvent.value!!.event.teamSignup) {
                 loadingHandler.showLoading("Joining Event ...")
                 eventAbsRepository.addCurrentUserToEvent(selectedEvent.value!!.event).onSuccess {
                     _isUserInEvent.value = true
                 }
             } else {
                 loadingHandler.showLoading("Creating Purchase Request ...")
-                billingRepository.createPurchaseIntent(event).onSuccess {
+                billingRepository.createPurchaseIntent(selectedEvent.value!!.event).onSuccess {
                     it?.let { setPaymentIntent(it) }
                     loadingHandler.showLoading("Waiting for Payment Completion ..")
                     presentPaymentSheet()
@@ -336,17 +371,19 @@ class DefaultEventDetailComponent(
 
     override fun joinEventAsTeam(team: TeamWithPlayers) {
         scope.launch {
+            _usersTeam.value = team
             if (selectedEvent.value == null) return@launch
-            if (event.price == 0.0) {
+            if (selectedEvent.value!!.event.price == 0.0) {
                 loadingHandler.showLoading("Joining Event ...")
-                eventAbsRepository.addTeamToEvent(selectedEvent.value!!.event, team.team).onSuccess {
-                    _isUserInEvent.value = true
-                }.onFailure {
-                    _errorState.value = ErrorMessage(it.message ?: "")
-                }
+                eventAbsRepository.addTeamToEvent(selectedEvent.value!!.event, team.team)
+                    .onSuccess {
+                        _isUserInEvent.value = true
+                    }.onFailure {
+                        _errorState.value = ErrorMessage(it.message ?: "")
+                    }
             } else {
                 loadingHandler.showLoading("Creating Purchase Request ...")
-                billingRepository.createPurchaseIntent(event, team.team.id).onSuccess {
+                billingRepository.createPurchaseIntent(selectedEvent.value!!.event, team.team.id).onSuccess {
                     it?.let { setPaymentIntent(it) }
                     loadingHandler.showLoading("Waiting for Payment Completion ..")
                     presentPaymentSheet()
@@ -418,7 +455,9 @@ class DefaultEventDetailComponent(
 
     override fun createNewTeam() {
         if (selectedEvent.value == null) return
-        onNavigateToTeamSettings(selectedEvent.value!!.event.freeAgents, selectedEvent.value!!.event)
+        onNavigateToTeamSettings(
+            selectedEvent.value!!.event.freeAgents, selectedEvent.value!!.event
+        )
     }
 
     override fun selectPlace(place: MVPPlace?) {
@@ -528,7 +567,7 @@ class DefaultEventDetailComponent(
     }
 
     private fun checkIsUserParticipant(): Boolean {
-        return event.playerIds.contains(currentUser.value.id)
+        return selectedEvent.value?.event?.playerIds?.contains(currentUser.value.id) == true
     }
 
     private fun checkIsUserInEvent(): Boolean {

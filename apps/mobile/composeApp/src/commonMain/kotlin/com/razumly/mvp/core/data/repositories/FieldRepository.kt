@@ -28,7 +28,8 @@ class FieldRepository(
                 DbConstants.DATABASE_NAME,
                 DbConstants.FIELDS_COLLECTION,
                 field.id,
-                field
+                field,
+                nestedType = Field::class
             )
         }
     }

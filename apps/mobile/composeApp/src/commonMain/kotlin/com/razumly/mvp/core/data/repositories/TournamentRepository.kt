@@ -1,8 +1,17 @@
 package com.razumly.mvp.core.data.repositories
 
 import com.razumly.mvp.core.data.DatabaseService
+import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
+import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.crossRef.FieldMatchCrossRef
+import com.razumly.mvp.core.data.dataTypes.crossRef.MatchTeamCrossRef
+import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
+import com.razumly.mvp.core.data.dataTypes.crossRef.TournamentMatchCrossRef
+import com.razumly.mvp.core.data.dataTypes.crossRef.TournamentTeamCrossRef
+import com.razumly.mvp.core.data.dataTypes.crossRef.TournamentUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.dtos.TournamentDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.toTournament
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResponse
@@ -16,6 +25,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -56,48 +66,107 @@ class TournamentRepository(
         lastDocumentId = ""
     }
 
-    override fun getTournamentWithRelationsFlow(tournamentId: String): Flow<Result<TournamentWithRelations>> = callbackFlow {
-        // Emit local data
-        val localJob = launch {
-            databaseService.getTournamentDao.getTournamentWithRelationsFlow(tournamentId)
-                .collect { tournament ->
-                    trySend(Result.success(tournament))
-                }
-        }
+    override fun getTournamentWithRelationsFlow(tournamentId: String): Flow<Result<TournamentWithRelations>> =
+        callbackFlow {
+            // Emit local data
+            val localJob = launch {
+                databaseService.getTournamentDao.getTournamentWithRelationsFlow(tournamentId)
+                    .collect { tournament ->
+                        trySend(Result.success(tournament))
+                    }
+            }
 
-        // Fetch remote data and emit failure if needed
-        val remoteJob = launch {
-            val result = getTournament(tournamentId)
-            result.onSuccess {
-                fieldRepository.getFieldsInTournament(tournamentId)
-                    .onFailure { error ->
-                        trySend(Result.failure(error))
+            // Fetch remote data and emit failure if needed
+            val remoteJob = launch {
+                val result = getTournament(tournamentId)
+                result.onSuccess {
+                    val fieldsDeferred =
+                        async { fieldRepository.getFieldsInTournament(tournamentId) }
+                    val playersDeferred = if (result.getOrNull()?.playerIds?.isNotEmpty() == true) {
+                        async { userRepository.getUsers(result.getOrNull()?.playerIds ?: listOf()) }
+                    } else { async { Result.success(emptyList()) } }
+                    val hostDeferred = async { userRepository.getUsers(listOf(it.hostId)) }
+                    val teamsDeferred = if (result.getOrNull()?.teamIds?.isNotEmpty() == true) {
+                        async { teamRepository.getTeams(result.getOrNull()?.teamIds ?: listOf()) }
+                    } else { async { Result.success(emptyList()) } }
+                    val matchesDeferred =
+                        async { matchRepository.getMatchesOfTournament(tournamentId) }
+
+                    val fieldsResult = fieldsDeferred.await()
+                    val playersResult = playersDeferred.await()
+                    val hostResult = hostDeferred.await()
+                    val teamsResult = teamsDeferred.await()
+                    val matchesResult = matchesDeferred.await()
+
+                    listOf(
+                        fieldsResult, playersResult, hostResult, teamsResult, matchesResult
+                    ).forEach { res ->
+                        res.onFailure { error ->
+                            trySend(Result.failure(error))
+                        }
                     }
-                userRepository.getUsers(result.getOrNull()?.playerIds ?: listOf())
-                    .onFailure { error ->
-                        trySend(Result.failure(error))
-                    }
-                userRepository.getUsers(listOf(it.hostId))
-                    .onFailure { error ->
-                        trySend(Result.failure(error))
-                    }
-                teamRepository.getTeams(result.getOrNull()?.teamIds ?: listOf())
-                    .onFailure { error ->
-                        trySend(Result.failure(error))
-                    }
-                matchRepository.getMatchesOfTournament(tournamentId)
-                    .onFailure { error ->
-                        trySend(Result.failure(error))
-                    }
-            }.onFailure { error ->
-                trySend(Result.failure(error))
+
+                    insertCrossReferences(
+                        players = playersResult.getOrThrow(),
+                        host = hostResult.getOrThrow(),
+                        teams = teamsResult.getOrThrow(),
+                        matches = matchesResult.getOrThrow(),
+                        tournamentId = tournamentId
+                    )
+                }.onFailure { error ->
+                    trySend(Result.failure(error))
+                }
+            }
+
+            awaitClose {
+                localJob.cancel()
+                remoteJob.cancel()
             }
         }
 
-        awaitClose {
-            localJob.cancel()
-            remoteJob.cancel()
-        }
+    private suspend fun insertCrossReferences(
+        players: List<UserData>,
+        host: List<UserData>,
+        teams: List<Team>,
+        matches: List<MatchMVP>,
+        tournamentId: String
+    ) {
+        databaseService.getTeamDao.upsertTournamentTeamCrossRefs(teams.map {
+            TournamentTeamCrossRef(
+                tournamentId, it.id
+            )
+        })
+        databaseService.getUserDataDao.upsertUserTournamentCrossRefs(players.map {
+            TournamentUserCrossRef(
+                it.id, tournamentId
+            )
+        })
+        databaseService.getUserDataDao.upsertUserTournamentCrossRefs(host.map {
+            TournamentUserCrossRef(
+                it.id, tournamentId
+            )
+        })
+        databaseService.getMatchDao.upsertTournamentMatchCrossRefs(matches.map {
+            TournamentMatchCrossRef(
+                tournamentId, it.id
+            )
+        })
+        databaseService.getTeamDao.upsertMatchTeamCrossRefs(
+            matches.map { match ->
+                listOfNotNull(match.team1?.let { MatchTeamCrossRef(it, match.id) },
+                    match.team2?.let { MatchTeamCrossRef(it, match.id) })
+            }.flatten()
+        )
+        databaseService.getTeamDao.upsertTeamPlayerCrossRefs(teams.map {
+            it.playerIds.map { playerId ->
+                TeamPlayerCrossRef(
+                    it.id, playerId
+                )
+            }
+        }.flatten())
+        matches.map { match ->
+            match.field?.let { FieldMatchCrossRef(it, match.id) }
+        }.let { databaseService.getMatchDao.upsertFieldMatchCrossRefs(it.filterNotNull()) }
     }
 
     override fun getTournamentFlow(tournamentId: String): Flow<Result<Tournament>> =
@@ -110,26 +179,24 @@ class TournamentRepository(
         } else {
             listOf(query)
         }
-        val response = multiResponse(
-            getRemoteData = {
-                database.listDocuments(
-                    DbConstants.DATABASE_NAME,
-                    DbConstants.TOURNAMENT_COLLECTION,
-                    queries = combinedQuery,
-                    TournamentDTO::class
-                ).documents.map { dtoDoc -> dtoDoc.convert { it.toTournament(dtoDoc.id) }.data }
-            },
+        val response = multiResponse(getRemoteData = {
+            database.listDocuments(
+                DbConstants.DATABASE_NAME,
+                DbConstants.TOURNAMENT_COLLECTION,
+                queries = combinedQuery,
+                TournamentDTO::class
+            ).documents.map { dtoDoc -> dtoDoc.convert { it.toTournament(dtoDoc.id) }.data }
+        },
             getLocalData = { emptyList() },
             saveData = { databaseService.getTournamentDao.upsertTournaments(it) },
-            deleteData = { }
-        )
+            deleteData = { })
         lastDocumentId = response.getOrNull()?.lastOrNull()?.id ?: lastDocumentId
         return response
     }
 
     override fun getTournamentsFlow(query: String): Flow<Result<List<Tournament>>> {
-        val localFlow =
-            databaseService.getTournamentDao.getAllCachedTournamentsFlow().map { Result.success(it) }
+        val localFlow = databaseService.getTournamentDao.getAllCachedTournamentsFlow()
+            .map { Result.success(it) }
         return localFlow
     }
 

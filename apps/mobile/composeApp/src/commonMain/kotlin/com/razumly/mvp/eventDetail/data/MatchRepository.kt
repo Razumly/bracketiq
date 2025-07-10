@@ -3,8 +3,6 @@ package com.razumly.mvp.eventDetail.data
 import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
-import com.razumly.mvp.core.data.dataTypes.crossRef.FieldMatchCrossRef
-import com.razumly.mvp.core.data.dataTypes.crossRef.MatchTeamCrossRef
 import com.razumly.mvp.core.data.dataTypes.dtos.MatchDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.toMatch
 import com.razumly.mvp.core.data.dataTypes.toMatchDTO
@@ -150,15 +148,6 @@ class MatchRepository(
             databaseService.getMatchDao.getMatchesOfTournament(tournamentId)
         }, saveData = { matches ->
             databaseService.getMatchDao.upsertMatches(matches)
-            databaseService.getMatchDao.upsertMatchTeamCrossRefs(matches.flatMap { match ->
-                val crossRefs = mutableListOf<MatchTeamCrossRef>()
-                match.team1?.let { crossRefs.add(MatchTeamCrossRef(it, match.id)) }
-                match.team2?.let { crossRefs.add(MatchTeamCrossRef(it, match.id)) }
-                crossRefs
-            })
-            databaseService.getMatchDao.upsertFieldMatchCrossRefs(matches.mapNotNull { match ->
-                match.field?.let { FieldMatchCrossRef(match.field, match.id) }
-            })
         }, deleteData = { databaseService.getMatchDao.deleteMatchesById(it) })
 
     override suspend fun subscribeToMatches(): Result<Unit> {

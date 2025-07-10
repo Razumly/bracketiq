@@ -3,6 +3,9 @@ package com.razumly.mvp.core.data.repositories
 import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
+import com.razumly.mvp.core.data.dataTypes.crossRef.EventTeamCrossRef
+import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
+import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
 import com.razumly.mvp.core.data.dataTypes.dtos.EventDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.toEvent
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResponse
@@ -15,7 +18,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
@@ -48,15 +54,63 @@ class EventRepository(
         lastDocumentId = ""
     }
 
-    override fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>> {
-        val localFlow = databaseService.getEventImpDao.getEventWithRelationsFlow(eventId)
-            .map { Result.success(it) }
-        scope.launch{
-            val event = getEvent(eventId)
-            userRepository.getUsers(event.getOrNull()?.event?.playerIds ?: listOf())
-            teamRepository.getTeams(event.getOrNull()?.event?.teamIds ?: listOf())
+    override fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>> =
+        callbackFlow {
+        val localFlow = launch {databaseService.getEventImpDao.getEventWithRelationsFlow(eventId)
+            .collect {
+                trySend(Result.success(it))
+            }
         }
-        return localFlow
+        val remoteFlow = launch{
+            getEvent(eventId).onSuccess { result ->
+                val playersDeferred = if (result.event.playerIds.isNotEmpty()) {
+                    async { userRepository.getUsers(result.event.playerIds) }
+                } else { async { Result.success(emptyList()) } }
+                val hostDeferred = async { userRepository.getUsers(listOf(result.event.hostId)) }
+                val teamsDeferred = if (result.event.teamIds.isNotEmpty()) {
+                    async { teamRepository.getTeams(result.event.teamIds) }
+                } else { async { Result.success(emptyList()) } }
+
+                val playersResult = playersDeferred.await()
+                val hostResult = hostDeferred.await()
+                val teamsResult = teamsDeferred.await()
+
+                listOf(
+                    playersResult, hostResult, teamsResult
+                ).forEach { res ->
+                    res.onFailure { error ->
+                        trySend(Result.failure(error))
+                    }
+                }
+                databaseService.getTeamDao.upsertEventTeamCrossRefs(teamsResult.getOrThrow().map {
+                    EventTeamCrossRef(
+                        it.id, eventId
+                    )
+                })
+                databaseService.getUserDataDao.upsertUserEventCrossRefs(playersResult.getOrThrow().map {
+                    EventUserCrossRef(
+                        it.id, eventId
+                    )
+                })
+                databaseService.getUserDataDao.upsertUserEventCrossRefs(hostResult.getOrThrow().map {
+                    EventUserCrossRef(
+                        it.id, eventId
+                    )
+                })
+                databaseService.getTeamDao.upsertTeamPlayerCrossRefs(teamsResult.getOrThrow().map {
+                    it.playerIds.map { playerId ->
+                        TeamPlayerCrossRef(
+                            it.id, playerId
+                        )
+                    }
+                }.flatten())
+            }
+        }
+
+        awaitClose {
+            localFlow.cancel()
+            remoteFlow.cancel()
+        }
     }
 
     override suspend fun getEvent(eventId: String): Result<EventWithRelations> =

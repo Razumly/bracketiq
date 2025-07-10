@@ -1,7 +1,6 @@
 package com.razumly.mvp.core.data.repositories
 
 import com.razumly.mvp.core.data.dataTypes.EventAbs
-import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.util.DbConstants
 import io.appwrite.services.Functions
@@ -28,29 +27,27 @@ class BillingRepository(
 ) : IBillingRepository {
     override suspend fun createPurchaseIntent(
         event: EventAbs, teamId: String?
-    ): Result<PurchaseIntent?> = runCatching {
+    ): Result<PurchaseIntent> = runCatching {
         val user = userRepository.currentUser.value.getOrThrow()
         val isTournament = when (event) {
             is Tournament -> true
             else -> false
         }
-        if (user.stripeAccountId.isBlank()) {
-            createAccount()
-            null
+        val response = Json.decodeFromString<PurchaseIntent>(
+            functions.createExecution(
+                functionId = DbConstants.BILLING_FUNCTION,
+                body = Json.encodeToString(
+                    CreatePurchaseIntent(user.id, event.id, teamId, isTournament)
+                ),
+                async = false,
+            ).responseBody
+        )
+        if (response.error != null) {
+            throw Exception(response.error)
         } else {
-            Json.decodeFromString(
-                PurchaseIntent.serializer(), functions.createExecution(
-                    functionId = DbConstants.BILLING_FUNCTION,
-                    body = Json.encodeToString(
-                        CreatePurchaseIntent(user.id, event.id, teamId, isTournament)
-                    ),
-                    async = false,
-                ).responseBody
-            )
+            response
         }
     }
-
-
 
     override suspend fun createAccount(): Result<String> = runCatching {
         val user = userRepository.currentUser.value.getOrThrow()
@@ -83,13 +80,13 @@ class BillingRepository(
 
     override suspend fun getOnboardingLink(): Result<String> = runCatching {
         val user = userRepository.currentUser.value.getOrThrow()
-        if (user.stripeAccountId.isBlank()) throw Exception("User has no stripe account")
+        if (user.stripeAccountId?.isBlank() == true) throw Exception("User has no stripe account")
 
         val response = Json.decodeFromString<CreateAccountResponse>(
             functions.createExecution(
                 functionId = DbConstants.BILLING_FUNCTION,
                 body = Json.encodeToString(
-                    GetHostOnboardingLink(user.stripeAccountId)
+                    user.stripeAccountId?.let { GetHostOnboardingLink(it) }
                 ),
                 async = false,
             ).responseBody
@@ -101,16 +98,16 @@ class BillingRepository(
     override suspend fun leaveAndRefundEvent(event: EventAbs): Result<Unit> =
     runCatching {
         val response = functions.createExecution(
-            "eventManager",
+            DbConstants.BILLING_FUNCTION,
             Json.encodeToString(RefundRequest(
                 eventId = event.id,
                 userId = userRepository.currentUser.value.getOrThrow().id,
             ))
         )
 
-        val editEventResponse = Json.decodeFromString<EditEventResponse>(response.responseBody)
-        if (!editEventResponse.error.isNullOrBlank()) {
-            throw Exception("Failed to add user to event")
+        val refundResponse = Json.decodeFromString<RefundResponse>(response.responseBody)
+        if (!refundResponse.error.isNullOrBlank()) {
+            throw Exception(refundResponse.error)
         }
     }
 }
@@ -159,15 +156,26 @@ private data class CreateAccountResponse(
 
 @Serializable
 data class PurchaseIntent(
-    val paymentIntent: String,
-    val ephemeralKey: String,
-    val customer: String,
-    val publishableKey: String,
+    val paymentIntent: String? = null,
+    val ephemeralKey: String? = null,
+    val customer: String? = null,
+    val publishableKey: String? = null,
+    val error: String? = null,
 )
 
 @Serializable
+@OptIn(ExperimentalSerializationApi::class)
 data class RefundRequest(
-    val command: String = "refund_payment",
+    @EncodeDefault val command: String = "refund_payment",
     val userId: String,
     val eventId: String,
+)
+
+@Serializable
+data class RefundResponse(
+    val refundId: String? = null,
+    val status: String? = null,
+    val amount: Int? = null,
+    val reason: String? = null,
+    val error: String? = null,
 )

@@ -48,15 +48,14 @@ interface TournamentDao {
 
     @Transaction
     suspend fun upsertTournamentWithRelations(tournament: Tournament) {
-        deleteTournamentWithCrossRefs(tournament.id)
+        deleteTournamentUserCrossRefs(tournament.id)
+        deleteTournamentMatchCrossRefs(tournament.id)
+        deleteTournamentTeamCrossRefs(tournament.id)
         upsertTournament(tournament)
     }
 
     @Transaction
     suspend fun deleteTournamentWithCrossRefs(tournamentId: String) {
-        deleteTournamentUserCrossRefs(tournamentId)
-        deleteTournamentMatchCrossRefs(tournamentId)
-        deleteTournamentTeamCrossRefs(tournamentId)
         deleteTournamentById(tournamentId)
     }
 

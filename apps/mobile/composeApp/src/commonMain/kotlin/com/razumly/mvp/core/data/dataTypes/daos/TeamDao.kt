@@ -22,6 +22,9 @@ interface TeamDao {
     @Upsert
     suspend fun upsertTeam(team: Team)
 
+    @Upsert
+    suspend fun upsertTeams(teams: List<Team>)
+
     @Query("SELECT * FROM Team WHERE id = :teamId")
     suspend fun getTeam(teamId: String): Team
 

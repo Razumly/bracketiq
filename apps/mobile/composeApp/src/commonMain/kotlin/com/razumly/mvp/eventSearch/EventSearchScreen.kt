@@ -97,9 +97,6 @@ fun EventSearchScreen(
 
     LaunchedEffect(Unit) {
         component.setLoadingHandler(loadingHandler)
-    }
-
-    LaunchedEffect(Unit) {
         component.errorState.collect { error ->
             if (error != null) {
                 errorHandler.showError(error.message)

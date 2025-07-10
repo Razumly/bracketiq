@@ -36,7 +36,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.razumly.mvp.core.data.dataTypes.EventAbsWithRelations
 import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
@@ -82,6 +81,11 @@ fun EventDetailScreen(
 
     LaunchedEffect(Unit) {
         component.setLoadingHandler(loadingHandler)
+        component.errorState.collect { error ->
+            if (error != null) {
+                errorHandler.showError(error.message)
+            }
+        }
     }
 
     LaunchedEffect(actualEvent) {
@@ -89,14 +93,6 @@ fun EventDetailScreen(
             loadingHandler.showLoading("Loading Event")
         } else {
             loadingHandler.hideLoading()
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        component.errorState.collect { error ->
-            if (error != null) {
-                errorHandler.showError(error.message)
-            }
         }
     }
 
@@ -116,7 +112,7 @@ fun EventDetailScreen(
                     EventDetails(
                         paymentProcessor = component,
                         mapComponent = mapComponent,
-                        hostHasAccount = currentUser.stripeAccountId.isNotBlank(),
+                        hostHasAccount = currentUser.stripeAccountId?.isNotBlank() == true,
                         onHostCreateAccount = { component.onHostCreateAccount() },
                         eventWithRelations = selectedEvent,
                         editEvent = editedEvent,

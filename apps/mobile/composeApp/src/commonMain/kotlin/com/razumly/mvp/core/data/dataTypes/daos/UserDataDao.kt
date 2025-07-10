@@ -6,7 +6,6 @@ import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Upsert
 import com.razumly.mvp.core.data.dataTypes.UserData
-import com.razumly.mvp.core.data.dataTypes.UserWithRelations
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TournamentUserCrossRef
@@ -80,19 +79,7 @@ interface UserDataDao {
 
     @Transaction
     @Query("SELECT * FROM UserData WHERE id = :id")
-    suspend fun getUserWithRelationsById(id: String): UserWithRelations?
-
-    @Transaction
-    @Query("SELECT * FROM UserData WHERE id = :id")
-    fun getUserWithRelationsFlowById(id: String): Flow<UserWithRelations?>
-
-    @Transaction
-    @Query("SELECT * FROM UserData WHERE id = :id")
     fun getUserFlowById(id: String): Flow<UserData?>
-
-    @Transaction
-    @Query("SELECT * FROM UserData WHERE id in (:ids)")
-    fun getUserByIdFlow(ids: List<String>): Flow<List<UserWithRelations>>
 
     @Query(
         "SELECT * FROM UserData " +

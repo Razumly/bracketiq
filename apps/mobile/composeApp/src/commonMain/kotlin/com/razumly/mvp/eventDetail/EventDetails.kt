@@ -2,18 +2,7 @@ package com.razumly.mvp.eventDetail
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.SizeTransform
-import androidx.compose.animation.core.EaseInCubic
-import androidx.compose.animation.core.EaseOutCubic
 import androidx.compose.animation.core.LinearOutSlowInEasing
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,7 +15,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -191,7 +179,8 @@ fun EventDetails(
         isPriceValid = editEvent.price >= 0
         isMaxParticipantsValid = editEvent.maxParticipants > 2
         isTeamSizeValid = editEvent.teamSizeLimit >= 2
-        isLocationValid = editEvent.location.isNotBlank() && editEvent.lat != 0.0 && editEvent.long != 0.0
+        isLocationValid =
+            editEvent.location.isNotBlank() && editEvent.lat != 0.0 && editEvent.long != 0.0
 
         if (editEvent is Tournament) {
             isWinnerSetCountValid = editEvent.winnerSetCount > 0
@@ -211,9 +200,8 @@ fun EventDetails(
             isLoserPointsValid = true
         }
 
-        isValid = isPriceValid && isMaxParticipantsValid && isTeamSizeValid &&
-                isWinnerSetCountValid && isWinnerPointsValid &&
-                isLoserSetCountValid && isLoserPointsValid
+        isValid =
+            isPriceValid && isMaxParticipantsValid && isTeamSizeValid && isWinnerSetCountValid && isWinnerPointsValid && isLoserSetCountValid && isLoserPointsValid
     }
 
     val backgroundColor = colorState.result?.paletteOrNull?.vibrantSwatch?.color
@@ -251,8 +239,7 @@ fun EventDetails(
                     )
                     IconButton(
                         onClick = onFavoriteClick,
-                        modifier = Modifier.padding(top = 32.dp, end = 8.dp)
-                            .align(Alignment.TopEnd)
+                        modifier = Modifier.padding(top = 32.dp, end = 8.dp).align(Alignment.TopEnd)
                     ) {
                         Icon(
                             painter = rememberVectorPainter(Icons.Default.AddCircle),
@@ -289,8 +276,7 @@ fun EventDetails(
                     ) {
                         CompositionLocalProvider(LocalHazeState provides hazeState) {
                             // Event Title - Animated
-                            AnimatedCardSection(
-                                isOnSurface = false,
+                            AnimatedCardSection(isOnSurface = false,
                                 isEditMode = editView,
                                 animationDelay = 0,
                                 viewContent = {
@@ -302,13 +288,10 @@ fun EventDetails(
                                     )
                                 },
                                 editContent = {
-                                    OutlinedTextField(
-                                        value = editEvent.name,
+                                    OutlinedTextField(value = editEvent.name,
                                         onValueChange = { onEditEvent { copy(name = it) } },
-                                        label = { Text("Event Name") }
-                                    )
-                                }
-                            )
+                                        label = { Text("Event Name") })
+                                })
 
                             // Location Display
                             Text(
@@ -325,8 +308,7 @@ fun EventDetails(
                                         revealCenter = it.boundsInWindow().center
                                     },
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color.Black,
-                                    contentColor = Color.White
+                                    containerColor = Color.Black, contentColor = Color.White
                                 )
                             ) {
                                 Icon(Icons.Default.Place, contentDescription = null)
@@ -338,8 +320,7 @@ fun EventDetails(
                             }
 
                             // Description Card
-                            AnimatedCardSection(
-                                isEditMode = editView,
+                            AnimatedCardSection(isEditMode = editView,
                                 animationDelay = 100,
                                 viewContent = {
                                     CardSection(
@@ -356,12 +337,10 @@ fun EventDetails(
                                         errorMessage = "",
                                         supportingText = "Add a Description of the Event"
                                     )
-                                }
-                            )
+                                })
 
                             // Event Type Card
-                            AnimatedCardSection(
-                                isEditMode = editView,
+                            AnimatedCardSection(isEditMode = editView,
                                 animationDelay = 150,
                                 viewContent = {
                                     CardSection(
@@ -380,13 +359,10 @@ fun EventDetails(
                                             label = "Event Type"
                                         ) { dismiss ->
                                             EventType.entries.forEach { eventType ->
-                                                DropdownMenuItem(
-                                                    onClick = {
-                                                        dismiss()
-                                                        onEventTypeSelected(eventType)
-                                                    },
-                                                    text = { Text(text = eventType.name) }
-                                                )
+                                                DropdownMenuItem(onClick = {
+                                                    dismiss()
+                                                    onEventTypeSelected(eventType)
+                                                }, text = { Text(text = eventType.name) })
                                             }
                                         }
                                         DropdownField(
@@ -395,22 +371,17 @@ fun EventDetails(
                                             label = "Field Type",
                                         ) { dismiss ->
                                             FieldType.entries.forEach { fieldType ->
-                                                DropdownMenuItem(
-                                                    onClick = {
-                                                        dismiss()
-                                                        onEditEvent { copy(fieldType = fieldType) }
-                                                    },
-                                                    text = { Text(text = fieldType.name) }
-                                                )
+                                                DropdownMenuItem(onClick = {
+                                                    dismiss()
+                                                    onEditEvent { copy(fieldType = fieldType) }
+                                                }, text = { Text(text = fieldType.name) })
                                             }
                                         }
                                     }
-                                }
-                            )
+                                })
 
                             // Price Card
-                            AnimatedCardSection(
-                                isEditMode = editView,
+                            AnimatedCardSection(isEditMode = editView,
                                 animationDelay = 200,
                                 viewContent = {
                                     CardSection("Price", event.price.moneyFormat())
@@ -440,12 +411,10 @@ fun EventDetails(
                                         errorMessage = stringResource(Res.string.invalid_price),
                                         supportingText = stringResource(Res.string.free_entry_hint)
                                     )
-                                }
-                            )
+                                })
 
                             // Date Card
-                            AnimatedCardSection(
-                                isEditMode = editView,
+                            AnimatedCardSection(isEditMode = editView,
                                 animationDelay = 250,
                                 viewContent = {
                                     CardSection("Date", dateRangeText)
@@ -456,8 +425,9 @@ fun EventDetails(
                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
                                         OutlinedTextField(
-                                            value = editEvent.start.toLocalDateTime(TimeZone.currentSystemDefault())
-                                                .format(dateTimeFormat),
+                                            value = editEvent.start.toLocalDateTime(
+                                                TimeZone.currentSystemDefault()
+                                            ).format(dateTimeFormat),
                                             onValueChange = {},
                                             label = { Text("Start Date & Time") },
                                             modifier = Modifier.weight(1f)
@@ -472,8 +442,9 @@ fun EventDetails(
                                             )
                                         )
                                         OutlinedTextField(
-                                            value = editEvent.end.toLocalDateTime(TimeZone.currentSystemDefault())
-                                                .format(dateTimeFormat),
+                                            value = editEvent.end.toLocalDateTime(
+                                                TimeZone.currentSystemDefault()
+                                            ).format(dateTimeFormat),
                                             onValueChange = {},
                                             label = { Text("End Date & Time") },
                                             modifier = Modifier.weight(1f)
@@ -488,12 +459,10 @@ fun EventDetails(
                                             )
                                         )
                                     }
-                                }
-                            )
+                                })
 
                             // Divisions Card
-                            AnimatedCardSection(
-                                isEditMode = editView,
+                            AnimatedCardSection(isEditMode = editView,
                                 animationDelay = 300,
                                 viewContent = {
                                     CardSection(
@@ -509,12 +478,10 @@ fun EventDetails(
                                         selectedDivisions = newSelection
                                         onEditEvent { copy(divisions = selectedDivisions) }
                                     }
-                                }
-                            )
+                                })
 
                             // Specifics Card
-                            AnimatedCardSection(
-                                isEditMode = editView,
+                            AnimatedCardSection(isEditMode = editView,
                                 animationDelay = 350,
                                 viewContent = {
                                     Text("Specifics", style = MaterialTheme.typography.titleMedium)
@@ -594,22 +561,20 @@ fun EventDetails(
                                         verticalAlignment = Alignment.CenterVertically,
                                         modifier = Modifier.padding(top = 8.dp)
                                     ) {
-                                        Checkbox(
-                                            checked = !editEvent.singleDivision,
-                                            onCheckedChange = { onEditEvent { copy(singleDivision = !it) } }
-                                        )
+                                        Checkbox(checked = !editEvent.singleDivision,
+                                            onCheckedChange = { onEditEvent { copy(singleDivision = !it) } })
                                         Text(text = "Split Signup Into Divisions")
                                     }
 
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.padding(top = 8.dp)
-                                    ) {
-                                        Checkbox(
-                                            checked = editEvent.teamSignup,
-                                            onCheckedChange = { onEditEvent { copy(teamSignup = it) } }
-                                        )
-                                        Text(text = "Team Event")
+                                    if (event is EventImp) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.padding(top = 8.dp)
+                                        ) {
+                                            Checkbox(checked = editEvent.teamSignup,
+                                                onCheckedChange = { onEditEvent { copy(teamSignup = it) } })
+                                            Text(text = "Team Event")
+                                        }
                                     }
 
                                     if (isNewEvent) {
@@ -618,13 +583,11 @@ fun EventDetails(
                                                 verticalAlignment = Alignment.CenterVertically,
                                                 modifier = Modifier.padding(top = 8.dp)
                                             ) {
-                                                Checkbox(
-                                                    checked = addSelfToEvent,
+                                                Checkbox(checked = addSelfToEvent,
                                                     onCheckedChange = {
                                                         addSelfToEvent = it
                                                         onAddCurrentUser(it)
-                                                    }
-                                                )
+                                                    })
                                                 Text(text = "Join as participant")
                                             }
                                         }
@@ -636,12 +599,10 @@ fun EventDetails(
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
-                                            Checkbox(
-                                                checked = editEvent.doubleElimination,
+                                            Checkbox(checked = editEvent.doubleElimination,
                                                 onCheckedChange = { checked ->
                                                     onEditTournament { copy(doubleElimination = checked) }
-                                                }
-                                            )
+                                                })
                                             Text("Double Elimination")
                                         }
 
@@ -673,12 +634,10 @@ fun EventDetails(
                                                         onEditTournament { copy(winnerSetCount = 0) }
                                                     } else {
                                                         onEditTournament {
-                                                            copy(
-                                                                winnerSetCount = newValue.toInt(),
+                                                            copy(winnerSetCount = newValue.toInt(),
                                                                 winnerBracketPointsToVictory = List(
                                                                     newValue.toInt()
-                                                                ) { 0 }
-                                                            )
+                                                                ) { 0 })
                                                         }
                                                     }
                                                 }
@@ -690,192 +649,214 @@ fun EventDetails(
                                         )
 
                                         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                            val constrainedWinnerSetCount =
+                                                remember(editEvent.winnerSetCount) {
+                                                    maxOf(1, minOf(editEvent.winnerSetCount, 5))
+                                                }
+
                                             val focusRequesters =
-                                                remember { List(4) { FocusRequester() } }
-                                            repeat(editEvent.winnerSetCount) { index ->
-                                                PointsTextField(
-                                                    value = editEvent.winnerBracketPointsToVictory.getOrNull(
-                                                        index
-                                                    )?.toString() ?: "",
+                                                remember(constrainedWinnerSetCount) {
+                                                    List(constrainedWinnerSetCount) { FocusRequester() }
+                                                }
+
+                                            repeat(constrainedWinnerSetCount) { index ->
+                                                PointsTextField(value = editEvent.winnerBracketPointsToVictory.getOrNull(
+                                                    index
+                                                )?.toString() ?: "",
                                                     label = "Set ${index + 1} Points to Win",
                                                     onValueChange = { newValue ->
                                                         if (newValue.all { it.isDigit() } && newValue.length <= 2) {
                                                             val winnerPoints =
                                                                 if (newValue.isBlank()) 0 else newValue.toInt()
                                                             onEditTournament {
-                                                                copy(
-                                                                    winnerBracketPointsToVictory = editEvent.winnerBracketPointsToVictory.toMutableList()
-                                                                        .apply {
-                                                                            set(
-                                                                                index,
-                                                                                winnerPoints
-                                                                            )
-                                                                        }
-                                                                )
+                                                                copy(winnerBracketPointsToVictory = editEvent.winnerBracketPointsToVictory.toMutableList()
+                                                                    .apply {
+                                                                        // Ensure list is large enough
+                                                                        while (size <= index) add(
+                                                                            0
+                                                                        )
+                                                                        set(index, winnerPoints)
+                                                                    })
                                                             }
                                                         }
                                                     },
                                                     focusRequester = focusRequesters[index],
                                                     nextFocus = {
-                                                        if (index < editEvent.winnerSetCount - 1)
+                                                        if (index < constrainedWinnerSetCount - 1) {
                                                             focusRequesters[index + 1].requestFocus()
-                                                    }
-                                                )
+                                                        }
+                                                    })
                                             }
                                         }
 
                                         // Loser bracket (if double elimination)
                                         if (editEvent.doubleElimination) {
-                                            NumberInputField(
-                                                value = editEvent.loserSetCount.toString(),
-                                                onValueChange = { newValue ->
-                                                    if (newValue.all { it.isDigit() }) {
-                                                        if (newValue.isBlank()) {
-                                                            onEditTournament { copy(loserSetCount = 0) }
-                                                        } else {
-                                                            onEditTournament { copy(loserSetCount = newValue.toInt()) }
-                                                        }
-                                                    }
-                                                },
-                                                label = "Loser Set Count",
-                                                isError = !isLoserSetCountValid,
-                                                isMoney = false,
-                                                errorMessage = stringResource(Res.string.value_too_low),
-                                            )
-
-                                            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                                                val loserPoints by remember {
-                                                    mutableStateOf(
-                                                        editEvent.loserBracketPointsToVictory.toMutableList()
-                                                    )
-                                                }
-                                                val focusRequesters =
-                                                    remember { List(4) { FocusRequester() } }
-                                                repeat(editEvent.loserSetCount) { index ->
-                                                    PointsTextField(
-                                                        value = editEvent.loserBracketPointsToVictory.getOrNull(
-                                                            index
-                                                        )?.toString() ?: "",
-                                                        label = "Set ${index + 1} Points to Win",
-                                                        onValueChange = { newValue ->
-                                                            if (newValue.all { it.isDigit() } && newValue.length <= 2) {
-                                                                if (newValue.isBlank()) {
-                                                                    loserPoints[index] = 0
-                                                                } else {
-                                                                    loserPoints[index] =
-                                                                        newValue.toInt()
-                                                                }
+                                            if (editEvent.doubleElimination) {
+                                                NumberInputField(
+                                                    value = editEvent.loserSetCount.toString(),
+                                                    onValueChange = { newValue ->
+                                                        if (newValue.all { it.isDigit() }) {
+                                                            if (newValue.isBlank()) {
                                                                 onEditTournament {
                                                                     copy(
-                                                                        loserBracketPointsToVictory = loserPoints
+                                                                        loserSetCount = 1
+                                                                    )
+                                                                } // Minimum 1
+                                                            } else {
+                                                                val setCount = minOf(
+                                                                    newValue.toInt(),
+                                                                    5
+                                                                ) // Maximum 5
+                                                                val actualSetCount =
+                                                                    maxOf(setCount, 1)
+                                                                onEditTournament {
+                                                                    copy(
+                                                                        loserSetCount = actualSetCount,
+                                                                        loserBracketPointsToVictory = List(
+                                                                            actualSetCount
+                                                                        ) { 0 }
                                                                     )
                                                                 }
                                                             }
-                                                        },
-                                                        focusRequester = focusRequesters[index],
-                                                        nextFocus = {
-                                                            if (index < editEvent.loserSetCount - 1)
-                                                                focusRequesters[index + 1].requestFocus()
                                                         }
-                                                    )
+                                                    },
+                                                    label = "Loser Set Count (1-5)",
+                                                    isError = !isLoserSetCountValid,
+                                                    isMoney = false,
+                                                    errorMessage = stringResource(Res.string.value_too_low),
+                                                    placeholder = "1-5"
+                                                )
+                                            }
+                                            // Calculate constrained loser set count
+                                            val constrainedLoserSetCount =
+                                                remember(editEvent.loserSetCount) {
+                                                    maxOf(1, minOf(editEvent.loserSetCount, 5))
                                                 }
+
+                                            val loserFocusRequesters =
+                                                remember(constrainedLoserSetCount) {
+                                                    List(constrainedLoserSetCount) { FocusRequester() }
+                                                }
+
+                                            repeat(constrainedLoserSetCount) { index ->
+                                                PointsTextField(
+                                                    value = editEvent.loserBracketPointsToVictory.getOrNull(
+                                                        index
+                                                    )?.toString() ?: "",
+                                                    label = "Set ${index + 1} Points to Win",
+                                                    onValueChange = { newValue ->
+                                                        if (newValue.all { it.isDigit() } && newValue.length <= 2) {
+                                                            val loserPoints =
+                                                                if (newValue.isBlank()) 0 else newValue.toInt()
+                                                            onEditTournament {
+                                                                copy(
+                                                                    loserBracketPointsToVictory = editEvent.loserBracketPointsToVictory.toMutableList()
+                                                                        .apply {
+                                                                            // Ensure list is large enough
+                                                                            while (size <= index) add(
+                                                                                0
+                                                                            )
+                                                                            set(index, loserPoints)
+                                                                        }
+                                                                )
+                                                            }
+                                                        }
+                                                    },
+                                                    focusRequester = loserFocusRequesters[index],
+                                                    nextFocus = {
+                                                        if (index < constrainedLoserSetCount - 1) {
+                                                            loserFocusRequesters[index + 1].requestFocus()
+                                                        }
+                                                    }
+                                                )
                                             }
                                         }
                                     }
-                                }
-                            )
+                                })
                             Spacer(Modifier.height(32.dp))
                         }
                     }
                 }
             }
+        }
+        // Date Pickers and Map (same as before)
+        PlatformDateTimePicker(
+            onDateSelected = { selectedInstant ->
+                onEditEvent { copy(start = selectedInstant ?: Clock.System.now()) }
+                showStartPicker = false
+            },
+            onDismissRequest = { showStartPicker = false },
+            showPicker = showStartPicker,
+        )
 
-            // Date Pickers and Map (same as before)
-            PlatformDateTimePicker(
-                onDateSelected = { selectedInstant ->
-                    onEditEvent { copy(start = selectedInstant ?: Clock.System.now()) }
-                    showStartPicker = false
-                },
-                onDismissRequest = { showStartPicker = false },
-                showPicker = showStartPicker,
-            )
+        PlatformDateTimePicker(
+            onDateSelected = { selectedInstant ->
+                onEditEvent { copy(end = selectedInstant ?: Clock.System.now()) }
+                showEndPicker = false
+            },
+            onDismissRequest = { showEndPicker = false },
+            showPicker = showEndPicker,
+        )
 
-            PlatformDateTimePicker(
-                onDateSelected = { selectedInstant ->
-                    onEditEvent { copy(end = selectedInstant ?: Clock.System.now()) }
-                    showEndPicker = false
-                },
-                onDismissRequest = { showEndPicker = false },
-                showPicker = showEndPicker,
-            )
+        EventMap(
+            component = mapComponent,
+            onEventSelected = { showImageSelector = true },
+            onPlaceSelected = { place ->
+                if (editView) {
+                    onPlaceSelected(place)
+                    selectedPlace = place
+                    showImageSelector = true
+                }
+            },
+            canClickPOI = editView,
+            focusedLocation = if (editEvent.location.isNotBlank()) {
+                editEvent.let { LatLng(it.lat, it.long) }
+            } else {
+                currentLocation ?: LatLng(0.0, 0.0)
+            },
+            focusedEvent = if (editEvent.location.isNotBlank()) {
+                editEvent
+            } else if (event.location.isNotBlank()) {
+                event
+            } else {
+                null
+            },
+            revealCenter = revealCenter,
+            onBackPressed = { mapComponent.toggleMap() },
+        )
 
-            EventMap(
-                component = mapComponent,
-                onEventSelected = { showImageSelector = true },
-                onPlaceSelected = { place ->
-                    if (editView) {
-                        onPlaceSelected(place)
-                        selectedPlace = place
-                        showImageSelector = true
-                    }
-                },
-                canClickPOI = editView,
-                focusedLocation = if (editEvent.location.isNotBlank()) {
-                    editEvent.let { LatLng(it.lat, it.long) }
-                } else {
-                    currentLocation ?: LatLng(0.0, 0.0)
-                },
-                focusedEvent = if (editEvent.location.isNotBlank()) {
-                    editEvent
-                } else if (event.location.isNotBlank()) {
-                    event
-                } else {
-                    null
-                },
-                revealCenter = revealCenter,
-                onBackPressed = { mapComponent.toggleMap() },
-            )
-
-            // Image selector dialog (same as before)
-            if (showImageSelector && selectedPlace != null) {
-                Dialog(onDismissRequest = {
-                    showImageSelector = false
-                    selectedPlace = null
-                }) {
-                    Column(Modifier.fillMaxSize()) {
-                        SelectEventImage(
-                            selectedPlace = selectedPlace!!,
-                            onSelectedImage = { onEditEvent(it) }
-                        )
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceEvenly
+        // Image selector dialog (same as before)
+        if (showImageSelector && selectedPlace != null) {
+            Dialog(onDismissRequest = {
+                showImageSelector = false
+                selectedPlace = null
+            }) {
+                Column(Modifier.fillMaxSize()) {
+                    SelectEventImage(selectedPlace = selectedPlace!!,
+                        onSelectedImage = { onEditEvent(it) })
+                    Row(
+                        Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        Button(
+                            onClick = {
+                                showImageSelector = false
+                                onEditEvent { copy(imageUrl = "") }
+                                onPlaceSelected(null)
+                            }, colors = ButtonColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer,
+                                contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                                disabledContainerColor = MaterialTheme.colorScheme.onSurface,
+                                disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         ) {
-                            Button(
-                                onClick = {
-                                    showImageSelector = false
-                                    onEditEvent { copy(imageUrl = "") }
-                                    onPlaceSelected(null)
-                                },
-                                colors = ButtonColors(
-                                    containerColor = MaterialTheme.colorScheme.errorContainer,
-                                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                                    disabledContainerColor = MaterialTheme.colorScheme.onSurface,
-                                    disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            ) {
-                                Text("Cancel")
-                            }
-                            Button(
-                                enabled = editEvent.imageUrl.isNotEmpty(),
-                                onClick = {
-                                    showImageSelector = false
-                                    mapComponent.toggleMap()
-                                    selectedPlace = null
-                                }
-                            ) {
-                                Text("Confirm")
-                            }
+                            Text("Cancel")
+                        }
+                        Button(enabled = editEvent.imageUrl.isNotEmpty(), onClick = {
+                            showImageSelector = false
+                            mapComponent.toggleMap()
+                            selectedPlace = null
+                        }) {
+                            Text("Confirm")
                         }
                     }
                 }
@@ -894,14 +875,10 @@ fun AnimatedCardSection(
     editContent: @Composable ColumnScope.() -> Unit
 ) {
     val columnModifier = if (isOnSurface) {
-        Modifier
-            .fillMaxWidth()
-            .hazeEffect(LocalHazeState.current, CupertinoMaterials.thin())
+        Modifier.fillMaxWidth().hazeEffect(LocalHazeState.current, CupertinoMaterials.thin())
             .padding(16.dp)
     } else {
-        Modifier
-            .fillMaxWidth()
-            .padding(16.dp)
+        Modifier.fillMaxWidth().padding(16.dp)
     }
 
     Surface(
@@ -930,18 +907,13 @@ fun AnimatedCardSection(
 
 @Composable
 fun ColumnScope.CardSection(
-    title: String,
-    content: String
+    title: String, content: String
 ) {
     Text(
-        text = title,
-        style = MaterialTheme.typography.titleMedium,
-        textAlign = TextAlign.Center
+        text = title, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center
     )
     Text(
-        text = content,
-        style = MaterialTheme.typography.bodyMedium,
-        textAlign = TextAlign.Center
+        text = content, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center
     )
 }
 
