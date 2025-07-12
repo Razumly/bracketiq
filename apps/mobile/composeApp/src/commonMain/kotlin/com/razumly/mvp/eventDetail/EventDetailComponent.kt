@@ -48,7 +48,6 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val divisionTeams: StateFlow<Map<String, TeamWithPlayers>>
     val selectedDivision: StateFlow<Division?>
     val divisionFields: StateFlow<List<FieldWithMatches>>
-    val isBracketView: StateFlow<Boolean>
     val rounds: StateFlow<List<List<MatchWithRelations?>>>
     val losersBracket: StateFlow<Boolean>
     val showDetails: StateFlow<Boolean>
@@ -57,10 +56,12 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val currentUser: StateFlow<UserData>
     val validTeams: StateFlow<List<TeamWithPlayers>>
     val isHost: StateFlow<Boolean>
-    val editedEvent: StateFlow<EventAbs>
     val isEditing: StateFlow<Boolean>
-    val backCallback: BackCallback
     val isUserInEvent: StateFlow<Boolean>
+    val isBracketView: StateFlow<Boolean>
+    val isEventFull: StateFlow<Boolean>
+    val editedEvent: StateFlow<EventAbs>
+    val backCallback: BackCallback
 
     fun matchSelected(selectedMatch: MatchWithRelations)
     fun onHostCreateAccount()
@@ -142,7 +143,7 @@ class DefaultEventDetailComponent(
         }
     }
 
-    private val _isUserInEvent: MutableStateFlow<Boolean> = MutableStateFlow(false)
+    private val _isUserInEvent: MutableStateFlow<Boolean> = MutableStateFlow(checkIsUserInEvent(event))
     override val isUserInEvent = _isUserInEvent.asStateFlow()
 
     override val selectedEvent: StateFlow<EventAbsWithRelations?> =
@@ -179,7 +180,7 @@ class DefaultEventDetailComponent(
         }
     }.stateIn(
         scope, SharingStarted.Eagerly, EventWithFullRelations(
-            Tournament(), emptyList(), emptyList(), emptyList()
+            event, emptyList(), emptyList(), emptyList()
         )
     )
 
@@ -222,6 +223,14 @@ class DefaultEventDetailComponent(
         flowOf(teams.filter { it.team.teamSize == event.teamSizeLimit })
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
+    override val isEventFull = selectedEvent.map { eventWithRelations ->
+        if (eventWithRelations == null) {
+            checkEventIsFull(event)
+        } else {
+            checkEventIsFull(eventWithRelations.event)
+        }
+    }.stateIn(scope, SharingStarted.Eagerly, checkEventIsFull(event))
+
     init {
         backHandler.register(backCallback)
         scope.launch {
@@ -262,7 +271,7 @@ class DefaultEventDetailComponent(
                                     teamIds = teams.filterNotNull(), playerIds = players
                                 )
                             }
-                            eventAbsRepository.updateEvent(update)
+                            eventAbsRepository.updateLocalEvent(update)
                         }
                     }
                 }
@@ -273,7 +282,7 @@ class DefaultEventDetailComponent(
             eventWithRelations.distinctUntilChanged { old, new -> old == new }.filterNotNull()
                 .collect { event ->
                     matchRepository.subscribeToMatches()
-                    _isUserInEvent.value = checkIsUserInEvent()
+                    _isUserInEvent.value = checkIsUserInEvent(event.event)
                     if (_isUserInEvent.value) {
                         _usersTeam.value =
                             event.teams.find { it.team.playerIds.contains(currentUser.value.id) }
@@ -354,6 +363,8 @@ class DefaultEventDetailComponent(
                 loadingHandler.showLoading("Joining Event ...")
                 eventAbsRepository.addCurrentUserToEvent(selectedEvent.value!!.event).onSuccess {
                     _isUserInEvent.value = true
+                }.onFailure {
+                    _errorState.value = ErrorMessage(it.message ?: "")
                 }
             } else {
                 loadingHandler.showLoading("Creating Purchase Request ...")
@@ -400,12 +411,12 @@ class DefaultEventDetailComponent(
             if (!_isUserInEvent.value || selectedEvent.value == null) {
                 return@launch
             }
-            if (selectedEvent.value!!.event.price > 0) {
+            val result = if (selectedEvent.value!!.event.price > 0) {
                 loadingHandler.showLoading("Requesting Refund ...")
                 billingRepository.leaveAndRefundEvent(selectedEvent.value!!.event).onFailure {
                     _errorState.value = ErrorMessage(it.message ?: "")
                 }
-            } else if (!selectedEvent.value!!.event.teamSignup || checkIsUserFreeAgent()) {
+            } else if (!selectedEvent.value!!.event.teamSignup || checkIsUserFreeAgent(selectedEvent.value!!.event)) {
                 loadingHandler.showLoading("Leaving Event ...")
                 eventAbsRepository.removeCurrentUserFromEvent(selectedEvent.value!!.event)
                     .onFailure { _errorState.value = ErrorMessage(it.message ?: "") }
@@ -415,6 +426,7 @@ class DefaultEventDetailComponent(
                     selectedEvent.value!!.event, _usersTeam.value!!
                 ).onFailure { _errorState.value = ErrorMessage(it.message ?: "") }
             }
+            result.onSuccess { _isUserInEvent.value = false }
             loadingHandler.hideLoading()
         }
     }
@@ -550,27 +562,35 @@ class DefaultEventDetailComponent(
         }
     }
 
-    private fun checkIsUserWaitListed(): Boolean {
-        return selectedEvent.value?.event?.waitList?.any { participant ->
+    private fun checkIsUserWaitListed(event: EventAbs): Boolean {
+        return event.waitList.any { participant ->
             (currentUser.value.id + currentUser.value.teamIds).contains(
                 participant
             )
-        } == true
+        }
     }
 
-    private fun checkIsUserFreeAgent(): Boolean {
-        return selectedEvent.value?.event?.freeAgents?.any { participant ->
+    private fun checkIsUserFreeAgent(event: EventAbs): Boolean {
+        return event.freeAgents.any { participant ->
             (currentUser.value.id + currentUser.value.teamIds).contains(
                 participant
             )
-        } == true
+        }
     }
 
-    private fun checkIsUserParticipant(): Boolean {
-        return selectedEvent.value?.event?.playerIds?.contains(currentUser.value.id) == true
+    private fun checkIsUserParticipant(event: EventAbs): Boolean {
+        return event.playerIds.contains(currentUser.value.id)
     }
 
-    private fun checkIsUserInEvent(): Boolean {
-        return checkIsUserParticipant() || checkIsUserFreeAgent() || checkIsUserWaitListed()
+    private fun checkIsUserInEvent(event: EventAbs): Boolean {
+        return checkIsUserParticipant(event) || checkIsUserFreeAgent(event) || checkIsUserWaitListed(event)
+    }
+
+    private fun checkEventIsFull(event: EventAbs): Boolean {
+        return if (event.teamSignup) {
+            event.maxParticipants <= event.teamIds.size
+        } else {
+            event.maxParticipants <= event.playerIds.size
+        }
     }
 }

@@ -42,6 +42,7 @@ interface ITournamentRepository : IMVPRepository {
     suspend fun getTournaments(query: String): Result<List<Tournament>>
     suspend fun createTournament(newTournament: Tournament): Result<Tournament>
     suspend fun updateTournament(newTournament: Tournament): Result<Tournament>
+    suspend fun updateLocalTournament(newTournament: Tournament): Result<Tournament>
     suspend fun deleteTournament(tournamentId: String): Result<Unit>
 }
 
@@ -259,6 +260,12 @@ class TournamentRepository(
         }, onReturn = { tournament ->
             tournament
         })
+
+    override suspend fun updateLocalTournament(newTournament: Tournament): Result<Tournament> =
+        runCatching {
+            databaseService.getTournamentDao.upsertTournament(newTournament)
+            newTournament
+        }
 
     override suspend fun deleteTournament(tournamentId: String): Result<Unit> = kotlin.runCatching {
         database.deleteDocument(

@@ -16,6 +16,8 @@ import io.appwrite.Query
 import io.appwrite.services.Functions
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -28,6 +30,7 @@ interface IEventAbsRepository : IMVPRepository {
     fun resetCursor()
     suspend fun createEvent(event: EventAbs): Result<Unit>
     suspend fun updateEvent(event: EventAbs): Result<Unit>
+    suspend fun updateLocalEvent(event: EventAbs): Result<Unit>
     suspend fun removeTeamFromEvent(event: EventAbs, teamWithPlayers: TeamWithPlayers): Result<Unit>
     suspend fun removeCurrentUserFromEvent(event: EventAbs): Result<Unit>
     suspend fun getEvent(event: EventAbs): Result<EventAbsWithRelations>
@@ -185,7 +188,7 @@ class EventAbsRepository(
         return if (editEventResponse.error.isNullOrBlank()) {
             Result.success(Unit)
         } else {
-            Result.failure(Exception("Failed to add user to event"))
+            Result.failure(Exception(editEventResponse.error))
         }
     }
 
@@ -204,7 +207,7 @@ class EventAbsRepository(
         return if (editEventResponse.error.isNullOrBlank()) {
             Result.success(Unit)
         } else {
-            Result.failure(Exception("Failed to add user to event"))
+            Result.failure(Exception(editEventResponse.error))
         }
     }
 
@@ -228,9 +231,9 @@ class EventAbsRepository(
 
         val editEventResponse = Json.decodeFromString<EditEventResponse>(response.responseBody)
         return if (editEventResponse.error.isNullOrBlank()) {
-            Result.success(Unit)
+            getEvent(event).map{}
         } else {
-            Result.failure(Exception("Failed to add user to event"))
+            Result.failure(Exception("Failed to add user to event: ${editEventResponse.error}"))
         }
     }
 
@@ -253,14 +256,25 @@ class EventAbsRepository(
         if (editEventResponse.error.isNullOrBlank()) {
             return@runCatching
         } else {
-           throw Exception("Failed to add team to event")
+           throw Exception(editEventResponse.error)
         }
     }
+    override suspend fun updateLocalEvent(event: EventAbs): Result<Unit> =
+        when (event) {
+            is EventImp -> {
+                eventRepository.updateLocalEvent(event)
+            }
+
+            is Tournament -> {
+                tournamentRepository.updateLocalTournament(event)
+            }
+        }.map{}
 }
 
 @Serializable
+@OptIn(ExperimentalSerializationApi::class)
 data class EditEventRequest(
-    val task: String = "editEvent",
+    @EncodeDefault val task: String = "editEvent",
     val eventId: String,
     val userId: String? = null,
     val teamId: String? = null,

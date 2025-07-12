@@ -31,6 +31,7 @@ interface IEventRepository : IMVPRepository {
     suspend fun getEvent(eventId: String): Result<EventWithRelations>
     suspend fun createEvent(newEvent: EventImp): Result<EventImp>
     suspend fun updateEvent(newEvent: EventImp): Result<EventImp>
+    suspend fun updateLocalEvent(newEvent: EventImp): Result<EventImp>
     suspend fun getEvents(query: String): Result<List<EventImp>>
     fun getEventsFlow(query: String): Flow<Result<List<EventImp>>>
 }
@@ -182,6 +183,11 @@ class EventRepository(
             lastDocumentId = response.getOrNull()?.lastOrNull()?.id ?: ""
         }
         return response
+    }
+
+    override suspend fun updateLocalEvent(newEvent: EventImp): Result<EventImp> {
+        databaseService.getEventImpDao.upsertEvent(newEvent)
+        return Result.success(newEvent)
     }
 
     override fun getEventsFlow(query: String): Flow<Result<List<EventImp>>> {

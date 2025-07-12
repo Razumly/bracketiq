@@ -70,6 +70,7 @@ fun EventDetailScreen(
     var animateExpanded by remember { mutableStateOf(false) }
     val isHost by component.isHost.collectAsState()
     val isEditing by component.isEditing.collectAsState()
+    val isEventFull by component.isEventFull.collectAsState()
     val editedEvent by component.editedEvent.collectAsState()
     var showFab by remember { mutableStateOf(false) }
     val loadingHandler = LocalLoadingHandler.current
@@ -109,8 +110,7 @@ fun EventDetailScreen(
                 AnimatedVisibility(
                     !showDetails, enter = expandVertically(), exit = shrinkVertically()
                 ) {
-                    EventDetails(
-                        paymentProcessor = component,
+                    EventDetails(paymentProcessor = component,
                         mapComponent = mapComponent,
                         hostHasAccount = currentUser.stripeAccountId?.isNotBlank() == true,
                         onHostCreateAccount = { component.onHostCreateAccount() },
@@ -160,41 +160,76 @@ fun EventDetailScreen(
                                         component.viewEvent()
                                         showDropdownMenu = false
                                     }) { Text("View") }
+                                    // In your EventDetailScreen composable, update the button section
                                     if (!isUserInEvent) {
                                         val individual =
                                             if (teamSignup) "Join as Free Agent" else "Join"
-                                        if (selectedEvent.event.price > 0 && !teamSignup) {
-                                            PaymentProcessorButton({
-                                                component.joinEvent()
-                                                showDropdownMenu = false
-                                            }, component, "Purchase Ticket")
-                                        } else {
-                                            Button(onClick = {
-                                                component.joinEvent()
-                                                showDropdownMenu = false
-                                            }) { Text(individual) }
-                                        }
-                                        if (teamSignup) {
-                                            if (selectedEvent.event.price > 0) {
-                                                PaymentProcessorButton(
-                                                    onClick = {
-                                                        showTeamSelectionDialog = true
-                                                        showDropdownMenu = false
-                                                    }, component,
-                                                    "Purchase Ticket for Team"
-                                                )
+
+                                        if (isEventFull) {
+                                            // Show waitlist options when event is full
+                                            if (selectedEvent.event.price > 0 && !teamSignup) {
+                                                PaymentProcessorButton({
+                                                    component.joinEvent()
+                                                    showDropdownMenu = false
+                                                }, component, "Join Waitlist (Payment Required)")
                                             } else {
                                                 Button(onClick = {
-                                                    showTeamSelectionDialog = true
+                                                    component.joinEvent()
                                                     showDropdownMenu = false
-                                                }) { Text("Join as Team") }
+                                                }) {
+                                                    Text("Join Waitlist")
+                                                }
+                                            }
+
+                                            if (teamSignup) {
+                                                if (selectedEvent.event.price > 0) {
+                                                    PaymentProcessorButton(
+                                                        onClick = {
+                                                            component.joinEvent()
+                                                            showDropdownMenu = false
+                                                        },
+                                                        component,
+                                                        "Join Waitlist as Team (Payment Required)"
+                                                    )
+                                                } else {
+                                                    Button(onClick = {
+                                                        component.joinEvent()
+                                                        showDropdownMenu = false
+                                                    }) {
+                                                        Text("Join Waitlist as Team")
+                                                    }
+                                                }
+                                            }
+                                        } else {
+                                            // Original join logic for when event is not full
+                                            if (selectedEvent.event.price > 0 && !teamSignup) {
+                                                PaymentProcessorButton({
+                                                    component.joinEvent()
+                                                    showDropdownMenu = false
+                                                }, component, "Purchase Ticket")
+                                            } else {
+                                                Button(onClick = {
+                                                    component.joinEvent()
+                                                    showDropdownMenu = false
+                                                }) { Text(individual) }
+                                            }
+
+                                            if (teamSignup) {
+                                                if (selectedEvent.event.price > 0) {
+                                                    PaymentProcessorButton(
+                                                        onClick = {
+                                                            showTeamSelectionDialog = true
+                                                            showDropdownMenu = false
+                                                        }, component, "Purchase Ticket for Team"
+                                                    )
+                                                } else {
+                                                    Button(onClick = {
+                                                        showTeamSelectionDialog = true
+                                                        showDropdownMenu = false
+                                                    }) { Text("Join as Team") }
+                                                }
                                             }
                                         }
-                                    } else {
-                                        Button(onClick = {
-                                            component.leaveEvent()
-                                            showDropdownMenu = false
-                                        }) { Text("Leave") }
                                     }
                                 }
                             }
