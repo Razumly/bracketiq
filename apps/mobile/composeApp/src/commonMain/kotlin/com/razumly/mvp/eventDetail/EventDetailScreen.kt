@@ -45,7 +45,6 @@ import com.razumly.mvp.core.presentation.composables.TeamCard
 import com.razumly.mvp.core.presentation.util.buttonTransitionSpec
 import com.razumly.mvp.core.util.LocalErrorHandler
 import com.razumly.mvp.core.util.LocalLoadingHandler
-import com.razumly.mvp.eventDetail.composables.CollapsableHeader
 import com.razumly.mvp.eventDetail.composables.ParticipantsView
 import com.razumly.mvp.eventDetail.composables.TournamentBracketView
 import com.razumly.mvp.eventMap.MapComponent
@@ -167,53 +166,44 @@ fun EventDetailScreen(
 
                                         if (isEventFull) {
                                             // Show waitlist options when event is full
-                                            if (selectedEvent.event.price > 0 && !teamSignup) {
-                                                PaymentProcessorButton({
-                                                    component.joinEvent()
-                                                    showDropdownMenu = false
-                                                }, component, "Join Waitlist (Payment Required)")
-                                            } else {
-                                                Button(onClick = {
-                                                    component.joinEvent()
-                                                    showDropdownMenu = false
-                                                }) {
-                                                    Text("Join Waitlist")
-                                                }
-                                            }
-
                                             if (teamSignup) {
                                                 if (selectedEvent.event.price > 0) {
                                                     PaymentProcessorButton(
                                                         onClick = {
+                                                            showTeamSelectionDialog = true
+                                                            showDropdownMenu = false
+                                                        },
+                                                        component,
+                                                        "Join Waitlist as Team (Payment Not Required)"
+                                                    )
+                                                } else {
+                                                    Button(onClick = {
+                                                        showTeamSelectionDialog = true
+                                                        showDropdownMenu = false
+                                                    }) {
+                                                        Text("Join Waitlist as Team")
+                                                    }
+                                                }
+                                            } else {
+                                                if (selectedEvent.event.price > 0) {
+                                                    PaymentProcessorButton(
+                                                        {
                                                             component.joinEvent()
                                                             showDropdownMenu = false
                                                         },
                                                         component,
-                                                        "Join Waitlist as Team (Payment Required)"
+                                                        "Join Waitlist (Payment Not Required)"
                                                     )
                                                 } else {
                                                     Button(onClick = {
                                                         component.joinEvent()
                                                         showDropdownMenu = false
                                                     }) {
-                                                        Text("Join Waitlist as Team")
+                                                        Text("Join Waitlist")
                                                     }
                                                 }
                                             }
                                         } else {
-                                            // Original join logic for when event is not full
-                                            if (selectedEvent.event.price > 0 && !teamSignup) {
-                                                PaymentProcessorButton({
-                                                    component.joinEvent()
-                                                    showDropdownMenu = false
-                                                }, component, "Purchase Ticket")
-                                            } else {
-                                                Button(onClick = {
-                                                    component.joinEvent()
-                                                    showDropdownMenu = false
-                                                }) { Text(individual) }
-                                            }
-
                                             if (teamSignup) {
                                                 if (selectedEvent.event.price > 0) {
                                                     PaymentProcessorButton(
@@ -228,7 +218,37 @@ fun EventDetailScreen(
                                                         showDropdownMenu = false
                                                     }) { Text("Join as Team") }
                                                 }
+                                            } else {
+                                                if (selectedEvent.event.price > 0) {
+                                                    PaymentProcessorButton({
+                                                        component.joinEvent()
+                                                        showDropdownMenu = false
+                                                    }, component, "Purchase Ticket")
+                                                } else {
+                                                    Button(onClick = {
+                                                        component.joinEvent()
+                                                        showDropdownMenu = false
+                                                    }) { Text(individual) }
+                                                }
                                             }
+                                        }
+                                    } else {
+                                        val leaveMessage =
+                                            if (component.checkIsUserFreeAgent(selectedEvent.event)) {
+                                                "Leave as Free Agent"
+                                            } else if (component.checkIsUserWaitListed(selectedEvent.event)) {
+                                                "Leave Waitlist"
+                                            } else if (selectedEvent.event.price > 0) {
+                                                "Request Refund"
+                                            } else {
+                                                "Leave Event"
+                                            }
+
+                                        Button(onClick = {
+                                            component.leaveEvent()
+                                            showDropdownMenu = false
+                                        }) {
+                                            Text(leaveMessage)
                                         }
                                     }
                                 }
@@ -242,7 +262,6 @@ fun EventDetailScreen(
                     exit = shrinkVertically(shrinkTowards = Alignment.Top)
                 ) {
                     Column(Modifier.padding(innerPadding).padding(top = 32.dp)) {
-                        CollapsableHeader(component)
                         Box(Modifier.fillMaxSize()) {
                             when (selectedEvent) {
                                 is TournamentWithRelations -> {

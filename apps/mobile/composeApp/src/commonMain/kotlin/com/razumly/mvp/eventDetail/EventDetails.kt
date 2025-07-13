@@ -111,14 +111,14 @@ import mvp.composeapp.generated.resources.free_entry_hint
 import mvp.composeapp.generated.resources.invalid_price
 import mvp.composeapp.generated.resources.max_players
 import mvp.composeapp.generated.resources.max_teams
-import mvp.composeapp.generated.resources.team_size_error
 import mvp.composeapp.generated.resources.team_size_limit
+import mvp.composeapp.generated.resources.value_range
 import mvp.composeapp.generated.resources.value_too_low
 import org.jetbrains.compose.resources.stringResource
 
 val LocalHazeState = compositionLocalOf { HazeState() }
 
-@OptIn(ExperimentalHazeApi::class, ExperimentalHazeMaterialsApi::class)
+@OptIn(ExperimentalHazeApi::class)
 @Composable
 fun EventDetails(
     paymentProcessor: IPaymentProcessor,
@@ -183,11 +183,11 @@ fun EventDetails(
             editEvent.location.isNotBlank() && editEvent.lat != 0.0 && editEvent.long != 0.0
 
         if (editEvent is Tournament) {
-            isWinnerSetCountValid = editEvent.winnerSetCount > 0
+            isWinnerSetCountValid = editEvent.winnerSetCount in 1..5
             isWinnerPointsValid = editEvent.winnerBracketPointsToVictory.all { it > 0 }
             isFieldCountValid = fieldCount > 0
             if (editEvent.doubleElimination) {
-                isLoserSetCountValid = editEvent.loserSetCount > 0
+                isLoserSetCountValid = editEvent.loserSetCount in 1..5
                 isLoserPointsValid = editEvent.loserBracketPointsToVictory.all { it > 0 }
             } else {
                 isLoserSetCountValid = true
@@ -535,7 +535,7 @@ fun EventDetails(
                                             }
                                         },
                                         isError = !isMaxParticipantsValid,
-                                        errorMessage = stringResource(Res.string.value_too_low),
+                                        errorMessage = stringResource(Res.string.value_too_low, 2),
                                         isMoney = false,
                                     )
 
@@ -552,7 +552,7 @@ fun EventDetails(
                                             }
                                         },
                                         isError = !isTeamSizeValid,
-                                        errorMessage = stringResource(Res.string.team_size_error),
+                                        errorMessage = stringResource(Res.string.value_range, 2, 6),
                                         isMoney = false,
                                         placeholder = "2-6"
                                     )
@@ -622,7 +622,7 @@ fun EventDetails(
                                             label = "Field Count",
                                             isError = !isFieldCountValid,
                                             isMoney = false,
-                                            errorMessage = stringResource(Res.string.value_too_low),
+                                            errorMessage = stringResource(Res.string.value_too_low, 0),
                                         )
 
                                         // Winner bracket configuration
@@ -645,7 +645,7 @@ fun EventDetails(
                                             label = "Winner Set Count",
                                             isError = !isWinnerSetCountValid,
                                             isMoney = false,
-                                            errorMessage = stringResource(Res.string.value_too_low),
+                                            errorMessage = stringResource(Res.string.value_range, 1, 5),
                                         )
 
                                         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -723,7 +723,7 @@ fun EventDetails(
                                                     label = "Loser Set Count (1-5)",
                                                     isError = !isLoserSetCountValid,
                                                     isMoney = false,
-                                                    errorMessage = stringResource(Res.string.value_too_low),
+                                                    errorMessage = stringResource(Res.string.value_range, 1, 5),
                                                     placeholder = "1-5"
                                                 )
                                             }

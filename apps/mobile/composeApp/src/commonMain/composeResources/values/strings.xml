@@ -33,8 +33,8 @@
     <string name="ok">OK</string>
     <string name="cancel">Cancel</string>
     <string name="team_size_limit">Team Size Limit</string>
-    <string name="team_size_error">Please enter a value between 2-6</string>
-    <string name="value_too_low">Please enter a value greater than 0</string>
+    <string name="value_range">Please enter a value between %1$d-%2$d</string>
+    <string name="value_too_low">Please enter a value greater than %1$d</string>
     <string name="max_players">Max Players at Event</string>
     <string name="max_teams">Max Teams at Event</string>
 </resources>
