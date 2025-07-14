@@ -363,7 +363,7 @@ class DefaultEventDetailComponent(
     override fun joinEvent() {
         scope.launch {
             if (selectedEvent.value == null) return@launch
-            if (selectedEvent.value!!.event.price == 0.0 || isEventFull.value) {
+            if (selectedEvent.value!!.event.price == 0.0 || isEventFull.value || selectedEvent.value!!.event.teamSignup) {
                 loadingHandler.showLoading("Joining Event ...")
                 eventAbsRepository.addCurrentUserToEvent(selectedEvent.value!!.event).onSuccess {
                     _isUserInEvent.value = true

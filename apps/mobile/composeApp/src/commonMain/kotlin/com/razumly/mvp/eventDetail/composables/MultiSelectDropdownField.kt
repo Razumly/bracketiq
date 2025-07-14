@@ -10,6 +10,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -29,6 +30,8 @@ fun MultiSelectDropdownField(
     selectedItems: List<Division>,
     label: String,
     modifier: Modifier = Modifier,
+    isError: Boolean,
+    errorMessage: String?,
     onSelectionChange: (List<Division>) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -53,6 +56,14 @@ fun MultiSelectDropdownField(
             label = { Text(label, maxLines = 1) },
             trailingIcon = {
                 ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
+            },
+            supportingText = {
+                if (isError && errorMessage != null) {
+                    Text(
+                        text = errorMessage,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
             },
             modifier = Modifier
                 .menuAnchor(MenuAnchorType.PrimaryEditable, true)

@@ -111,12 +111,15 @@ fun combineLocalDateTimeAndConvertToUtc(
     minute: Int,
     timeZone: TimeZone
 ): Instant {
-    val localDate = Instant.fromEpochMilliseconds(dateMillis)
-        .toLocalDateTime(timeZone)
+    val selectedDate = Instant.fromEpochMilliseconds(dateMillis)
+        .toLocalDateTime(TimeZone.UTC)
         .date
-    val localDateTime = LocalDateTime(localDate, LocalTime(hour, minute))
+
+    val localDateTime = LocalDateTime(selectedDate, LocalTime(hour, minute))
+
     return localDateTime.toInstant(timeZone)
 }
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 object PastOrPresentSelectableDates: SelectableDates {

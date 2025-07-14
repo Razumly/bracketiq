@@ -4,11 +4,15 @@ import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.presentation.composables.NativeViewFactory
 import com.razumly.mvp.core.util.UrlHandler
 import io.github.aakira.napier.Napier
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 // In iosMain
 actual open class PaymentProcessor : IPaymentProcessor {
     actual override var urlHandler: UrlHandler? = null
 
+    private val _paymentResult = MutableStateFlow<PaymentResult?>(null)
+    actual override val paymentResult = _paymentResult.asStateFlow()
     private var purchaseIntent: PurchaseIntent? = null
     private var onPaymentResult: ((PaymentResult) -> Unit)? = null
     private var _nativeViewFactory: NativeViewFactory? = null
@@ -35,15 +39,17 @@ actual open class PaymentProcessor : IPaymentProcessor {
         when (result) {
             is PaymentResult.Completed -> {
                 Napier.d("Completed Purchase", tag = "Stripe")
-                // Handle success
+                _paymentResult.value = PaymentResult.Completed
             }
             is PaymentResult.Canceled -> {
                 Napier.d("Cancelled Purchase", tag = "Stripe")
-                // Handle cancellation
+                _paymentResult.value = PaymentResult.Canceled
             }
             is PaymentResult.Failed -> {
                 Napier.d("Failed Purchase: ${result.error}", tag = "Stripe")
-                // Handle failure
+                _paymentResult.value = PaymentResult.Failed(
+                    result.error
+                )
             }
         }
         onPaymentResult?.invoke(result)

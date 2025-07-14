@@ -19,7 +19,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonColors
@@ -27,7 +26,6 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -51,7 +49,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -111,9 +108,11 @@ import mvp.composeapp.generated.resources.free_entry_hint
 import mvp.composeapp.generated.resources.invalid_price
 import mvp.composeapp.generated.resources.max_players
 import mvp.composeapp.generated.resources.max_teams
+import mvp.composeapp.generated.resources.select_a_value
 import mvp.composeapp.generated.resources.team_size_limit
 import mvp.composeapp.generated.resources.value_range
 import mvp.composeapp.generated.resources.value_too_low
+import mvp.composeapp.generated.resources.enter_value
 import org.jetbrains.compose.resources.stringResource
 
 val LocalHazeState = compositionLocalOf { HazeState() }
@@ -152,6 +151,7 @@ fun EventDetails(
     var selectedPlace by remember { mutableStateOf<MVPPlace?>(null) }
 
     // Validation states
+    var isNameValid by remember { mutableStateOf(editEvent.name.isNotBlank()) }
     var isPriceValid by remember { mutableStateOf(editEvent.price >= 0) }
     var isMaxParticipantsValid by remember { mutableStateOf(editEvent.maxParticipants > 2) }
     var isTeamSizeValid by remember { mutableStateOf(editEvent.teamSizeLimit >= 2) }
@@ -160,9 +160,11 @@ fun EventDetails(
     var isWinnerPointsValid by remember { mutableStateOf(true) }
     var isLoserPointsValid by remember { mutableStateOf(true) }
     var isLocationValid by remember { mutableStateOf(editEvent.location.isNotBlank() && editEvent.lat != 0.0 && editEvent.long != 0.0) }
-    var selectedDivisions by remember { mutableStateOf(editEvent.divisions) }
     var isFieldCountValid by remember { mutableStateOf(true) }
+    var isSkillLevelValid by remember { mutableStateOf(true) }
+
     var fieldCount by remember { mutableStateOf(0) }
+    var selectedDivisions by remember { mutableStateOf(editEvent.divisions) }
     var addSelfToEvent by remember { mutableStateOf(false) }
 
     val currentLocation by mapComponent.currentLocation.collectAsState()
@@ -176,11 +178,13 @@ fun EventDetails(
 
     // Validation effect
     LaunchedEffect(editEvent) {
+        isNameValid = editEvent.name.isNotBlank()
         isPriceValid = editEvent.price >= 0
         isMaxParticipantsValid = editEvent.maxParticipants > 2
         isTeamSizeValid = editEvent.teamSizeLimit >= 2
         isLocationValid =
             editEvent.location.isNotBlank() && editEvent.lat != 0.0 && editEvent.long != 0.0
+        isSkillLevelValid = editEvent.divisions.isNotEmpty()
 
         if (editEvent is Tournament) {
             isWinnerSetCountValid = editEvent.winnerSetCount in 1..5
@@ -237,15 +241,6 @@ fun EventDetails(
                         text = "",
                         arrow = false
                     )
-                    IconButton(
-                        onClick = onFavoriteClick,
-                        modifier = Modifier.padding(top = 32.dp, end = 8.dp).align(Alignment.TopEnd)
-                    ) {
-                        Icon(
-                            painter = rememberVectorPainter(Icons.Default.AddCircle),
-                            contentDescription = "Favorite",
-                        )
-                    }
                 }
 
                 Column(
@@ -290,7 +285,15 @@ fun EventDetails(
                                 editContent = {
                                     OutlinedTextField(value = editEvent.name,
                                         onValueChange = { onEditEvent { copy(name = it) } },
-                                        label = { Text("Event Name") })
+                                        label = { Text("Event Name") },
+                                        isError = !isNameValid,
+                                        supportingText = {
+                                            Text(
+                                                text = stringResource(Res.string.enter_value),
+                                                color = MaterialTheme.colorScheme.error
+                                            )
+                                        }
+                                    )
                                 })
 
                             // Location Display
@@ -474,6 +477,8 @@ fun EventDetails(
                                     MultiSelectDropdownField(
                                         selectedItems = selectedDivisions,
                                         label = "Skill levels",
+                                        isError = !isSkillLevelValid,
+                                        errorMessage = stringResource(Res.string.select_a_value),
                                     ) { newSelection ->
                                         selectedDivisions = newSelection
                                         onEditEvent { copy(divisions = selectedDivisions) }
@@ -535,7 +540,7 @@ fun EventDetails(
                                             }
                                         },
                                         isError = !isMaxParticipantsValid,
-                                        errorMessage = stringResource(Res.string.value_too_low, 2),
+                                        errorMessage = stringResource(Res.string.value_too_low, 1),
                                         isMoney = false,
                                     )
 
@@ -556,15 +561,6 @@ fun EventDetails(
                                         isMoney = false,
                                         placeholder = "2-6"
                                     )
-
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.padding(top = 8.dp)
-                                    ) {
-                                        Checkbox(checked = !editEvent.singleDivision,
-                                            onCheckedChange = { onEditEvent { copy(singleDivision = !it) } })
-                                        Text(text = "Split Signup Into Divisions")
-                                    }
 
                                     if (event is EventImp) {
                                         Row(

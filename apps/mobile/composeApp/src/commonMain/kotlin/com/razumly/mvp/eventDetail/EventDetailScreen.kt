@@ -161,9 +161,6 @@ fun EventDetailScreen(
                                     }) { Text("View") }
                                     // In your EventDetailScreen composable, update the button section
                                     if (!isUserInEvent) {
-                                        val individual =
-                                            if (teamSignup) "Join as Free Agent" else "Join"
-
                                         if (isEventFull) {
                                             // Show waitlist options when event is full
                                             if (teamSignup) {
@@ -205,6 +202,9 @@ fun EventDetailScreen(
                                             }
                                         } else {
                                             if (teamSignup) {
+                                                Button(onClick = {component.joinEvent()}) {
+                                                    Text("Join as free agent")
+                                                }
                                                 if (selectedEvent.event.price > 0) {
                                                     PaymentProcessorButton(
                                                         onClick = {
@@ -228,7 +228,7 @@ fun EventDetailScreen(
                                                     Button(onClick = {
                                                         component.joinEvent()
                                                         showDropdownMenu = false
-                                                    }) { Text(individual) }
+                                                    }) { Text("Join") }
                                                 }
                                             }
                                         }
