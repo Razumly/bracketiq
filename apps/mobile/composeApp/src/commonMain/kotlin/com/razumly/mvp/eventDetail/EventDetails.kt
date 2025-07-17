@@ -126,7 +126,6 @@ fun EventDetails(
     onHostCreateAccount: () -> Unit,
     eventWithRelations: EventAbsWithRelations,
     editEvent: EventAbs,
-    onFavoriteClick: () -> Unit,
     navPadding: PaddingValues = PaddingValues(),
     onPlaceSelected: (MVPPlace?) -> Unit,
     editView: Boolean,
@@ -136,7 +135,6 @@ fun EventDetails(
     onAddCurrentUser: (Boolean) -> Unit,
     onEventTypeSelected: (EventType) -> Unit,
     onSelectFieldCount: (Int) -> Unit,
-    onBack: () -> Unit,
     joinButton: @Composable (isValid: Boolean) -> Unit
 ) {
     val event = eventWithRelations.event
@@ -233,16 +231,6 @@ fun EventDetails(
                     Modifier.matchParentSize().hazeSource(hazeState, key = "BackGround"),
                     if (!editView) event.imageUrl else editEvent.imageUrl,
                 )
-
-                if (!editView) {
-                    PlatformBackButton(
-                        { onBack() },
-                        modifier = Modifier.padding(top = 32.dp, start = 8.dp)
-                            .align(Alignment.TopStart),
-                        text = "",
-                        arrow = false
-                    )
-                }
 
                 Column(
                     modifier = Modifier.fillMaxWidth(),

@@ -19,9 +19,20 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -41,6 +52,7 @@ import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
 import com.razumly.mvp.core.presentation.composables.PaymentProcessorButton
+import com.razumly.mvp.core.presentation.composables.PlatformBackButton
 import com.razumly.mvp.core.presentation.composables.TeamCard
 import com.razumly.mvp.core.presentation.util.buttonTransitionSpec
 import com.razumly.mvp.core.util.LocalErrorHandler
@@ -74,6 +86,8 @@ fun EventDetailScreen(
     val editedEvent by component.editedEvent.collectAsState()
     var showFab by remember { mutableStateOf(false) }
     val loadingHandler = LocalLoadingHandler.current
+    var showOptionsDropdown by remember { mutableStateOf(false) }
+    var showDeleteConfirmation by remember { mutableStateOf(false) }
 
     val isUserInEvent by component.isUserInEvent.collectAsState()
 
@@ -110,148 +124,227 @@ fun EventDetailScreen(
                 AnimatedVisibility(
                     !showDetails, enter = expandVertically(), exit = shrinkVertically()
                 ) {
-                    EventDetails(paymentProcessor = component,
-                        mapComponent = mapComponent,
-                        hostHasAccount = currentUser.stripeAccountId?.isNotBlank() == true,
-                        onHostCreateAccount = { component.onHostCreateAccount() },
-                        eventWithRelations = selectedEvent,
-                        editEvent = editedEvent,
-                        onFavoriteClick = {},
-                        navPadding = LocalNavBarPadding.current,
-                        onPlaceSelected = { component.selectPlace(it) },
-                        editView = isEditing,
-                        onEditEvent = { update -> component.editEventField(update) },
-                        onEditTournament = { update -> component.editTournamentField(update) },
-                        isNewEvent = false,
-                        onEventTypeSelected = { component.onTypeSelected(it) },
-                        onAddCurrentUser = {},
-                        onBack = { component.backCallback.onBack() },
-                        onSelectFieldCount = { component.selectFieldCount(it) }) { isValid ->
-                        AnimatedContent(
-                            targetState = isEditing,
-                            transitionSpec = { buttonTransitionSpec() },
-                            label = "buttonTransition"
-                        ) { editMode ->
-                            Column(
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                if (editMode) {
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box {
+                        EventDetails(paymentProcessor = component,
+                            mapComponent = mapComponent,
+                            hostHasAccount = currentUser.stripeAccountId?.isNotBlank() == true,
+                            onHostCreateAccount = { component.onHostCreateAccount() },
+                            eventWithRelations = selectedEvent,
+                            editEvent = editedEvent,
+                            navPadding = LocalNavBarPadding.current,
+                            onPlaceSelected = { component.selectPlace(it) },
+                            editView = isEditing,
+                            onEditEvent = { update -> component.editEventField(update) },
+                            onEditTournament = { update -> component.editTournamentField(update) },
+                            isNewEvent = false,
+                            onEventTypeSelected = { component.onTypeSelected(it) },
+                            onAddCurrentUser = {},
+                            onSelectFieldCount = { component.selectFieldCount(it) }) { isValid ->
+                            AnimatedContent(
+                                targetState = isEditing,
+                                transitionSpec = { buttonTransitionSpec() },
+                                label = "buttonTransition"
+                            ) { editMode ->
+                                Column(
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    if (editMode) {
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Button(onClick = {
+                                                component.updateEvent()
+                                                component.toggleEdit()
+                                            }, enabled = isValid) {
+                                                Text("Confirm")
+                                            }
+                                            Button(onClick = {
+                                                component.toggleEdit()
+                                            }) {
+                                                Text("Cancel")
+                                            }
+                                        }
+                                    } else {
                                         Button(onClick = {
-                                            component.updateEvent()
-                                            component.toggleEdit()
-                                        }, enabled = isValid) {
-                                            Text("Confirm")
-                                        }
-                                        Button(onClick = {
-                                            component.toggleEdit()
-                                        }) {
-                                            Text("Cancel")
-                                        }
-                                    }
-                                } else {
-                                    if (isHost) {
-                                        Button(onClick = { component.toggleEdit() }) {
-                                            Text("Edit")
-                                        }
-                                    }
-                                    Button(onClick = {
-                                        component.viewEvent()
-                                        showDropdownMenu = false
-                                    }) { Text("View") }
-                                    // In your EventDetailScreen composable, update the button section
-                                    if (!isUserInEvent) {
-                                        if (isEventFull) {
-                                            // Show waitlist options when event is full
-                                            if (teamSignup) {
-                                                if (selectedEvent.event.price > 0) {
-                                                    PaymentProcessorButton(
-                                                        onClick = {
+                                            component.viewEvent()
+                                            showDropdownMenu = false
+                                        }) { Text("View") }
+                                        // In your EventDetailScreen composable, update the button section
+                                        if (!isUserInEvent) {
+                                            if (isEventFull) {
+                                                // Show waitlist options when event is full
+                                                if (teamSignup) {
+                                                    if (selectedEvent.event.price > 0) {
+                                                        PaymentProcessorButton(
+                                                            onClick = {
+                                                                showTeamSelectionDialog = true
+                                                                showDropdownMenu = false
+                                                            },
+                                                            component,
+                                                            "Join Waitlist as Team (Payment Not Required)"
+                                                        )
+                                                    } else {
+                                                        Button(onClick = {
                                                             showTeamSelectionDialog = true
                                                             showDropdownMenu = false
-                                                        },
-                                                        component,
-                                                        "Join Waitlist as Team (Payment Not Required)"
-                                                    )
+                                                        }) {
+                                                            Text("Join Waitlist as Team")
+                                                        }
+                                                    }
                                                 } else {
-                                                    Button(onClick = {
-                                                        showTeamSelectionDialog = true
-                                                        showDropdownMenu = false
-                                                    }) {
-                                                        Text("Join Waitlist as Team")
+                                                    if (selectedEvent.event.price > 0) {
+                                                        PaymentProcessorButton(
+                                                            {
+                                                                component.joinEvent()
+                                                                showDropdownMenu = false
+                                                            },
+                                                            component,
+                                                            "Join Waitlist (Payment Not Required)"
+                                                        )
+                                                    } else {
+                                                        Button(onClick = {
+                                                            component.joinEvent()
+                                                            showDropdownMenu = false
+                                                        }) {
+                                                            Text("Join Waitlist")
+                                                        }
                                                     }
                                                 }
                                             } else {
-                                                if (selectedEvent.event.price > 0) {
-                                                    PaymentProcessorButton(
-                                                        {
+                                                if (teamSignup) {
+                                                    Button(onClick = { component.joinEvent() }) {
+                                                        Text("Join as free agent")
+                                                    }
+                                                    if (selectedEvent.event.price > 0) {
+                                                        PaymentProcessorButton(
+                                                            onClick = {
+                                                                showTeamSelectionDialog = true
+                                                                showDropdownMenu = false
+                                                            }, component, "Purchase Ticket for Team"
+                                                        )
+                                                    } else {
+                                                        Button(onClick = {
+                                                            showTeamSelectionDialog = true
+                                                            showDropdownMenu = false
+                                                        }) { Text("Join as Team") }
+                                                    }
+                                                } else {
+                                                    if (selectedEvent.event.price > 0) {
+                                                        PaymentProcessorButton({
                                                             component.joinEvent()
                                                             showDropdownMenu = false
-                                                        },
-                                                        component,
-                                                        "Join Waitlist (Payment Not Required)"
-                                                    )
-                                                } else {
-                                                    Button(onClick = {
-                                                        component.joinEvent()
-                                                        showDropdownMenu = false
-                                                    }) {
-                                                        Text("Join Waitlist")
+                                                        }, component, "Purchase Ticket")
+                                                    } else {
+                                                        Button(onClick = {
+                                                            component.joinEvent()
+                                                            showDropdownMenu = false
+                                                        }) { Text("Join") }
                                                     }
                                                 }
                                             }
                                         } else {
-                                            if (teamSignup) {
-                                                Button(onClick = {component.joinEvent()}) {
-                                                    Text("Join as free agent")
-                                                }
-                                                if (selectedEvent.event.price > 0) {
-                                                    PaymentProcessorButton(
-                                                        onClick = {
-                                                            showTeamSelectionDialog = true
-                                                            showDropdownMenu = false
-                                                        }, component, "Purchase Ticket for Team"
+                                            val leaveMessage =
+                                                if (component.checkIsUserFreeAgent(selectedEvent.event)) {
+                                                    "Leave as Free Agent"
+                                                } else if (component.checkIsUserWaitListed(
+                                                        selectedEvent.event
                                                     )
+                                                ) {
+                                                    "Leave Waitlist"
+                                                } else if (selectedEvent.event.price > 0) {
+                                                    "Request Refund"
                                                 } else {
-                                                    Button(onClick = {
-                                                        showTeamSelectionDialog = true
-                                                        showDropdownMenu = false
-                                                    }) { Text("Join as Team") }
+                                                    "Leave Event"
                                                 }
-                                            } else {
-                                                if (selectedEvent.event.price > 0) {
-                                                    PaymentProcessorButton({
-                                                        component.joinEvent()
-                                                        showDropdownMenu = false
-                                                    }, component, "Purchase Ticket")
-                                                } else {
-                                                    Button(onClick = {
-                                                        component.joinEvent()
-                                                        showDropdownMenu = false
-                                                    }) { Text("Join") }
-                                                }
-                                            }
-                                        }
-                                    } else {
-                                        val leaveMessage =
-                                            if (component.checkIsUserFreeAgent(selectedEvent.event)) {
-                                                "Leave as Free Agent"
-                                            } else if (component.checkIsUserWaitListed(selectedEvent.event)) {
-                                                "Leave Waitlist"
-                                            } else if (selectedEvent.event.price > 0) {
-                                                "Request Refund"
-                                            } else {
-                                                "Leave Event"
-                                            }
 
-                                        Button(onClick = {
-                                            component.leaveEvent()
-                                            showDropdownMenu = false
-                                        }) {
-                                            Text(leaveMessage)
+                                            Button(onClick = {
+                                                component.leaveEvent()
+                                                showDropdownMenu = false
+                                            }) {
+                                                Text(leaveMessage)
+                                            }
                                         }
                                     }
+                                }
+                            }
+                        }
+                        if (!isEditing && (isHost || isUserInEvent)) {
+                            PlatformBackButton(
+                                { component.backCallback.onBack() },
+                                modifier = Modifier.padding(top = 64.dp, start = 8.dp)
+                                    .align(Alignment.TopStart),
+                                text = "",
+                                arrow = false
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(top = 64.dp, end = 16.dp) // Adjust for status bar
+                            ) {
+                                IconButton(
+                                    onClick = { showOptionsDropdown = true },
+                                    modifier = Modifier
+                                        .background(
+                                            MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+                                            shape = CircleShape
+                                        )
+                                ) {
+                                    Icon(
+                                        Icons.Default.MoreVert,
+                                        contentDescription = "More options",
+                                        tint = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+
+                                DropdownMenu(
+                                    expanded = showOptionsDropdown,
+                                    onDismissRequest = { showOptionsDropdown = false }
+                                ) {
+                                    // Edit option
+                                    DropdownMenuItem(
+                                        text = { Text("Edit") },
+                                        onClick = {
+                                            component.toggleEdit()
+                                            showOptionsDropdown = false
+                                        },
+                                        leadingIcon = {
+                                            Icon(Icons.Default.Edit, contentDescription = null)
+                                        },
+                                        enabled = isHost
+                                    )
+
+                                    // Share option
+                                    DropdownMenuItem(
+                                        text = { Text("Share") },
+                                        onClick = {
+                                            component.shareEvent()
+                                            showOptionsDropdown = false
+                                        },
+                                        leadingIcon = {
+                                            Icon(Icons.Default.Share, contentDescription = null)
+                                        }
+                                    )
+
+                                    // Delete option (only for hosts)
+                                    if (isHost) {
+                                        DropdownMenuItem(
+                                            text = { Text("Delete") },
+                                            onClick = {
+                                                showDeleteConfirmation = true
+                                                showOptionsDropdown = false
+                                            },
+                                            leadingIcon = {
+                                                Icon(
+                                                    Icons.Default.Delete,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.error
+                                                )
+                                            },
+                                            colors = MenuDefaults.itemColors(
+                                                textColor = MaterialTheme.colorScheme.error
+                                            )
+                                        )
+                                    }
+
                                 }
                             }
                         }
@@ -312,6 +405,41 @@ fun EventDetailScreen(
                 }, onDismiss = {
                     showTeamSelectionDialog = false
                 }, onCreateTeam = { component.createNewTeam() })
+            }
+            if (showDeleteConfirmation) {
+                AlertDialog(
+                    onDismissRequest = { showDeleteConfirmation = false },
+                    title = { Text("Delete Event") },
+                    text = {
+                        Text(
+                            if (selectedEvent.event.price > 0) {
+                                "Are you sure you want to delete this event? All participants will receive a full refund. This action cannot be undone."
+                            } else {
+                                "Are you sure you want to delete this event? This action cannot be undone."
+                            }
+                        )
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                component.deleteEvent()
+                                showDeleteConfirmation = false
+                            },
+                            colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.error
+                            )
+                        ) {
+                            Text("Delete")
+                        }
+                    },
+                    dismissButton = {
+                        Button(
+                            onClick = { showDeleteConfirmation = false }
+                        ) {
+                            Text("Cancel")
+                        }
+                    }
+                )
             }
         }
     }

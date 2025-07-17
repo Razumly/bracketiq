@@ -13,6 +13,7 @@ import androidx.compose.material3.SearchBar
 import androidx.compose.material3.SearchBarDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -150,10 +151,15 @@ actual fun EventMap(
                 }
             }) {
             poiMarkerState?.let { markerState ->
-                LaunchedEffect(selectedPlace?.placeId, showingInfoWindow) {
-                    if (showingInfoWindow) {
-                        delay(150)
+                DisposableEffect(selectedPlace?.placeId) {
+                    val job = scope.launch {
+                        delay(200)
                         markerState.showInfoWindow()
+                    }
+
+                    onDispose {
+                        job.cancel()
+                        markerState.hideInfoWindow()
                     }
                 }
 

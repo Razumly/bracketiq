@@ -79,6 +79,8 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun editEventField(update: EventImp.() -> EventImp)
     fun editTournamentField(update: Tournament.() -> Tournament)
     fun updateEvent()
+    fun deleteEvent()
+    fun shareEvent()
     fun createNewTeam()
     fun selectPlace(place: MVPPlace?)
     fun onTypeSelected(type: EventType)
@@ -586,6 +588,14 @@ class DefaultEventDetailComponent(
                 participant
             )
         }
+    }
+
+    override fun deleteEvent() {
+
+    }
+
+    override fun shareEvent() {
+
     }
 
     override fun checkIsUserFreeAgent(event: EventAbs): Boolean {

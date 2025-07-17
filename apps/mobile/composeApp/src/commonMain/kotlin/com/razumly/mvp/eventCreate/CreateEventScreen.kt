@@ -104,7 +104,6 @@ fun CreateEventScreen(
                         mapComponent = mapComponent,
                         eventWithRelations = defaultEvent,
                         editEvent = newEventState,
-                        onFavoriteClick = {},
                         navPadding = LocalNavBarPadding.current,
                         onPlaceSelected = { component.selectPlace(it) },
                         editView = isEditing,
@@ -113,7 +112,6 @@ fun CreateEventScreen(
                         isNewEvent = true,
                         onEventTypeSelected = { component.onTypeSelected(it) },
                         onAddCurrentUser = {},
-                        onBack = {},
                         onSelectFieldCount = { component.selectFieldCount(it) }
                     ) { isValid -> canProceed = isValid }
 
