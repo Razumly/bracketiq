@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
@@ -46,13 +47,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
 import com.razumly.mvp.core.presentation.composables.PaymentProcessorButton
-import com.razumly.mvp.core.presentation.composables.PlatformBackButton
 import com.razumly.mvp.core.presentation.composables.TeamCard
 import com.razumly.mvp.core.presentation.util.buttonTransitionSpec
 import com.razumly.mvp.core.util.LocalErrorHandler
@@ -268,25 +269,32 @@ fun EventDetailScreen(
                             }
                         }
                         if (!isEditing && (isHost || isUserInEvent)) {
-                            PlatformBackButton(
-                                { component.backCallback.onBack() },
-                                modifier = Modifier.padding(top = 64.dp, start = 8.dp)
-                                    .align(Alignment.TopStart),
-                                text = "",
-                                arrow = false
-                            )
                             Box(
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
+                                Modifier.padding(top = 64.dp, start = 16.dp)
+                                    .align(Alignment.TopStart)
+                            ) {
+                                IconButton(
+                                    { component.backCallback.onBack() },
+                                    modifier = Modifier.background(
+                                        Color.White.copy(alpha = 0.7f), shape = CircleShape
+                                    ),
+                                ) {
+                                    Icon(
+                                        Icons.Default.Close,
+                                        contentDescription = "Close",
+                                        tint = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
+                            Box(
+                                modifier = Modifier.align(Alignment.TopEnd)
                                     .padding(top = 64.dp, end = 16.dp) // Adjust for status bar
                             ) {
                                 IconButton(
                                     onClick = { showOptionsDropdown = true },
-                                    modifier = Modifier
-                                        .background(
-                                            MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
-                                            shape = CircleShape
-                                        )
+                                    modifier = Modifier.background(
+                                        Color.White.copy(alpha = 0.7f), shape = CircleShape
+                                    )
                                 ) {
                                     Icon(
                                         Icons.Default.MoreVert,
@@ -295,53 +303,39 @@ fun EventDetailScreen(
                                     )
                                 }
 
-                                DropdownMenu(
-                                    expanded = showOptionsDropdown,
-                                    onDismissRequest = { showOptionsDropdown = false }
-                                ) {
+                                DropdownMenu(expanded = showOptionsDropdown,
+                                    onDismissRequest = { showOptionsDropdown = false }) {
                                     // Edit option
-                                    DropdownMenuItem(
-                                        text = { Text("Edit") },
-                                        onClick = {
-                                            component.toggleEdit()
-                                            showOptionsDropdown = false
-                                        },
-                                        leadingIcon = {
-                                            Icon(Icons.Default.Edit, contentDescription = null)
-                                        },
-                                        enabled = isHost
+                                    DropdownMenuItem(text = { Text("Edit") }, onClick = {
+                                        component.toggleEdit()
+                                        showOptionsDropdown = false
+                                    }, leadingIcon = {
+                                        Icon(Icons.Default.Edit, contentDescription = null)
+                                    }, enabled = isHost
                                     )
 
                                     // Share option
-                                    DropdownMenuItem(
-                                        text = { Text("Share") },
-                                        onClick = {
-                                            component.shareEvent()
-                                            showOptionsDropdown = false
-                                        },
-                                        leadingIcon = {
-                                            Icon(Icons.Default.Share, contentDescription = null)
-                                        }
-                                    )
+                                    DropdownMenuItem(text = { Text("Share") }, onClick = {
+                                        component.shareEvent()
+                                        showOptionsDropdown = false
+                                    }, leadingIcon = {
+                                        Icon(Icons.Default.Share, contentDescription = null)
+                                    })
 
                                     // Delete option (only for hosts)
                                     if (isHost) {
-                                        DropdownMenuItem(
-                                            text = { Text("Delete") },
-                                            onClick = {
-                                                showDeleteConfirmation = true
-                                                showOptionsDropdown = false
-                                            },
-                                            leadingIcon = {
-                                                Icon(
-                                                    Icons.Default.Delete,
-                                                    contentDescription = null,
-                                                    tint = MaterialTheme.colorScheme.error
-                                                )
-                                            },
-                                            colors = MenuDefaults.itemColors(
-                                                textColor = MaterialTheme.colorScheme.error
+                                        DropdownMenuItem(text = { Text("Delete") }, onClick = {
+                                            showDeleteConfirmation = true
+                                            showOptionsDropdown = false
+                                        }, leadingIcon = {
+                                            Icon(
+                                                Icons.Default.Delete,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.error
                                             )
+                                        }, colors = MenuDefaults.itemColors(
+                                            textColor = MaterialTheme.colorScheme.error
+                                        )
                                         )
                                     }
 
@@ -407,8 +401,7 @@ fun EventDetailScreen(
                 }, onCreateTeam = { component.createNewTeam() })
             }
             if (showDeleteConfirmation) {
-                AlertDialog(
-                    onDismissRequest = { showDeleteConfirmation = false },
+                AlertDialog(onDismissRequest = { showDeleteConfirmation = false },
                     title = { Text("Delete Event") },
                     text = {
                         Text(
@@ -424,8 +417,7 @@ fun EventDetailScreen(
                             onClick = {
                                 component.deleteEvent()
                                 showDeleteConfirmation = false
-                            },
-                            colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                            }, colors = androidx.compose.material3.ButtonDefaults.buttonColors(
                                 containerColor = MaterialTheme.colorScheme.error
                             )
                         ) {
@@ -433,13 +425,10 @@ fun EventDetailScreen(
                         }
                     },
                     dismissButton = {
-                        Button(
-                            onClick = { showDeleteConfirmation = false }
-                        ) {
+                        Button(onClick = { showDeleteConfirmation = false }) {
                             Text("Cancel")
                         }
-                    }
-                )
+                    })
             }
         }
     }

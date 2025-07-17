@@ -338,9 +338,12 @@ class DefaultEventDetailComponent(
         } else {
             eventWithRelations.value.teams
         }.associateBy { it.team.id }
-        _divisionMatches.value =
+        _divisionMatches.value = if (!selectedEvent.value!!.event.singleDivision) {
             eventWithRelations.value.matches.filter { it.match.division == division }
                 .associateBy { it.match.id }
+        } else {
+            eventWithRelations.value.matches.associateBy { it.match.id }
+        }
     }
 
     override fun onHostCreateAccount() {
