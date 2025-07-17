@@ -72,6 +72,30 @@ actual fun EventMap(
     var showingInfoWindow by remember { mutableStateOf(false) }
     var isAnimating by remember { mutableStateOf(false) }
 
+    val eventMarkerStates = remember(events) {
+        events.associate { event ->
+            event.id to MarkerState(position = LatLng(event.lat, event.long))
+        }
+    }
+
+    val placeMarkerStates = remember(places) {
+        places.associate { place ->
+            place.id!! to MarkerState(position = place.location!!)
+        }
+    }
+
+    val poiMarkerState = remember(selectedPlace) {
+        selectedPlace?.let { poi ->
+            MarkerState(position = poi.latLng)
+        }
+    }
+
+    val focusedEventMarkerState = remember(focusedEvent) {
+        focusedEvent?.let { event ->
+            MarkerState(position = LatLng(event.lat, event.long))
+        }
+    }
+
     val animationProgress by animateFloatAsState(
         targetValue = if (showMap) 1f else 0f, animationSpec = tween(durationMillis = 1000)
     )
@@ -80,29 +104,27 @@ actual fun EventMap(
     LaunchedEffect(initCameraState) {
         cameraPositionState.move(
             CameraUpdateFactory.newLatLngZoom(
-                initCameraState,
-                defaultZoom
+                initCameraState, defaultZoom
             )
         )
     }
     var currentCameraState by remember { mutableStateOf(cameraPositionState) }
 
     LaunchedEffect(cameraPositionState) {
-        snapshotFlow { cameraPositionState }
-            .collect { newTarget ->
+        snapshotFlow { cameraPositionState }.collect { newTarget ->
                 currentCameraState = newTarget
             }
     }
 
     Box(
-        modifier = modifier.fillMaxSize()
+        modifier = modifier
+            .fillMaxSize()
             .graphicsLayer {
-            alpha = if (animationProgress > 0f) 1f else 0f
-        }.clip(CircularRevealShape(animationProgress, revealCenter)),
+                alpha = if (animationProgress > 0f) 1f else 0f
+            }
+            .clip(CircularRevealShape(animationProgress, revealCenter)),
     ) {
-        GoogleMap(
-            modifier = Modifier
-                .fillMaxSize(),
+        GoogleMap(modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(top = 160.dp),
             cameraPositionState = cameraPositionState,
             properties = MapProperties(isMyLocationEnabled = true),
@@ -118,78 +140,75 @@ actual fun EventMap(
                         cameraPositionState.animate(
                             CameraUpdateFactory.newCameraPosition(
                                 CameraPosition.fromLatLngZoom(poi.latLng, defaultZoom)
-                            ),
-                            durationMs = 800
+                            ), durationMs = 500
                         )
 
-                        // Wait for camera animation to complete
                         delay(300)
                         isAnimating = false
                         showingInfoWindow = true
                     }
                 }
-            }
-        ) {
-            selectedPlace?.let { poi ->
-                val markerState = remember(poi.placeId) {
-                    MarkerState(position = poi.latLng)
-                }
-
-                LaunchedEffect(showingInfoWindow) {
+            }) {
+            poiMarkerState?.let { markerState ->
+                LaunchedEffect(selectedPlace?.placeId, showingInfoWindow) {
                     if (showingInfoWindow) {
-                        delay(100)
+                        delay(150)
                         markerState.showInfoWindow()
                     }
                 }
 
                 Marker(
                     state = markerState,
-                    title = poi.name,
+                    title = selectedPlace?.name ?: "",
                     onClick = {
                         if (showingInfoWindow) {
                             scope.launch {
-                                onPlaceSelected(component.getPlace(poi.placeId))
+                                onPlaceSelected(component.getPlace(selectedPlace!!.placeId))
                             }
                         }
                         true
                     }
                 )
             }
+
+            // Event Markers
             if (!canClickPOI) {
                 events.forEach { event ->
-                    val eventPosition = LatLng(event.lat, event.long)
-                    val state = rememberUpdatedMarkerState(event.id, eventPosition)
+                    eventMarkerStates[event.id]?.let { markerState ->
+                        Marker(
+                            state = markerState,
+                            title = event.name,
+                            snippet = "${event.fieldType} - $${event.price}",
+                            onInfoWindowClick = { onEventSelected(event) }
+                        )
+                    }
+                }
+            }
+
+            // Place Markers
+            places.forEach { place ->
+                placeMarkerStates[place.id!!]?.let { markerState ->
                     Marker(
-                        state = state,
-                        title = event.name,
-                        snippet = "${event.fieldType} - $${event.price}",
-                        onInfoWindowClick = { onEventSelected(event) }
+                        state = markerState,
+                        title = place.displayName,
+                        onClick = {
+                            markerState.showInfoWindow()
+                            scope.launch {
+                                onPlaceSelected(component.getMVPPlace(place))
+                            }
+                            true
+                        }
                     )
                 }
             }
-            places.forEach { place ->
-                val state = rememberUpdatedMarkerState(place.id!!, place.location!!)
-                Marker(
-                    state = state,
-                    title = place.displayName,
-                    onClick = {
-                        state.showInfoWindow()
-                        scope.launch {
-                            onPlaceSelected(component.getMVPPlace(place))
-                        }
-                        true
-                    }
-                )
-            }
 
-            focusedEvent?.let { event ->
-                val eventPosition = LatLng(event.lat, event.long)
-                val state = rememberUpdatedMarkerState(event.id, eventPosition)
+            // Focused Event Marker
+            focusedEventMarkerState?.let { markerState ->
                 Marker(
-                    state = state,
-                    title = event.name,
-                    snippet = "${event.fieldType} - $${event.price}",
-                    onInfoWindowClick = { onEventSelected(event) }
+                    state = markerState,
+                    title = focusedEvent?.name ?: "",
+                    snippet = "${focusedEvent?.fieldType} - $${focusedEvent?.price}",
+                    onInfoWindowClick = { focusedEvent?.let { onEventSelected(it) } }
                 )
             }
         }
@@ -254,8 +273,7 @@ fun MapSearchBar(
     val onActiveChange: (Boolean) -> Unit = { isActive ->
         searchActive = isActive
     }
-    val colors1 =
-        SearchBarDefaults.colors()
+    val colors1 = SearchBarDefaults.colors()
 
     val onSearch: (query: String) -> Unit = { query ->
         coroutineScope.launch {
@@ -301,17 +319,13 @@ fun MapSearchBar(
         expanded = searchActive,
         onExpandedChange = onActiveChange,
         colors = colors1,
-    )
-    {
+    ) {
         suggestions.forEach { suggestion ->
             suggestion.displayName?.let { name ->
-                DropdownMenuItem(
-                    text = { Text(name) },
-                    onClick = {
-                        searchInput = name
-                        onSearch(searchInput)
-                    }
-                )
+                DropdownMenuItem(text = { Text(name) }, onClick = {
+                    searchInput = name
+                    onSearch(searchInput)
+                })
             }
         }
     }
@@ -319,11 +333,9 @@ fun MapSearchBar(
 
 @Composable
 private fun rememberUpdatedMarkerState(
-    key: String,
-    position: LatLng
+    key: String, position: LatLng
 ): MarkerState {
-    return remember(key) { MarkerState(position = position) }
-        .apply {
+    return remember(key) { MarkerState(position = position) }.apply {
             if (this.position != position) {
                 this.position = position
             }
