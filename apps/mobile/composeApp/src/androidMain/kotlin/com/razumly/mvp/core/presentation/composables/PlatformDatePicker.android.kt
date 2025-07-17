@@ -29,9 +29,11 @@ import kotlinx.datetime.toLocalDateTime
 actual fun PlatformDateTimePicker(
     onDateSelected: (Instant?) -> Unit,
     onDismissRequest: () -> Unit,
-    showPicker: Boolean
+    showPicker: Boolean,
+    getTime: Boolean,
+    canSelectPast: Boolean,
 ) {
-    if (showPicker){
+    if (showPicker) {
         var showDatePicker by remember { mutableStateOf(true) }
         var showTimePicker by remember { mutableStateOf(false) }
         var selectedDateMillis by remember { mutableStateOf<Long?>(null) }
@@ -45,75 +47,67 @@ actual fun PlatformDateTimePicker(
         if (showDatePicker) {
             val datePickerState = rememberDatePickerState(
                 initialSelectedDateMillis = System.currentTimeMillis(),
-                selectableDates = PastOrPresentSelectableDates,
+                selectableDates = com.razumly.mvp.core.presentation.composables.PastOrFutureSelectableDates(
+                    canSelectPast
+                ),
             )
 
-            DatePickerDialog(
-                onDismissRequest = onDismissRequest,
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            selectedDateMillis = datePickerState.selectedDateMillis
-                            showDatePicker = false
-                            showTimePicker = true
-                        }
-                    ) {
-                        Text("OK")
+            DatePickerDialog(onDismissRequest = onDismissRequest, confirmButton = {
+                TextButton(onClick = {
+                    selectedDateMillis = datePickerState.selectedDateMillis
+                    showDatePicker = false
+                    if (getTime) {
+                        showTimePicker = true
+                    } else {
+                        onDateSelected(selectedDateMillis?.let {
+                            Instant.fromEpochMilliseconds(it).toLocalDateTime(TimeZone.UTC)
+                                .toInstant(timeZone)
+                        })
+                        onDismissRequest()
                     }
-                },
-                dismissButton = {
-                    TextButton(onClick = onDismissRequest) { Text("Cancel") }
+                }) {
+                    Text("OK")
                 }
-            ) {
+            }, dismissButton = {
+                TextButton(onClick = onDismissRequest) { Text("Cancel") }
+            }) {
                 DatePicker(state = datePickerState)
             }
         }
 
         if (showTimePicker) {
-            AlertDialog(
-                onDismissRequest = {
-                    showTimePicker = false
-                    onDismissRequest()
-                },
-                dismissButton = {
-                    TextButton(onClick = onDismissRequest) { Text("Cancel") }
-                },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            selectedDateMillis?.let { dateMillis ->
-                                // Combine as local date and time, convert to UTC
-                                val instant = combineLocalDateTimeAndConvertToUtc(
-                                    dateMillis = dateMillis,
-                                    hour = timeState.hour,
-                                    minute = timeState.minute,
-                                    timeZone = timeZone
-                                )
-                                onDateSelected(instant)
-                            }
-                            onDismissRequest()
-                        }
-                    ) {
-                        Text("OK")
+            AlertDialog(onDismissRequest = {
+                showTimePicker = false
+                onDismissRequest()
+            }, dismissButton = {
+                TextButton(onClick = onDismissRequest) { Text("Cancel") }
+            }, confirmButton = {
+                TextButton(onClick = {
+                    selectedDateMillis?.let { dateMillis ->
+                        // Combine as local date and time, convert to UTC
+                        val instant = combineLocalDateTimeAndConvertToUtc(
+                            dateMillis = dateMillis,
+                            hour = timeState.hour,
+                            minute = timeState.minute,
+                            timeZone = timeZone
+                        )
+                        onDateSelected(instant)
                     }
-                },
-                text = {
-                    TimePicker(state = timeState)
+                    onDismissRequest()
+                }) {
+                    Text("OK")
                 }
-            )
+            }, text = {
+                TimePicker(state = timeState)
+            })
         }
     }
 }
 
 fun combineLocalDateTimeAndConvertToUtc(
-    dateMillis: Long,
-    hour: Int,
-    minute: Int,
-    timeZone: TimeZone
+    dateMillis: Long, hour: Int, minute: Int, timeZone: TimeZone
 ): Instant {
-    val selectedDate = Instant.fromEpochMilliseconds(dateMillis)
-        .toLocalDateTime(TimeZone.UTC)
-        .date
+    val selectedDate = Instant.fromEpochMilliseconds(dateMillis).toLocalDateTime(TimeZone.UTC).date
 
     val localDateTime = LocalDateTime(selectedDate, LocalTime(hour, minute))
 
@@ -122,12 +116,18 @@ fun combineLocalDateTimeAndConvertToUtc(
 
 
 @OptIn(ExperimentalMaterial3Api::class)
-object PastOrPresentSelectableDates: SelectableDates {
+class PastOrFutureSelectableDates(private val canSelectPast: Boolean) : SelectableDates {
     override fun isSelectableDate(utcTimeMillis: Long): Boolean {
-        return utcTimeMillis >= System.currentTimeMillis()
+        if (!canSelectPast) {
+            return utcTimeMillis >= System.currentTimeMillis()
+        }
+        return true
     }
 
     override fun isSelectableYear(year: Int): Boolean {
-        return year >= LocalDate.now().year && year <= LocalDate.now().year + 2
+        if (!canSelectPast) {
+            return year >= LocalDate.now().year && year <= LocalDate.now().year + 2
+        }
+        return true
     }
 }

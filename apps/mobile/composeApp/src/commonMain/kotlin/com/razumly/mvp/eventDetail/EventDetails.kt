@@ -71,7 +71,6 @@ import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.enums.FieldType
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.composables.PaymentProcessorButton
-import com.razumly.mvp.core.presentation.composables.PlatformBackButton
 import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
 import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
@@ -774,6 +773,8 @@ fun EventDetails(
             },
             onDismissRequest = { showStartPicker = false },
             showPicker = showStartPicker,
+            getTime = true,
+            canSelectPast = false,
         )
 
         PlatformDateTimePicker(
@@ -783,6 +784,8 @@ fun EventDetails(
             },
             onDismissRequest = { showEndPicker = false },
             showPicker = showEndPicker,
+            getTime = true,
+            canSelectPast = false,
         )
 
         EventMap(

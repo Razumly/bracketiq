@@ -7,6 +7,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,13 +28,13 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
-import androidx.compose.material3.Divider
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -50,8 +51,6 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
-import androidx.compose.ui.layout.positionInWindow
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -59,11 +58,12 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.enums.FieldType
+import com.razumly.mvp.core.presentation.util.dateTimeFormat
 import com.razumly.mvp.eventSearch.util.EventFilter
 import kotlinx.datetime.Clock
-import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.TimeZone
-import kotlinx.datetime.plus
+import kotlinx.datetime.format
+import kotlinx.datetime.toLocalDateTime
 
 @Composable
 fun SearchBox(
@@ -80,25 +80,19 @@ fun SearchBox(
     var searchInput by remember { mutableStateOf("") }
     var isFocused by remember { mutableStateOf(false) }
     var showFilterDropdown by remember { mutableStateOf(false) }
+
     val focusManager = LocalFocusManager.current
 
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .onGloballyPositioned { coordinates ->
-                val position = coordinates.positionInRoot()
-                val size = coordinates.size
-                onPositionChange(position, size)
-            }
-    ) {
+    Column(modifier = modifier.fillMaxWidth().onGloballyPositioned { coordinates ->
+        val position = coordinates.positionInRoot()
+        val size = coordinates.size
+        onPositionChange(position, size)
+    }) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            OutlinedTextField(
-                value = searchInput,
+            OutlinedTextField(value = searchInput,
                 onValueChange = { newQuery ->
                     searchInput = newQuery
                     onChange(newQuery)
@@ -106,40 +100,32 @@ fun SearchBox(
                 placeholder = { Text(placeholder) },
                 leadingIcon = {
                     Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = "Search"
+                        imageVector = Icons.Default.Search, contentDescription = "Search"
                     )
                 },
                 trailingIcon = {
                     if (searchInput.isNotEmpty()) {
-                        IconButton(
-                            onClick = {
-                                searchInput = ""
-                                onChange("")
-                                focusManager.clearFocus()
-                            }
-                        ) {
+                        IconButton(onClick = {
+                            searchInput = ""
+                            onChange("")
+                            focusManager.clearFocus()
+                        }) {
                             Icon(
-                                imageVector = Icons.Default.Clear,
-                                contentDescription = "Clear"
+                                imageVector = Icons.Default.Clear, contentDescription = "Clear"
                             )
                         }
                     }
                 },
                 singleLine = true,
-                modifier = Modifier
-                    .weight(1f)
-                    .onFocusChanged { focusState ->
-                        isFocused = focusState.isFocused
-                        onFocusChange(focusState.isFocused)
-                    },
+                modifier = Modifier.weight(1f).onFocusChanged { focusState ->
+                    isFocused = focusState.isFocused
+                    onFocusChange(focusState.isFocused)
+                },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(
-                    onSearch = {
-                        onSearch(searchInput)
-                        focusManager.clearFocus()
-                    }
-                )
+                keyboardActions = KeyboardActions(onSearch = {
+                    onSearch(searchInput)
+                    focusManager.clearFocus()
+                })
             )
 
             if (filter && currentFilter != null) {
@@ -147,14 +133,11 @@ fun SearchBox(
 
                 // Filter Button with Badge
                 Box {
-                    IconButton(
-                        onClick = { showFilterDropdown = !showFilterDropdown }
-                    ) {
+                    IconButton(onClick = { showFilterDropdown = !showFilterDropdown }) {
                         Icon(
                             Icons.Default.Menu,
                             contentDescription = "Filter",
-                            tint = if (isFilterActive(currentFilter))
-                                MaterialTheme.colorScheme.primary
+                            tint = if (isFilterActive(currentFilter)) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
@@ -162,13 +145,9 @@ fun SearchBox(
                     // Active filter indicator
                     if (isFilterActive(currentFilter)) {
                         Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .background(
-                                    MaterialTheme.colorScheme.primary,
-                                    CircleShape
-                                )
-                                .align(Alignment.TopEnd)
+                            modifier = Modifier.size(8.dp).background(
+                                MaterialTheme.colorScheme.primary, CircleShape
+                            ).align(Alignment.TopEnd)
                         )
                     }
                 }
@@ -177,21 +156,16 @@ fun SearchBox(
 
         // Filter Dropdown
         if (filter && currentFilter != null) {
-            FilterDropdown(
-                visible = showFilterDropdown,
+            FilterDropdown(visible = showFilterDropdown,
                 currentFilter = currentFilter,
                 onFilterChange = onFilterChange,
-                onDismiss = { showFilterDropdown = false }
-            )
+                onDismiss = { showFilterDropdown = false })
         }
     }
 }
 
 private fun isFilterActive(filter: EventFilter): Boolean {
-    return filter.eventType != null ||
-            filter.field != null ||
-            filter.price != null ||
-            filter.date != null
+    return filter.eventType != null || filter.field != null || filter.price != null || filter.date != null
 }
 
 @Composable
@@ -201,82 +175,109 @@ private fun FilterDropdown(
     onFilterChange: (EventFilter.() -> EventFilter) -> Unit,
     onDismiss: () -> Unit
 ) {
+    var showStartPicker by remember { mutableStateOf(false) }
+    var showEndPicker by remember { mutableStateOf(false) }
     AnimatedVisibility(
         visible = visible,
         enter = expandVertically(animationSpec = tween(300)) + fadeIn(),
         exit = shrinkVertically(animationSpec = tween(300)) + fadeOut()
     ) {
         Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 8.dp,
             shape = RoundedCornerShape(12.dp)
         ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                // Header
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+            Box {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    Text(
-                        text = "Filter Events",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
+                    // Header
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Filter Events",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+
+                        TextButton(onClick = {
+                            onFilterChange { EventFilter() }
+                            onDismiss()
+                        }) {
+                            Text("Clear All")
+                        }
+                    }
+
+                    HorizontalDivider()
+
+                    // Event Type Filter
+                    EventTypeFilterSection(
+                        currentFilter = currentFilter, onFilterChange = onFilterChange
                     )
 
-                    TextButton(onClick = {
-                        onFilterChange { EventFilter() }
-                        onDismiss()
-                    }) {
-                        Text("Clear All")
+                    HorizontalDivider()
+
+                    // Field Type Filter
+                    FieldTypeFilterSection(
+                        currentFilter = currentFilter, onFilterChange = onFilterChange
+                    )
+
+                    HorizontalDivider()
+
+                    // Price Filter
+                    PriceFilterSection(
+                        currentFilter = currentFilter, onFilterChange = onFilterChange
+                    )
+
+                    HorizontalDivider()
+
+                    // Date Filter
+                    DateFilterSection(
+                        currentFilter = currentFilter,
+                        { showStartPicker = true },
+                        { showEndPicker = true }
+                    )
+
+                    // Apply Button
+                    Button(
+                        onClick = onDismiss, modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Apply Filters")
                     }
                 }
-
-                HorizontalDivider()
-
-                // Event Type Filter
-                EventTypeFilterSection(
-                    currentFilter = currentFilter,
-                    onFilterChange = onFilterChange
+                PlatformDateTimePicker(
+                    onDateSelected = { selectedInstant ->
+                        onFilterChange {
+                            copy(
+                                date = (selectedInstant ?: Clock.System.now()) to date.second
+                            )
+                        }
+                        showStartPicker = false
+                    },
+                    onDismissRequest = { showStartPicker = false },
+                    showPicker = showStartPicker,
+                    getTime = false,
+                    canSelectPast = true,
                 )
-
-                HorizontalDivider()
-
-                // Field Type Filter
-                FieldTypeFilterSection(
-                    currentFilter = currentFilter,
-                    onFilterChange = onFilterChange
+                PlatformDateTimePicker(
+                    onDateSelected = { selectedInstant ->
+                        onFilterChange {
+                            copy(
+                                date = date.first to selectedInstant
+                            )
+                        }
+                        showEndPicker = false
+                    },
+                    onDismissRequest = { showEndPicker = false },
+                    showPicker = showEndPicker,
+                    getTime = false,
+                    canSelectPast = true,
                 )
-
-                HorizontalDivider()
-
-                // Price Filter
-                PriceFilterSection(
-                    currentFilter = currentFilter,
-                    onFilterChange = onFilterChange
-                )
-
-                HorizontalDivider()
-
-                // Date Filter
-                DateFilterSection(
-                    currentFilter = currentFilter,
-                    onFilterChange = onFilterChange
-                )
-
-                // Apply Button
-                Button(
-                    onClick = onDismiss,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Apply Filters")
-                }
             }
         }
     }
@@ -284,8 +285,7 @@ private fun FilterDropdown(
 
 @Composable
 private fun EventTypeFilterSection(
-    currentFilter: EventFilter,
-    onFilterChange: (EventFilter.() -> EventFilter) -> Unit
+    currentFilter: EventFilter, onFilterChange: (EventFilter.() -> EventFilter) -> Unit
 ) {
     Column {
         Text(
@@ -299,27 +299,21 @@ private fun EventTypeFilterSection(
             modifier = Modifier.padding(top = 8.dp)
         ) {
             item {
-                FilterChip(
-                    selected = currentFilter.eventType == null,
+                FilterChip(selected = currentFilter.eventType == null,
                     onClick = { onFilterChange { copy(eventType = null) } },
-                    label = { Text("All") }
-                )
+                    label = { Text("All") })
             }
 
             item {
-                FilterChip(
-                    selected = currentFilter.eventType == EventType.TOURNAMENT,
+                FilterChip(selected = currentFilter.eventType == EventType.TOURNAMENT,
                     onClick = { onFilterChange { copy(eventType = EventType.TOURNAMENT) } },
-                    label = { Text("Tournaments") }
-                )
+                    label = { Text("Tournaments") })
             }
 
             item {
-                FilterChip(
-                    selected = currentFilter.eventType == EventType.EVENT,
+                FilterChip(selected = currentFilter.eventType == EventType.EVENT,
                     onClick = { onFilterChange { copy(eventType = EventType.EVENT) } },
-                    label = { Text("Events") }
-                )
+                    label = { Text("Events") })
             }
         }
     }
@@ -327,8 +321,7 @@ private fun EventTypeFilterSection(
 
 @Composable
 private fun FieldTypeFilterSection(
-    currentFilter: EventFilter,
-    onFilterChange: (EventFilter.() -> EventFilter) -> Unit
+    currentFilter: EventFilter, onFilterChange: (EventFilter.() -> EventFilter) -> Unit
 ) {
     Column {
         Text(
@@ -342,19 +335,15 @@ private fun FieldTypeFilterSection(
             modifier = Modifier.padding(top = 8.dp)
         ) {
             item {
-                FilterChip(
-                    selected = currentFilter.field == null,
+                FilterChip(selected = currentFilter.field == null,
                     onClick = { onFilterChange { copy(field = null) } },
-                    label = { Text("All Fields") }
-                )
+                    label = { Text("All Fields") })
             }
 
             items(FieldType.entries) { fieldType ->
-                FilterChip(
-                    selected = currentFilter.field == fieldType,
+                FilterChip(selected = currentFilter.field == fieldType,
                     onClick = { onFilterChange { copy(field = fieldType) } },
-                    label = { Text(fieldType.name) }
-                )
+                    label = { Text(fieldType.name) })
             }
         }
     }
@@ -362,8 +351,7 @@ private fun FieldTypeFilterSection(
 
 @Composable
 private fun PriceFilterSection(
-    currentFilter: EventFilter,
-    onFilterChange: (EventFilter.() -> EventFilter) -> Unit
+    currentFilter: EventFilter, onFilterChange: (EventFilter.() -> EventFilter) -> Unit
 ) {
     var enablePriceFilter by remember(currentFilter.price) {
         mutableStateOf(currentFilter.price != null)
@@ -383,15 +371,12 @@ private fun PriceFilterSection(
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Switch(
-                checked = enablePriceFilter,
-                onCheckedChange = { enabled ->
-                    enablePriceFilter = enabled
-                    onFilterChange {
-                        copy(price = if (enabled) priceRange else null)
-                    }
+            Switch(checked = enablePriceFilter, onCheckedChange = { enabled ->
+                enablePriceFilter = enabled
+                onFilterChange {
+                    copy(price = if (enabled) priceRange else null)
                 }
-            )
+            })
         }
 
         if (enablePriceFilter) {
@@ -417,13 +402,8 @@ private fun PriceFilterSection(
 
 @Composable
 private fun DateFilterSection(
-    currentFilter: EventFilter,
-    onFilterChange: (EventFilter.() -> EventFilter) -> Unit
+    currentFilter: EventFilter, onStartDateClicked: () -> Unit, onEndDateClicked: () -> Unit
 ) {
-    var enableDateFilter by remember(currentFilter.date) {
-        mutableStateOf(currentFilter.date != null)
-    }
-
     Column {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -435,46 +415,46 @@ private fun DateFilterSection(
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Switch(
-                checked = enableDateFilter,
-                onCheckedChange = { enabled ->
-                    enableDateFilter = enabled
-                    if (!enabled) {
-                        onFilterChange { copy(date = null) }
-                    }
-                }
-            )
         }
-
-        if (enableDateFilter) {
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.padding(top = 8.dp)
-            ) {
-                item {
-                    FilterChip(
-                        selected = false,
-                        onClick = {
-                            val now = Clock.System.now()
-                            val weekFromNow = now.plus(7, DateTimeUnit.DAY, TimeZone.currentSystemDefault())
-                            onFilterChange { copy(date = now to weekFromNow) }
-                        },
-                        label = { Text("This Week") }
-                    )
-                }
-
-                item {
-                    FilterChip(
-                        selected = false,
-                        onClick = {
-                            val now = Clock.System.now()
-                            val monthFromNow = now.plus(30, DateTimeUnit.DAY, TimeZone.currentSystemDefault())
-                            onFilterChange { copy(date = now to monthFromNow) }
-                        },
-                        label = { Text("This Month") }
-                    )
-                }
-            }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedTextField(
+                value = currentFilter.date.first.toLocalDateTime(
+                    TimeZone.currentSystemDefault()
+                ).format(dateTimeFormat),
+                onValueChange = {},
+                label = { Text("Start Date & Time") },
+                modifier = Modifier.weight(1f)
+                    .clickable(onClick = onStartDateClicked),
+                readOnly = true,
+                enabled = false,
+                colors = OutlinedTextFieldDefaults.colors(
+                    disabledContainerColor = OutlinedTextFieldDefaults.colors().focusedContainerColor,
+                    disabledTextColor = OutlinedTextFieldDefaults.colors().focusedTextColor,
+                    disabledLabelColor = OutlinedTextFieldDefaults.colors().focusedLabelColor,
+                    disabledBorderColor = OutlinedTextFieldDefaults.colors().unfocusedIndicatorColor,
+                )
+            )
+            OutlinedTextField(
+                value = currentFilter.date.second?.toLocalDateTime(
+                    TimeZone.currentSystemDefault()
+                )?.format(dateTimeFormat) ?: "Select an End Date",
+                onValueChange = {},
+                label = { Text("End Date") },
+                modifier = Modifier.weight(1f)
+                    .clickable(onClick = onEndDateClicked),
+                readOnly = true,
+                enabled = false,
+                colors = OutlinedTextFieldDefaults.colors(
+                    disabledContainerColor = OutlinedTextFieldDefaults.colors().focusedContainerColor,
+                    disabledTextColor = OutlinedTextFieldDefaults.colors().focusedTextColor,
+                    disabledLabelColor = OutlinedTextFieldDefaults.colors().focusedLabelColor,
+                    disabledBorderColor = OutlinedTextFieldDefaults.colors().unfocusedIndicatorColor,
+                )
+            )
         }
     }
 }

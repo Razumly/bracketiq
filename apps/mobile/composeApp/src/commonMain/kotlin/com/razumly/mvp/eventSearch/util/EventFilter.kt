@@ -11,7 +11,7 @@ data class EventFilter (
     val eventType: EventType? = null,
     val field: FieldType? = null,
     val price: Pair<Double, Double>? = null,
-    val date: Pair<Instant, Instant?>? = Pair(Clock.System.now(), null),
+    val date: Pair<Instant, Instant?> = Pair(Clock.System.now(), null),
 ) {
     fun filter(event: EventAbs): Boolean {
         if (eventType != null) {
@@ -25,8 +25,8 @@ data class EventFilter (
             }
         }
         if (price != null && (event.price < price.first || event.price > price.second)) return false
-        if (date != null && event.start < date.first) return false
-        if (date?.second != null && event.start > date.second!!) return false
+        if (event.start < date.first) return false
+        if (date.second != null && event.start > date.second!!) return false
         if (field != null && event.fieldType != field) return false
         return true
     }

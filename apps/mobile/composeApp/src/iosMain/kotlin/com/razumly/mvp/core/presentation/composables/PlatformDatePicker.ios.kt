@@ -1,12 +1,6 @@
 package com.razumly.mvp.core.presentation.composables
 
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.viewinterop.UIKitViewController
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.zIndex
 import com.razumly.mvp.LocalNativeViewFactory
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
@@ -16,11 +10,13 @@ import kotlin.time.Duration.Companion.days
 actual fun PlatformDateTimePicker(
     onDateSelected: (Instant?) -> Unit,
     onDismissRequest: () -> Unit,
-    showPicker: Boolean
+    showPicker: Boolean,
+    getTime: Boolean,
+    canSelectPast: Boolean
 ) {
     // Get the current time and calculate min/max dates
     val now = Clock.System.now()
-    val minDate = now
+    val minDate = if (canSelectPast) now else now - (2 * 365).days
     val maxDate = now + (2 * 365).days
 
     val factory = LocalNativeViewFactory.current
@@ -30,6 +26,7 @@ actual fun PlatformDateTimePicker(
             initialDate = now,
             minDate = minDate,
             maxDate = maxDate,
+            getTime = getTime,
             onDateSelected = onDateSelected,
             onDismissRequest = onDismissRequest
         )

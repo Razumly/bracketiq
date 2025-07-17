@@ -36,6 +36,7 @@ interface NativeViewFactory {
         initialDate: Instant,
         minDate: Instant,
         maxDate: Instant,
+        getTime: Boolean,
         onDateSelected: (Instant?) -> Unit,
         onDismissRequest: () -> Unit
     )

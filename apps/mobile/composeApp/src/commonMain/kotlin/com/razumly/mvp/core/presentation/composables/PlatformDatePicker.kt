@@ -8,4 +8,6 @@ expect fun PlatformDateTimePicker(
     onDateSelected: (Instant?) -> Unit,
     onDismissRequest: () -> Unit,
     showPicker: Boolean,
+    getTime: Boolean,
+    canSelectPast: Boolean,
 )
