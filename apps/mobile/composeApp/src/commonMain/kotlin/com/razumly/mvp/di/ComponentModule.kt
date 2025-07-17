@@ -9,6 +9,7 @@ import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.presentation.RootComponent
 import com.razumly.mvp.core.presentation.RootComponent.DeepLinkNav
+import com.razumly.mvp.core.presentation.util.ShareServiceProvider
 import com.razumly.mvp.eventCreate.DefaultCreateEventComponent
 import com.razumly.mvp.eventDetail.DefaultEventDetailComponent
 import com.razumly.mvp.eventManagement.DefaultEventManagementComponent
@@ -76,7 +77,7 @@ val componentModule = module {
             fieldRepository = get(),
             onNavigateToTeamSettings = onNavigateToTeamSettings,
             onBack = onBack,
-            billingRepository = get()
+            billingRepository = get(),
         )
     }
 

@@ -20,6 +20,7 @@ interface IBillingRepository : IMVPRepository {
     suspend fun createCustomer(): Result<Unit>
     suspend fun getOnboardingLink(): Result<String>
     suspend fun leaveAndRefundEvent(event: EventAbs): Result<Unit>
+    suspend fun deleteAndRefundEvent(event: EventAbs): Result<Unit>
 }
 
 class BillingRepository(
@@ -82,27 +83,34 @@ class BillingRepository(
         val user = userRepository.currentUser.value.getOrThrow()
         if (user.stripeAccountId?.isBlank() == true) throw Exception("User has no stripe account")
 
-        val response = Json.decodeFromString<CreateAccountResponse>(
-            functions.createExecution(
-                functionId = DbConstants.BILLING_FUNCTION,
-                body = Json.encodeToString(
-                    user.stripeAccountId?.let { GetHostOnboardingLink(it) }
-                ),
-                async = false,
-            ).responseBody
-        )
+        val response = Json.decodeFromString<CreateAccountResponse>(functions.createExecution(
+            functionId = DbConstants.BILLING_FUNCTION,
+            body = Json.encodeToString(user.stripeAccountId?.let { GetHostOnboardingLink(it) }),
+            async = false,
+        ).responseBody)
         userRepository.updateUser(user.copy(stripeAccountId = response.accountId))
         response.onboardingUrl
-        }
+    }
 
-    override suspend fun leaveAndRefundEvent(event: EventAbs): Result<Unit> =
-    runCatching {
+    override suspend fun leaveAndRefundEvent(event: EventAbs): Result<Unit> = runCatching {
         val response = functions.createExecution(
-            DbConstants.BILLING_FUNCTION,
-            Json.encodeToString(RefundRequest(
-                eventId = event.id,
-                userId = userRepository.currentUser.value.getOrThrow().id,
-            ))
+            DbConstants.BILLING_FUNCTION, Json.encodeToString(
+                RefundRequest(
+                    eventId = event.id,
+                    userId = userRepository.currentUser.value.getOrThrow().id,
+                )
+            )
+        )
+
+        val refundResponse = Json.decodeFromString<RefundResponse>(response.responseBody)
+        if (!refundResponse.error.isNullOrBlank()) {
+            throw Exception(refundResponse.error)
+        }
+    }
+
+    override suspend fun deleteAndRefundEvent(event: EventAbs): Result<Unit> = runCatching {
+        val response = functions.createExecution(
+            DbConstants.BILLING_FUNCTION, Json.encodeToString(RefundFullEvent(eventId = event.id))
         )
 
         val refundResponse = Json.decodeFromString<RefundResponse>(response.responseBody)
@@ -168,6 +176,13 @@ data class PurchaseIntent(
 data class RefundRequest(
     @EncodeDefault val command: String = "refund_payment",
     val userId: String,
+    val eventId: String,
+)
+
+@Serializable
+@OptIn(ExperimentalSerializationApi::class)
+data class RefundFullEvent(
+    @EncodeDefault val command: String = "refund_all_payments",
     val eventId: String,
 )
 

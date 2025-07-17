@@ -30,12 +30,16 @@ interface IEventAbsRepository : IMVPRepository {
     fun resetCursor()
     suspend fun createEvent(event: EventAbs): Result<Unit>
     suspend fun updateEvent(event: EventAbs): Result<Unit>
+    suspend fun deleteEvent(event: EventAbs): Result<Unit>
     suspend fun updateLocalEvent(event: EventAbs): Result<Unit>
     suspend fun removeTeamFromEvent(event: EventAbs, teamWithPlayers: TeamWithPlayers): Result<Unit>
     suspend fun removeCurrentUserFromEvent(event: EventAbs): Result<Unit>
     suspend fun getEvent(event: EventAbs): Result<EventAbsWithRelations>
     suspend fun getEventsInBounds(bounds: Bounds): Result<Pair<List<EventAbs>, Boolean>>
-    suspend fun searchEvents(searchQuery: String, userLocation: LatLng): Result<Pair<List<EventAbs>, Boolean>>
+    suspend fun searchEvents(
+        searchQuery: String, userLocation: LatLng
+    ): Result<Pair<List<EventAbs>, Boolean>>
+
     suspend fun addCurrentUserToEvent(event: EventAbs): Result<Unit>
     suspend fun addTeamToEvent(event: EventAbs, team: Team): Result<Unit>
     suspend fun getUsersEvents(): Result<Pair<List<EventAbs>, Boolean>>
@@ -47,7 +51,7 @@ class EventAbsRepository(
     private val userRepository: IUserRepository,
     private val teamRepository: ITeamRepository,
     private val functions: Functions,
-): IEventAbsRepository {
+) : IEventAbsRepository {
     override fun resetCursor() {
         eventRepository.resetCursor()
         tournamentRepository.resetCursor()
@@ -82,7 +86,9 @@ class EventAbsRepository(
         return getEvents(query, bounds.center)
     }
 
-    private suspend fun getEvents(query: String, userLocation: LatLng?): Result<Pair<List<EventAbs>, Boolean>> {
+    private suspend fun getEvents(
+        query: String, userLocation: LatLng?
+    ): Result<Pair<List<EventAbs>, Boolean>> {
         val eventResults = eventRepository.getEvents(query)
         val tournamentResults = tournamentRepository.getTournaments(query)
 
@@ -98,7 +104,7 @@ class EventAbsRepository(
                     calcDistance(
                         userLocation, LatLng(it.lat, it.long)
                     )
-                },false)
+                }, false)
             }
         } else {
             result.map { events ->
@@ -128,18 +134,20 @@ class EventAbsRepository(
 
         return combine(eventsFlow, tournamentsFlow) { events, tournaments ->
             runCatching {
-                val combinedEvents: List<EventAbs> = events.getOrDefault(emptyList()) + tournaments.getOrDefault(
-                    emptyList())
+                val combinedEvents: List<EventAbs> =
+                    events.getOrDefault(emptyList()) + tournaments.getOrDefault(
+                        emptyList()
+                    )
                 combinedEvents.sortedBy { calcDistance(userLocation, LatLng(it.lat, it.long)) }
             }
         }
     }
 
     override suspend fun createEvent(event: EventAbs): Result<Unit> {
-        return when(event.eventType) {
+        return when (event.eventType) {
             EventType.TOURNAMENT -> tournamentRepository.createTournament(event as Tournament)
             EventType.EVENT -> eventRepository.createEvent(event as EventImp)
-        }.map{}
+        }.map {}
     }
 
     override suspend fun updateEvent(event: EventAbs): Result<Unit> {
@@ -147,14 +155,31 @@ class EventAbsRepository(
             is EventImp -> {
                 eventRepository.updateEvent(event)
             }
+
             is Tournament -> {
                 tournamentRepository.updateTournament(event)
             }
-        }.map{}
+        }.map {}
+    }
+
+    override suspend fun deleteEvent(event: EventAbs): Result<Unit> = runCatching {
+        functions.createExecution(
+            DbConstants.EDIT_EVENT_FUNCTION, Json.encodeToString(
+                EditEventRequest(
+                    eventId = event.id,
+                    isTournament = (event.eventType == EventType.TOURNAMENT),
+                    command = "deleteEvent"
+                )
+            )
+        )
     }
 
     override fun getUsersEventsFlow(): Flow<Result<List<EventAbs>>> {
-        return eventRepository.getEventsFlow(Query.equal("hostId", userRepository.currentUser.value.getOrThrow().id))
+        return eventRepository.getEventsFlow(
+            Query.equal(
+                "hostId", userRepository.currentUser.value.getOrThrow().id
+            )
+        )
     }
 
     override suspend fun getUsersEvents(): Result<Pair<List<EventAbs>, Boolean>> {
@@ -162,26 +187,33 @@ class EventAbsRepository(
         return getEvents(query, null)
     }
 
-    override suspend fun searchEvents(searchQuery: String, userLocation: LatLng): Result<Pair<List<EventAbs>, Boolean>> {
+    override suspend fun searchEvents(
+        searchQuery: String, userLocation: LatLng
+    ): Result<Pair<List<EventAbs>, Boolean>> {
         val query = Query.contains("name", searchQuery)
         return getEvents(query, userLocation)
     }
 
-    override fun searchEventsFlow(searchQuery: String, userLocation: LatLng): Flow<Result<List<EventAbs>>> {
+    override fun searchEventsFlow(
+        searchQuery: String, userLocation: LatLng
+    ): Flow<Result<List<EventAbs>>> {
         val query = Query.contains("name", searchQuery)
         return getEventsFlow(query, userLocation)
     }
 
-    override suspend fun removeTeamFromEvent(event: EventAbs, teamWithPlayers: TeamWithPlayers): Result<Unit> {
+    override suspend fun removeTeamFromEvent(
+        event: EventAbs, teamWithPlayers: TeamWithPlayers
+    ): Result<Unit> {
         val team = teamWithPlayers.team
         val response = functions.createExecution(
-            DbConstants.EDIT_EVENT_FUNCTION,
-            Json.encodeToString(EditEventRequest(
-                eventId = event.id,
-                teamId = team.id,
-                isTournament = (event.eventType.name == "TOURNAMENT"),
-                command = "removeParticipant"
-            ))
+            DbConstants.EDIT_EVENT_FUNCTION, Json.encodeToString(
+                EditEventRequest(
+                    eventId = event.id,
+                    teamId = team.id,
+                    isTournament = (event.eventType.name == "TOURNAMENT"),
+                    command = "removeParticipant"
+                )
+            )
         )
 
         val editEventResponse = Json.decodeFromString<EditEventResponse>(response.responseBody)
@@ -194,13 +226,14 @@ class EventAbsRepository(
 
     private suspend fun removePlayerFromEvent(event: EventAbs, player: UserData): Result<Unit> {
         val response = functions.createExecution(
-            DbConstants.EDIT_EVENT_FUNCTION,
-            Json.encodeToString(EditEventRequest(
-                eventId = event.id,
-                userId = player.id,
-                isTournament = (event.eventType.name == "TOURNAMENT"),
-                command = "removeParticipant"
-            ))
+            DbConstants.EDIT_EVENT_FUNCTION, Json.encodeToString(
+                EditEventRequest(
+                    eventId = event.id,
+                    userId = player.id,
+                    isTournament = (event.eventType.name == "TOURNAMENT"),
+                    command = "removeParticipant"
+                )
+            )
         )
 
         val editEventResponse = Json.decodeFromString<EditEventResponse>(response.responseBody)
@@ -220,18 +253,19 @@ class EventAbsRepository(
     override suspend fun addCurrentUserToEvent(event: EventAbs): Result<Unit> = runCatching {
         val currentUser = userRepository.currentUser.value.getOrThrow()
         val response = functions.createExecution(
-            DbConstants.EDIT_EVENT_FUNCTION,
-            Json.encodeToString(EditEventRequest(
-                eventId = event.id,
-                userId = currentUser.id,
-                isTournament = (event.eventType.name == "TOURNAMENT"),
-                command = "addParticipant"
-            ))
+            DbConstants.EDIT_EVENT_FUNCTION, Json.encodeToString(
+                EditEventRequest(
+                    eventId = event.id,
+                    userId = currentUser.id,
+                    isTournament = (event.eventType.name == "TOURNAMENT"),
+                    command = "addParticipant"
+                )
+            )
         )
 
         val editEventResponse = Json.decodeFromString<EditEventResponse>(response.responseBody)
         return if (editEventResponse.error.isNullOrBlank()) {
-            getEvent(event).map{}
+            getEvent(event).map {}
         } else {
             Result.failure(Exception("Failed to add user to event: ${editEventResponse.error}"))
         }
@@ -243,32 +277,33 @@ class EventAbsRepository(
         }
 
         val response = functions.createExecution(
-            DbConstants.EDIT_EVENT_FUNCTION,
-            Json.encodeToString(EditEventRequest(
-                teamId = team.id,
-                eventId = event.id,
-                isTournament = (event.eventType.name == "TOURNAMENT"),
-                command = "addParticipant"
-            ))
+            DbConstants.EDIT_EVENT_FUNCTION, Json.encodeToString(
+                EditEventRequest(
+                    teamId = team.id,
+                    eventId = event.id,
+                    isTournament = (event.eventType.name == "TOURNAMENT"),
+                    command = "addParticipant"
+                )
+            )
         )
 
         val editEventResponse = Json.decodeFromString<EditEventResponse>(response.responseBody)
         if (editEventResponse.error.isNullOrBlank()) {
             return@runCatching
         } else {
-           throw Exception(editEventResponse.error)
+            throw Exception(editEventResponse.error)
         }
     }
-    override suspend fun updateLocalEvent(event: EventAbs): Result<Unit> =
-        when (event) {
-            is EventImp -> {
-                eventRepository.updateLocalEvent(event)
-            }
 
-            is Tournament -> {
-                tournamentRepository.updateLocalTournament(event)
-            }
-        }.map{}
+    override suspend fun updateLocalEvent(event: EventAbs): Result<Unit> = when (event) {
+        is EventImp -> {
+            eventRepository.updateLocalEvent(event)
+        }
+
+        is Tournament -> {
+            tournamentRepository.updateLocalTournament(event)
+        }
+    }.map {}
 }
 
 @Serializable
@@ -284,6 +319,5 @@ data class EditEventRequest(
 
 @Serializable
 data class EditEventResponse(
-    val message: String? = "",
-    val error: String? = ""
+    val message: String? = "", val error: String? = ""
 )

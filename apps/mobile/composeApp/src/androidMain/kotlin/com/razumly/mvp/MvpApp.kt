@@ -2,16 +2,15 @@ package com.razumly.mvp
 
 import android.app.Application
 import android.content.Context
-import com.google.firebase.FirebaseApp
 import com.mmk.kmpnotifier.notification.NotifierManager
 import com.mmk.kmpnotifier.notification.configuration.NotificationPlatformConfiguration
 import com.razumly.mvp.di.KoinInitializer
-import com.stripe.android.paymentsheet.PaymentSheet
 import io.github.aakira.napier.Napier
 
 class MvpApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        instance = this
         NotifierManager.initialize(
             configuration = NotificationPlatformConfiguration.Android(
                 notificationIconResId = R.drawable.logo_mvp,

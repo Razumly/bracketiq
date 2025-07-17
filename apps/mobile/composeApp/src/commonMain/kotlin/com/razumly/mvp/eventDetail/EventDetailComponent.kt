@@ -22,6 +22,8 @@ import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentResult
+import com.razumly.mvp.core.presentation.util.ShareServiceProvider
+import com.razumly.mvp.core.presentation.util.createEventUrl
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.eventDetail.data.IMatchRepository
@@ -236,6 +238,8 @@ class DefaultEventDetailComponent(
             checkEventIsFull(eventWithRelations.event)
         }
     }.stateIn(scope, SharingStarted.Eagerly, checkEventIsFull(event))
+
+    private val shareServiceProvider = ShareServiceProvider()
 
     init {
         backHandler.register(backCallback)
@@ -591,11 +595,20 @@ class DefaultEventDetailComponent(
     }
 
     override fun deleteEvent() {
-
+        scope.launch {
+            if (selectedEvent.value!!.event.price > 0) {
+                eventAbsRepository.deleteEvent(selectedEvent.value!!.event)
+            } else {
+                billingRepository.deleteAndRefundEvent(selectedEvent.value!!.event)
+            }
+        }
     }
 
     override fun shareEvent() {
-
+        val shareService = shareServiceProvider.getShareService()
+        shareService.share(
+            selectedEvent.value!!.event.name, createEventUrl(selectedEvent.value!!.event)
+        )
     }
 
     override fun checkIsUserFreeAgent(event: EventAbs): Boolean {

@@ -19,6 +19,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.snapshotFlow
+import com.razumly.mvp.core.data.dataTypes.EventAbs
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
@@ -187,3 +189,7 @@ fun AnimatedContentTransitionScope<Boolean>.buttonTransitionSpec() =
             animationSpec = tween(100)
         )
     }.using(SizeTransform(clip = false))
+
+fun createEventUrl(event: EventAbs): String {
+    return "https://www.razumly.com/mvp/${if (event.eventType == EventType.TOURNAMENT) "tournament/" else "event/"}${event.id}"
+}
