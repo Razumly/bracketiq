@@ -25,10 +25,10 @@ actual open class PaymentProcessor : IPaymentProcessor {
         val intent = purchaseIntent ?: return
 
         _nativeViewFactory?.presentStripePaymentSheet(
-            publishableKey = intent.publishableKey,
-            customerId = intent.customer,
-            ephemeralKey = intent.ephemeralKey,
-            paymentIntent = intent.paymentIntent,
+            publishableKey = intent.publishableKey!!,
+            customerId = intent.customer!!,
+            ephemeralKey = intent.ephemeralKey!!,
+            paymentIntent = intent.paymentIntent!!,
             onPaymentResult = { result ->
                 handlePaymentResult(result)
             }

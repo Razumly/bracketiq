@@ -15,6 +15,7 @@ struct DateTimePickerView: View {
     @State private var selectedDate: Date
     let minDate: Date
     let maxDate: Date
+    let getTime: Bool
     let onConfirm: (Date) -> Void
     let onDismiss: () -> Void
     
@@ -22,12 +23,14 @@ struct DateTimePickerView: View {
         initialDate: Date,
         minDate: Date,
         maxDate: Date,
+        getTime: Bool,
         onConfirm: @escaping (Date) -> Void,
         onDismiss: @escaping () -> Void
     ) {
         self._selectedDate = State(initialValue: initialDate)
         self.minDate = minDate
         self.maxDate = maxDate
+        self.getTime = getTime
         self.onConfirm = onConfirm
         self.onDismiss = onDismiss
     }
@@ -42,12 +45,14 @@ struct DateTimePickerView: View {
             )
             .datePickerStyle(.graphical)
             
-            DatePicker(
-                "",
-                selection: $selectedDate,
-                displayedComponents: [.hourAndMinute]
-            )
-            .datePickerStyle(.wheel)
+            if (getTime) {
+                DatePicker(
+                    "",
+                    selection: $selectedDate,
+                    displayedComponents: [.hourAndMinute]
+                )
+                .datePickerStyle(.wheel)
+            }
             
             HStack {
                 Button("Cancel", action: onDismiss)
@@ -65,6 +70,7 @@ class DateTimePickerViewController: UIHostingController<DateTimePickerView> {
         initialDate: Date,
         minDate: Date,
         maxDate: Date,
+        getTime: Bool,
         onConfirm: @escaping (Date) -> Void,
         onDismiss: @escaping () -> Void
     ) {
@@ -72,6 +78,7 @@ class DateTimePickerViewController: UIHostingController<DateTimePickerView> {
             initialDate: initialDate,
             minDate: minDate,
             maxDate: maxDate,
+            getTime: getTime,
             onConfirm: onConfirm,
             onDismiss: onDismiss
         )

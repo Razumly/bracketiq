@@ -1,5 +1,12 @@
 package com.razumly.mvp.core.presentation.util
 
+import kotlinx.cinterop.BetaInteropApi
+import platform.Foundation.NSString
+import platform.Foundation.create
+import platform.UIKit.UIActivityViewController
+import platform.UIKit.UIApplication
+
+@OptIn(BetaInteropApi::class)
 class IOSShareService : ShareService {
     override fun share(title: String, url: String) {
         val activityItems = listOf(

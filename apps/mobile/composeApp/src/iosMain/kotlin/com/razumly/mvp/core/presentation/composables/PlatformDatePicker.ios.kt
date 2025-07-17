@@ -16,7 +16,7 @@ actual fun PlatformDateTimePicker(
 ) {
     // Get the current time and calculate min/max dates
     val now = Clock.System.now()
-    val minDate = if (canSelectPast) now else now - (2 * 365).days
+    val minDate = if (canSelectPast) now - (2 * 365).days else now
     val maxDate = now + (2 * 365).days
 
     val factory = LocalNativeViewFactory.current

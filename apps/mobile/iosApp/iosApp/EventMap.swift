@@ -75,32 +75,40 @@ struct EventMap: View {
                         onSearch: { query in
                             Task {
                                 if let currentLoc = loc {
+                                    // Clear previous search results
+                                    places = []
+                                    // Add new search results
                                     places = try await component.searchPlaces(
                                         query: query,
                                         latLng: LatLng(latitude: currentLoc.latitude, longitude: currentLoc.longitude)
                                     )
                                 }
+                                searchText = ""
                             }
-                            searchText = ""
                         },
                         onSuggestionTap: { place in
                             Task {
                                 if place.id == "Query" {
                                     if let currentLoc = loc {
+                                        // Clear previous results before new search
+                                        places = []
                                         places = try await component.searchPlaces(
                                             query: place.name,
                                             latLng: LatLng(latitude: currentLoc.latitude, longitude: currentLoc.longitude)
                                         )
+                                    } else {
+                                        places = []
                                     }
                                 } else {
-                                    places = []
-                                    let place = try await component.getPlace(placeId: place.id)
-                                    if let place = place {
-                                        onPlaceSelected(place)
+                                    let placeDetails = try await component.getPlace(placeId: place.id)
+                                    if let placeDetails = placeDetails {
+                                        // Clear previous results and set new single place
+                                        places = [placeDetails]
                                     }
                                 }
                             }
-                        },
+                        }
+,
                         onTextChanged: { newValue in
                             searchTask?.cancel()
                             
@@ -180,11 +188,11 @@ struct GoogleMapView: UIViewRepresentable {
     func makeUIView(context: Context) -> GMSMapView {
         let camera: GMSCameraPosition
         if let f = focusedLocation {
-            camera = .camera(withLatitude: f.latitude, longitude: f.longitude, zoom: 15) // Increased zoom
+            camera = .camera(withLatitude: f.latitude, longitude: f.longitude, zoom: 12)
         } else if let loc = currentLocation {
-            camera = .camera(withLatitude: loc.latitude, longitude: loc.longitude, zoom: 15) // Increased zoom
+            camera = .camera(withLatitude: loc.latitude, longitude: loc.longitude, zoom: 12)
         } else {
-            camera = .camera(withLatitude: 0.0, longitude: 0.0, zoom: 2) // Default to SF with high zoom
+            camera = .camera(withLatitude: 0.0, longitude: 0.0, zoom: 2)
         }
         
         let options = GMSMapViewOptions()
@@ -211,25 +219,43 @@ struct GoogleMapView: UIViewRepresentable {
 
     
     func updateUIView(_ mapView: GMSMapView, context: Context) {
-        // 1) animate to newly focusedEvent or focusedLocation
+        // Clear place markers when new places array comes in
+        if !places.isEmpty {
+            context.coordinator.clearPlaceMarkers()
+            context.coordinator.currentPOIMarker?.map = nil
+            context.coordinator.currentPOIMarker = nil
+        }
         
-        mapView.clear()
         if let fe = focusedEvent, context.coordinator.lastEventId != fe.id {
+            mapView.clear()
+            context.coordinator.currentPOIMarker = nil
+            context.coordinator.placeMarkers.removeAll()
+            
             let pos = CLLocationCoordinate2D(latitude: fe.lat, longitude: fe.long)
-            mapView.animate(to: cameraPosition(for: pos))
+            let camera = GMSCameraPosition.camera(withTarget: pos, zoom: 12)
+            mapView.animate(to: camera)
             context.coordinator.lastEventId = fe.id
+            
             let coord = CLLocationCoordinate2D(latitude: fe.lat, longitude: fe.long)
             let m = GMSMarker(position: coord)
             m.title = fe.name
             m.snippet = "\(fe.fieldType) – $\(fe.price)"
             m.userData = fe
             m.map = mapView
+            
         } else if let fc = focusedLocation,
                   context.coordinator.lastFocus ?? (0.0, 0.0) != (fc.latitude, fc.longitude) {
+            mapView.clear()
+            context.coordinator.currentPOIMarker = nil
+            context.coordinator.placeMarkers.removeAll()
+            
             let pos = CLLocationCoordinate2D(latitude: fc.latitude, longitude: fc.longitude)
-            mapView.animate(to: cameraPosition(for: pos))
+            let camera = GMSCameraPosition.camera(withTarget: pos, zoom: 12)
+            mapView.animate(to: camera)
             context.coordinator.lastFocus = (fc.latitude, fc.longitude)
         }
+        
+        // Add event markers (only when not in POI selection mode)
         if !canClickPOI {
             for event in events {
                 let coord = CLLocationCoordinate2D(latitude: event.lat, longitude: event.long)
@@ -241,14 +267,29 @@ struct GoogleMapView: UIViewRepresentable {
             }
         }
         
+        // Add suggestion place markers and track them
         for place in places {
             let coord = CLLocationCoordinate2D(latitude: place.lat, longitude: place.long)
-            let m = GMSMarker(position: coord)
-            m.title = place.name
-            m.userData = place
-            m.map = mapView
+            let marker = GMSMarker(position: coord)
+            marker.title = place.name
+            marker.userData = place
+            marker.map = mapView
+            
+            // Track this marker
+            context.coordinator.placeMarkers.append(marker)
+            
+            // Animate to the suggestion place if it's the only one
+            if places.count == 1 {
+                let camera = GMSCameraPosition.camera(withTarget: coord, zoom: 15)
+                mapView.animate(to: camera)
+                // Show the info window automatically for suggestion places
+                mapView.selectedMarker = marker
+            }
         }
     }
+
+
+
     
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -258,8 +299,8 @@ struct GoogleMapView: UIViewRepresentable {
         )
     }
     
-    private func cameraPosition(for coord: CLLocationCoordinate2D) -> GMSCameraPosition {
-        GMSCameraPosition.camera(withTarget: coord, zoom: 12)
+    private func cameraPosition(for coord: CLLocationCoordinate2D, zoom: Float = 12) -> GMSCameraPosition {
+        GMSCameraPosition.camera(withTarget: coord, zoom: zoom)
     }
 }
 
@@ -267,7 +308,9 @@ class Coordinator: NSObject, GMSMapViewDelegate {
     let parent: GoogleMapView
     var lastFocus: (Double, Double)?
     var lastEventId: String?
-    
+    var selectedMarker: GMSMarker?
+    var currentPOIMarker: GMSMarker? // Track the current POI marker
+    var placeMarkers: [GMSMarker] = [] // Track place markers from searches/suggestions
     
     init(
         parent: GoogleMapView,
@@ -277,7 +320,12 @@ class Coordinator: NSObject, GMSMapViewDelegate {
         self.parent = parent
     }
     
-    // Handle POI clicks
+    // Helper method to clear place markers
+    func clearPlaceMarkers() {
+        placeMarkers.forEach { $0.map = nil }
+        placeMarkers.removeAll()
+    }
+    
     // Handle POI clicks
     func mapView(
         _ mapView: GMSMapView,
@@ -285,45 +333,72 @@ class Coordinator: NSObject, GMSMapViewDelegate {
         name: String,
         location: CLLocationCoordinate2D
     ) {
-        print("POI tapped: \(name) with ID: \(placeID)") // Debug log
+        print("POI tapped: \(name) with ID: \(placeID)")
         guard parent.canClickPOI else {
             print("POI clicks disabled")
             return
         }
         
         print("Processing POI click for: \(name)")
-        mapView.animate(to: GMSCameraPosition.camera(withTarget: location, zoom: 15))
         
-        Task {
-            do {
-                let place = try await self.parent.component.getPlace(placeId: placeID)
-                if let place = place {
-                    await MainActor.run {
-                        self.parent.onPlaceSelected(place)
-                    }
-                }
-            } catch {
-                print("Error getting place details: \(error)")
-            }
-        }
+        // Clear the previous POI marker if it exists
+        currentPOIMarker?.map = nil
+        currentPOIMarker = nil
+        
+        mapView.animate(to: GMSCameraPosition.camera(withTarget: location, zoom: 12))
+        
+        // Create a new marker for the POI
+        let marker = GMSMarker(position: location)
+        marker.title = name
+        marker.userData = placeID
+        marker.map = mapView
+        
+        // Track this as the current POI marker
+        currentPOIMarker = marker
+        
+        // Show the info window
+        mapView.selectedMarker = marker
+        selectedMarker = marker
     }
-
     
-    // Tapping a marker (show its callout)
+    // Handle marker tap (show info window)
     func mapView(_ mapView: GMSMapView, didTap marker: GMSMarker) -> Bool {
         mapView.selectedMarker = marker
+        selectedMarker = marker
         return true
     }
     
-    // Tapping the callout
+    // Handle info window tap (trigger the action)
     func mapView(_ mapView: GMSMapView, didTapInfoWindowOf marker: GMSMarker) {
         if let event = marker.userData as? EventAbs {
             parent.onEventSelected(event)
+        } else if let placeID = marker.userData as? String {
+            Task {
+                do {
+                    let place = try await self.parent.component.getPlace(placeId: placeID)
+                    if let place = place {
+                        await MainActor.run {
+                            self.parent.onPlaceSelected(place)
+                        }
+                    }
+                } catch {
+                    print("Error getting place details: \(error)")
+                }
+            }
         } else if let place = marker.userData as? MVPPlace {
             parent.onPlaceSelected(place)
         }
     }
+    
+    // Clear selected markers when tapping elsewhere
+    func mapView(_ mapView: GMSMapView, didTapAt coordinate: CLLocationCoordinate2D) {
+        selectedMarker = nil
+        // Optionally clear POI marker when tapping empty space
+        // currentPOIMarker?.map = nil
+        // currentPOIMarker = nil
+    }
 }
+
 
 struct MapSearchBar: View {
     @Binding var text: String

@@ -80,6 +80,7 @@ class IOSNativeViewFactory: NativeViewFactory {
         initialDate: Kotlinx_datetimeInstant,
         minDate: Kotlinx_datetimeInstant,
         maxDate: Kotlinx_datetimeInstant,
+        getTime: Bool,
         onDateSelected: @escaping (Kotlinx_datetimeInstant?) -> Void,
         onDismissRequest: @escaping () -> Void
     ) {
@@ -96,6 +97,7 @@ class IOSNativeViewFactory: NativeViewFactory {
             initialDate: initialDateSwift,
             minDate: minDateSwift,
             maxDate: maxDateSwift,
+            getTime: getTime,
             onConfirm: { date in
                 let instant = Kotlinx_datetimeInstant.companion.fromEpochMilliseconds(
                     epochMilliseconds: Int64(date.timeIntervalSince1970 * 1000)
