@@ -45,6 +45,7 @@ import com.razumly.mvp.core.presentation.composables.TeamCard
 import com.razumly.mvp.core.presentation.util.buttonTransitionSpec
 import com.razumly.mvp.core.util.LocalErrorHandler
 import com.razumly.mvp.core.util.LocalLoadingHandler
+import com.razumly.mvp.eventDetail.composables.CollapsableHeader
 import com.razumly.mvp.eventDetail.composables.ParticipantsView
 import com.razumly.mvp.eventDetail.composables.TournamentBracketView
 import com.razumly.mvp.eventMap.MapComponent
@@ -262,6 +263,7 @@ fun EventDetailScreen(
                     exit = shrinkVertically(shrinkTowards = Alignment.Top)
                 ) {
                     Column(Modifier.padding(innerPadding).padding(top = 32.dp)) {
+                        CollapsableHeader(component)
                         Box(Modifier.fillMaxSize()) {
                             when (selectedEvent) {
                                 is TournamentWithRelations -> {

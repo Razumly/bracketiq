@@ -104,6 +104,7 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.format
 import kotlinx.datetime.toLocalDateTime
 import mvp.composeapp.generated.resources.Res
+import mvp.composeapp.generated.resources.enter_value
 import mvp.composeapp.generated.resources.free_entry_hint
 import mvp.composeapp.generated.resources.invalid_price
 import mvp.composeapp.generated.resources.max_players
@@ -112,7 +113,6 @@ import mvp.composeapp.generated.resources.select_a_value
 import mvp.composeapp.generated.resources.team_size_limit
 import mvp.composeapp.generated.resources.value_range
 import mvp.composeapp.generated.resources.value_too_low
-import mvp.composeapp.generated.resources.enter_value
 import org.jetbrains.compose.resources.stringResource
 
 val LocalHazeState = compositionLocalOf { HazeState() }
@@ -149,6 +149,7 @@ fun EventDetails(
     var revealCenter by remember { mutableStateOf(Offset.Zero) }
     var showImageSelector by rememberSaveable { mutableStateOf(false) }
     var selectedPlace by remember { mutableStateOf<MVPPlace?>(null) }
+    var previousSelection by remember { mutableStateOf<LatLng?>(null) }
 
     // Validation states
     var isNameValid by remember { mutableStateOf(editEvent.name.isNotBlank()) }
@@ -288,10 +289,12 @@ fun EventDetails(
                                         label = { Text("Event Name") },
                                         isError = !isNameValid,
                                         supportingText = {
-                                            Text(
-                                                text = stringResource(Res.string.enter_value),
-                                                color = MaterialTheme.colorScheme.error
-                                            )
+                                            if (!isNameValid) {
+                                                Text(
+                                                    text = stringResource(Res.string.enter_value),
+                                                    color = MaterialTheme.colorScheme.error
+                                                )
+                                            }
                                         }
                                     )
                                 })
@@ -491,7 +494,7 @@ fun EventDetails(
                                 viewContent = {
                                     Text("Specifics", style = MaterialTheme.typography.titleMedium)
                                     Text(
-                                        "Max Players: ${event.maxParticipants}",
+                                        "Max Participants: ${event.maxParticipants}",
                                         style = MaterialTheme.typography.bodyMedium
                                     )
                                     Text(
@@ -802,11 +805,14 @@ fun EventDetails(
                     onPlaceSelected(place)
                     selectedPlace = place
                     showImageSelector = true
+                    previousSelection = LatLng(place.lat, place.long)
                 }
             },
             canClickPOI = editView,
             focusedLocation = if (editEvent.location.isNotBlank()) {
                 editEvent.let { LatLng(it.lat, it.long) }
+            } else if (previousSelection != null) {
+                previousSelection!!
             } else {
                 currentLocation ?: LatLng(0.0, 0.0)
             },

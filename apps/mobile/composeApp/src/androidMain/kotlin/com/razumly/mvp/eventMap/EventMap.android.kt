@@ -45,6 +45,7 @@ import com.razumly.mvp.core.presentation.util.CircularRevealShape
 import com.razumly.mvp.core.util.toGoogle
 import dev.icerock.moko.geo.compose.BindLocationTrackerEffect
 import io.github.aakira.napier.Napier
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
@@ -59,7 +60,6 @@ actual fun EventMap(
     revealCenter: Offset,
     onBackPressed: (() -> Unit)?
 ) {
-    val selectedPlace = remember { mutableStateOf<PointOfInterest?>(null) }
     val scope = rememberCoroutineScope()
     val showMap by component.showMap.collectAsState()
     var places by remember { mutableStateOf<List<Place>>(listOf()) }
@@ -68,7 +68,9 @@ actual fun EventMap(
     val defaultDurationMs = 1000
     val initCameraState = focusedLocation.toGoogle()
     val cameraPositionState = rememberCameraPositionState()
-    val currentLocation by component.currentLocation.collectAsState()
+    var selectedPlace by remember { mutableStateOf<PointOfInterest?>(null) }
+    var showingInfoWindow by remember { mutableStateOf(false) }
+    var isAnimating by remember { mutableStateOf(false) }
 
     val animationProgress by animateFloatAsState(
         targetValue = if (showMap) 1f else 0f, animationSpec = tween(durationMillis = 1000)
@@ -106,33 +108,49 @@ actual fun EventMap(
             properties = MapProperties(isMyLocationEnabled = true),
             uiSettings = MapUiSettings(zoomControlsEnabled = false),
             onPOIClick = { poi ->
-                if (canClickPOI) {
+                if (canClickPOI && !isAnimating) {
+                    selectedPlace = poi
+                    showingInfoWindow = false
+                    isAnimating = true
+
                     scope.launch {
-                        selectedPlace.value = poi
+                        // Animate camera first
                         cameraPositionState.animate(
                             CameraUpdateFactory.newCameraPosition(
-                                CameraPosition.fromLatLngZoom(
-                                    poi.latLng,
-                                    defaultZoom
-                                )
-                            )
+                                CameraPosition.fromLatLngZoom(poi.latLng, defaultZoom)
+                            ),
+                            durationMs = 800
                         )
+
+                        // Wait for camera animation to complete
+                        delay(300)
+                        isAnimating = false
+                        showingInfoWindow = true
                     }
                 }
             }
         ) {
-            selectedPlace.value?.let { poi ->
-                val state = rememberUpdatedMarkerState(poi.latLng)
-                state.showInfoWindow()
-                scope.launch {
-                    onPlaceSelected(component.getPlace(poi.placeId))
-                    selectedPlace.value = null
+            selectedPlace?.let { poi ->
+                val markerState = remember(poi.placeId) {
+                    MarkerState(position = poi.latLng)
                 }
+
+                LaunchedEffect(showingInfoWindow) {
+                    if (showingInfoWindow) {
+                        delay(100)
+                        markerState.showInfoWindow()
+                    }
+                }
+
                 Marker(
-                    state = state,
+                    state = markerState,
                     title = poi.name,
                     onClick = {
-                        state.showInfoWindow()
+                        if (showingInfoWindow) {
+                            scope.launch {
+                                onPlaceSelected(component.getPlace(poi.placeId))
+                            }
+                        }
                         true
                     }
                 )
@@ -140,7 +158,7 @@ actual fun EventMap(
             if (!canClickPOI) {
                 events.forEach { event ->
                     val eventPosition = LatLng(event.lat, event.long)
-                    val state = rememberUpdatedMarkerState(eventPosition)
+                    val state = rememberUpdatedMarkerState(event.id, eventPosition)
                     Marker(
                         state = state,
                         title = event.name,
@@ -150,7 +168,7 @@ actual fun EventMap(
                 }
             }
             places.forEach { place ->
-                val state = rememberUpdatedMarkerState(place.location!!)
+                val state = rememberUpdatedMarkerState(place.id!!, place.location!!)
                 Marker(
                     state = state,
                     title = place.displayName,
@@ -166,7 +184,7 @@ actual fun EventMap(
 
             focusedEvent?.let { event ->
                 val eventPosition = LatLng(event.lat, event.long)
-                val state = rememberUpdatedMarkerState(eventPosition)
+                val state = rememberUpdatedMarkerState(event.id, eventPosition)
                 Marker(
                     state = state,
                     title = event.name,
@@ -186,7 +204,7 @@ actual fun EventMap(
                     currentCameraState.position.target,
                     it
                 ) { newPlaces ->
-                    selectedPlace.value = null
+                    selectedPlace = null
                     if (newPlaces.size > 1) {
                         val bounds = LatLngBounds.builder()
                         newPlaces.forEach { place ->
@@ -199,17 +217,6 @@ actual fun EventMap(
                                 CameraUpdateFactory.newLatLngZoom(location, defaultZoom),
                                 defaultDurationMs
                             )
-                        }
-                    } else {
-                        // Fallback to current location
-                        currentLocation?.let { validLoc ->
-                            val target = validLoc.toGoogle()
-                            scope.launch {
-                                cameraPositionState.animate(
-                                    CameraUpdateFactory.newLatLngZoom(target, defaultZoom),
-                                    defaultDurationMs
-                                )
-                            }
                         }
                     }
                     places = newPlaces
@@ -311,6 +318,14 @@ fun MapSearchBar(
 }
 
 @Composable
-private fun rememberUpdatedMarkerState(newPosition: LatLng): MarkerState =
-    remember { MarkerState(position = newPosition) }
-        .apply { position = newPosition }
+private fun rememberUpdatedMarkerState(
+    key: String,
+    position: LatLng
+): MarkerState {
+    return remember(key) { MarkerState(position = position) }
+        .apply {
+            if (this.position != position) {
+                this.position = position
+            }
+        }
+}
