@@ -34,6 +34,7 @@ interface IEventRepository : IMVPRepository {
     suspend fun updateLocalEvent(newEvent: EventImp): Result<EventImp>
     suspend fun getEvents(query: String): Result<List<EventImp>>
     fun getEventsFlow(query: String): Flow<Result<List<EventImp>>>
+    suspend fun deleteEvent(eventId: String): Result<Unit>
 }
 
 class EventRepository(
@@ -194,5 +195,9 @@ class EventRepository(
         val localFlow = databaseService.getEventImpDao.getAllCachedEvents()
             .map { Result.success(it) }
         return localFlow
+    }
+
+    override suspend fun deleteEvent(eventId: String): Result<Unit> = runCatching {
+        databaseService.getEventImpDao.deleteEventWithCrossRefs(eventId)
     }
 }

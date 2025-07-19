@@ -42,7 +42,6 @@ import kotlinx.datetime.toLocalDateTime
 fun MatchCard(
     match: MatchWithRelations?,
     onClick: () -> Unit,
-    losersBracket: Boolean,
     modifier: Modifier = Modifier
 ) {
     val component = LocalTournamentComponent.current
@@ -50,10 +49,10 @@ fun MatchCard(
     val teams by component.divisionTeams.collectAsState()
     val matches by component.divisionMatches.collectAsState()
     val fields by component.divisionFields.collectAsState()
-    val matchCardColor = if (match != null && match.match.losersBracket == losersBracket) {
-        matchCard
-    } else {
+    val matchCardColor = if (match != null && match.match.losersBracket ) {
         MaterialTheme.colorScheme.tertiaryContainer
+    } else {
+        matchCard
     }
     Box(
         modifier = modifier

@@ -268,9 +268,6 @@ class TournamentRepository(
         }
 
     override suspend fun deleteTournament(tournamentId: String): Result<Unit> = kotlin.runCatching {
-        database.deleteDocument(
-            DbConstants.DATABASE_NAME, DbConstants.TOURNAMENT_COLLECTION, tournamentId
-        )
         databaseService.getTournamentDao.deleteTournamentWithCrossRefs(tournamentId)
     }
 }

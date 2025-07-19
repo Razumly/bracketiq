@@ -38,6 +38,7 @@ import com.razumly.mvp.core.presentation.util.isScrollingUp
 import com.razumly.mvp.core.util.ceilDiv
 import com.razumly.mvp.eventDetail.LocalTournamentComponent
 import com.razumly.mvp.home.LocalNavBarPadding
+import io.github.aakira.napier.Napier
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 @Composable
@@ -51,29 +52,26 @@ fun TournamentBracketView(
     val columnScrollState = rememberScrollState()
 
     val lazyRowState = rememberLazyListState()
-    val maxHeightInRowDp = remember { mutableStateOf(Dp.Unspecified) }
+    var maxHeightInRowDp by remember { mutableStateOf(Dp.Unspecified) }
     val columnHeight by animateDpAsState(
-        targetValue = maxHeightInRowDp.value,
-        label = "Column Height"
+        targetValue = maxHeightInRowDp, label = "Column Height"
     )
     val cardHeight = 90
     val cardPadding = 64
     val cardContainerHeight = cardHeight + cardPadding
-    val boxHeight = remember { mutableStateOf(Dp.Unspecified) }
+    var boxHeight by remember { mutableStateOf(Dp.Unspecified) }
     val width = getScreenWidth() / 1.5
-    val maxHeightIndex = remember { mutableIntStateOf(0) }
+    var maxHeightIndex by remember { mutableIntStateOf(0) }
     val navBarPadding = LocalNavBarPadding.current.calculateBottomPadding()
     var prevColumnScroll by remember { mutableStateOf(columnScrollState.value) }
     var isScrollingUp by remember { mutableStateOf(true) }
     val isScrollingLeft by lazyRowState.isScrollingUp()
 
     LaunchedEffect(columnScrollState) {
-        snapshotFlow { columnScrollState.value }
-            .distinctUntilChanged()
-            .collect { currentScroll ->
-                isScrollingUp = currentScroll <= prevColumnScroll
-                prevColumnScroll = currentScroll
-            }
+        snapshotFlow { columnScrollState.value }.distinctUntilChanged().collect { currentScroll ->
+            isScrollingUp = currentScroll <= prevColumnScroll
+            prevColumnScroll = currentScroll
+        }
     }
 
     LaunchedEffect(isScrollingUp) {
@@ -85,89 +83,107 @@ fun TournamentBracketView(
     }
 
     LaunchedEffect(lazyRowState, roundsList, losersBracket) {
-        snapshotFlow { lazyRowState.firstVisibleItemIndex }.collect { index ->
+        // Function to calculate height
+        fun calculateMaxHeight(index: Int) {
             var maxSize = 0
-            val itemsInViewCount = lazyRowState.layoutInfo.visibleItemsInfo.size
-            val lastItemInViewIndex = index + itemsInViewCount - 1
-            roundsList.slice(index..lastItemInViewIndex).forEachIndexed { i, round ->
-                val notNullSize = round.filterNotNull().size
-                val halfSize = round.size.ceilDiv(2)
-                if (notNullSize > halfSize || (losersBracket && i == 0) || (index != 0 && notNullSize == halfSize)) {
-                    if (round.size > maxSize) {
-                        maxSize = round.size
-                        maxHeightIndex.intValue = index + i
-                    }
-                } else {
-                    if ((notNullSize) > maxSize) {
-                        maxSize = notNullSize
-                        maxHeightIndex.intValue = index + i
+            val itemsInViewCount = lazyRowState.layoutInfo.visibleItemsInfo.size.takeIf { it > 0 } ?: roundsList.size
+            val lastItemInViewIndex = (index + itemsInViewCount - 1).coerceAtMost(roundsList.size - 1)
+
+            if (roundsList.isNotEmpty() && index < roundsList.size) {
+                roundsList.slice(index..lastItemInViewIndex).forEachIndexed { i, round ->
+                    val notNullSize = round.filterNotNull().size
+                    val halfSize = round.size.ceilDiv(2)
+                    val currentIndex = index + i
+
+                    if (!losersBracket && round.any { it?.match?.losersBracket == true} && i != 0) {
+                        if (round.size * 2 > maxSize) {
+                            maxSize = round.size * 2
+                            maxHeightIndex = currentIndex
+                        }
+                    } else if (notNullSize > halfSize || (losersBracket && i == 0) || (index != 0 && notNullSize == halfSize)) {
+                        if (round.size > maxSize) {
+                            maxSize = round.size
+                            maxHeightIndex = currentIndex
+                        }
+                    } else {
+                        if (notNullSize > maxSize) {
+                            maxSize = notNullSize
+                            maxHeightIndex = currentIndex
+                        }
                     }
                 }
+
+                Napier.d("Max Size: $maxSize, maxIndex: $maxHeightIndex")
+                maxHeightInRowDp = maxSize.dp * cardContainerHeight
+
+                if (boxHeight == Dp.Unspecified || maxHeightInRowDp > boxHeight) {
+                    boxHeight = maxHeightInRowDp + navBarPadding + 16.dp
+                }
             }
-            maxHeightInRowDp.value = maxSize.dp * cardContainerHeight
-            if (boxHeight.value == Dp.Unspecified || maxHeightInRowDp.value > boxHeight.value) {
-                boxHeight.value = maxHeightInRowDp.value + navBarPadding + 16.dp
-            }
+        }
+
+        // Run initial calculation
+        calculateMaxHeight(0)
+
+        // Listen for changes
+        snapshotFlow { lazyRowState.firstVisibleItemIndex }.collect { index ->
+            calculateMaxHeight(index)
         }
     }
 
+
     Column(
-        Modifier
-            .fillMaxSize()
-            .verticalScroll(columnScrollState)
+        Modifier.fillMaxSize().verticalScroll(columnScrollState)
             .background(MaterialTheme.colorScheme.background)
     ) {
         Column(Modifier.fillMaxWidth()) {
             LazyRow(
                 state = lazyRowState,
-                modifier = Modifier
-                    .height(boxHeight.value)
-                    .fillMaxWidth(),
+                modifier = Modifier.height(boxHeight).fillMaxWidth(),
             ) {
                 itemsIndexed(roundsList, key = { _, round ->
                     round.filterNotNull().joinToString { it.match.id }
                 }) { colIndex, round ->
                     Column(
-                        modifier = Modifier
-                            .padding(start = 16.dp)
-                            .width(intrinsicSize = IntrinsicSize.Max)
-                            .height(columnHeight),
+                        modifier = Modifier.padding(start = 16.dp)
+                            .width(intrinsicSize = IntrinsicSize.Max).height(columnHeight),
                         verticalArrangement = Arrangement.SpaceBetween,
                     ) {
                         round.chunked(2).forEachIndexed { chunkIndex, matches ->
-                            val filteredMatches = if (colIndex == 0) {
-                                matches.filterNotNull()
-                            } else {
-                                matches
+                            val filteredMatches = remember(colIndex, maxHeightIndex, lazyRowState) {
+                                if (colIndex == 0 || maxHeightIndex == colIndex) {
+                                    matches.filterNotNull()
+                                } else {
+                                    matches
+                                }
                             }
-                            val visible = remember(colIndex, chunkIndex, matches) {
+                            var visible by remember(colIndex, chunkIndex, matches) {
                                 mutableStateOf(
                                     true
                                 )
                             }
 
-                            val pairWeight = animateFloatAsState(
-                                targetValue = if (visible.value) 1.0f else 0.01f,
+                            val pairWeight by animateFloatAsState(
+                                targetValue = if (visible) 1.0f else 0.01f,
                                 label = "Card Visibility",
                             )
                             LaunchedEffect(maxHeightIndex) {
                                 snapshotFlow { lazyRowState.firstVisibleItemIndex }.collect {
-                                    visible.value = (matches.filterNotNull().isNotEmpty() ||
-                                            maxHeightIndex.intValue == colIndex)
+                                    visible = (matches.filterNotNull()
+                                        .isNotEmpty() || (colIndex == it))
                                 }
                             }
                             Box(
-                                modifier = Modifier
-                                    .weight(pairWeight.value)
+                                modifier = Modifier.weight(pairWeight)
                                     .background(MaterialTheme.colorScheme.background),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Column(
-                                    modifier = Modifier
-                                        .fillMaxHeight(),
+                                    modifier = Modifier.fillMaxHeight(),
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     verticalArrangement = Arrangement.SpaceAround
                                 ) {
+                                    Napier.d("Column: $colIndex, Chunk: $chunkIndex, Filtered Matches count: ${filteredMatches.size}, is visible: $visible")
                                     filteredMatches.forEach { match ->
                                         MatchCard(
                                             match = match,
@@ -176,10 +192,8 @@ fun TournamentBracketView(
                                                     onMatchClick(match)
                                                 }
                                             },
-                                            modifier = Modifier
-                                                .height(cardHeight.dp)
+                                            modifier = Modifier.height(cardHeight.dp)
                                                 .width(width.dp),
-                                            losersBracket = losersBracket
                                         )
                                     }
                                 }

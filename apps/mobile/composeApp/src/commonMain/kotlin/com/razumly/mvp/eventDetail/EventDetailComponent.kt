@@ -599,10 +599,16 @@ class DefaultEventDetailComponent(
 
     override fun deleteEvent() {
         scope.launch {
-            if (selectedEvent.value!!.event.price > 0) {
-                eventAbsRepository.deleteEvent(selectedEvent.value!!.event)
+            if (selectedEvent.value!!.event.price == 0.0) {
+                eventAbsRepository.deleteEvent(selectedEvent.value!!.event).onFailure {
+                    _errorState.value = ErrorMessage(it.message ?: "")
+                }
+                backCallback.onBack()
             } else {
-                billingRepository.deleteAndRefundEvent(selectedEvent.value!!.event)
+                billingRepository.deleteAndRefundEvent(selectedEvent.value!!.event).onFailure {
+                    _errorState.value = ErrorMessage(it.message ?: "")
+                }
+                backCallback.onBack()
             }
         }
     }

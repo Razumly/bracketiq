@@ -85,7 +85,7 @@ class MatchRepository(
         databaseService.getMatchDao.upsertMatch(updatedMatch)
     }, onReturn = {
         functions.createExecution(
-            functionId = DbConstants.EDIT_EVENT_FUNCTION,
+            functionId = DbConstants.EVENT_MANAGER_FUNCTION,
             body = UpdateMatchArguments(Clock.System.now(), match.tournamentId, match.id).toJson(),
             async = false,
         )

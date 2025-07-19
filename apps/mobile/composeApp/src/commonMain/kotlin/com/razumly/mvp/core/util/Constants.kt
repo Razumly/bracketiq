@@ -17,7 +17,7 @@ object DbConstants {
     const val EVENTS_ATTRIBUTE = "eventIds"
     const val LAT_ATTRIBUTE = "lat"
     const val LONG_ATTRIBUTE = "long"
-    const val EDIT_EVENT_FUNCTION = "eventManager"
+    const val EVENT_MANAGER_FUNCTION = "eventManager"
     const val BILLING_FUNCTION = "mvpBilling"
     const val ERROR_TAG = "Database"
     const val MATCHES_CHANNEL = "databases.$DATABASE_NAME.collections.$MATCHES_COLLECTION.documents"

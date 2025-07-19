@@ -268,44 +268,44 @@ fun EventDetailScreen(
                                 }
                             }
                         }
-                        if (!isEditing && (isHost || isUserInEvent)) {
-                            Box(
-                                Modifier.padding(top = 64.dp, start = 16.dp)
-                                    .align(Alignment.TopStart)
-                            ) {
-                                IconButton(
-                                    { component.backCallback.onBack() },
-                                    modifier = Modifier.background(
-                                        Color.White.copy(alpha = 0.7f), shape = CircleShape
-                                    ),
-                                ) {
-                                    Icon(
-                                        Icons.Default.Close,
-                                        contentDescription = "Close",
-                                        tint = MaterialTheme.colorScheme.onSurface
-                                    )
-                                }
-                            }
-                            Box(
-                                modifier = Modifier.align(Alignment.TopEnd)
-                                    .padding(top = 64.dp, end = 16.dp) // Adjust for status bar
-                            ) {
-                                IconButton(
-                                    onClick = { showOptionsDropdown = true },
-                                    modifier = Modifier.background(
-                                        Color.White.copy(alpha = 0.7f), shape = CircleShape
-                                    )
-                                ) {
-                                    Icon(
-                                        Icons.Default.MoreVert,
-                                        contentDescription = "More options",
-                                        tint = MaterialTheme.colorScheme.onSurface
-                                    )
-                                }
 
-                                DropdownMenu(expanded = showOptionsDropdown,
-                                    onDismissRequest = { showOptionsDropdown = false }) {
-                                    // Edit option
+                        Box(
+                            Modifier.padding(top = 64.dp, start = 16.dp).align(Alignment.TopStart)
+                        ) {
+                            IconButton(
+                                { component.backCallback.onBack() },
+                                modifier = Modifier.background(
+                                    Color.White.copy(alpha = 0.7f), shape = CircleShape
+                                ),
+                            ) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "Close",
+                                    tint = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                        Box(
+                            modifier = Modifier.align(Alignment.TopEnd)
+                                .padding(top = 64.dp, end = 16.dp) // Adjust for status bar
+                        ) {
+                            IconButton(
+                                onClick = { showOptionsDropdown = true },
+                                modifier = Modifier.background(
+                                    Color.White.copy(alpha = 0.7f), shape = CircleShape
+                                )
+                            ) {
+                                Icon(
+                                    Icons.Default.MoreVert,
+                                    contentDescription = "More options",
+                                    tint = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+
+                            DropdownMenu(expanded = showOptionsDropdown,
+                                onDismissRequest = { showOptionsDropdown = false }) {
+                                // Edit option
+                                if (isHost) {
                                     DropdownMenuItem(text = { Text("Edit") }, onClick = {
                                         component.toggleEdit()
                                         showOptionsDropdown = false
@@ -313,33 +313,31 @@ fun EventDetailScreen(
                                         Icon(Icons.Default.Edit, contentDescription = null)
                                     }, enabled = isHost
                                     )
+                                }
 
-                                    // Share option
-                                    DropdownMenuItem(text = { Text("Share") }, onClick = {
-                                        component.shareEvent()
+                                DropdownMenuItem(text = { Text("Share") }, onClick = {
+                                    component.shareEvent()
+                                    showOptionsDropdown = false
+                                }, leadingIcon = {
+                                    Icon(Icons.Default.Share, contentDescription = null)
+                                })
+
+                                if (isHost) {
+                                    DropdownMenuItem(text = { Text("Delete") }, onClick = {
+                                        showDeleteConfirmation = true
                                         showOptionsDropdown = false
                                     }, leadingIcon = {
-                                        Icon(Icons.Default.Share, contentDescription = null)
-                                    })
-
-                                    // Delete option (only for hosts)
-                                    if (isHost) {
-                                        DropdownMenuItem(text = { Text("Delete") }, onClick = {
-                                            showDeleteConfirmation = true
-                                            showOptionsDropdown = false
-                                        }, leadingIcon = {
-                                            Icon(
-                                                Icons.Default.Delete,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.error
-                                            )
-                                        }, colors = MenuDefaults.itemColors(
-                                            textColor = MaterialTheme.colorScheme.error
+                                        Icon(
+                                            Icons.Default.Delete,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.error
                                         )
-                                        )
-                                    }
-
+                                    }, colors = MenuDefaults.itemColors(
+                                        textColor = MaterialTheme.colorScheme.error
+                                    )
+                                    )
                                 }
+
                             }
                         }
                     }

@@ -164,7 +164,7 @@ class EventAbsRepository(
 
     override suspend fun deleteEvent(event: EventAbs): Result<Unit> = runCatching {
         functions.createExecution(
-            DbConstants.EDIT_EVENT_FUNCTION, Json.encodeToString(
+            DbConstants.EVENT_MANAGER_FUNCTION, Json.encodeToString(
                 EditEventRequest(
                     eventId = event.id,
                     isTournament = (event.eventType == EventType.TOURNAMENT),
@@ -172,6 +172,14 @@ class EventAbsRepository(
                 )
             )
         )
+        when (event) {
+            is EventImp -> {
+                eventRepository.deleteEvent(event.id)
+            }
+            is Tournament -> {
+                tournamentRepository.deleteTournament(event.id)
+            }
+        }.map {}
     }
 
     override fun getUsersEventsFlow(): Flow<Result<List<EventAbs>>> {
@@ -206,7 +214,7 @@ class EventAbsRepository(
     ): Result<Unit> {
         val team = teamWithPlayers.team
         val response = functions.createExecution(
-            DbConstants.EDIT_EVENT_FUNCTION, Json.encodeToString(
+            DbConstants.EVENT_MANAGER_FUNCTION, Json.encodeToString(
                 EditEventRequest(
                     eventId = event.id,
                     teamId = team.id,
@@ -226,7 +234,7 @@ class EventAbsRepository(
 
     private suspend fun removePlayerFromEvent(event: EventAbs, player: UserData): Result<Unit> {
         val response = functions.createExecution(
-            DbConstants.EDIT_EVENT_FUNCTION, Json.encodeToString(
+            DbConstants.EVENT_MANAGER_FUNCTION, Json.encodeToString(
                 EditEventRequest(
                     eventId = event.id,
                     userId = player.id,
@@ -253,7 +261,7 @@ class EventAbsRepository(
     override suspend fun addCurrentUserToEvent(event: EventAbs): Result<Unit> = runCatching {
         val currentUser = userRepository.currentUser.value.getOrThrow()
         val response = functions.createExecution(
-            DbConstants.EDIT_EVENT_FUNCTION, Json.encodeToString(
+            DbConstants.EVENT_MANAGER_FUNCTION, Json.encodeToString(
                 EditEventRequest(
                     eventId = event.id,
                     userId = currentUser.id,
@@ -277,7 +285,7 @@ class EventAbsRepository(
         }
 
         val response = functions.createExecution(
-            DbConstants.EDIT_EVENT_FUNCTION, Json.encodeToString(
+            DbConstants.EVENT_MANAGER_FUNCTION, Json.encodeToString(
                 EditEventRequest(
                     teamId = team.id,
                     eventId = event.id,

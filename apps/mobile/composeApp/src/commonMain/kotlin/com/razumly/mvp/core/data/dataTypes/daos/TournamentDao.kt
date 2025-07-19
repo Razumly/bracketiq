@@ -57,6 +57,9 @@ interface TournamentDao {
     @Transaction
     suspend fun deleteTournamentWithCrossRefs(tournamentId: String) {
         deleteTournamentById(tournamentId)
+        deleteTournamentUserCrossRefs(tournamentId)
+        deleteTournamentMatchCrossRefs(tournamentId)
+        deleteTournamentTeamCrossRefs(tournamentId)
     }
 
     @Query("DELETE FROM user_tournament_cross_ref WHERE tournamentId = :tournamentId")
