@@ -66,8 +66,6 @@ fun EventList(
             ) {
                 EventCard(
                     event,
-                    {},
-                    Modifier.padding(8.dp),
                     navPadding = PaddingValues(bottom = 16.dp),
                     onMapClick = { offset ->
                         onMapClick(offset, event)

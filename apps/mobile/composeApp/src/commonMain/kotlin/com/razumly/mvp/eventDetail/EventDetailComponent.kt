@@ -473,8 +473,13 @@ class DefaultEventDetailComponent(
     }
 
     override fun editEventField(update: EventImp.() -> EventImp) {
-        if (_editedEvent.value is EventImp) {
-            _editedEvent.value = (_editedEvent.value as EventImp).update()
+        when (_editedEvent.value) {
+            is EventImp -> _editedEvent.value = (_editedEvent.value as EventImp).update()
+            is Tournament -> {
+                var event = (_editedEvent.value as Tournament).toEvent()
+                event = event.update()
+                _editedEvent.value = Tournament().updateTournamentFromEvent(event)
+            }
         }
     }
 

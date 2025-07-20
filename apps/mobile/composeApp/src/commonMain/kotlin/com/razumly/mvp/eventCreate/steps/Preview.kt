@@ -40,8 +40,6 @@ fun Preview(
         ) {
             EventCard(
                 previewEvent,
-                onFavoriteClick = {},
-                favoritesModifier = Modifier.padding(8.dp),
                 navPadding = PaddingValues(bottom = 16.dp),
                 onMapClick = {},
             )

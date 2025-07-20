@@ -12,18 +12,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,16 +45,14 @@ import com.razumly.mvp.eventSearch.util.TextPatterns
 import dev.chrisbanes.haze.ExperimentalHazeApi
 import dev.chrisbanes.haze.HazeInputScale
 import dev.chrisbanes.haze.HazeProgressive
-import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
 import dev.chrisbanes.haze.materials.HazeMaterials
+import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.format
 import kotlinx.datetime.toLocalDateTime
-
-private val LocalHazeState = compositionLocalOf { HazeState() }
 
 @OptIn(
     ExperimentalHazeMaterialsApi::class,
@@ -67,16 +61,13 @@ private val LocalHazeState = compositionLocalOf { HazeState() }
 @Composable
 fun EventCard(
     event: EventAbs,
-    onFavoriteClick: () -> Unit,
-    favoritesModifier: Modifier,
     navPadding: PaddingValues = PaddingValues(),
     onMapClick: (Offset) -> Unit,
 ) {
     var imageStateText by remember { mutableStateOf("initial") }
     val patterns = TextPatterns(event.name)
-    val hazeState = HazeState()
+    val hazeState = rememberHazeState()
     var mapButtonOffset by remember { mutableStateOf(Offset.Zero) }
-
 
     val dateRangeText = remember(event.start, event.end) {
         val startDate = event.start.toLocalDateTime(TimeZone.currentSystemDefault()).date
@@ -93,116 +84,106 @@ fun EventCard(
     }
 
 
-    CompositionLocalProvider(LocalHazeState provides hazeState) {
-        Box(Modifier.fillMaxSize()) {
-            AsyncImage(model = event.imageUrl,
-                contentDescription = "Event Image",
-                modifier = Modifier.matchParentSize().hazeSource(LocalHazeState.current, key = event.id),
-                contentScale = ContentScale.Crop,
-                onState = { state ->
-                    imageStateText = when (state) {
-                        is AsyncImagePainter.State.Loading -> "Loading"
-                        is AsyncImagePainter.State.Error -> "Error loading image: ${state.result.throwable}"
+    Box(Modifier.fillMaxSize()) {
+        AsyncImage(model = event.imageUrl,
+            contentDescription = "Event Image",
+            modifier = Modifier.matchParentSize().hazeSource(hazeState, key = event.id),
+            contentScale = ContentScale.Crop,
+            onState = { state ->
+                imageStateText = when (state) {
+                    is AsyncImagePainter.State.Loading -> "Loading"
+                    is AsyncImagePainter.State.Error -> "Error loading image: ${state.result.throwable}"
 
-                        is AsyncImagePainter.State.Success -> "success"
-                        is AsyncImagePainter.State.Empty -> "Image is Empty"
-                    }
-                })
-            if (imageStateText != "success") {
-                Text(imageStateText)
-            }
-            IconButton(
-                onClick = onFavoriteClick, modifier = favoritesModifier.align(Alignment.TopEnd)
+                    is AsyncImagePainter.State.Success -> "success"
+                    is AsyncImagePainter.State.Empty -> "Image is Empty"
+                }
+            })
+        if (imageStateText != "success") {
+            Text(imageStateText)
+        }
+
+        // Event Details Section
+        Column(
+            modifier = Modifier.hazeEffect(
+                hazeState, HazeMaterials.ultraThin(MaterialTheme.colorScheme.onBackground)
             ) {
-                Icon(
-                    painter = rememberVectorPainter(Icons.Default.AddCircle),
-                    contentDescription = "Favorite",
+                inputScale = HazeInputScale.Fixed(0.5f)
+                progressive = HazeProgressive.verticalGradient(
+                    easing = FastOutSlowInEasing,
+                    startIntensity = 0f,
+                    endIntensity = 1f,
+                    startY = 200f
+                )
+            }.padding(navPadding).padding(horizontal = 16.dp).fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(4.dp, alignment = Alignment.Bottom)
+        ) {
+            Spacer(modifier = Modifier.height(232.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Button(
+                    modifier = Modifier.onGloballyPositioned { layoutCoordinates ->
+                        val boundsInWindow = layoutCoordinates.boundsInWindow()
+                        mapButtonOffset = boundsInWindow.center
+                    },
+                    onClick = { onMapClick(mapButtonOffset) },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color.Black, contentColor = Color.White
+                    )
+                ) {
+                    Text("View on Map")
+                    Icon(Icons.Default.Place, contentDescription = "View on Map Button")
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = event.name,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.background
                 )
             }
 
-            // Event Details Section
-            Column(
-                modifier = Modifier.hazeEffect(
-                    LocalHazeState.current, HazeMaterials.ultraThin(MaterialTheme.colorScheme.onBackground)
-                ) {
-                    inputScale = HazeInputScale.Fixed(0.5f)
-                    progressive = HazeProgressive.verticalGradient(
-                        easing = FastOutSlowInEasing,
-                        startIntensity = 0f,
-                        endIntensity = 1f,
-                        startY = 200f
-                    )
-                }.padding(navPadding).padding(horizontal = 16.dp).fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(4.dp, alignment = Alignment.Bottom)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Start,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Spacer(modifier = Modifier.height(232.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Button(
-                        modifier = Modifier.onGloballyPositioned { layoutCoordinates ->
-                            val boundsInWindow = layoutCoordinates.boundsInWindow()
-                            mapButtonOffset = boundsInWindow.center
-                        },
-                        onClick = { onMapClick(mapButtonOffset) },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color.Black, contentColor = Color.White
-                        )
-                    ) {
-                        Text("View on Map")
-                        Icon(Icons.Default.Place, contentDescription = "View on Map Button")
-                    }
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = event.name,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.background
-                    )
-                }
+                Icon(
+                    painter = rememberVectorPainter(Icons.Default.LocationOn),
+                    contentDescription = "Location",
+                    tint = MaterialTheme.colorScheme.background
+                )
+                Text(
+                    text = event.location,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.background
+                )
+            }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Start,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        painter = rememberVectorPainter(Icons.Default.LocationOn),
-                        contentDescription = "Location",
-                        tint = MaterialTheme.colorScheme.background
-                    )
-                    Text(
-                        text = event.location,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.background
-                    )
-                }
+            StylizedText("${event.fieldType} ${event.eventType}".toTitleCase(), patterns)
+            StylizedText("Divisions: ${event.divisions.joinToString(", ")}", patterns)
+            androidx.compose.material3.HorizontalDivider(thickness = 2.dp)
 
-                StylizedText("${event.fieldType} ${event.eventType}".toTitleCase(), patterns)
-                StylizedText("Divisions: ${event.divisions.joinToString(", ")}", patterns)
-                androidx.compose.material3.HorizontalDivider(thickness = 2.dp)
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = dateRangeText,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.background
-                    )
-                    Text(
-                        text = event.price.moneyFormat(),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.background
-                    )
-                }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = dateRangeText,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.background
+                )
+                Text(
+                    text = event.price.moneyFormat(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.background
+                )
             }
         }
     }

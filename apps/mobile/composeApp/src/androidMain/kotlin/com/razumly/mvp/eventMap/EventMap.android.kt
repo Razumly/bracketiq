@@ -101,162 +101,162 @@ actual fun EventMap(
         targetValue = if (showMap) 1f else 0f, animationSpec = tween(durationMillis = 1000)
     )
     BindLocationTrackerEffect(component.locationTracker)
+    if (showMap) {
 
-    LaunchedEffect(initCameraState) {
-        cameraPositionState.move(
-            CameraUpdateFactory.newLatLngZoom(
-                initCameraState, defaultZoom
+        LaunchedEffect(initCameraState) {
+            cameraPositionState.move(
+                CameraUpdateFactory.newLatLngZoom(
+                    initCameraState, defaultZoom
+                )
             )
-        )
-    }
-    var currentCameraState by remember { mutableStateOf(cameraPositionState) }
+        }
+        var currentCameraState by remember { mutableStateOf(cameraPositionState) }
 
-    LaunchedEffect(cameraPositionState) {
-        snapshotFlow { cameraPositionState }.collect { newTarget ->
+        LaunchedEffect(cameraPositionState) {
+            snapshotFlow { cameraPositionState }.collect { newTarget ->
                 currentCameraState = newTarget
             }
-    }
-
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .graphicsLayer {
-                alpha = if (animationProgress > 0f) 1f else 0f
-            }
-            .clip(CircularRevealShape(animationProgress, revealCenter)),
-    ) {
-        GoogleMap(modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(top = 160.dp),
-            cameraPositionState = cameraPositionState,
-            properties = MapProperties(isMyLocationEnabled = true),
-            uiSettings = MapUiSettings(zoomControlsEnabled = false),
-            onPOIClick = { poi ->
-                if (canClickPOI && !isAnimating) {
-                    selectedPlace = poi
-                    showingInfoWindow = false
-                    isAnimating = true
-
-                    scope.launch {
-                        // Animate camera first
-                        cameraPositionState.animate(
-                            CameraUpdateFactory.newCameraPosition(
-                                CameraPosition.fromLatLngZoom(poi.latLng, defaultZoom)
-                            ), durationMs = 500
-                        )
-
-                        delay(300)
-                        isAnimating = false
-                        showingInfoWindow = true
-                    }
+        }
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    alpha = if (animationProgress > 0f) 1f else 0f
                 }
-            }) {
-            poiMarkerState?.let { markerState ->
-                DisposableEffect(selectedPlace?.placeId) {
-                    val job = scope.launch {
-                        delay(200)
-                        markerState.showInfoWindow()
-                    }
+                .clip(CircularRevealShape(animationProgress, revealCenter)),
+        ) {
+            GoogleMap(modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(top = 160.dp),
+                cameraPositionState = cameraPositionState,
+                properties = MapProperties(isMyLocationEnabled = true),
+                uiSettings = MapUiSettings(zoomControlsEnabled = false),
+                onPOIClick = { poi ->
+                    if (canClickPOI && !isAnimating) {
+                        selectedPlace = poi
+                        showingInfoWindow = false
+                        isAnimating = true
 
-                    onDispose {
-                        job.cancel()
-                        markerState.hideInfoWindow()
-                    }
-                }
+                        scope.launch {
+                            // Animate camera first
+                            cameraPositionState.animate(
+                                CameraUpdateFactory.newCameraPosition(
+                                    CameraPosition.fromLatLngZoom(poi.latLng, defaultZoom)
+                                ), durationMs = 500
+                            )
 
-                Marker(
-                    state = markerState,
-                    title = selectedPlace?.name ?: "",
-                    onClick = {
-                        if (showingInfoWindow) {
-                            scope.launch {
-                                onPlaceSelected(component.getPlace(selectedPlace!!.placeId))
-                            }
+                            delay(300)
+                            isAnimating = false
+                            showingInfoWindow = true
                         }
-                        true
                     }
-                )
-            }
+                }) {
+                poiMarkerState?.let { markerState ->
+                    DisposableEffect(selectedPlace?.placeId) {
+                        val job = scope.launch {
+                            delay(200)
+                            markerState.showInfoWindow()
+                        }
 
-            // Event Markers
-            if (!canClickPOI) {
-                events.forEach { event ->
-                    eventMarkerStates[event.id]?.let { markerState ->
-                        Marker(
-                            state = markerState,
-                            title = event.name,
-                            snippet = "${event.fieldType} - $${event.price}",
-                            onInfoWindowClick = { onEventSelected(event) }
-                        )
+                        onDispose {
+                            job.cancel()
+                            markerState.hideInfoWindow()
+                        }
                     }
-                }
-            }
 
-            // Place Markers
-            places.forEach { place ->
-                placeMarkerStates[place.id!!]?.let { markerState ->
                     Marker(
                         state = markerState,
-                        title = place.displayName,
+                        title = selectedPlace?.name ?: "",
                         onClick = {
-                            markerState.showInfoWindow()
-                            scope.launch {
-                                onPlaceSelected(component.getMVPPlace(place))
+                            if (showingInfoWindow) {
+                                scope.launch {
+                                    onPlaceSelected(component.getPlace(selectedPlace!!.placeId))
+                                }
                             }
                             true
                         }
                     )
                 }
-            }
 
-            // Focused Event Marker
-            focusedEventMarkerState?.let { markerState ->
-                Marker(
-                    state = markerState,
-                    title = focusedEvent?.name ?: "",
-                    snippet = "${focusedEvent?.fieldType} - $${focusedEvent?.price}",
-                    onInfoWindowClick = { focusedEvent?.let { onEventSelected(it) } }
-                )
-            }
-        }
-
-        if (canClickPOI) {
-            currentCameraState.projection?.visibleRegion?.latLngBounds?.let {
-                MapSearchBar(
-                    Modifier
-                        .padding(horizontal = 16.dp)
-                        .fillMaxWidth(),
-                    component,
-                    currentCameraState.position.target,
-                    it
-                ) { newPlaces ->
-                    selectedPlace = null
-                    if (newPlaces.size > 1) {
-                        val bounds = LatLngBounds.builder()
-                        newPlaces.forEach { place ->
-                            bounds.include(place.location!!)
-                        }
-                    } else if (newPlaces.isNotEmpty()) {
-                        scope.launch {
-                            val location = newPlaces.first().location!!
-                            cameraPositionState.animate(
-                                CameraUpdateFactory.newLatLngZoom(location, defaultZoom),
-                                defaultDurationMs
+                // Event Markers
+                if (!canClickPOI) {
+                    events.forEach { event ->
+                        eventMarkerStates[event.id]?.let { markerState ->
+                            Marker(
+                                state = markerState,
+                                title = event.name,
+                                snippet = "${event.fieldType} - $${event.price}",
+                                onInfoWindowClick = { onEventSelected(event) }
                             )
                         }
                     }
-                    places = newPlaces
+                }
+
+                // Place Markers
+                places.forEach { place ->
+                    placeMarkerStates[place.id!!]?.let { markerState ->
+                        Marker(
+                            state = markerState,
+                            title = place.displayName,
+                            onClick = {
+                                markerState.showInfoWindow()
+                                scope.launch {
+                                    onPlaceSelected(component.getMVPPlace(place))
+                                }
+                                true
+                            }
+                        )
+                    }
+                }
+
+                // Focused Event Marker
+                focusedEventMarkerState?.let { markerState ->
+                    Marker(
+                        state = markerState,
+                        title = focusedEvent?.name ?: "",
+                        snippet = "${focusedEvent?.fieldType} - $${focusedEvent?.price}",
+                        onInfoWindowClick = { focusedEvent?.let { onEventSelected(it) } }
+                    )
                 }
             }
-        }
 
-        if (onBackPressed != null) {
-            MapFloatingActionButton(
-                isVisible = showMap,
-                onCloseMap = onBackPressed,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 128.dp)
-            )
+            if (canClickPOI) {
+                currentCameraState.projection?.visibleRegion?.latLngBounds?.let {
+                    MapSearchBar(
+                        Modifier
+                            .padding(horizontal = 16.dp)
+                            .fillMaxWidth(),
+                        component,
+                        currentCameraState.position.target,
+                        it
+                    ) { newPlaces ->
+                        selectedPlace = null
+                        if (newPlaces.size > 1) {
+                            val bounds = LatLngBounds.builder()
+                            newPlaces.forEach { place ->
+                                bounds.include(place.location!!)
+                            }
+                        } else if (newPlaces.isNotEmpty()) {
+                            scope.launch {
+                                val location = newPlaces.first().location!!
+                                cameraPositionState.animate(
+                                    CameraUpdateFactory.newLatLngZoom(location, defaultZoom),
+                                    defaultDurationMs
+                                )
+                            }
+                        }
+                        places = newPlaces
+                    }
+                }
+            }
+
+            if (onBackPressed != null) {
+                MapFloatingActionButton(
+                    onCloseMap = onBackPressed,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 128.dp)
+                )
+            }
         }
     }
 }
@@ -342,8 +342,8 @@ private fun rememberUpdatedMarkerState(
     key: String, position: LatLng
 ): MarkerState {
     return remember(key) { MarkerState(position = position) }.apply {
-            if (this.position != position) {
-                this.position = position
-            }
+        if (this.position != position) {
+            this.position = position
         }
+    }
 }
