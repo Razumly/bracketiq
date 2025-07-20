@@ -97,6 +97,7 @@ import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.materials.CupertinoMaterials
 import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
+import dev.chrisbanes.haze.rememberHazeState
 import dev.icerock.moko.geo.LatLng
 import kotlinx.datetime.Clock
 import kotlinx.datetime.TimeZone
@@ -114,7 +115,7 @@ import mvp.composeapp.generated.resources.value_range
 import mvp.composeapp.generated.resources.value_too_low
 import org.jetbrains.compose.resources.stringResource
 
-val LocalHazeState = compositionLocalOf { HazeState() }
+private val LocalHazeState = compositionLocalOf { HazeState() }
 
 @OptIn(ExperimentalHazeApi::class)
 @Composable
@@ -138,7 +139,7 @@ fun EventDetails(
 ) {
     val event = eventWithRelations.event
     val host = eventWithRelations.host
-    val hazeState = remember { HazeState() }
+    val hazeState = HazeState()
     val scrollState = rememberScrollState()
     var isValid by remember { mutableStateOf(false) }
     var showStartPicker by remember { mutableStateOf(false) }
@@ -174,7 +175,6 @@ fun EventDetails(
         colorState.updateFrom(painter)
     }
 
-    // Validation effect
     LaunchedEffect(editEvent) {
         isNameValid = editEvent.name.isNotBlank()
         isPriceValid = editEvent.price >= 0
@@ -226,38 +226,38 @@ fun EventDetails(
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().verticalScroll(scrollState)) {
             Box(Modifier.fillMaxSize()) {
-                BackgroundImage(
-                    Modifier.matchParentSize().hazeSource(hazeState, key = "BackGround"),
-                    if (!editView) event.imageUrl else editEvent.imageUrl,
-                )
 
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Spacer(Modifier.height(getScreenHeight().dp / 2))
+                CompositionLocalProvider(LocalHazeState provides hazeState) {
+                    BackgroundImage(
+                        Modifier.matchParentSize().hazeSource(LocalHazeState.current),
+                        if (!editView) event.imageUrl else editEvent.imageUrl,
+                    )
 
                     Column(
-                        Modifier.fillMaxWidth().hazeEffect(hazeState) {
-                            inputScale = HazeInputScale.Fixed(0.5f)
-                            style = HazeStyle(
-                                backgroundColor = backgroundColor,
-                                tint = null,
-                                blurRadius = 64.dp,
-                                noiseFactor = 0f
-                            )
-                            progressive = HazeProgressive.verticalGradient(
-                                easing = LinearOutSlowInEasing,
-                                startIntensity = 0f,
-                                endIntensity = 1f,
-                                startY = 0f,
-                                endY = 500f
-                            )
-                        }.padding(navPadding).padding(horizontal = 16.dp).padding(top = 32.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.fillMaxWidth(),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        CompositionLocalProvider(LocalHazeState provides hazeState) {
+                        Spacer(Modifier.height(getScreenHeight().dp / 2))
+                        Column(
+                            Modifier.fillMaxWidth().hazeEffect(LocalHazeState.current) {
+                                inputScale = HazeInputScale.Fixed(0.5f)
+                                style = HazeStyle(
+                                    backgroundColor = backgroundColor,
+                                    tint = null,
+                                    blurRadius = 64.dp,
+                                    noiseFactor = 0f
+                                )
+                                progressive = HazeProgressive.verticalGradient(
+                                    easing = LinearOutSlowInEasing,
+                                    startIntensity = 0f,
+                                    endIntensity = 1f,
+                                    startY = 0f,
+                                    endY = 500f
+                                )
+                            }.padding(navPadding).padding(horizontal = 16.dp).padding(top = 32.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
                             // Event Title - Animated
                             AnimatedCardSection(isOnSurface = false,
                                 isEditMode = editView,
@@ -608,7 +608,10 @@ fun EventDetails(
                                             label = "Field Count",
                                             isError = !isFieldCountValid,
                                             isMoney = false,
-                                            errorMessage = stringResource(Res.string.value_too_low, 0),
+                                            errorMessage = stringResource(
+                                                Res.string.value_too_low,
+                                                0
+                                            ),
                                         )
 
                                         // Winner bracket configuration
@@ -631,7 +634,11 @@ fun EventDetails(
                                             label = "Winner Set Count",
                                             isError = !isWinnerSetCountValid,
                                             isMoney = false,
-                                            errorMessage = stringResource(Res.string.value_range, 1, 5),
+                                            errorMessage = stringResource(
+                                                Res.string.value_range,
+                                                1,
+                                                5
+                                            ),
                                         )
 
                                         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -709,7 +716,11 @@ fun EventDetails(
                                                     label = "Loser Set Count (1-5)",
                                                     isError = !isLoserSetCountValid,
                                                     isMoney = false,
-                                                    errorMessage = stringResource(Res.string.value_range, 1, 5),
+                                                    errorMessage = stringResource(
+                                                        Res.string.value_range,
+                                                        1,
+                                                        5
+                                                    ),
                                                     placeholder = "1-5"
                                                 )
                                             }
