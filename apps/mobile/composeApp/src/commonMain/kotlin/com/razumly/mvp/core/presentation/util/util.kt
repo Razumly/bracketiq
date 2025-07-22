@@ -27,6 +27,7 @@ import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.LocalTime
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.format.MonthNames
+import kotlinx.datetime.format.Padding
 import kotlinx.datetime.format.char
 import kotlinx.datetime.toLocalDateTime
 import kotlin.math.abs
@@ -43,11 +44,9 @@ expect fun getScreenWidth(): Int
 expect fun getScreenHeight(): Int
 
 val timeFormat = LocalTime.Format {
-    amPmHour()
+    amPmHour(Padding.NONE)
     char(':')
     minute()
-    char(':')
-    second()
     char(' ')
     amPmMarker("AM", "PM")
 }
@@ -59,7 +58,7 @@ val dateFormat = LocalDate.Format {
 }
 
 val dateTimeFormat = LocalDateTime.Format {
-    dayOfMonth()
+    dayOfMonth(padding = Padding.NONE)
     char(' ')
     monthName(MonthNames.ENGLISH_ABBREVIATED)
     char(',')
@@ -101,6 +100,10 @@ fun String.toTitleCase(): String {
         .lowercase()
         .split(" ")
         .joinToString(" ") { word ->
+            word.replaceFirstChar { char ->
+                char.uppercase()
+            }
+        }.split(".").joinToString(".") { word ->
             word.replaceFirstChar { char ->
                 char.uppercase()
             }

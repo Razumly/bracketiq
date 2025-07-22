@@ -45,7 +45,6 @@ fun MatchCard(
     modifier: Modifier = Modifier
 ) {
     val component = LocalTournamentComponent.current
-    val textModifier = Modifier.width(70.dp)
     val teams by component.divisionTeams.collectAsState()
     val matches by component.divisionMatches.collectAsState()
     val fields by component.divisionFields.collectAsState()
@@ -90,7 +89,6 @@ fun MatchCard(
                         team1 = teams[match.match.team1],
                         team2 = teams[match.match.team2],
                         match = match,
-                        textModifier = textModifier,
                         matches = matches,
                     )
                 }
@@ -158,7 +156,6 @@ private fun TeamsSection(
     team2: TeamWithPlayers?,
     match: MatchWithRelations,
     matches: Map<String, MatchWithRelations>,
-    textModifier: Modifier
 ) {
     Column(
         modifier = Modifier
@@ -168,9 +165,9 @@ private fun TeamsSection(
     ) {
         val leftMatch = matches[match.previousLeftMatch?.id]
         val rightMatch = matches[match.previousRightMatch?.id]
-        TeamRow(team1, match.match.team1Points, leftMatch, match.match.losersBracket, textModifier)
+        TeamRow(team1, match.match.team1Points, leftMatch, match.match.losersBracket)
         HorizontalDivider(thickness = 1.dp)
-        TeamRow(team2, match.match.team2Points, rightMatch, match.match.losersBracket, textModifier)
+        TeamRow(team2, match.match.team2Points, rightMatch, match.match.losersBracket)
     }
 }
 
@@ -180,25 +177,24 @@ private fun TeamRow(
     points: List<Int>,
     previousMatch: MatchWithRelations?,
     isLosersBracket: Boolean,
-    textModifier: Modifier
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         team?.let { currentTeam ->
-            if (currentTeam.team.name != null) {
+            if (!currentTeam.team.name.isNullOrBlank()) {
                 Text(
                     currentTeam.team.name.toString(),
-                    textModifier,
+                    Modifier.weight(1f),
                     overflow = TextOverflow.Ellipsis,
                     maxLines = 1
                 )
             } else {
                 currentTeam.players.forEach { player ->
                     Text(
-                        "${player.firstName}.${player.lastName?.first()}",
-                        textModifier,
+                        "${player.firstName}.${player.lastName.first()}",
+                        Modifier.weight(1f),
                         overflow = TextOverflow.Ellipsis,
                         maxLines = 1
                     )
@@ -209,7 +205,7 @@ private fun TeamRow(
             previousMatch?.match?.matchNumber?.let { matchNumber ->
                 val prefix =
                     if (isLosersBracket && !previousMatch.match.losersBracket) "Loser" else "Winner"
-                Text("$prefix of match #$matchNumber")
+                Text("$prefix of match #$matchNumber", Modifier.weight(1f))
             }
         }
     }

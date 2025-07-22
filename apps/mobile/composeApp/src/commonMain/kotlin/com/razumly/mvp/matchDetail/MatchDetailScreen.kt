@@ -30,7 +30,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.razumly.mvp.core.presentation.util.instantToDateTimeString
 import com.razumly.mvp.icons.MVPIcons
 import com.razumly.mvp.icons.Remove24Px
 import mvp.composeapp.generated.resources.Res
@@ -61,8 +60,8 @@ fun MatchDetailScreen(
     val team1Text = remember(team1) {
         derivedStateOf {
             when {
-                team1?.team?.name != null -> team1?.team?.name
-                team1?.players != null -> team1?.players?.joinToString(" & ") {
+                team1?.team?.name != null -> team1.team.name
+                team1?.players != null -> team1.players.joinToString(" & ") {
                     "${it.firstName}.${it.lastName.first()}"
                 }
 
@@ -74,8 +73,8 @@ fun MatchDetailScreen(
     val team2Text = remember(team2) {
         derivedStateOf {
             when {
-                team2?.team?.name != null -> team2?.team?.name
-                team2?.players != null -> team2?.players?.joinToString(" & ") {
+                team2?.team?.name != null -> team2.team.name
+                team2?.players != null -> team2.players.joinToString(" & ") {
                     "${it.firstName}.${it.lastName.first()}"
                 }
 
@@ -139,22 +138,18 @@ fun MatchDetailScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceEvenly
     ) {
-        match.match.team1Points[currentSet].let {
-            if (team1Text != null) {
-                ScoreCard(
-                    title = team1Text,
-                    score = it.toString(),
-                    increase = {
-                        component.updateScore(isTeam1 = true, increment = true)
-                    },
-                    decrease = {
-                        component.updateScore(isTeam1 = true, increment = false)
-                    },
-                    enabled = canIncrement,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-        }
+        ScoreCard(
+            title = team1Text,
+            score = match.match.team1Points[currentSet].toString(),
+            increase = {
+                component.updateScore(isTeam1 = true, increment = true)
+            },
+            decrease = {
+                component.updateScore(isTeam1 = true, increment = false)
+            },
+            enabled = canIncrement,
+            modifier = Modifier.weight(1f)
+        )
 
         Row(
             modifier = Modifier
@@ -164,13 +159,11 @@ fun MatchDetailScreen(
                 )
                 .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
-            match.match.start.let {
-                Text(
-                    text = instantToDateTimeString(it),
-                    color = Color.White,
-                    style = MaterialTheme.typography.titleLarge
-                )
-            }
+            Text(
+                text = "Match: ${match.match.matchNumber}",
+                color = Color.White,
+                style = MaterialTheme.typography.titleLarge
+            )
             Text(
                 text = " | ",
                 color = Color.White,
@@ -183,23 +176,19 @@ fun MatchDetailScreen(
             )
         }
 
-        match.match.team2Points[currentSet].let {
-            if (team2Text != null) {
-                ScoreCard(
-                    title = team2Text,
-                    score = it.toString(),
-                    modifier = Modifier
-                        .weight(1f),
-                    increase = {
-                        component.updateScore(isTeam1 = false, increment = true)
-                    },
-                    decrease = {
-                        component.updateScore(isTeam1 = false, increment = false)
-                    },
-                    enabled = canIncrement
-                )
-            }
-        }
+        ScoreCard(
+            title = team2Text,
+            score = match.match.team2Points[currentSet].toString(),
+            modifier = Modifier
+                .weight(1f),
+            increase = {
+                component.updateScore(isTeam1 = false, increment = true)
+            },
+            decrease = {
+                component.updateScore(isTeam1 = false, increment = false)
+            },
+            enabled = canIncrement
+        )
     }
 }
 

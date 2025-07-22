@@ -211,7 +211,7 @@ class EventAbsRepository(
 
     override suspend fun removeTeamFromEvent(
         event: EventAbs, teamWithPlayers: TeamWithPlayers
-    ): Result<Unit> {
+    ): Result<Unit> = runCatching {
         val team = teamWithPlayers.team
         val response = functions.createExecution(
             DbConstants.EVENT_MANAGER_FUNCTION, Json.encodeToString(
@@ -224,15 +224,19 @@ class EventAbsRepository(
             )
         )
 
-        val editEventResponse = Json.decodeFromString<EditEventResponse>(response.responseBody)
-        return if (editEventResponse.error.isNullOrBlank()) {
-            Result.success(Unit)
+        if (response.responseBody.isNotBlank()) {
+            val editEventResponse = Json.decodeFromString<EditEventResponse>(response.responseBody)
+            return if (editEventResponse.error.isNullOrBlank()) {
+                Result.success(Unit)
+            } else {
+                Result.failure(Exception(editEventResponse.error))
+            }
         } else {
-            Result.failure(Exception(editEventResponse.error))
+            return Result.failure(Exception("Failed to remove team from event"))
         }
     }
 
-    private suspend fun removePlayerFromEvent(event: EventAbs, player: UserData): Result<Unit> {
+    private suspend fun removePlayerFromEvent(event: EventAbs, player: UserData): Result<Unit> = runCatching {
         val response = functions.createExecution(
             DbConstants.EVENT_MANAGER_FUNCTION, Json.encodeToString(
                 EditEventRequest(
@@ -244,11 +248,15 @@ class EventAbsRepository(
             )
         )
 
-        val editEventResponse = Json.decodeFromString<EditEventResponse>(response.responseBody)
-        return if (editEventResponse.error.isNullOrBlank()) {
-            Result.success(Unit)
+        if (response.responseBody.isNotBlank()) {
+            val editEventResponse = Json.decodeFromString<EditEventResponse>(response.responseBody)
+            return if (editEventResponse.error.isNullOrBlank()) {
+                Result.success(Unit)
+            } else {
+                Result.failure(Exception(editEventResponse.error))
+            }
         } else {
-            Result.failure(Exception(editEventResponse.error))
+            return Result.failure(Exception("Failed to remove player from event"))
         }
     }
 
@@ -271,11 +279,15 @@ class EventAbsRepository(
             )
         )
 
-        val editEventResponse = Json.decodeFromString<EditEventResponse>(response.responseBody)
-        return if (editEventResponse.error.isNullOrBlank()) {
-            getEvent(event).map {}
+        if (response.responseBody.isNotBlank()) {
+            val editEventResponse = Json.decodeFromString<EditEventResponse>(response.responseBody)
+            return if (editEventResponse.error.isNullOrBlank()) {
+                Result.success(Unit)
+            } else {
+                Result.failure(Exception(editEventResponse.error))
+            }
         } else {
-            Result.failure(Exception("Failed to add user to event: ${editEventResponse.error}"))
+            return Result.failure(Exception("Failed to add user to event"))
         }
     }
 
@@ -295,11 +307,15 @@ class EventAbsRepository(
             )
         )
 
-        val editEventResponse = Json.decodeFromString<EditEventResponse>(response.responseBody)
-        if (editEventResponse.error.isNullOrBlank()) {
-            return@runCatching
+        if (response.responseBody.isNotBlank()) {
+            val editEventResponse = Json.decodeFromString<EditEventResponse>(response.responseBody)
+            return if (editEventResponse.error.isNullOrBlank()) {
+                Result.success(Unit)
+            } else {
+                Result.failure(Exception(editEventResponse.error))
+            }
         } else {
-            throw Exception(editEventResponse.error)
+            return Result.failure(Exception("Failed to add team to event"))
         }
     }
 

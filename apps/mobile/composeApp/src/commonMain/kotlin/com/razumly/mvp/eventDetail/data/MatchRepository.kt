@@ -13,7 +13,6 @@ import com.razumly.mvp.core.util.DbConstants
 import com.razumly.mvp.core.util.DbConstants.MATCHES_CHANNEL
 import com.razumly.mvp.core.util.convert
 import io.appwrite.Query
-import io.appwrite.extensions.toJson
 import io.appwrite.models.RealtimeSubscription
 import io.appwrite.services.Databases
 import io.appwrite.services.Functions
@@ -30,6 +29,11 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 interface IMatchRepository : IMVPRepository {
     suspend fun getMatch(matchId: String): Result<MatchMVP>
@@ -66,7 +70,8 @@ class MatchRepository(
         }, onReturn = { it })
 
     override fun getMatchFlow(matchId: String): Flow<Result<MatchWithRelations>> {
-        val localFlow = databaseService.getMatchDao.getMatchFlowById(matchId).map { Result.success(it) }
+        val localFlow =
+            databaseService.getMatchDao.getMatchFlowById(matchId).map { Result.success(it) }
         scope.launch {
             getMatch(matchId)
         }
@@ -83,13 +88,7 @@ class MatchRepository(
         ).data.toMatch(match.id)
     }, saveCall = { updatedMatch ->
         databaseService.getMatchDao.upsertMatch(updatedMatch)
-    }, onReturn = {
-        functions.createExecution(
-            functionId = DbConstants.EVENT_MANAGER_FUNCTION,
-            body = UpdateMatchArguments(Clock.System.now(), match.tournamentId, match.id).toJson(),
-            async = false,
-        )
-    })
+    }, onReturn = {})
 
     override fun getMatchesOfTournamentFlow(tournamentId: String): Flow<Result<List<MatchWithRelations>>> =
         callbackFlow {
@@ -129,11 +128,24 @@ class MatchRepository(
             }
         }
 
-    override suspend fun updateMatchFinished(match: MatchMVP, time: Instant): Result<Unit> {
-        val updatedMatch = match.copy(end = time)
+    override suspend fun updateMatchFinished(match: MatchMVP, time: Instant): Result<Unit> =
+        runCatching {
+            val updatedMatch = match.copy(end = time)
 
-        return updateMatch(updatedMatch)
-    }
+            return updateMatch(updatedMatch).onSuccess {
+                functions.createExecution(
+                    functionId = DbConstants.EVENT_MANAGER_FUNCTION,
+                    body = Json.encodeToString(
+                        UpdateMatchArguments(
+                            time = Clock.System.now(),
+                            tournament = match.tournamentId,
+                            matchId = match.id
+                        )
+                    ),
+                    async = false,
+                )
+            }
+        }
 
     override suspend fun getMatchesOfTournament(tournamentId: String): Result<List<MatchMVP>> =
         multiResponse(getRemoteData = {
@@ -188,7 +200,10 @@ class MatchRepository(
     override fun setIgnoreMatch(match: MatchMVP?) = runCatching { _ignoreMatch.value = match }
 }
 
+@Serializable
+@OptIn(ExperimentalSerializationApi::class)
 data class UpdateMatchArguments(
+    @EncodeDefault val task: String = "updateMatch",
     val time: Instant,
     val tournament: String,
     val matchId: String,

@@ -78,12 +78,16 @@ import com.razumly.mvp.core.presentation.util.teamSizeFormat
 import com.razumly.mvp.core.presentation.util.toDivisionCase
 import com.razumly.mvp.core.presentation.util.toTitleCase
 import com.razumly.mvp.core.presentation.util.transitionSpec
+import com.razumly.mvp.eventDetail.composables.CancellationRefundOptions
 import com.razumly.mvp.eventDetail.composables.DropdownField
+import com.razumly.mvp.eventDetail.composables.LoserSetCountDropdown
 import com.razumly.mvp.eventDetail.composables.MultiSelectDropdownField
 import com.razumly.mvp.eventDetail.composables.NumberInputField
 import com.razumly.mvp.eventDetail.composables.PointsTextField
 import com.razumly.mvp.eventDetail.composables.SelectEventImage
+import com.razumly.mvp.eventDetail.composables.TeamSizeLimitDropdown
 import com.razumly.mvp.eventDetail.composables.TextInputField
+import com.razumly.mvp.eventDetail.composables.WinnerSetCountDropdown
 import com.razumly.mvp.eventMap.EventMap
 import com.razumly.mvp.eventMap.MapComponent
 import dev.chrisbanes.haze.ExperimentalHazeApi
@@ -108,8 +112,6 @@ import mvp.composeapp.generated.resources.invalid_price
 import mvp.composeapp.generated.resources.max_players
 import mvp.composeapp.generated.resources.max_teams
 import mvp.composeapp.generated.resources.select_a_value
-import mvp.composeapp.generated.resources.team_size_limit
-import mvp.composeapp.generated.resources.value_range
 import mvp.composeapp.generated.resources.value_too_low
 import org.jetbrains.compose.resources.stringResource
 
@@ -401,6 +403,13 @@ fun EventDetails(
                                     errorMessage = stringResource(Res.string.invalid_price),
                                     supportingText = stringResource(Res.string.free_entry_hint)
                                 )
+                                if (editEvent.price > 0.0) {
+                                    CancellationRefundOptions(
+                                        selectedOption = editEvent.cancellationRefundHours,
+                                        onOptionSelected = { onEditEvent { copy(cancellationRefundHours = it) } },
+                                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                                    )
+                                }
                             })
 
                         // Date Card
@@ -531,23 +540,10 @@ fun EventDetails(
                                     errorMessage = stringResource(Res.string.value_too_low, 1),
                                     isMoney = false,
                                 )
-
-                                NumberInputField(
-                                    value = editEvent.teamSizeLimit.toString(),
-                                    label = stringResource(Res.string.team_size_limit),
-                                    onValueChange = { newValue ->
-                                        if (newValue.all { it.isDigit() }) {
-                                            if (newValue.isBlank()) {
-                                                onEditEvent { copy(teamSizeLimit = 0) }
-                                            } else {
-                                                onEditEvent { copy(teamSizeLimit = newValue.toInt()) }
-                                            }
-                                        }
-                                    },
-                                    isError = !isTeamSizeValid,
-                                    errorMessage = stringResource(Res.string.value_range, 2, 6),
-                                    isMoney = false,
-                                    placeholder = "2-6"
+                                TeamSizeLimitDropdown(
+                                    selectedTeamSize = editEvent.teamSizeLimit,
+                                    onTeamSizeSelected = { onEditEvent { copy(teamSizeLimit = it) } },
+                                    modifier = Modifier.fillMaxWidth()
                                 )
 
                                 if (event is EventImp) {
@@ -610,29 +606,17 @@ fun EventDetails(
                                         ),
                                     )
 
-                                    // Winner bracket configuration
-                                    NumberInputField(
-                                        value = editEvent.winnerSetCount.toString(),
-                                        onValueChange = { newValue ->
-                                            if (newValue.all { it.isDigit() }) {
-                                                if (newValue.isBlank()) {
-                                                    onEditTournament { copy(winnerSetCount = 0) }
-                                                } else {
-                                                    onEditTournament {
-                                                        copy(winnerSetCount = newValue.toInt(),
-                                                            winnerBracketPointsToVictory = List(
-                                                                newValue.toInt()
-                                                            ) { 0 })
-                                                    }
-                                                }
+                                    WinnerSetCountDropdown(
+                                        selectedCount = editEvent.winnerSetCount,
+                                        onCountSelected = { newValue ->
+                                            onEditTournament {
+                                                copy(
+                                                    winnerSetCount = newValue,
+                                                    winnerBracketPointsToVictory = List(newValue) { 0 }
+                                                )
                                             }
                                         },
-                                        label = "Winner Set Count",
-                                        isError = !isWinnerSetCountValid,
-                                        isMoney = false,
-                                        errorMessage = stringResource(
-                                            Res.string.value_range, 1, 5
-                                        ),
+                                        modifier = Modifier.fillMaxWidth()
                                     )
 
                                     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -678,37 +662,17 @@ fun EventDetails(
                                     // Loser bracket (if double elimination)
                                     if (editEvent.doubleElimination) {
                                         if (editEvent.doubleElimination) {
-                                            NumberInputField(
-                                                value = editEvent.loserSetCount.toString(),
-                                                onValueChange = { newValue ->
-                                                    if (newValue.all { it.isDigit() }) {
-                                                        if (newValue.isBlank()) {
-                                                            onEditTournament {
-                                                                copy(
-                                                                    loserSetCount = 1
-                                                                )
-                                                            } // Minimum 1
-                                                        } else {
-                                                            val setCount = minOf(
-                                                                newValue.toInt(), 5
-                                                            ) // Maximum 5
-                                                            val actualSetCount = maxOf(setCount, 1)
-                                                            onEditTournament {
-                                                                copy(loserSetCount = actualSetCount,
-                                                                    loserBracketPointsToVictory = List(
-                                                                        actualSetCount
-                                                                    ) { 0 })
-                                                            }
-                                                        }
+                                            LoserSetCountDropdown(
+                                                selectedCount = editEvent.loserSetCount,
+                                                onCountSelected = { newValue ->
+                                                    onEditTournament {
+                                                        copy(
+                                                            loserSetCount = newValue,
+                                                            loserBracketPointsToVictory = List(newValue) { 0 }
+                                                        )
                                                     }
                                                 },
-                                                label = "Loser Set Count (1-5)",
-                                                isError = !isLoserSetCountValid,
-                                                isMoney = false,
-                                                errorMessage = stringResource(
-                                                    Res.string.value_range, 1, 5
-                                                ),
-                                                placeholder = "1-5"
+                                                modifier = Modifier.fillMaxWidth()
                                             )
                                         }
                                         // Calculate constrained loser set count
