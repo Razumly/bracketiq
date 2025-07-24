@@ -54,7 +54,7 @@ actual class MapComponent(
     private val _currentRadiusMeters = MutableStateFlow(50.0)
 
     private val _showMap = MutableStateFlow(false)
-    val showMap = _showMap.asStateFlow()
+    actual val showMap = _showMap.asStateFlow()
 
     private val placesClient: PlacesClient by lazy {
         if (!Places.isInitialized()) {

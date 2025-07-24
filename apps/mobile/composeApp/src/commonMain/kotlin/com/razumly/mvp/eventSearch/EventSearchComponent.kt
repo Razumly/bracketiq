@@ -103,7 +103,11 @@ class DefaultEventSearchComponent(
     }
 
     @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
-    override val events = combine(_currentLocation.filterNotNull(), _currentRadius, _filter) { location, radius, eventFilter ->
+    override val events = combine(
+        _currentLocation.filterNotNull(),
+        _currentRadius,
+        _filter
+    ) { location, radius, eventFilter ->
         getBounds(radius, location.latitude, location.longitude) to eventFilter
     }.debounce(200L).flatMapLatest { (bounds, eventFilter) ->
         eventAbsRepository.getEventsInBoundsFlow(bounds).map { result ->
@@ -161,10 +165,9 @@ class DefaultEventSearchComponent(
         instanceKeeper.put(CLEANUP_KEY, Cleanup(locationTracker))
 
         scope.launch {
-            try {
-                _locationStateFlow.collect {
+            _locationStateFlow.collect {
+                try {
                     if (it == null) {
-                        _errorState.value = ErrorMessage("Location not available")
                         return@collect
                     }
                     if (_currentLocation.value == null) {
@@ -176,21 +179,21 @@ class DefaultEventSearchComponent(
                         _currentLocation.value = it
                         loadMoreEvents()
                     }
+                } catch (e: Exception) {
+                    _errorState.value = ErrorMessage("Failed to track location: ${e.message}")
                 }
-            } catch (e: Exception) {
-                _errorState.value = ErrorMessage("Failed to track location: ${e.message}")
             }
         }
 
         scope.launch {
-            try {
-                currentRadius.collect {
-                        if (_locationStateFlow.value != null) {
-                            loadMoreEvents()
-                        }
+            currentRadius.collect {
+                if (_locationStateFlow.value != null) {
+                    try {
+                        loadMoreEvents()
+                    } catch (e: Exception) {
+                        _errorState.value = ErrorMessage("Failed to update events: ${e.message}")
                     }
-            } catch (e: Exception) {
-                _errorState.value = ErrorMessage("Failed to update events: ${e.message}")
+                }
             }
         }
     }
@@ -229,7 +232,8 @@ class DefaultEventSearchComponent(
 
             val radius = _currentRadius.value
             val currentLocation = _currentLocation.value ?: return@launch
-            val currentBounds = getBounds(radius, currentLocation.latitude, currentLocation.longitude)
+            val currentBounds =
+                getBounds(radius, currentLocation.latitude, currentLocation.longitude)
 
             eventAbsRepository.getEventsInBounds(currentBounds)
                 .onSuccess { (_, hasMore) ->
@@ -246,7 +250,7 @@ class DefaultEventSearchComponent(
         _filter.value = _filter.value.update()
     }
 
-    private class Cleanup(private val locationTracker: LocationTracker): InstanceKeeper.Instance {
+    private class Cleanup(private val locationTracker: LocationTracker) : InstanceKeeper.Instance {
         override fun onDestroy() {
             locationTracker.stopTracking()
         }

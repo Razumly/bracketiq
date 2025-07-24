@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -84,6 +85,7 @@ import com.razumly.mvp.eventDetail.composables.LoserSetCountDropdown
 import com.razumly.mvp.eventDetail.composables.MultiSelectDropdownField
 import com.razumly.mvp.eventDetail.composables.NumberInputField
 import com.razumly.mvp.eventDetail.composables.PointsTextField
+import com.razumly.mvp.eventDetail.composables.RegistrationOptions
 import com.razumly.mvp.eventDetail.composables.SelectEventImage
 import com.razumly.mvp.eventDetail.composables.TeamSizeLimitDropdown
 import com.razumly.mvp.eventDetail.composables.TextInputField
@@ -173,7 +175,7 @@ fun EventDetails(
         colorState.updateFrom(painter)
     }
 
-    LaunchedEffect(editEvent) {
+    LaunchedEffect(editEvent, fieldCount) {
         isNameValid = editEvent.name.isNotBlank()
         isPriceValid = editEvent.price >= 0
         isMaxParticipantsValid = editEvent.maxParticipants > 2
@@ -377,6 +379,14 @@ fun EventDetails(
                             hazeState = hazeState,
                             viewContent = {
                                 CardSection("Price", event.price.moneyFormat())
+                                CardSection(
+                                    "Refund Policy", when (event.cancellationRefundHours) {
+                                        0 -> "Automatic Refund"
+                                        1 -> "24 hours before event"
+                                        2 -> "48 hours before event"
+                                        else -> "No cutoff (always allow refunds)"
+                                    }
+                                )
                             },
                             editContent = {
                                 if (!hostHasAccount) {
@@ -388,7 +398,7 @@ fun EventDetails(
                                 }
                                 NumberInputField(
                                     value = (editEvent.price * 100).toInt().toString(),
-                                    label = "",
+                                    label = "Price",
                                     enabled = hostHasAccount,
                                     onValueChange = { newText ->
                                         if (newText.isBlank()) {
@@ -406,15 +416,46 @@ fun EventDetails(
                                 if (editEvent.price > 0.0) {
                                     CancellationRefundOptions(
                                         selectedOption = editEvent.cancellationRefundHours,
-                                        onOptionSelected = { onEditEvent { copy(cancellationRefundHours = it) } },
+                                        onOptionSelected = {
+                                            onEditEvent {
+                                                copy(
+                                                    cancellationRefundHours = it
+                                                )
+                                            }
+                                        },
                                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
                                     )
                                 }
                             })
 
-                        // Date Card
                         AnimatedCardSection(isEditMode = editView,
                             animationDelay = 250,
+                            hazeState = hazeState,
+                            viewContent = {
+                                CardSection(
+                                    "Registration Cutoff",
+                                    when (editEvent.registrationCutoffHours) {
+                                        0 -> "No Cutoff"
+                                        1 -> "24 hours before event"
+                                        2 -> "48 hours before event"
+                                        else -> "No cutoff"
+                                    }
+                                )
+                            },
+                            editContent = {
+                                RegistrationOptions(
+                                    selectedOption = editEvent.registrationCutoffHours,
+                                    onOptionSelected = {
+                                        onEditEvent { copy(registrationCutoffHours = it) }
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        )
+
+                        // Date Card
+                        AnimatedCardSection(isEditMode = editView,
+                            animationDelay = 300,
                             hazeState = hazeState,
                             viewContent = {
                                 CardSection("Date", dateRangeText)
@@ -424,9 +465,10 @@ fun EventDetails(
                                     Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    OutlinedTextField(value = editEvent.start.toLocalDateTime(
-                                        TimeZone.currentSystemDefault()
-                                    ).format(dateTimeFormat),
+                                    OutlinedTextField(
+                                        value = editEvent.start.toLocalDateTime(
+                                            TimeZone.currentSystemDefault()
+                                        ).format(dateTimeFormat),
                                         onValueChange = {},
                                         label = { Text("Start Date & Time") },
                                         modifier = Modifier.weight(1f)
@@ -440,9 +482,10 @@ fun EventDetails(
                                             disabledBorderColor = OutlinedTextFieldDefaults.colors().unfocusedIndicatorColor,
                                         )
                                     )
-                                    OutlinedTextField(value = editEvent.end.toLocalDateTime(
-                                        TimeZone.currentSystemDefault()
-                                    ).format(dateTimeFormat),
+                                    OutlinedTextField(
+                                        value = editEvent.end.toLocalDateTime(
+                                            TimeZone.currentSystemDefault()
+                                        ).format(dateTimeFormat),
                                         onValueChange = {},
                                         label = { Text("End Date & Time") },
                                         modifier = Modifier.weight(1f)
@@ -461,7 +504,7 @@ fun EventDetails(
 
                         // Divisions Card
                         AnimatedCardSection(isEditMode = editView,
-                            animationDelay = 300,
+                            animationDelay = 350,
                             hazeState = hazeState,
                             viewContent = {
                                 CardSection(
@@ -475,6 +518,7 @@ fun EventDetails(
                                     label = "Skill levels",
                                     isError = !isSkillLevelValid,
                                     errorMessage = stringResource(Res.string.select_a_value),
+                                    modifier = Modifier.fillMaxWidth(.5f)
                                 ) { newSelection ->
                                     selectedDivisions = newSelection
                                     onEditEvent { copy(divisions = selectedDivisions) }
@@ -483,7 +527,7 @@ fun EventDetails(
 
                         // Specifics Card
                         AnimatedCardSection(isEditMode = editView,
-                            animationDelay = 350,
+                            animationDelay = 400,
                             hazeState = hazeState,
                             viewContent = {
                                 Text("Specifics", style = MaterialTheme.typography.titleMedium)
@@ -543,7 +587,7 @@ fun EventDetails(
                                 TeamSizeLimitDropdown(
                                     selectedTeamSize = editEvent.teamSizeLimit,
                                     onTeamSizeSelected = { onEditEvent { copy(teamSizeLimit = it) } },
-                                    modifier = Modifier.fillMaxWidth()
+                                    modifier = Modifier.fillMaxWidth(.5f)
                                 )
 
                                 if (event is EventImp) {
@@ -574,16 +618,20 @@ fun EventDetails(
 
                                 // Tournament-specific fields
                                 if (editEvent is Tournament) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        Checkbox(checked = editEvent.doubleElimination,
-                                            onCheckedChange = { checked ->
-                                                onEditTournament { copy(doubleElimination = checked) }
-                                            })
-                                        Text("Double Elimination")
-                                    }
+                                    OutlinedTextField(value = editEvent.prize,
+                                        onValueChange = {
+                                            if (it.length <= 50) onEditTournament {
+                                                copy(
+                                                    prize = it
+                                                )
+                                            }
+                                        },
+                                        label = { Text("Prize") },
+                                        supportingText = {
+                                            Text(
+                                                text = "If there is a prize, enter it here"
+                                            )
+                                        })
 
                                     NumberInputField(
                                         value = fieldCount.toString(),
@@ -612,11 +660,11 @@ fun EventDetails(
                                             onEditTournament {
                                                 copy(
                                                     winnerSetCount = newValue,
-                                                    winnerBracketPointsToVictory = List(newValue) { 0 }
+                                                    winnerBracketPointsToVictory = List(newValue) { 21 }
                                                 )
                                             }
                                         },
-                                        modifier = Modifier.fillMaxWidth()
+                                        modifier = Modifier.fillMaxWidth(.5f).padding(bottom = 16.dp)
                                     )
 
                                     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -629,37 +677,65 @@ fun EventDetails(
                                             List(constrainedWinnerSetCount) { FocusRequester() }
                                         }
 
-                                        repeat(constrainedWinnerSetCount) { index ->
-                                            PointsTextField(value = editEvent.winnerBracketPointsToVictory.getOrNull(
-                                                index
-                                            )?.toString() ?: "",
-                                                label = "Set ${index + 1} Points to Win",
-                                                onValueChange = { newValue ->
-                                                    if (newValue.all { it.isDigit() } && newValue.length <= 2) {
-                                                        val winnerPoints =
-                                                            if (newValue.isBlank()) 0 else newValue.toInt()
-                                                        onEditTournament {
-                                                            copy(winnerBracketPointsToVictory = editEvent.winnerBracketPointsToVictory.toMutableList()
-                                                                .apply {
-                                                                    // Ensure list is large enough
-                                                                    while (size <= index) add(
-                                                                        0
-                                                                    )
+                                        FlowRow(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            repeat(constrainedWinnerSetCount) { index ->
+                                                PointsTextField(
+                                                    value = editEvent.winnerBracketPointsToVictory.getOrNull(index)?.toString() ?: "",
+                                                    label = "Set ${index + 1} Points",
+                                                    onValueChange = { newValue ->
+                                                        if (newValue.all { it.isDigit() } && newValue.length <= 2) {
+                                                            val winnerPoints = if (newValue.isBlank()) {
+                                                                0
+                                                            } else {
+                                                                if (editEvent.winnerBracketPointsToVictory.getOrNull(index) == 0 && newValue.toInt() >= 10) {
+                                                                    newValue.toInt() / 10
+                                                                } else {
+                                                                    newValue.toInt()
+                                                                }
+                                                            }
+                                                            onEditTournament {
+                                                                copy(winnerBracketPointsToVictory = editEvent.winnerBracketPointsToVictory.toMutableList().apply {
+                                                                    while (size <= index) add(0)
                                                                     set(index, winnerPoints)
                                                                 })
+                                                            }
+                                                        }
+                                                    },
+                                                    isError = editEvent.winnerBracketPointsToVictory.getOrNull(index)?.let { it <= 0 } ?: true,
+                                                    errorMessage = "Points must be greater than 0",
+                                                    focusRequester = focusRequesters[index],
+                                                    nextFocus = {
+                                                        if (index < constrainedWinnerSetCount - 1) {
+                                                            focusRequesters[index + 1].requestFocus()
                                                         }
                                                     }
-                                                },
-                                                focusRequester = focusRequesters[index],
-                                                nextFocus = {
-                                                    if (index < constrainedWinnerSetCount - 1) {
-                                                        focusRequesters[index + 1].requestFocus()
-                                                    }
-                                                })
+                                                )
+
+                                            }
                                         }
                                     }
 
-                                    // Loser bracket (if double elimination)
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Checkbox(checked = editEvent.doubleElimination,
+                                            onCheckedChange = { checked ->
+                                                onEditTournament {
+                                                    copy(
+                                                        doubleElimination = checked,
+                                                        loserBracketPointsToVictory = listOf(21),
+                                                        loserSetCount = 1
+                                                    )
+                                                }
+                                            })
+                                        Text("Double Elimination")
+                                    }
+
                                     if (editEvent.doubleElimination) {
                                         if (editEvent.doubleElimination) {
                                             LoserSetCountDropdown(
@@ -668,11 +744,14 @@ fun EventDetails(
                                                     onEditTournament {
                                                         copy(
                                                             loserSetCount = newValue,
-                                                            loserBracketPointsToVictory = List(newValue) { 0 }
+                                                            loserBracketPointsToVictory = List(
+                                                                newValue
+                                                            ) { 21 }
                                                         )
                                                     }
                                                 },
-                                                modifier = Modifier.fillMaxWidth()
+                                                modifier = Modifier.fillMaxWidth(.5f)
+                                                    .padding(bottom = 16.dp)
                                             )
                                         }
                                         // Calculate constrained loser set count
@@ -686,33 +765,41 @@ fun EventDetails(
                                                 List(constrainedLoserSetCount) { FocusRequester() }
                                             }
 
-                                        repeat(constrainedLoserSetCount) { index ->
-                                            PointsTextField(value = editEvent.loserBracketPointsToVictory.getOrNull(
-                                                index
-                                            )?.toString() ?: "",
-                                                label = "Set ${index + 1} Points to Win",
-                                                onValueChange = { newValue ->
-                                                    if (newValue.all { it.isDigit() } && newValue.length <= 2) {
-                                                        val loserPoints =
-                                                            if (newValue.isBlank()) 0 else newValue.toInt()
-                                                        onEditTournament {
-                                                            copy(loserBracketPointsToVictory = editEvent.loserBracketPointsToVictory.toMutableList()
-                                                                .apply {
-                                                                    // Ensure list is large enough
-                                                                    while (size <= index) add(
-                                                                        0
-                                                                    )
+
+                                        FlowRow(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            repeat(constrainedLoserSetCount) { index ->
+                                                PointsTextField(
+                                                    value = editEvent.loserBracketPointsToVictory.getOrNull(index)?.toString() ?: "",
+                                                    label = "Set ${index + 1} Points",
+                                                    onValueChange = { newValue ->
+                                                        if (newValue.all { it.isDigit() } && newValue.length <= 2) {
+                                                            val loserPoints = if (newValue.isBlank()) {
+                                                                0
+                                                            } else {
+                                                                newValue.toInt()
+                                                            }
+                                                            onEditTournament {
+                                                                copy(loserBracketPointsToVictory = editEvent.loserBracketPointsToVictory.toMutableList().apply {
+                                                                    while (size <= index) add(0)
                                                                     set(index, loserPoints)
                                                                 })
+                                                            }
+                                                        }
+                                                    },
+                                                    isError = editEvent.loserBracketPointsToVictory.getOrNull(index)?.let { it <= 0 } ?: true,
+                                                    errorMessage = "Points must be greater than 0",
+                                                    focusRequester = loserFocusRequesters[index],
+                                                    nextFocus = {
+                                                        if (index < constrainedLoserSetCount - 1) {
+                                                            loserFocusRequesters[index + 1].requestFocus()
                                                         }
                                                     }
-                                                },
-                                                focusRequester = loserFocusRequesters[index],
-                                                nextFocus = {
-                                                    if (index < constrainedLoserSetCount - 1) {
-                                                        loserFocusRequesters[index + 1].requestFocus()
-                                                    }
-                                                })
+                                                )
+                                            }
                                         }
                                     }
                                 }

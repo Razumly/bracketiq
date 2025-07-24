@@ -16,21 +16,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
 @Composable
-fun CancellationRefundOptions(
+fun RegistrationOptions(
     selectedOption: Int,
     onOptionSelected: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val refundOptions = listOf(
-        RefundOption(0, "No cutoff (always allow refunds)"),
+        RefundOption(0, "No Cutoff"),
         RefundOption(1, "24 hours before event"),
         RefundOption(2, "48 hours before event"),
-        RefundOption(3, "Automatic refunds disabled")
     )
 
     Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
-            text = "Automatic Refund Policy",
+            text = "Registration Cutoff Policy",
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.padding(bottom = 8.dp)
@@ -59,7 +58,7 @@ fun CancellationRefundOptions(
     }
 }
 
-data class RefundOption(
+data class RegistrationOption(
     val value: Int,
     val label: String
 )

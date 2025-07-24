@@ -605,16 +605,19 @@ class DefaultEventDetailComponent(
     override fun deleteEvent() {
         scope.launch {
             if (selectedEvent.value!!.event.price == 0.0) {
+                loadingHandler.showLoading("Deleting Event ...")
                 eventAbsRepository.deleteEvent(selectedEvent.value!!.event).onFailure {
                     _errorState.value = ErrorMessage(it.message ?: "")
                 }
                 backCallback.onBack()
             } else {
+                loadingHandler.showLoading("Deleting Event and Refunding ...")
                 billingRepository.deleteAndRefundEvent(selectedEvent.value!!.event).onFailure {
                     _errorState.value = ErrorMessage(it.message ?: "")
                 }
                 backCallback.onBack()
             }
+            loadingHandler.hideLoading()
         }
     }
 

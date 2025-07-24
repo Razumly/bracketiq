@@ -38,6 +38,7 @@ data class EventImp(
     override val playerIds: List<String>,
     override val teamIds: List<String>,
     override val cancellationRefundHours: Int,
+    override val registrationCutoffHours: Int = 0,
     @Transient override val eventType: EventType = EventType.EVENT,
     @Transient override val lastUpdated: Instant = Clock.System.now(),
 ): EventAbs {
@@ -58,7 +59,7 @@ data class EventImp(
                 price = 0.0,
                 rating = 0f,
                 imageUrl = "",
-                teamSizeLimit = 0,
+                teamSizeLimit = 2,
                 maxParticipants = 0,
                 singleDivision = false,
                 teamSignup = false,
@@ -66,7 +67,8 @@ data class EventImp(
                 freeAgents = listOf(),
                 playerIds = listOf(),
                 teamIds = listOf(),
-                cancellationRefundHours = 0
+                cancellationRefundHours = 0,
+                registrationCutoffHours = 0,
             )
         }
     }
@@ -96,6 +98,7 @@ data class EventImp(
             playerIds = playerIds,
             teamIds = teamIds,
             cancellationRefundHours = cancellationRefundHours,
+            registrationCutoffHours = registrationCutoffHours,
         )
     }
 }

@@ -3,6 +3,7 @@ package com.razumly.mvp.eventDetail.composables
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -23,12 +24,21 @@ fun PointsTextField(
     label: String,
     onValueChange: (String) -> Unit,
     focusRequester: FocusRequester,
-    nextFocus: () -> Unit
+    nextFocus: () -> Unit,
+    isError: Boolean = false,
+    errorMessage: String = ""
 ) {
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
         label = { Text(label) },
+        isError = isError,
+        supportingText = if (isError && errorMessage.isNotEmpty()) {
+            { Text(
+                text = errorMessage,
+                color = MaterialTheme.colorScheme.error
+            ) }
+        } else null,
         keyboardOptions = KeyboardOptions(
             keyboardType = KeyboardType.Number,
             imeAction = ImeAction.Next
@@ -37,13 +47,14 @@ fun PointsTextField(
             onNext = { nextFocus() }
         ),
         modifier = Modifier
-            .width(100.dp)
+            .width(120.dp)
             .focusRequester(focusRequester)
             .onKeyEvent {
                 if (it.key == Key.Enter) {
                     nextFocus()
                     true
                 } else false
-            },
+            }
     )
 }
+

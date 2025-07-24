@@ -22,6 +22,7 @@ data class Tournament(
     val loserBracketPointsToVictory: List<Int>,
     val winnerScoreLimitsPerSet: List<Int>,
     val loserScoreLimitsPerSet: List<Int>,
+    val prize: String,
     @PrimaryKey override var id: String,
     override val name: String,
     override val description: String,
@@ -43,6 +44,7 @@ data class Tournament(
     override val playerIds: List<String>,
     override val teamIds: List<String>,
     override val cancellationRefundHours: Int,
+    override val registrationCutoffHours: Int = 0,
     @Transient override val eventType: EventType = EventType.TOURNAMENT,
     @Transient override val lastUpdated: Instant = Clock.System.now(),
     override val maxParticipants: Int,
@@ -52,9 +54,9 @@ data class Tournament(
         operator fun invoke(): Tournament {
             return Tournament(
                 doubleElimination = false,
-                winnerSetCount = 0,
+                winnerSetCount = 1,
                 loserSetCount = 0,
-                winnerBracketPointsToVictory = listOf(),
+                winnerBracketPointsToVictory = listOf(21),
                 loserBracketPointsToVictory = listOf(),
                 winnerScoreLimitsPerSet = listOf(),
                 loserScoreLimitsPerSet = listOf(),
@@ -73,14 +75,16 @@ data class Tournament(
                 lat = 0.0,
                 long = 0.0,
                 maxParticipants = 0,
-                teamSizeLimit = 0,
+                teamSizeLimit = 2,
                 singleDivision = false,
                 teamSignup = true,
                 waitList = listOf(),
                 freeAgents = listOf(),
                 playerIds = listOf(),
                 teamIds = listOf(),
-                cancellationRefundHours = 0
+                cancellationRefundHours = 0,
+                registrationCutoffHours = 0,
+                prize = ""
             )
         }
     }
@@ -108,7 +112,8 @@ data class Tournament(
             freeAgents = event.freeAgents,
             playerIds = event.playerIds,
             teamIds = event.teamIds,
-            cancellationRefundHours = 0,
+            cancellationRefundHours = event.cancellationRefundHours,
+            registrationCutoffHours = event.registrationCutoffHours,
         )
     }
     fun toEvent(): EventImp {
@@ -136,7 +141,8 @@ data class Tournament(
             freeAgents = freeAgents,
             playerIds = playerIds,
             teamIds = teamIds,
-            cancellationRefundHours = cancellationRefundHours
+            cancellationRefundHours = cancellationRefundHours,
+            registrationCutoffHours = registrationCutoffHours,
         )
     }
     fun toTournamentDTO(): TournamentDTO {
@@ -170,7 +176,9 @@ data class Tournament(
             freeAgents = freeAgents,
             playerIds = playerIds,
             teamIds = teamIds,
-            cancellationRefundHours = cancellationRefundHours
+            cancellationRefundHours = cancellationRefundHours,
+            registrationCutoffHours = registrationCutoffHours,
+            prize = prize,
         )
     }
 }

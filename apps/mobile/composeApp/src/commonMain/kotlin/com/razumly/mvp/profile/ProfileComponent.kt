@@ -24,6 +24,7 @@ interface ProfileComponent: IPaymentProcessor {
     fun manageTeams()
     fun manageEvents()
     fun clearCache()
+    fun manageStripeAccountOnboarding()
     fun manageStripeAccount()
     fun setLoadingHandler(loadingHandler: LoadingHandler)
 }
@@ -66,7 +67,7 @@ class DefaultProfileComponent(
         onNavigateToEvents()
     }
 
-    override fun manageStripeAccount() {
+    override fun manageStripeAccountOnboarding() {
         scopeMain.launch {
             loadingHandler.showLoading("Redirecting to Stripe ...")
             billingRepository.getOnboardingLink().onSuccess { onboardingUrl ->
@@ -74,6 +75,18 @@ class DefaultProfileComponent(
                     url = onboardingUrl,
                 )
             }.onFailure {
+                _errorState.value = ErrorMessage(it.message ?: "")
+            }
+            loadingHandler.hideLoading()
+        }
+    }
+
+    override fun manageStripeAccount() {
+        scopeMain.launch {
+            loadingHandler.showLoading("Redirecting to Stripe ...")
+            urlHandler?.openUrlInWebView(
+                url = "https://dashboard.stripe.com/dashboard",
+            )?.onFailure {
                 _errorState.value = ErrorMessage(it.message ?: "")
             }
             loadingHandler.hideLoading()

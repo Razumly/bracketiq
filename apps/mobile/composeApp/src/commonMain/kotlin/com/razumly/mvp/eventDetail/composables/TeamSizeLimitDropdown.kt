@@ -1,5 +1,7 @@
 package com.razumly.mvp.eventDetail.composables
 
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -16,7 +18,7 @@ import androidx.compose.ui.Modifier
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TeamSizeLimitDropdown(
+fun ColumnScope.TeamSizeLimitDropdown(
     selectedTeamSize: Int,
     onTeamSizeSelected: (Int) -> Unit,
     modifier: Modifier = Modifier
@@ -46,7 +48,7 @@ fun TeamSizeLimitDropdown(
                 ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
             },
             colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
-            modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryEditable, true)
+            modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryEditable, true).fillMaxWidth()
         )
 
         ExposedDropdownMenu(

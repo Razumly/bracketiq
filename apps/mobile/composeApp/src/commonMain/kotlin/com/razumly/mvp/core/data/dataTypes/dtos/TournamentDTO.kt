@@ -20,6 +20,7 @@ data class TournamentDTO(
     val loserBracketPointsToVictory: List<Int>,
     val winnerScoreLimitsPerSet: List<Int>,
     val loserScoreLimitsPerSet: List<Int>,
+    val prize: String,
     @Transient
     val id: String = "",
     val location: String,
@@ -41,6 +42,7 @@ data class TournamentDTO(
     val playerIds: List<String>,
     val teamIds: List<String>,
     val cancellationRefundHours: Int,
+    val registrationCutoffHours: Int,
 )
 
 fun TournamentDTO.toTournament(id: String): Tournament {
@@ -75,6 +77,8 @@ fun TournamentDTO.toTournament(id: String): Tournament {
         freeAgents = freeAgents,
         playerIds = playerIds,
         teamIds = teamIds,
-        cancellationRefundHours = cancellationRefundHours
+        cancellationRefundHours = cancellationRefundHours,
+        registrationCutoffHours = registrationCutoffHours,
+        prize = prize,
     )
 }

@@ -16,7 +16,6 @@ import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.presentation.composables.PaymentProcessorButton
 import com.razumly.mvp.core.util.LocalErrorHandler
 import com.razumly.mvp.core.util.LocalLoadingHandler
-import com.razumly.mvp.eventDetail.DefaultEventDetailComponent
 import com.razumly.mvp.home.LocalNavBarPadding
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -53,7 +52,7 @@ fun ProfileScreen(component: ProfileComponent) {
                 .padding(bottom = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Button(onClick = { component.manageTeams() }){
+            Button(onClick = { component.manageTeams() }) {
                 Text("Manage Teams")
             }
             Button(
@@ -67,8 +66,15 @@ fun ProfileScreen(component: ProfileComponent) {
                 Text("Manage Events")
             }
             PaymentProcessorButton(
-                onClick = { component.manageStripeAccount() }, component,"Manage Stripe Account"
+                onClick = { component.manageStripeAccountOnboarding() },
+                component,
+                "Manage Stripe Onboarding"
             )
+            Button(
+                onClick = { component.manageStripeAccount() },
+            )
+            { Text("Stripe Dashboard") }
+
             Button(
                 onClick = { component.onLogout() },
             ) {

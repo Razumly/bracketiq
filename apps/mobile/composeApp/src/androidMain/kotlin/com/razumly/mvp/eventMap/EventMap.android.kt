@@ -101,8 +101,7 @@ actual fun EventMap(
         targetValue = if (showMap) 1f else 0f, animationSpec = tween(durationMillis = 1000)
     )
     BindLocationTrackerEffect(component.locationTracker)
-    if (showMap) {
-
+    if (animationProgress > 0f) {
         LaunchedEffect(initCameraState) {
             cameraPositionState.move(
                 CameraUpdateFactory.newLatLngZoom(

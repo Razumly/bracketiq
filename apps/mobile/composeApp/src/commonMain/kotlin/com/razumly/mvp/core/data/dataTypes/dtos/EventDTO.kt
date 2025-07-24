@@ -34,6 +34,7 @@ data class EventDTO(
     val playerIds: List<String>,
     val teamIds: List<String>,
     val cancellationRefundHours: Int,
+    val registrationCutoffHours: Int,
 )
 
 fun EventDTO.toEvent(id: String): EventImp {
@@ -61,6 +62,7 @@ fun EventDTO.toEvent(id: String): EventImp {
         freeAgents = freeAgents,
         playerIds = playerIds,
         teamIds = teamIds,
-        cancellationRefundHours = cancellationRefundHours
+        cancellationRefundHours = cancellationRefundHours,
+        registrationCutoffHours = registrationCutoffHours,
     )
 }

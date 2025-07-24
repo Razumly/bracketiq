@@ -39,7 +39,7 @@ fun NumberInputField(
             ),
             singleLine = true,
             isError = isError,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth(.5f),
             visualTransformation = if (isMoney) CurrencyAmountInputVisualTransformation() else VisualTransformation.None,
             supportingText = {
                 if (isError && errorMessage != null) {

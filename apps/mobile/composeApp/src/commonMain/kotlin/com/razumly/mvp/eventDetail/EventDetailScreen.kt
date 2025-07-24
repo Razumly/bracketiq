@@ -64,6 +64,8 @@ import com.razumly.mvp.eventDetail.composables.TournamentBracketView
 import com.razumly.mvp.eventMap.MapComponent
 import com.razumly.mvp.home.LocalNavBarPadding
 import kotlinx.coroutines.delay
+import kotlinx.datetime.Clock
+import kotlin.time.Duration.Companion.hours
 
 val LocalTournamentComponent =
     compositionLocalOf<EventDetailComponent> { error("No tournament provided") }
@@ -89,10 +91,17 @@ fun EventDetailScreen(
     val loadingHandler = LocalLoadingHandler.current
     var showOptionsDropdown by remember { mutableStateOf(false) }
     var showDeleteConfirmation by remember { mutableStateOf(false) }
+    val showMap by mapComponent.showMap.collectAsState()
 
     val isUserInEvent by component.isUserInEvent.collectAsState()
 
     val selectedEvent = actualEvent ?: EventWithRelations(EventImp(), null)
+    val cutoffHours = when (selectedEvent.event.cancellationRefundHours) {
+        0 -> 0
+        1 -> 24
+        2 -> 48
+        else -> null
+    }
     val teamSignup = selectedEvent.event.teamSignup
 
     LaunchedEffect(Unit) {
@@ -252,13 +261,24 @@ fun EventDetailScreen(
                                                 ) {
                                                     "Leave Waitlist"
                                                 } else if (selectedEvent.event.price > 0) {
-                                                    "Request Refund"
+                                                    if (cutoffHours == null || selectedEvent.event.start.plus(
+                                                            cutoffHours.hours
+                                                        ) <= Clock.System.now()
+                                                    ) {
+                                                        "Request Refund (Not Automatic)"
+                                                    } else {
+                                                        "Request Refund (Automatic)"
+                                                    }
                                                 } else {
                                                     "Leave Event"
                                                 }
 
                                             Button(onClick = {
-                                                component.leaveEvent()
+                                                if (selectedEvent.event.price > 0) {
+                                                    component.requestRefund()
+                                                } else {
+                                                    component.leaveEvent()
+                                                }
                                                 showDropdownMenu = false
                                             }) {
                                                 Text(leaveMessage)
@@ -269,75 +289,77 @@ fun EventDetailScreen(
                             }
                         }
 
-                        Box(
-                            Modifier.padding(top = 64.dp, start = 16.dp).align(Alignment.TopStart)
-                        ) {
-                            IconButton(
-                                { component.backCallback.onBack() },
-                                modifier = Modifier.background(
-                                    Color.White.copy(alpha = 0.7f), shape = CircleShape
-                                ),
+                        if (!showMap) {
+                            Box(
+                                Modifier.padding(top = 64.dp, start = 16.dp)
+                                    .align(Alignment.TopStart)
                             ) {
-                                Icon(
-                                    Icons.Default.Close,
-                                    contentDescription = "Close",
-                                    tint = MaterialTheme.colorScheme.onSurface
-                                )
+                                IconButton(
+                                    { component.backCallback.onBack() },
+                                    modifier = Modifier.background(
+                                        Color.White.copy(alpha = 0.7f), shape = CircleShape
+                                    ),
+                                ) {
+                                    Icon(
+                                        Icons.Default.Close,
+                                        contentDescription = "Close",
+                                        tint = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
                             }
-                        }
-                        Box(
-                            modifier = Modifier.align(Alignment.TopEnd)
-                                .padding(top = 64.dp, end = 16.dp) // Adjust for status bar
-                        ) {
-                            IconButton(
-                                onClick = { showOptionsDropdown = true },
-                                modifier = Modifier.background(
-                                    Color.White.copy(alpha = 0.7f), shape = CircleShape
-                                )
+                            Box(
+                                modifier = Modifier.align(Alignment.TopEnd)
+                                    .padding(top = 64.dp, end = 16.dp) // Adjust for status bar
                             ) {
-                                Icon(
-                                    Icons.Default.MoreVert,
-                                    contentDescription = "More options",
-                                    tint = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-
-                            DropdownMenu(expanded = showOptionsDropdown,
-                                onDismissRequest = { showOptionsDropdown = false }) {
-                                // Edit option
-                                if (isHost) {
-                                    DropdownMenuItem(text = { Text("Edit") }, onClick = {
-                                        component.toggleEdit()
-                                        showOptionsDropdown = false
-                                    }, leadingIcon = {
-                                        Icon(Icons.Default.Edit, contentDescription = null)
-                                    }, enabled = isHost
+                                IconButton(
+                                    onClick = { showOptionsDropdown = true },
+                                    modifier = Modifier.background(
+                                        Color.White.copy(alpha = 0.7f), shape = CircleShape
+                                    )
+                                ) {
+                                    Icon(
+                                        Icons.Default.MoreVert,
+                                        contentDescription = "More options",
+                                        tint = MaterialTheme.colorScheme.onSurface
                                     )
                                 }
 
-                                DropdownMenuItem(text = { Text("Share") }, onClick = {
-                                    component.shareEvent()
-                                    showOptionsDropdown = false
-                                }, leadingIcon = {
-                                    Icon(Icons.Default.Share, contentDescription = null)
-                                })
-
-                                if (isHost) {
-                                    DropdownMenuItem(text = { Text("Delete") }, onClick = {
-                                        showDeleteConfirmation = true
-                                        showOptionsDropdown = false
-                                    }, leadingIcon = {
-                                        Icon(
-                                            Icons.Default.Delete,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.error
+                                DropdownMenu(expanded = showOptionsDropdown,
+                                    onDismissRequest = { showOptionsDropdown = false }) {
+                                    // Edit option
+                                    if (isHost) {
+                                        DropdownMenuItem(text = { Text("Edit") }, onClick = {
+                                            component.toggleEdit()
+                                            showOptionsDropdown = false
+                                        }, leadingIcon = {
+                                            Icon(Icons.Default.Edit, contentDescription = null)
+                                        }, enabled = isHost
                                         )
-                                    }, colors = MenuDefaults.itemColors(
-                                        textColor = MaterialTheme.colorScheme.error
-                                    )
-                                    )
-                                }
+                                    }
 
+                                    DropdownMenuItem(text = { Text("Share") }, onClick = {
+                                        component.shareEvent()
+                                        showOptionsDropdown = false
+                                    }, leadingIcon = {
+                                        Icon(Icons.Default.Share, contentDescription = null)
+                                    })
+
+                                    if (isHost) {
+                                        DropdownMenuItem(text = { Text("Delete") }, onClick = {
+                                            showDeleteConfirmation = true
+                                            showOptionsDropdown = false
+                                        }, leadingIcon = {
+                                            Icon(
+                                                Icons.Default.Delete,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.error
+                                            )
+                                        }, colors = MenuDefaults.itemColors(
+                                            textColor = MaterialTheme.colorScheme.error
+                                        )
+                                        )
+                                    }
+                                }
                             }
                         }
                     }

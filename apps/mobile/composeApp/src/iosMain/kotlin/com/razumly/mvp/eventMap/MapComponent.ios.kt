@@ -26,7 +26,6 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.Serializable
@@ -62,7 +61,7 @@ actual class MapComponent(
     private val _currentRadiusMeters = MutableStateFlow(50.0)
 
     private val _showMap = MutableStateFlow(false)
-    val showMap = _showMap.asStateFlow()
+    actual val showMap = _showMap.asStateFlow()
 
     private val httpClient = HttpClient(Darwin) {
         install(ContentNegotiation) {

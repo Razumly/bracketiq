@@ -38,7 +38,7 @@ class CurrencyAmountInputVisualTransformation(
             }
         }
 
-        val formattedNumber = intPart + decimalSeparator + fractionPart
+        val formattedNumber = "$$intPart$decimalSeparator$fractionPart"
 
         val newText = AnnotatedString(
             text = formattedNumber,

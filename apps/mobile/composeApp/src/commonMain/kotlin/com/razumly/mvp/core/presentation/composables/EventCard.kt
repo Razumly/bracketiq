@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import com.razumly.mvp.core.data.dataTypes.EventAbs
+import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.moneyFormat
 import com.razumly.mvp.core.presentation.util.toTitleCase
@@ -55,8 +56,7 @@ import kotlinx.datetime.format
 import kotlinx.datetime.toLocalDateTime
 
 @OptIn(
-    ExperimentalHazeMaterialsApi::class,
-    ExperimentalHazeApi::class
+    ExperimentalHazeMaterialsApi::class, ExperimentalHazeApi::class
 )
 @Composable
 fun EventCard(
@@ -102,7 +102,6 @@ fun EventCard(
             Text(imageStateText)
         }
 
-        // Event Details Section
         Column(
             modifier = Modifier.hazeEffect(
                 hazeState, HazeMaterials.ultraThin(MaterialTheme.colorScheme.onBackground)
@@ -119,14 +118,12 @@ fun EventCard(
         ) {
             Spacer(modifier = Modifier.height(232.dp))
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Button(
-                    modifier = Modifier.onGloballyPositioned { layoutCoordinates ->
-                        val boundsInWindow = layoutCoordinates.boundsInWindow()
-                        mapButtonOffset = boundsInWindow.center
-                    },
+                Button(modifier = Modifier.onGloballyPositioned { layoutCoordinates ->
+                    val boundsInWindow = layoutCoordinates.boundsInWindow()
+                    mapButtonOffset = boundsInWindow.center
+                },
                     onClick = { onMapClick(mapButtonOffset) },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Color.Black, contentColor = Color.White
@@ -167,12 +164,20 @@ fun EventCard(
             }
 
             StylizedText("${event.fieldType} ${event.eventType}".toTitleCase(), patterns)
-            StylizedText("Divisions: ${event.divisions.joinToString(", ")}", patterns)
-            androidx.compose.material3.HorizontalDivider(thickness = 2.dp)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                StylizedText("Divisions: ${event.divisions.joinToString(", ")}", patterns)
+                if (event is Tournament) {
+                    Text(
+                        text = "Prize: " + event.prize,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.background
+                    )
+                }
+            }
+            HorizontalDivider(thickness = 2.dp)
 
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
                     text = dateRangeText,

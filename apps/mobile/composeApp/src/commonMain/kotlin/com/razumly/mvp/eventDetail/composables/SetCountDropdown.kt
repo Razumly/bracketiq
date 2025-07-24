@@ -1,9 +1,12 @@
 package com.razumly.mvp.eventDetail.composables
 
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -15,7 +18,7 @@ import androidx.compose.ui.Modifier
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SetCountDropdown(
+fun ColumnScope.SetCountDropdown(
     selectedCount: Int,
     onCountSelected: (Int) -> Unit,
     label: String,
@@ -38,7 +41,7 @@ fun SetCountDropdown(
                 ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
             },
             colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
-            modifier = Modifier.menuAnchor()
+            modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryEditable, true)
         )
 
         ExposedDropdownMenu(
@@ -60,7 +63,7 @@ fun SetCountDropdown(
 }
 
 @Composable
-fun WinnerSetCountDropdown(
+fun ColumnScope.WinnerSetCountDropdown(
     selectedCount: Int,
     onCountSelected: (Int) -> Unit,
     modifier: Modifier = Modifier
@@ -74,7 +77,7 @@ fun WinnerSetCountDropdown(
 }
 
 @Composable
-fun LoserSetCountDropdown(
+fun ColumnScope.LoserSetCountDropdown(
     selectedCount: Int,
     onCountSelected: (Int) -> Unit,
     modifier: Modifier = Modifier
