@@ -30,10 +30,12 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuDefaults
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -48,11 +50,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
+import com.razumly.mvp.core.data.repositories.FeeBreakdown
 import com.razumly.mvp.core.presentation.composables.PaymentProcessorButton
 import com.razumly.mvp.core.presentation.composables.TeamCard
 import com.razumly.mvp.core.presentation.util.buttonTransitionSpec
@@ -65,6 +69,7 @@ import com.razumly.mvp.eventMap.MapComponent
 import com.razumly.mvp.home.LocalNavBarPadding
 import kotlinx.coroutines.delay
 import kotlinx.datetime.Clock
+import kotlin.math.round
 import kotlin.time.Duration.Companion.hours
 
 val LocalTournamentComponent =
@@ -92,6 +97,10 @@ fun EventDetailScreen(
     var showOptionsDropdown by remember { mutableStateOf(false) }
     var showDeleteConfirmation by remember { mutableStateOf(false) }
     val showMap by mapComponent.showMap.collectAsState()
+    var showRefundReasonDialog by remember { mutableStateOf(false) }
+    var refundReason by remember { mutableStateOf("") }
+    val showFeeBreakdown by component.showFeeBreakdown.collectAsState()
+    val currentFeeBreakdown by component.currentFeeBreakdown.collectAsState()
 
     val isUserInEvent by component.isUserInEvent.collectAsState()
 
@@ -275,7 +284,7 @@ fun EventDetailScreen(
 
                                             Button(onClick = {
                                                 if (selectedEvent.event.price > 0) {
-                                                    component.requestRefund()
+                                                    showRefundReasonDialog = true
                                                 } else {
                                                     component.leaveEvent()
                                                 }
@@ -450,6 +459,30 @@ fun EventDetailScreen(
                         }
                     })
             }
+
+            if (showRefundReasonDialog) {
+                RefundReasonDialog(
+                    currentReason = refundReason,
+                    onReasonChange = { refundReason = it },
+                    onConfirm = {
+                        component.requestRefund(refundReason)
+                        showRefundReasonDialog = false
+                        refundReason = ""
+                    },
+                    onDismiss = {
+                        showRefundReasonDialog = false
+                        refundReason = ""
+                    }
+                )
+            }
+
+            if (showFeeBreakdown && currentFeeBreakdown != null) {
+                FeeBreakdownDialog(
+                    feeBreakdown = currentFeeBreakdown!!,
+                    onConfirm = { component.confirmFeeBreakdown() },
+                    onCancel = { component.dismissFeeBreakdown() }
+                )
+            }
         }
     }
 }
@@ -477,4 +510,135 @@ fun TeamSelectionDialog(
             Text("Manage Teams")
         }
     })
+}
+
+@Composable
+fun RefundReasonDialog(
+    currentReason: String,
+    onReasonChange: (String) -> Unit,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Refund Request") },
+        text = {
+            Column {
+                Text(
+                    "Please provide a reason for your refund request:",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+                OutlinedTextField(
+                    value = currentReason,
+                    onValueChange = onReasonChange,
+                    placeholder = { Text("Enter reason...") },
+                    modifier = Modifier.fillMaxWidth(),
+                    maxLines = 3
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                enabled = currentReason.isNotBlank()
+            ) {
+                Text("Submit Refund Request")
+            }
+        },
+        dismissButton = {
+            Button(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+private fun Int.centsToDollars(): String {
+    val dollars = this / 100.0
+    val rounded = round(dollars * 100) / 100
+    val wholePart = rounded.toInt()
+    val decimalPart = ((rounded - wholePart) * 100).toInt()
+    return if (decimalPart == 0) {
+        "$wholePart.00"
+    } else if (decimalPart < 10) {
+        "$wholePart.0$decimalPart"
+    } else {
+        "$wholePart.$decimalPart"
+    }
+}
+
+@Composable
+fun FeeBreakdownDialog(
+    feeBreakdown: FeeBreakdown,
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("Payment Breakdown") },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    "Review the charges before proceeding:",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+
+                HorizontalDivider()
+
+                FeeRow("Event Price", "$${feeBreakdown.eventPrice.centsToDollars()}")
+                FeeRow("Processing Fee", "$${feeBreakdown.processingFee.centsToDollars()}")
+                FeeRow("Stripe Fee", "$${feeBreakdown.stripeFee.centsToDollars()}")
+
+                HorizontalDivider()
+
+                FeeRow(
+                    "Total Charge",
+                    "$${feeBreakdown.totalCharge.centsToDollars()}",
+                    isTotal = true
+                )
+
+                Text(
+                    "Host receives: $${feeBreakdown.hostReceives.centsToDollars()}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = onConfirm) {
+                Text("Proceed to Payment")
+            }
+        },
+        dismissButton = {
+            Button(onClick = onCancel) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+private fun FeeRow(
+    label: String,
+    amount: String,
+    isTotal: Boolean = false
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = label,
+            style = if (isTotal) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium,
+            fontWeight = if (isTotal) FontWeight.Bold else FontWeight.Normal
+        )
+        Text(
+            text = amount,
+            style = if (isTotal) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium,
+            fontWeight = if (isTotal) FontWeight.Bold else FontWeight.Normal
+        )
+    }
 }

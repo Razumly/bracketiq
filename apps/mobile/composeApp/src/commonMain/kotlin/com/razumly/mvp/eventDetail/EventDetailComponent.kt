@@ -14,6 +14,7 @@ import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.Division
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.repositories.FeeBreakdown
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IEventAbsRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
@@ -64,8 +65,11 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val isEventFull: StateFlow<Boolean>
     val editedEvent: StateFlow<EventAbs>
     val backCallback: BackCallback
+    val showFeeBreakdown: StateFlow<Boolean>
+    val currentFeeBreakdown: StateFlow<FeeBreakdown?>
 
     fun matchSelected(selectedMatch: MatchWithRelations)
+    fun showFeeBreakdown(feeBreakdown: FeeBreakdown, onConfirm: () -> Unit, onCancel: () -> Unit)
     fun onHostCreateAccount()
     fun selectDivision(division: Division)
     fun setLoadingHandler(loadingHandler: LoadingHandler)
@@ -77,7 +81,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun joinEventAsTeam(team: TeamWithPlayers)
     fun viewEvent()
     fun leaveEvent()
-    fun requestRefund()
+    fun requestRefund(reason: String)
     fun editEventField(update: EventImp.() -> EventImp)
     fun editTournamentField(update: Tournament.() -> Tournament)
     fun updateEvent()
@@ -89,6 +93,8 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun selectFieldCount(count: Int)
     fun checkIsUserWaitListed(event: EventAbs): Boolean
     fun checkIsUserFreeAgent(event: EventAbs): Boolean
+    fun dismissFeeBreakdown()
+    fun confirmFeeBreakdown()
 }
 
 @Serializable
@@ -216,6 +222,14 @@ class DefaultEventDetailComponent(
 
     private val _showDetails = MutableStateFlow(false)
     override val showDetails = _showDetails.asStateFlow()
+
+    private val _showFeeBreakdown = MutableStateFlow(false)
+    override val showFeeBreakdown = _showFeeBreakdown.asStateFlow()
+
+    private val _currentFeeBreakdown = MutableStateFlow<FeeBreakdown?>(null)
+    override val currentFeeBreakdown = _currentFeeBreakdown.asStateFlow()
+
+    private var pendingPaymentAction: (() -> Unit)? = null
 
     private val _userTeams = currentUser.flatMapLatest {
         teamRepository.getTeamsWithPlayersFlow(it.id).map { result ->
@@ -372,6 +386,7 @@ class DefaultEventDetailComponent(
     override fun joinEvent() {
         scope.launch {
             if (selectedEvent.value == null) return@launch
+
             if (selectedEvent.value!!.event.price == 0.0 || isEventFull.value || selectedEvent.value!!.event.teamSignup) {
                 loadingHandler.showLoading("Joining Event ...")
                 eventAbsRepository.addCurrentUserToEvent(selectedEvent.value!!.event).onSuccess {
@@ -381,13 +396,28 @@ class DefaultEventDetailComponent(
                 }
             } else {
                 loadingHandler.showLoading("Creating Purchase Request ...")
-                billingRepository.createPurchaseIntent(selectedEvent.value!!.event).onSuccess {
-                    it?.let { setPaymentIntent(it) }
-                    loadingHandler.showLoading("Waiting for Payment Completion ..")
-                    presentPaymentSheet()
-                }.onFailure {
-                    _errorState.value = ErrorMessage(it.message ?: "")
-                }
+                billingRepository.createPurchaseIntent(selectedEvent.value!!.event)
+                    .onSuccess { purchaseIntent ->
+                        purchaseIntent?.let { intent ->
+                            intent.feeBreakdown?.firstOrNull()?.let { feeBreakdown ->
+                                showFeeBreakdown(feeBreakdown, onConfirm = {
+                                    scope.launch {
+                                        setPaymentIntent(intent)
+                                    }
+                                    loadingHandler.showLoading("Waiting for Payment Completion ..")
+                                    presentPaymentSheet()
+                                }, onCancel = {
+                                    loadingHandler.hideLoading()
+                                })
+                            } ?: run {
+                                setPaymentIntent(intent)
+                                loadingHandler.showLoading("Waiting for Payment Completion ..")
+                                presentPaymentSheet()
+                            }
+                        }
+                    }.onFailure {
+                        _errorState.value = ErrorMessage(it.message ?: "")
+                    }
             }
             loadingHandler.hideLoading()
         }
@@ -397,6 +427,7 @@ class DefaultEventDetailComponent(
         scope.launch {
             _usersTeam.value = team
             if (selectedEvent.value == null) return@launch
+
             if (selectedEvent.value!!.event.price == 0.0 || isEventFull.value) {
                 loadingHandler.showLoading("Joining Event ...")
                 eventAbsRepository.addTeamToEvent(selectedEvent.value!!.event, team.team)
@@ -408,10 +439,24 @@ class DefaultEventDetailComponent(
             } else {
                 loadingHandler.showLoading("Creating Purchase Request ...")
                 billingRepository.createPurchaseIntent(selectedEvent.value!!.event, team.team.id)
-                    .onSuccess {
-                        it?.let { setPaymentIntent(it) }
-                        loadingHandler.showLoading("Waiting for Payment Completion ..")
-                        presentPaymentSheet()
+                    .onSuccess { purchaseIntent ->
+                        purchaseIntent?.let { intent ->
+                            intent.feeBreakdown?.firstOrNull()?.let { feeBreakdown ->
+                                showFeeBreakdown(feeBreakdown, onConfirm = {
+                                    scope.launch {
+                                        setPaymentIntent(intent)
+                                    }
+                                    loadingHandler.showLoading("Waiting for Payment Completion ..")
+                                    presentPaymentSheet()
+                                }, onCancel = {
+                                    loadingHandler.hideLoading()
+                                })
+                            } ?: run {
+                                setPaymentIntent(intent)
+                                loadingHandler.showLoading("Waiting for Payment Completion ..")
+                                presentPaymentSheet()
+                            }
+                        }
                     }.onFailure {
                         _errorState.value = ErrorMessage(it.message ?: "")
                     }
@@ -420,13 +465,13 @@ class DefaultEventDetailComponent(
         }
     }
 
-    override fun requestRefund() {
+    override fun requestRefund(reason: String) {
         scope.launch {
             if (!_isUserInEvent.value || selectedEvent.value == null) {
                 return@launch
             }
             loadingHandler.showLoading("Requesting Refund ...")
-            billingRepository.leaveAndRefundEvent(selectedEvent.value!!.event).onFailure {
+            billingRepository.leaveAndRefundEvent(selectedEvent.value!!.event, reason).onFailure {
                 _errorState.value = ErrorMessage(it.message ?: "")
             }.onSuccess {
                 eventAbsRepository.getEvent(selectedEvent.value!!.event)
@@ -652,5 +697,24 @@ class DefaultEventDetailComponent(
         } else {
             event.maxParticipants <= event.playerIds.size
         }
+    }
+
+    override fun showFeeBreakdown(
+        feeBreakdown: FeeBreakdown, onConfirm: () -> Unit, onCancel: () -> Unit
+    ) {
+        _currentFeeBreakdown.value = feeBreakdown
+        _showFeeBreakdown.value = true
+        pendingPaymentAction = onConfirm
+    }
+
+    override fun dismissFeeBreakdown() {
+        _showFeeBreakdown.value = false
+        _currentFeeBreakdown.value = null
+        pendingPaymentAction = null
+    }
+
+    override fun confirmFeeBreakdown() {
+        pendingPaymentAction?.invoke()
+        dismissFeeBreakdown()
     }
 }

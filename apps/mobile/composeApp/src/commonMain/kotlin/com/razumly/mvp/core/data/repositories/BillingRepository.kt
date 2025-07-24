@@ -1,6 +1,7 @@
 package com.razumly.mvp.core.data.repositories
 
 import com.razumly.mvp.core.data.dataTypes.EventAbs
+import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.util.DbConstants
 import io.appwrite.services.Functions
@@ -19,12 +20,15 @@ interface IBillingRepository : IMVPRepository {
     suspend fun createAccount(): Result<String>
     suspend fun createCustomer(): Result<Unit>
     suspend fun getOnboardingLink(): Result<String>
-    suspend fun leaveAndRefundEvent(event: EventAbs): Result<Unit>
+    suspend fun leaveAndRefundEvent(event: EventAbs, reason: String): Result<Unit>
     suspend fun deleteAndRefundEvent(event: EventAbs): Result<Unit>
 }
 
 class BillingRepository(
-    private val userRepository: IUserRepository, private val functions: Functions
+    private val userRepository: IUserRepository,
+    private val functions: Functions,
+    private val eventRepository: IEventRepository,
+    private val tournamentRepository: ITournamentRepository
 ) : IBillingRepository {
     override suspend fun createPurchaseIntent(
         event: EventAbs, teamId: String?
@@ -83,30 +87,37 @@ class BillingRepository(
         val user = userRepository.currentUser.value.getOrThrow()
         if (user.stripeAccountId?.isBlank() == true) throw Exception("User has no stripe account")
 
-        val response = Json.decodeFromString<CreateAccountResponse>(functions.createExecution(
-            functionId = DbConstants.BILLING_FUNCTION,
-            body = Json.encodeToString(user.stripeAccountId?.let { GetHostOnboardingLink(it) }),
-            async = false,
-        ).responseBody)
+        val response = Json.decodeFromString<CreateAccountResponse>(
+            functions.createExecution(
+                functionId = DbConstants.BILLING_FUNCTION,
+                body = Json.encodeToString(user.stripeAccountId?.let { GetHostOnboardingLink(it) }),
+                async = false,
+            ).responseBody
+        )
         userRepository.updateUser(user.copy(stripeAccountId = response.accountId))
         response.onboardingUrl
     }
 
-    override suspend fun leaveAndRefundEvent(event: EventAbs): Result<Unit> = runCatching {
-        val response = functions.createExecution(
-            DbConstants.BILLING_FUNCTION, Json.encodeToString(
-                RefundRequest(
-                    eventId = event.id,
-                    userId = userRepository.currentUser.value.getOrThrow().id,
+    override suspend fun leaveAndRefundEvent(event: EventAbs, reason: String): Result<Unit> =
+        runCatching {
+            val response = functions.createExecution(
+                DbConstants.BILLING_FUNCTION, Json.encodeToString(
+                    RefundRequest(
+                        eventId = event.id,
+                        userId = userRepository.currentUser.value.getOrThrow().id,
+                        reason = reason
+                    )
                 )
             )
-        )
 
-        val refundResponse = Json.decodeFromString<RefundResponse>(response.responseBody)
-        if (!refundResponse.error.isNullOrBlank()) {
-            throw Exception(refundResponse.error)
+            val refundResponse = Json.decodeFromString<RefundResponse>(response.responseBody)
+            if (!refundResponse.error.isNullOrBlank()) {
+                throw Exception(refundResponse.error)
+            }
+            if (refundResponse.success == false) {
+                throw Exception(refundResponse.message)
+            }
         }
-    }
 
     override suspend fun deleteAndRefundEvent(event: EventAbs): Result<Unit> = runCatching {
         val response = functions.createExecution(
@@ -116,6 +127,13 @@ class BillingRepository(
         val refundResponse = Json.decodeFromString<RefundResponse>(response.responseBody)
         if (!refundResponse.error.isNullOrBlank()) {
             throw Exception(refundResponse.error)
+        }
+        if (refundResponse.success == false) {
+            throw Exception(refundResponse.message)
+        }
+        when (event) {
+            is Tournament -> tournamentRepository.deleteTournament(event.id)
+            is EventImp -> eventRepository.deleteEvent(event.id)
         }
     }
 }
@@ -168,7 +186,18 @@ data class PurchaseIntent(
     val ephemeralKey: String? = null,
     val customer: String? = null,
     val publishableKey: String? = null,
+    val feeBreakdown: List<FeeBreakdown>? = null,
     val error: String? = null,
+)
+
+@Serializable
+data class FeeBreakdown(
+    val eventPrice: Int,
+    val stripeFee: Int,
+    val processingFee: Int,
+    val totalCharge: Int,
+    val hostReceives: Int,
+    val feePercentage: Float,
 )
 
 @Serializable
@@ -177,6 +206,7 @@ data class RefundRequest(
     @EncodeDefault val command: String = "refund_payment",
     val userId: String,
     val eventId: String,
+    val reason: String,
 )
 
 @Serializable
@@ -189,7 +219,9 @@ data class RefundFullEvent(
 @Serializable
 data class RefundResponse(
     val refundId: String? = null,
-    val status: String? = null,
+    val success: Boolean? = null,
+    val emailSent: Boolean? = null,
+    val message: String? = null,
     val amount: Int? = null,
     val reason: String? = null,
     val error: String? = null,
