@@ -75,7 +75,6 @@ actual fun EventMap(
 
             if (onBackPressed != null) {
                 MapFloatingActionButton(
-                    isVisible = showMap,
                     onCloseMap = onBackPressed,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
