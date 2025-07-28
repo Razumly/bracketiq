@@ -4,6 +4,7 @@ import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.util.DbConstants
+import com.razumly.mvp.core.util.jsonMVP
 import io.appwrite.services.Functions
 import kotlinx.datetime.Instant
 import kotlinx.serialization.EncodeDefault
@@ -38,10 +39,10 @@ class BillingRepository(
             is Tournament -> true
             else -> false
         }
-        val response = Json.decodeFromString<PurchaseIntent>(
+        val response = jsonMVP.decodeFromString<PurchaseIntent>(
             functions.createExecution(
                 functionId = DbConstants.BILLING_FUNCTION,
-                body = Json.encodeToString(
+                body = jsonMVP.encodeToString(
                     CreatePurchaseIntent(user.id, event.id, teamId, isTournament)
                 ),
                 async = false,
@@ -56,10 +57,10 @@ class BillingRepository(
 
     override suspend fun createAccount(): Result<String> = runCatching {
         val user = userRepository.currentUser.value.getOrThrow()
-        val response = Json.decodeFromString<CreateAccountResponse>(
+        val response = jsonMVP.decodeFromString<CreateAccountResponse>(
             functions.createExecution(
                 functionId = DbConstants.BILLING_FUNCTION,
-                body = Json.encodeToString(
+                body = jsonMVP.encodeToString(
                     CreateAccount(user.id)
                 ),
                 async = false,
@@ -71,10 +72,10 @@ class BillingRepository(
 
     override suspend fun createCustomer(): Result<Unit> = runCatching {
         val user = userRepository.currentUser.value.getOrThrow()
-        val response = Json.decodeFromString<CreateAccountResponse>(
+        val response = jsonMVP.decodeFromString<CreateAccountResponse>(
             functions.createExecution(
                 functionId = DbConstants.BILLING_FUNCTION,
-                body = Json.encodeToString(
+                body = jsonMVP.encodeToString(
                     CreateCustomer(user.id)
                 ),
                 async = false,
@@ -87,10 +88,10 @@ class BillingRepository(
         val user = userRepository.currentUser.value.getOrThrow()
         if (user.stripeAccountId?.isBlank() == true) throw Exception("User has no stripe account")
 
-        val response = Json.decodeFromString<CreateAccountResponse>(
+        val response = jsonMVP.decodeFromString<CreateAccountResponse>(
             functions.createExecution(
                 functionId = DbConstants.BILLING_FUNCTION,
-                body = Json.encodeToString(user.stripeAccountId?.let { GetHostOnboardingLink(it) }),
+                body = jsonMVP.encodeToString(user.stripeAccountId?.let { GetHostOnboardingLink(it) }),
                 async = false,
             ).responseBody
         )
@@ -101,7 +102,7 @@ class BillingRepository(
     override suspend fun leaveAndRefundEvent(event: EventAbs, reason: String): Result<Unit> =
         runCatching {
             val response = functions.createExecution(
-                DbConstants.BILLING_FUNCTION, Json.encodeToString(
+                DbConstants.BILLING_FUNCTION, jsonMVP.encodeToString(
                     RefundRequest(
                         eventId = event.id,
                         userId = userRepository.currentUser.value.getOrThrow().id,
@@ -110,7 +111,7 @@ class BillingRepository(
                 )
             )
 
-            val refundResponse = Json.decodeFromString<RefundResponse>(response.responseBody)
+            val refundResponse = jsonMVP.decodeFromString<RefundResponse>(response.responseBody)
             if (!refundResponse.error.isNullOrBlank()) {
                 throw Exception(refundResponse.error)
             }
@@ -121,10 +122,10 @@ class BillingRepository(
 
     override suspend fun deleteAndRefundEvent(event: EventAbs): Result<Unit> = runCatching {
         val response = functions.createExecution(
-            DbConstants.BILLING_FUNCTION, Json.encodeToString(RefundFullEvent(eventId = event.id))
+            DbConstants.BILLING_FUNCTION, jsonMVP.encodeToString(RefundFullEvent(eventId = event.id))
         )
 
-        val refundResponse = Json.decodeFromString<RefundResponse>(response.responseBody)
+        val refundResponse = jsonMVP.decodeFromString<RefundResponse>(response.responseBody)
         if (!refundResponse.error.isNullOrBlank()) {
             throw Exception(refundResponse.error)
         }
@@ -186,7 +187,7 @@ data class PurchaseIntent(
     val ephemeralKey: String? = null,
     val customer: String? = null,
     val publishableKey: String? = null,
-    val feeBreakdown: List<FeeBreakdown>? = null,
+    val feeBreakdown: FeeBreakdown? = null,
     val error: String? = null,
 )
 

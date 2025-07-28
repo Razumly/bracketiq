@@ -399,13 +399,13 @@ class DefaultEventDetailComponent(
                 billingRepository.createPurchaseIntent(selectedEvent.value!!.event)
                     .onSuccess { purchaseIntent ->
                         purchaseIntent?.let { intent ->
-                            intent.feeBreakdown?.firstOrNull()?.let { feeBreakdown ->
+                            intent.feeBreakdown?.let { feeBreakdown ->
                                 showFeeBreakdown(feeBreakdown, onConfirm = {
                                     scope.launch {
                                         setPaymentIntent(intent)
+                                        loadingHandler.showLoading("Waiting for Payment Completion ..")
+                                        presentPaymentSheet()
                                     }
-                                    loadingHandler.showLoading("Waiting for Payment Completion ..")
-                                    presentPaymentSheet()
                                 }, onCancel = {
                                     loadingHandler.hideLoading()
                                 })
@@ -441,13 +441,13 @@ class DefaultEventDetailComponent(
                 billingRepository.createPurchaseIntent(selectedEvent.value!!.event, team.team.id)
                     .onSuccess { purchaseIntent ->
                         purchaseIntent?.let { intent ->
-                            intent.feeBreakdown?.firstOrNull()?.let { feeBreakdown ->
+                            intent.feeBreakdown?.let { feeBreakdown ->
                                 showFeeBreakdown(feeBreakdown, onConfirm = {
                                     scope.launch {
                                         setPaymentIntent(intent)
+                                        loadingHandler.showLoading("Waiting for Payment Completion ..")
+                                        presentPaymentSheet()
                                     }
-                                    loadingHandler.showLoading("Waiting for Payment Completion ..")
-                                    presentPaymentSheet()
                                 }, onCancel = {
                                     loadingHandler.hideLoading()
                                 })
