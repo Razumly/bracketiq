@@ -30,6 +30,7 @@ import com.razumly.mvp.matchDetail.DefaultMatchContentComponent
 import com.razumly.mvp.matchDetail.MatchContentComponent
 import com.razumly.mvp.profile.DefaultProfileComponent
 import com.razumly.mvp.profile.ProfileComponent
+import com.razumly.mvp.refundManager.DefaultRefundManagerComponent
 import com.razumly.mvp.teamManagement.DefaultTeamManagementComponent
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -65,6 +66,7 @@ interface HomeComponent {
         data class Profile(val component: ProfileComponent) : Child()
         data class Teams(val component: DefaultTeamManagementComponent) : Child()
         data class Events(val component: DefaultEventManagementComponent) : Child()
+        data class RefundManager(val component: DefaultRefundManagerComponent) : Child()
     }
 
     @Serializable
@@ -102,6 +104,9 @@ interface HomeComponent {
 
         @Serializable
         data object Events : Config()
+
+        @Serializable
+        data object RefundManager : Config()
     }
 }
 
@@ -212,7 +217,8 @@ class DefaultHomeComponent(
                         componentContext,
                         onNavigateToLogin,
                         ::onNavigateToTeamSettings,
-                        ::onNavigateToEvents
+                        ::onNavigateToEvents,
+                        ::onNavigateToRefunds
                     )
                 }.value
             )
@@ -225,9 +231,15 @@ class DefaultHomeComponent(
                 }.value
             )
 
-            Config.Events -> Child.Events(
+            is Config.Events -> Child.Events(
                 _koin.inject<DefaultEventManagementComponent> {
                     parametersOf(componentContext, ::onEventSelected, ::onBack)
+                }.value
+            )
+
+            is Config.RefundManager -> Child.RefundManager(
+                _koin.inject<DefaultRefundManagerComponent> {
+                    parametersOf(componentContext)
                 }.value
             )
         }
@@ -256,6 +268,10 @@ class DefaultHomeComponent(
 
     private fun onNavigateToEvents() {
         navigation.pushNew(Config.Events)
+    }
+
+    private fun onNavigateToRefunds() {
+        navigation.pushNew(Config.RefundManager)
     }
 
     override fun onTabSelected(page: Config) {

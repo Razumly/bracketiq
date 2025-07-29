@@ -143,6 +143,7 @@ class ChatGroupRepository(
                 nestedType = ChatGroup::class
             ).data.copy(id = newChatGroup.id)
         }, saveCall = { chatGroup ->
+            databaseService.getChatGroupDao.upsertChatGroupWithRelations(chatGroup)
             pushNotificationsRepository.createChatGroupTopic(chatGroup).onSuccess {
                 chatGroup.userIds.forEach { userId ->
                     pushNotificationsRepository.subscribeUserToChatGroup(userId, chatGroup.id)
@@ -158,7 +159,6 @@ class ChatGroupRepository(
                 throw it
             }
             _subscriptionList.value += chatGroup
-            databaseService.getChatGroupDao.upsertChatGroupWithRelations(chatGroup)
         }, onReturn = { })
 
     override suspend fun updateChatGroup(newChatGroup: ChatGroup): Result<ChatGroup> =

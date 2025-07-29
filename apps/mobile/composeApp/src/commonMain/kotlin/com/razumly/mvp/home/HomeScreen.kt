@@ -50,6 +50,7 @@ import com.razumly.mvp.eventManagement.EventManagementScreen
 import com.razumly.mvp.eventSearch.EventSearchScreen
 import com.razumly.mvp.matchDetail.MatchDetailScreen
 import com.razumly.mvp.profile.ProfileScreen
+import com.razumly.mvp.refundManager.RefundManagerScreen
 import com.razumly.mvp.teamManagement.TeamManagementScreen
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.launch
@@ -185,6 +186,11 @@ private fun HomeContent(
                     is HomeComponent.Child.Events -> {
                         Napier.d(tag = "Navigation") { "Navigating to Events Screen" }
                         EventManagementScreen(instance.component)
+                    }
+
+                    is HomeComponent.Child.RefundManager -> {
+                        Napier.d(tag = "Navigation") { "Navigating to Refund Manager Screen" }
+                        RefundManagerScreen(instance.component)
                     }
                 }
             }

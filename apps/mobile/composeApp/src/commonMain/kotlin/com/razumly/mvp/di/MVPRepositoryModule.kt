@@ -57,6 +57,8 @@ val MVPRepositoryModule = module {
         ChatGroupRepository(get(), get(), get(), get(), get(), get())
     } bind IChatGroupRepository::class
     single {
-        BillingRepository(get(), get(), get(), get())
+        BillingRepository(
+            get(), get(), get(), get(), get(), get()
+        )
     } bind IBillingRepository::class
 }

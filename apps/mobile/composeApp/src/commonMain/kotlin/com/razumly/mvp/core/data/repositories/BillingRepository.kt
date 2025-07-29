@@ -1,17 +1,22 @@
 package com.razumly.mvp.core.data.repositories
 
+import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.EventImp
+import com.razumly.mvp.core.data.dataTypes.RefundRequest
+import com.razumly.mvp.core.data.dataTypes.RefundRequestWithRelations
 import com.razumly.mvp.core.data.dataTypes.Tournament
+import com.razumly.mvp.core.data.dataTypes.dtos.RefundRequestDTO
 import com.razumly.mvp.core.util.DbConstants
 import com.razumly.mvp.core.util.jsonMVP
+import io.appwrite.Query
+import io.appwrite.services.Databases
 import io.appwrite.services.Functions
 import kotlinx.datetime.Instant
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 
 interface IBillingRepository : IMVPRepository {
     suspend fun createPurchaseIntent(
@@ -23,13 +28,20 @@ interface IBillingRepository : IMVPRepository {
     suspend fun getOnboardingLink(): Result<String>
     suspend fun leaveAndRefundEvent(event: EventAbs, reason: String): Result<Unit>
     suspend fun deleteAndRefundEvent(event: EventAbs): Result<Unit>
+
+    suspend fun getRefundsWithRelations(): Result<List<RefundRequestWithRelations>>
+    suspend fun getRefunds(): Result<List<RefundRequest>>
+    suspend fun approveRefund(refundRequest: RefundRequest): Result<Unit>
+    suspend fun rejectRefund(refundId: String): Result<Unit>
 }
 
 class BillingRepository(
     private val userRepository: IUserRepository,
     private val functions: Functions,
     private val eventRepository: IEventRepository,
-    private val tournamentRepository: ITournamentRepository
+    private val tournamentRepository: ITournamentRepository,
+    private val databases: Databases,
+    private val databaseService: DatabaseService
 ) : IBillingRepository {
     override suspend fun createPurchaseIntent(
         event: EventAbs, teamId: String?
@@ -103,10 +115,14 @@ class BillingRepository(
         runCatching {
             val response = functions.createExecution(
                 DbConstants.BILLING_FUNCTION, jsonMVP.encodeToString(
-                    RefundRequest(
+                    RefundApiRequest(
                         eventId = event.id,
                         userId = userRepository.currentUser.value.getOrThrow().id,
-                        reason = reason
+                        reason = reason,
+                        isTournament = when (event) {
+                            is Tournament -> true
+                            else -> false
+                        }
                     )
                 )
             )
@@ -122,7 +138,8 @@ class BillingRepository(
 
     override suspend fun deleteAndRefundEvent(event: EventAbs): Result<Unit> = runCatching {
         val response = functions.createExecution(
-            DbConstants.BILLING_FUNCTION, jsonMVP.encodeToString(RefundFullEvent(eventId = event.id))
+            DbConstants.BILLING_FUNCTION,
+            jsonMVP.encodeToString(RefundFullEvent(eventId = event.id))
         )
 
         val refundResponse = jsonMVP.decodeFromString<RefundResponse>(response.responseBody)
@@ -136,6 +153,91 @@ class BillingRepository(
             is Tournament -> tournamentRepository.deleteTournament(event.id)
             is EventImp -> eventRepository.deleteEvent(event.id)
         }
+    }
+
+    override suspend fun getRefundsWithRelations(): Result<List<RefundRequestWithRelations>> =
+        runCatching {
+            val currentUserId = userRepository.currentUser.value.getOrThrow().id
+
+            val cachedRefunds =
+                databaseService.getRefundRequestDao.getRefundRequestsWithRelations(currentUserId)
+
+            val serverRefunds = databases.listDocuments(
+                databaseId = DbConstants.DATABASE_NAME,
+                collectionId = DbConstants.REFUNDS_COLLECTION,
+                queries = listOf(
+                    Query.contains("hostId", currentUserId)
+                ),
+                nestedType = RefundRequestDTO::class
+            ).documents.map { it.data.toRefundRequest(it.id) }
+
+            databaseService.getRefundRequestDao.upsertRefundRequests(serverRefunds)
+
+            serverRefunds.forEach { refund ->
+                userRepository.getUsers(listOf(refund.userId)).onSuccess { _ ->
+                }
+
+                if (refund.isTournament) {
+                    tournamentRepository.getTournament(refund.eventId).onSuccess { _ ->
+                    }
+                } else {
+                    eventRepository.getEvent(refund.eventId).onSuccess { _ ->
+                    }
+                }
+            }
+
+            databaseService.getRefundRequestDao.getRefundRequestsWithRelations(currentUserId)
+        }
+
+    override suspend fun getRefunds(): Result<List<RefundRequest>> = runCatching {
+        val currentUserId = userRepository.currentUser.value.getOrThrow().id
+
+        val serverRefunds = databases.listDocuments(
+            databaseId = DbConstants.DATABASE_NAME,
+            collectionId = DbConstants.REFUNDS_COLLECTION,
+            queries = listOf(
+                Query.contains("hostId", currentUserId)
+            ),
+            nestedType = RefundRequestDTO::class
+        ).documents.map { it.data.toRefundRequest(it.id) }
+
+        databaseService.getRefundRequestDao.upsertRefundRequests(serverRefunds)
+
+        serverRefunds
+    }
+
+    override suspend fun approveRefund(refundRequest: RefundRequest): Result<Unit> = runCatching {
+        val response = functions.createExecution(
+            DbConstants.BILLING_FUNCTION, jsonMVP.encodeToString(
+                RefundApiRequest(
+                    eventId = refundRequest.eventId,
+                    userId = refundRequest.userId,
+                    reason = "requested_by_host",
+                    isTournament = refundRequest.isTournament
+                )
+            )
+        )
+
+        val refundResponse = jsonMVP.decodeFromString<RefundResponse>(response.responseBody)
+        if (!refundResponse.error.isNullOrBlank()) {
+            throw Exception(refundResponse.error)
+        }
+
+        if (refundResponse.success == false) {
+            throw Exception(refundResponse.message)
+        }
+
+        databaseService.getRefundRequestDao.deleteRefundRequest(refundRequest.id)
+    }
+
+    override suspend fun rejectRefund(refundId: String): Result<Unit> = runCatching {
+        databases.deleteDocument(
+            databaseId = DbConstants.DATABASE_NAME,
+            collectionId = DbConstants.REFUNDS_COLLECTION,
+            documentId = refundId
+        )
+
+        databaseService.getRefundRequestDao.deleteRefundRequest(refundId)
     }
 }
 
@@ -203,8 +305,9 @@ data class FeeBreakdown(
 
 @Serializable
 @OptIn(ExperimentalSerializationApi::class)
-data class RefundRequest(
+data class RefundApiRequest(
     @EncodeDefault val command: String = "refund_payment",
+    val isTournament: Boolean,
     val userId: String,
     val eventId: String,
     val reason: String,

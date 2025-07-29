@@ -76,6 +76,12 @@ fun ProfileScreen(component: ProfileComponent) {
             { Text("Stripe Dashboard") }
 
             Button(
+                onClick = { component.manageRefunds() },
+            ) {
+                Text("Manage Refunds")
+            }
+
+            Button(
                 onClick = { component.onLogout() },
             ) {
                 Text("Logout")

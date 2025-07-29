@@ -10,6 +10,7 @@ import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MessageMVP
+import com.razumly.mvp.core.data.dataTypes.RefundRequest
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.UserData
@@ -28,6 +29,7 @@ import com.razumly.mvp.core.data.dataTypes.daos.EventImpDao
 import com.razumly.mvp.core.data.dataTypes.daos.FieldDao
 import com.razumly.mvp.core.data.dataTypes.daos.MatchDao
 import com.razumly.mvp.core.data.dataTypes.daos.MessageDao
+import com.razumly.mvp.core.data.dataTypes.daos.RefundRequestDao
 import com.razumly.mvp.core.data.dataTypes.daos.TeamDao
 import com.razumly.mvp.core.data.dataTypes.daos.TournamentDao
 import com.razumly.mvp.core.data.dataTypes.daos.UserDataDao
@@ -53,7 +55,8 @@ import com.razumly.mvp.core.data.util.Converters
         FieldMatchCrossRef::class,
         TeamPendingPlayerCrossRef::class,
         ChatUserCrossRef::class,
-    ], version = 62
+        RefundRequest::class,
+    ], version = 63
 )
 @TypeConverters(Converters::class)
 @ConstructedBy(MVPDatabaseCtor::class)
@@ -66,6 +69,7 @@ abstract class MVPDatabaseservice : RoomDatabase(), DatabaseService {
     abstract override val getEventImpDao: EventImpDao
     abstract override val getChatGroupDao: ChatGroupDao
     abstract override val getMessageDao: MessageDao
+    abstract override val getRefundRequestDao: RefundRequestDao
 }
 
 interface DatabaseService {
@@ -77,4 +81,5 @@ interface DatabaseService {
     val getEventImpDao: EventImpDao
     val getChatGroupDao: ChatGroupDao
     val getMessageDao: MessageDao
+    val getRefundRequestDao: RefundRequestDao
 }

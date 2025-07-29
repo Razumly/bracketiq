@@ -1,7 +1,6 @@
 package com.razumly.mvp.profile
 
 import com.arkivanov.decompose.ComponentContext
-import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
@@ -27,15 +26,16 @@ interface ProfileComponent: IPaymentProcessor {
     fun manageStripeAccountOnboarding()
     fun manageStripeAccount()
     fun setLoadingHandler(loadingHandler: LoadingHandler)
+    fun manageRefunds()
 }
 
 class DefaultProfileComponent(
     private val componentContext: ComponentContext,
     private val userRepository: IUserRepository,
-    private val databaseService: DatabaseService,
     private val onNavigateToLogin: () -> Unit,
     private val onNavigateToEvents: () -> Unit,
     private val onNavigateToTeamSettings: (freeAgents: List<String>, event: EventAbs?) -> Unit,
+    private val onNavigateToRefundManager: () -> Unit,
     private val billingRepository: IBillingRepository,
 ) : ProfileComponent, PaymentProcessor(), ComponentContext by componentContext {
     private val scopeMain = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -91,6 +91,10 @@ class DefaultProfileComponent(
             }
             loadingHandler.hideLoading()
         }
+    }
+
+    override fun manageRefunds() {
+        onNavigateToRefundManager()
     }
 
     override fun clearCache() {

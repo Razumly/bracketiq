@@ -91,6 +91,7 @@ fun EventDetailScreen(
     val isHost by component.isHost.collectAsState()
     val isEditing by component.isEditing.collectAsState()
     val isEventFull by component.isEventFull.collectAsState()
+    var isRefundAutomatic by remember { mutableStateOf(false) }
     val editedEvent by component.editedEvent.collectAsState()
     var showFab by remember { mutableStateOf(false) }
     val loadingHandler = LocalLoadingHandler.current
@@ -111,6 +112,8 @@ fun EventDetailScreen(
         2 -> 48
         else -> null
     }
+    val timeDiff = selectedEvent.event.start.minus(Clock.System.now())
+    isRefundAutomatic = (cutoffHours != null && timeDiff <= cutoffHours.hours)
     val teamSignup = selectedEvent.event.teamSignup
 
     LaunchedEffect(Unit) {
@@ -270,13 +273,10 @@ fun EventDetailScreen(
                                                 ) {
                                                     "Leave Waitlist"
                                                 } else if (selectedEvent.event.price > 0) {
-                                                    if (cutoffHours == null || selectedEvent.event.start.plus(
-                                                            cutoffHours.hours
-                                                        ) <= Clock.System.now()
-                                                    ) {
-                                                        "Request Refund (Not Automatic)"
+                                                    if (isRefundAutomatic) {
+                                                        "Leave and Request Refund (Not Automatic)"
                                                     } else {
-                                                        "Request Refund (Automatic)"
+                                                        "Leave and Get Refund"
                                                     }
                                                 } else {
                                                     "Leave Event"

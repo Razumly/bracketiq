@@ -9,7 +9,6 @@ import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.presentation.RootComponent
 import com.razumly.mvp.core.presentation.RootComponent.DeepLinkNav
-import com.razumly.mvp.core.presentation.util.ShareServiceProvider
 import com.razumly.mvp.eventCreate.DefaultCreateEventComponent
 import com.razumly.mvp.eventDetail.DefaultEventDetailComponent
 import com.razumly.mvp.eventManagement.DefaultEventManagementComponent
@@ -17,6 +16,7 @@ import com.razumly.mvp.eventSearch.DefaultEventSearchComponent
 import com.razumly.mvp.home.DefaultHomeComponent
 import com.razumly.mvp.matchDetail.DefaultMatchContentComponent
 import com.razumly.mvp.profile.DefaultProfileComponent
+import com.razumly.mvp.refundManager.DefaultRefundManagerComponent
 import com.razumly.mvp.teamManagement.DefaultTeamManagementComponent
 import com.razumly.mvp.userAuth.DefaultAuthComponent
 import org.koin.dsl.module
@@ -59,13 +59,7 @@ val componentModule = module {
         )
     }
 
-    factory { (
-                  componentContext: ComponentContext,
-                  event: EventAbs,
-                  onMatchSelected: (MatchWithRelations, Tournament) -> Unit,
-                  onNavigateToTeamSettings: (freeAgents: List<String>, event: EventAbs?) -> Unit,
-                  onBack: () -> Unit
-              ) ->
+    factory { (componentContext: ComponentContext, event: EventAbs, onMatchSelected: (MatchWithRelations, Tournament) -> Unit, onNavigateToTeamSettings: (freeAgents: List<String>, event: EventAbs?) -> Unit, onBack: () -> Unit) ->
         DefaultEventDetailComponent(
             componentContext = componentContext,
             event = event,
@@ -125,15 +119,15 @@ val componentModule = module {
         )
     }
 
-    factory { (componentContext: ComponentContext, onNavigateToLogin: () -> Unit, onNavigateToTeamSettings: (List<String>, EventAbs?) -> Unit, onNavigateToEvents: () -> Unit) ->
+    factory { (componentContext: ComponentContext, onNavigateToLogin: () -> Unit, onNavigateToTeamSettings: (List<String>, EventAbs?) -> Unit, onNavigateToEvents: () -> Unit, onNavigateToRefundManager: () -> Unit) ->
         DefaultProfileComponent(
             componentContext = componentContext,
             onNavigateToLogin = onNavigateToLogin,
             onNavigateToTeamSettings = onNavigateToTeamSettings,
             userRepository = get(),
-            databaseService = get(),
             onNavigateToEvents = onNavigateToEvents,
-            billingRepository = get()
+            billingRepository = get(),
+            onNavigateToRefundManager = onNavigateToRefundManager,
         )
     }
 
@@ -146,6 +140,14 @@ val componentModule = module {
             selectedEvent = selectedEvent,
             onBack = onBack,
             eventAbsRepository = get()
+        )
+    }
+
+    factory { (componentContext: ComponentContext) ->
+        DefaultRefundManagerComponent(
+            componentContext = componentContext,
+            userRepository = get(),
+            billingRepository = get(),
         )
     }
 
