@@ -11,6 +11,7 @@ import io.appwrite.ID
 import io.appwrite.models.Execution
 import io.appwrite.services.Account
 import io.appwrite.services.Functions
+import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
@@ -110,13 +111,17 @@ class PushNotificationsRepository(
 
             override fun onNotificationClicked(data: PayloadData) {
                 super.onNotificationClicked(data)
-                println("Notification clicked, Notification payloadData: $data")
+                Napier.d(tag = "PushNotificationsRepository", message = "Notification clicked: $data")
             }
 
             override fun onPushNotificationWithPayloadData(
                 title: String?, body: String?, data: PayloadData
             ) {
-                println("Push Notification is received: Title: $title and Body: $body and Notification payloadData: $data")
+                super.onPushNotificationWithPayloadData(title, body, data)
+                Napier.d(
+                    tag = "PushNotificationsRepository",
+                    message = "Push notification with payload data: $data"
+                )
             }
         }
         NotifierManager.addListener(managerListener)
@@ -240,17 +245,17 @@ class PushNotificationsRepository(
     }
 
     override suspend fun addDeviceAsTarget(): Result<Unit> = runCatching {
-        val target = account.createPushTarget(ID.unique(), _pushToken.value)
-        userDataSource.savePushTarget(target.id)
-    }
+        account.createPushTarget(ID.unique(), _pushToken.value)
+    }.onSuccess {
+        userDataSource.savePushTarget(it.id)
+    }.map {}
 
     override suspend fun removeDeviceAsTarget(): Result<Unit> = runCatching {
         if (_pushTarget.value.isBlank()) return Result.failure(Exception("No push target found"))
-        runCatching {
-            account.deletePushTarget(_pushTarget.value)
-        }
+        account.deletePushTarget(_pushTarget.value)
+    }.onSuccess {
         userDataSource.savePushTarget("")
-    }
+    }.map {}
 }
 
 @Serializable

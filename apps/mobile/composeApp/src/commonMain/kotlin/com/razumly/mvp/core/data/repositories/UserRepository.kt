@@ -3,8 +3,6 @@ package com.razumly.mvp.core.data.repositories
 import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.UserData
-import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
-import com.razumly.mvp.core.data.dataTypes.crossRef.TournamentUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.dtos.UserDataDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.toUserData
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResponse
@@ -93,7 +91,7 @@ class UserRepository(
             nestedType = UserDataDTO::class
         ).data.copy(id = id).toUserData(id)
         Napier.d("User data: $remoteUserData")
-        if (_pushToken.value.isNotBlank() && _pushTarget.value.isBlank()) {
+        if (_pushToken.value.isNotBlank()) {
             pushNotificationsRepository.addDeviceAsTarget()
         }
         databaseService.getUserDataDao.upsertUserData(remoteUserData)
@@ -147,7 +145,7 @@ class UserRepository(
             databaseService.getUserDataDao.upsertUserData(user)
             currentUserDataSource.saveUserId(user.id)
 
-            if (_pushToken.value.isNotBlank() && _pushTarget.value.isBlank()) {
+            if (_pushToken.value.isNotBlank()) {
                 pushNotificationsRepository.addDeviceAsTarget()
             }
 

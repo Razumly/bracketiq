@@ -42,6 +42,7 @@ class EventRepository(
     private val database: Databases,
     private val teamRepository: ITeamRepository,
     private val userRepository: IUserRepository,
+    private val notificationsRepository: IPushNotificationsRepository
 ): IEventRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var lastDocumentId = ""
@@ -132,6 +133,7 @@ class EventRepository(
 
     override suspend fun createEvent(newEvent: EventImp): Result<EventImp> =
         singleResponse(networkCall = {
+            notificationsRepository.createEventTopic(newEvent)
             database.createDocument(
                 DbConstants.DATABASE_NAME,
                 DbConstants.EVENT_COLLECTION,

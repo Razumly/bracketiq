@@ -52,7 +52,8 @@ class TournamentRepository(
     private val teamRepository: ITeamRepository,
     private val userRepository: IUserRepository,
     private val matchRepository: IMatchRepository,
-    private val fieldRepository: IFieldRepository
+    private val fieldRepository: IFieldRepository,
+    private val notificationsRepository: IPushNotificationsRepository
 ) : ITournamentRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var lastDocumentId = ""
@@ -233,6 +234,7 @@ class TournamentRepository(
 
     override suspend fun createTournament(newTournament: Tournament): Result<Tournament> =
         singleResponse(networkCall = {
+            notificationsRepository.createTournamentTopic(newTournament)
             database.createDocument(
                 DbConstants.DATABASE_NAME,
                 DbConstants.TOURNAMENT_COLLECTION,

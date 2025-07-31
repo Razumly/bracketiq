@@ -32,8 +32,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         NotifierManager.onCreateOrOnNewIntent(intent)
+        Napier.d(tag = "intent", message = intent.data.toString())
         rootComponent = handleDeepLink { uri ->
             val deepLinkNav = uri?.extractDeepLinkNav()
+            Napier.d(tag = "DeepLink", message = "Extracted DeepLinkNav: $deepLinkNav")
             retainedComponent("RootRetainedComponent") {
                 getKoin().get<RootComponent> { parametersOf(it, deepLinkNav) }
             }
@@ -53,6 +55,7 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         NotifierManager.onCreateOrOnNewIntent(intent)
+        Napier.d(tag = "intent", message = intent.data.toString())
 
         // Handle deep links when app is already open
         intent.data?.let { uri ->

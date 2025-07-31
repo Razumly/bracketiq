@@ -30,7 +30,7 @@ val MVPRepositoryModule = module {
         EventAbsRepository(get(), get(), get(), get(), get())
     } bind IEventAbsRepository::class
     single {
-        EventRepository(get(), get(), get(), get())
+        EventRepository(get(), get(), get(), get(), get())
     } bind IEventRepository::class
     single {
         FieldRepository(get(), get())
@@ -39,7 +39,7 @@ val MVPRepositoryModule = module {
         TeamRepository(get(), get(), get(), get())
     } bind ITeamRepository::class
     single {
-        TournamentRepository(get(), get(), get(), get(), get(), get())
+        TournamentRepository(get(), get(), get(), get(), get(), get(), get())
     } bind ITournamentRepository::class
     single {
         UserRepository(get(), get(), get(), get(), get(), get())
