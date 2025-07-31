@@ -67,6 +67,9 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val backCallback: BackCallback
     val showFeeBreakdown: StateFlow<Boolean>
     val currentFeeBreakdown: StateFlow<FeeBreakdown?>
+    val isUserInWaitlist: StateFlow<Boolean>
+    val isUserFreeAgent: StateFlow<Boolean>
+    val isUserCaptain: StateFlow<Boolean>
 
     fun matchSelected(selectedMatch: MatchWithRelations)
     fun showFeeBreakdown(feeBreakdown: FeeBreakdown, onConfirm: () -> Unit, onCancel: () -> Unit)
@@ -155,10 +158,6 @@ class DefaultEventDetailComponent(
             onBack()
         }
     }
-
-    private val _isUserInEvent: MutableStateFlow<Boolean> =
-        MutableStateFlow(checkIsUserInEvent(event))
-    override val isUserInEvent = _isUserInEvent.asStateFlow()
 
     override val selectedEvent: StateFlow<EventAbsWithRelations?> =
         eventAbsRepository.getEventWithRelationsFlow(event).map { result ->
@@ -253,6 +252,19 @@ class DefaultEventDetailComponent(
         }
     }.stateIn(scope, SharingStarted.Eagerly, checkEventIsFull(event))
 
+    private val _isUserInEvent: MutableStateFlow<Boolean> =
+        MutableStateFlow(checkIsUserInEvent(event))
+    override val isUserInEvent = _isUserInEvent.asStateFlow()
+
+    private val _isUserInWaitlist = MutableStateFlow(checkIsUserWaitListed(event))
+    override val isUserInWaitlist = _isUserInWaitlist.asStateFlow()
+
+    private val _isUserFreeAgent = MutableStateFlow(checkIsUserFreeAgent(event))
+    override val isUserFreeAgent = _isUserFreeAgent.asStateFlow()
+
+    private val _isUserCaptain = MutableStateFlow(checkIsUserCaptain())
+    override val isUserCaptain = _isUserCaptain.asStateFlow()
+
     private val shareServiceProvider = ShareServiceProvider()
 
     init {
@@ -307,6 +319,8 @@ class DefaultEventDetailComponent(
                 .collect { event ->
                     matchRepository.subscribeToMatches()
                     _isUserInEvent.value = checkIsUserInEvent(event.event)
+                    _isUserInWaitlist.value = checkIsUserWaitListed(event.event)
+                    _isUserFreeAgent.value = checkIsUserFreeAgent(event.event)
                     if (_isUserInEvent.value) {
                         _usersTeam.value =
                             event.teams.find { it.team.playerIds.contains(currentUser.value.id) }
@@ -319,6 +333,8 @@ class DefaultEventDetailComponent(
                             }?.let {
                                 teamRepository.getTeamWithPlayers(it).getOrNull()
                             }
+
+                        _isUserCaptain.value = checkIsUserCaptain()
                     }
                     event.event.divisions.firstOrNull()?.let { selectDivision(it) }
                 }
@@ -390,7 +406,8 @@ class DefaultEventDetailComponent(
             if (selectedEvent.value!!.event.price == 0.0 || isEventFull.value || selectedEvent.value!!.event.teamSignup) {
                 loadingHandler.showLoading("Joining Event ...")
                 eventAbsRepository.addCurrentUserToEvent(selectedEvent.value!!.event).onSuccess {
-                    _isUserInEvent.value = true
+                    loadingHandler.showLoading("Reloading Event")
+                    eventAbsRepository.getEvent(selectedEvent.value!!.event)
                 }.onFailure {
                     _errorState.value = ErrorMessage(it.message ?: "")
                 }
@@ -415,6 +432,10 @@ class DefaultEventDetailComponent(
                                 presentPaymentSheet()
                             }
                         }
+                        loadingHandler.showLoading("Reloading Event")
+                        while(!_isUserInEvent.value) {
+                            eventAbsRepository.getEvent(selectedEvent.value!!.event)
+                        }
                     }.onFailure {
                         _errorState.value = ErrorMessage(it.message ?: "")
                     }
@@ -432,7 +453,8 @@ class DefaultEventDetailComponent(
                 loadingHandler.showLoading("Joining Event ...")
                 eventAbsRepository.addTeamToEvent(selectedEvent.value!!.event, team.team)
                     .onSuccess {
-                        _isUserInEvent.value = true
+                        loadingHandler.showLoading("Reloading Event")
+                        eventAbsRepository.getEvent(selectedEvent.value!!.event)
                     }.onFailure {
                         _errorState.value = ErrorMessage(it.message ?: "")
                     }
@@ -457,6 +479,10 @@ class DefaultEventDetailComponent(
                                 presentPaymentSheet()
                             }
                         }
+                        loadingHandler.showLoading("Reloading Event")
+                        while(!_isUserInEvent.value) {
+                            eventAbsRepository.getEvent(selectedEvent.value!!.event)
+                        }
                     }.onFailure {
                         _errorState.value = ErrorMessage(it.message ?: "")
                     }
@@ -476,6 +502,8 @@ class DefaultEventDetailComponent(
             }.onSuccess {
                 eventAbsRepository.getEvent(selectedEvent.value!!.event)
             }
+            loadingHandler.showLoading("Reloading Event")
+            eventAbsRepository.getEvent(selectedEvent.value!!.event)
             loadingHandler.hideLoading()
         }
     }
@@ -497,6 +525,7 @@ class DefaultEventDetailComponent(
                     ).onFailure { _errorState.value = ErrorMessage(it.message ?: "") }
                 }
             result.onSuccess {
+                loadingHandler.showLoading("Reloading Event")
                 eventAbsRepository.getEvent(selectedEvent.value!!.event)
             }
             loadingHandler.hideLoading()
@@ -683,6 +712,10 @@ class DefaultEventDetailComponent(
 
     private fun checkIsUserParticipant(event: EventAbs): Boolean {
         return event.playerIds.contains(currentUser.value.id)
+    }
+
+    private fun checkIsUserCaptain(): Boolean {
+        return _usersTeam.value?.team?.captainId == currentUser.value.id
     }
 
     private fun checkIsUserInEvent(event: EventAbs): Boolean {

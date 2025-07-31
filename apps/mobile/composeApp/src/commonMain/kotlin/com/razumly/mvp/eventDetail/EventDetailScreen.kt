@@ -106,6 +106,10 @@ fun EventDetailScreen(
     val isUserInEvent by component.isUserInEvent.collectAsState()
 
     val selectedEvent = actualEvent ?: EventWithRelations(EventImp(), null)
+    val isFreeAgent by component.isUserFreeAgent.collectAsState()
+    val isWaitListed by component.isUserInWaitlist.collectAsState()
+    val isCaptain by component.isUserCaptain.collectAsState()
+
     val cutoffHours = when (selectedEvent.event.cancellationRefundHours) {
         0 -> 0
         1 -> 24
@@ -263,27 +267,22 @@ fun EventDetailScreen(
                                                     }
                                                 }
                                             }
-                                        } else {
-                                            val leaveMessage =
-                                                if (component.checkIsUserFreeAgent(selectedEvent.event)) {
-                                                    "Leave as Free Agent"
-                                                } else if (component.checkIsUserWaitListed(
-                                                        selectedEvent.event
-                                                    )
-                                                ) {
-                                                    "Leave Waitlist"
-                                                } else if (selectedEvent.event.price > 0) {
-                                                    if (isRefundAutomatic) {
-                                                        "Leave and Request Refund (Not Automatic)"
-                                                    } else {
-                                                        "Leave and Get Refund"
-                                                    }
+                                        } else if (!teamSignup || isCaptain || isFreeAgent) {
+                                            val leaveMessage = if (isFreeAgent) {
+                                                "Leave as Free Agent"
+                                            } else if (isWaitListed) {
+                                                "Leave Waitlist"
+                                            } else if (selectedEvent.event.price > 0) {
+                                                if (isRefundAutomatic) {
+                                                    "Leave and Request Refund (Not Automatic)"
                                                 } else {
-                                                    "Leave Event"
+                                                    "Leave and Get Refund"
                                                 }
-
+                                            } else {
+                                                "Leave Event"
+                                            }
                                             Button(onClick = {
-                                                if (selectedEvent.event.price > 0) {
+                                                if (selectedEvent.event.price > 0 && !isFreeAgent && !isWaitListed) {
                                                     showRefundReasonDialog = true
                                                 } else {
                                                     component.leaveEvent()
@@ -422,12 +421,17 @@ fun EventDetailScreen(
 
             // Dialog for team selection when joining an event that requires team signup
             if (showTeamSelectionDialog) {
-                TeamSelectionDialog(teams = validTeams, onTeamSelected = { selectedTeam ->
-                    showTeamSelectionDialog = false
-                    component.joinEventAsTeam(selectedTeam)
-                }, onDismiss = {
-                    showTeamSelectionDialog = false
-                }, onCreateTeam = { component.createNewTeam() })
+                TeamSelectionDialog(teams = validTeams,
+                    onTeamSelected = { selectedTeam ->
+                        showTeamSelectionDialog = false
+                        component.joinEventAsTeam(selectedTeam)
+                    },
+                    onDismiss = {
+                        showTeamSelectionDialog = false
+                    },
+                    onCreateTeam = { component.createNewTeam() },
+                    sizeLimit = selectedEvent.event.teamSizeLimit
+                )
             }
             if (showDeleteConfirmation) {
                 AlertDialog(onDismissRequest = { showDeleteConfirmation = false },
@@ -461,8 +465,7 @@ fun EventDetailScreen(
             }
 
             if (showRefundReasonDialog) {
-                RefundReasonDialog(
-                    currentReason = refundReason,
+                RefundReasonDialog(currentReason = refundReason,
                     onReasonChange = { refundReason = it },
                     onConfirm = {
                         component.requestRefund(refundReason)
@@ -472,16 +475,13 @@ fun EventDetailScreen(
                     onDismiss = {
                         showRefundReasonDialog = false
                         refundReason = ""
-                    }
-                )
+                    })
             }
 
             if (showFeeBreakdown && currentFeeBreakdown != null) {
-                FeeBreakdownDialog(
-                    feeBreakdown = currentFeeBreakdown!!,
+                FeeBreakdownDialog(feeBreakdown = currentFeeBreakdown!!,
                     onConfirm = { component.confirmFeeBreakdown() },
-                    onCancel = { component.dismissFeeBreakdown() }
-                )
+                    onCancel = { component.dismissFeeBreakdown() })
             }
         }
     }
@@ -490,26 +490,30 @@ fun EventDetailScreen(
 
 @Composable
 fun TeamSelectionDialog(
+    sizeLimit: Int,
     teams: List<TeamWithPlayers>,
     onTeamSelected: (TeamWithPlayers) -> Unit,
     onDismiss: () -> Unit,
     onCreateTeam: () -> Unit
 ) {
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Select a Team") }, text = {
-        // List only valid teams
-        LazyColumn {
-            items(teams) { team ->
-                Row(modifier = Modifier.fillMaxWidth().clickable { onTeamSelected(team) }
-                    .padding(8.dp)) {
-                    TeamCard(team)
+    AlertDialog(onDismissRequest = onDismiss,
+        title = { Text("Select a Team of size $sizeLimit") },
+        text = {
+            // List only valid teams
+            LazyColumn {
+                items(teams) { team ->
+                    Row(modifier = Modifier.fillMaxWidth().clickable { onTeamSelected(team) }
+                        .padding(8.dp)) {
+                        TeamCard(team)
+                    }
                 }
             }
-        }
-    }, confirmButton = {
-        Button(onClick = onCreateTeam) {
-            Text("Manage Teams")
-        }
-    })
+        },
+        confirmButton = {
+            Button(onClick = onCreateTeam) {
+                Text("Manage Teams")
+            }
+        })
 }
 
 @Composable
@@ -519,39 +523,32 @@ fun RefundReasonDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Refund Request") },
-        text = {
-            Column {
-                Text(
-                    "Please provide a reason for your refund request:",
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(bottom = 8.dp)
-                )
-                OutlinedTextField(
-                    value = currentReason,
-                    onValueChange = onReasonChange,
-                    placeholder = { Text("Enter reason...") },
-                    modifier = Modifier.fillMaxWidth(),
-                    maxLines = 3
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = onConfirm,
-                enabled = currentReason.isNotBlank()
-            ) {
-                Text("Submit Refund Request")
-            }
-        },
-        dismissButton = {
-            Button(onClick = onDismiss) {
-                Text("Cancel")
-            }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Refund Request") }, text = {
+        Column {
+            Text(
+                "Please provide a reason for your refund request:",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+            OutlinedTextField(
+                value = currentReason,
+                onValueChange = onReasonChange,
+                placeholder = { Text("Enter reason...") },
+                modifier = Modifier.fillMaxWidth(),
+                maxLines = 3
+            )
         }
-    )
+    }, confirmButton = {
+        Button(
+            onClick = onConfirm, enabled = currentReason.isNotBlank()
+        ) {
+            Text("Submit Refund Request")
+        }
+    }, dismissButton = {
+        Button(onClick = onDismiss) {
+            Text("Cancel")
+        }
+    })
 }
 
 private fun Int.centsToDollars(): String {
@@ -570,65 +567,51 @@ private fun Int.centsToDollars(): String {
 
 @Composable
 fun FeeBreakdownDialog(
-    feeBreakdown: FeeBreakdown,
-    onConfirm: () -> Unit,
-    onCancel: () -> Unit
+    feeBreakdown: FeeBreakdown, onConfirm: () -> Unit, onCancel: () -> Unit
 ) {
-    AlertDialog(
-        onDismissRequest = onCancel,
-        title = { Text("Payment Breakdown") },
-        text = {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    "Review the charges before proceeding:",
-                    style = MaterialTheme.typography.bodyMedium
-                )
+    AlertDialog(onDismissRequest = onCancel, title = { Text("Payment Breakdown") }, text = {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                "Review the charges before proceeding:", style = MaterialTheme.typography.bodyMedium
+            )
 
-                HorizontalDivider()
+            HorizontalDivider()
 
-                FeeRow("Event Price", "$${feeBreakdown.eventPrice.centsToDollars()}")
-                FeeRow("Processing Fee", "$${feeBreakdown.processingFee.centsToDollars()}")
-                FeeRow("Stripe Fee", "$${feeBreakdown.stripeFee.centsToDollars()}")
+            FeeRow("Event Price", "$${feeBreakdown.eventPrice.centsToDollars()}")
+            FeeRow("Processing Fee", "$${feeBreakdown.processingFee.centsToDollars()}")
+            FeeRow("Stripe Fee", "$${feeBreakdown.stripeFee.centsToDollars()}")
 
-                HorizontalDivider()
+            HorizontalDivider()
 
-                FeeRow(
-                    "Total Charge",
-                    "$${feeBreakdown.totalCharge.centsToDollars()}",
-                    isTotal = true
-                )
+            FeeRow(
+                "Total Charge", "$${feeBreakdown.totalCharge.centsToDollars()}", isTotal = true
+            )
 
-                Text(
-                    "Host receives: $${feeBreakdown.hostReceives.centsToDollars()}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        },
-        confirmButton = {
-            Button(onClick = onConfirm) {
-                Text("Proceed to Payment")
-            }
-        },
-        dismissButton = {
-            Button(onClick = onCancel) {
-                Text("Cancel")
-            }
+            Text(
+                "Host receives: $${feeBreakdown.hostReceives.centsToDollars()}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
-    )
+    }, confirmButton = {
+        Button(onClick = onConfirm) {
+            Text("Proceed to Payment")
+        }
+    }, dismissButton = {
+        Button(onClick = onCancel) {
+            Text("Cancel")
+        }
+    })
 }
 
 @Composable
 private fun FeeRow(
-    label: String,
-    amount: String,
-    isTotal: Boolean = false
+    label: String, amount: String, isTotal: Boolean = false
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween
+        modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Text(
             text = label,
