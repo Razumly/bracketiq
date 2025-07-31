@@ -102,9 +102,17 @@ class PushNotificationsRepository(
         val managerListener = object : NotifierManager.Listener {
             override fun onNewToken(token: String) {
                 runBlocking {
-                    if (_pushTarget.value.isNotBlank()) {
-                        account.updatePushTarget(_pushTarget.value, token)
-                        userDataSource.savePushToken(token)
+                    runCatching{
+                        if (_pushTarget.value.isNotBlank()) {
+                            account.updatePushTarget(_pushTarget.value, token)
+                            userDataSource.savePushToken(token)
+                        }
+                    }.onFailure {
+                        try {
+                            account.createPushTarget(_pushTarget.value, token)
+                        } catch (e: Exception) {
+                            Napier.e("Error updating push target", e)
+                        }
                     }
                 }
             }

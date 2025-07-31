@@ -9,7 +9,6 @@ import com.razumly.mvp.userAuth.util.getGoogleUserInfo
 import io.appwrite.ID
 import io.appwrite.enums.OAuthProvider
 import io.appwrite.extensions.createOAuth2Session
-import io.github.aakira.napier.Napier
 
 
 suspend fun IUserRepository.oauth2Login(): Result<Unit> {
@@ -34,9 +33,9 @@ suspend fun UserRepository.oauth2Login(): Result<Unit> = kotlin.runCatching {
                 collectionId = DbConstants.USER_DATA_COLLECTION,
                 documentId = id,
                 data = UserDataDTO(
-                    firstName = userInfo.givenName,
-                    lastName = userInfo.familyName,
-                    userName = "${userInfo.givenName}${ID.unique()}",
+                    firstName = userInfo.given_name,
+                    lastName = userInfo.family_name,
+                    userName = "${userInfo.given_name}${ID.unique()}",
                     id = id,
                     teamIds = listOf(),
                     friendIds = listOf(),
