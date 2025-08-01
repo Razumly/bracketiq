@@ -167,13 +167,6 @@ fun EventDetails(
     var addSelfToEvent by remember { mutableStateOf(false) }
 
     val currentLocation by mapComponent.currentLocation.collectAsState()
-    val painter = rememberAsyncImagePainter(event.imageUrl)
-    val painterLoader = rememberPainterLoader()
-    val colorState = rememberDominantColorState(loader = painterLoader)
-
-    LaunchedEffect(painter) {
-        colorState.updateFrom(painter)
-    }
 
     LaunchedEffect(editEvent, fieldCount) {
         isNameValid = editEvent.name.isNotBlank()
@@ -205,11 +198,6 @@ fun EventDetails(
         isValid =
             isPriceValid && isMaxParticipantsValid && isTeamSizeValid && isWinnerSetCountValid && isWinnerPointsValid && isLoserSetCountValid && isLoserPointsValid
     }
-
-    val backgroundColor = colorState.result?.paletteOrNull?.vibrantSwatch?.color
-        ?: MaterialTheme.colorScheme.background
-    val onBackgroundColor = colorState.result?.paletteOrNull?.vibrantSwatch?.onColor
-        ?: MaterialTheme.colorScheme.onBackground
 
     val dateRangeText = remember(event.start, event.end) {
         val startDate = event.start.toLocalDateTime(TimeZone.currentSystemDefault()).date
@@ -266,7 +254,6 @@ fun EventDetails(
                                     text = event.name,
                                     style = MaterialTheme.typography.headlineMedium,
                                     fontWeight = FontWeight.Bold,
-                                    color = onBackgroundColor
                                 )
                             },
                             editContent = {
@@ -288,7 +275,6 @@ fun EventDetails(
                         Text(
                             text = if (!editView) event.location else editEvent.location,
                             style = MaterialTheme.typography.bodyMedium,
-                            color = onBackgroundColor
                         )
 
                         // Map Button

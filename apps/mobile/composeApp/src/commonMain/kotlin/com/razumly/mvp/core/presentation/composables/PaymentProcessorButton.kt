@@ -7,5 +7,5 @@ import com.razumly.mvp.core.presentation.IPaymentProcessor
 expect fun PaymentProcessorButton(
     onClick: () -> Unit,
     paymentProcessor: IPaymentProcessor,
-    text: String
+    text: String,
 )

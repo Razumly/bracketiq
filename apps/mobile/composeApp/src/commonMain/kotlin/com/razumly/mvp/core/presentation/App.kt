@@ -25,13 +25,6 @@ fun App(root: RootComponent) {
     Napier.base(DebugAntilog())
     Napier.d(tag = "Navigation") { "Current child: ${childStack.active.instance}" }
 
-    setSingletonImageLoaderFactory { context ->
-        ImageLoader
-            .Builder(context)
-            .crossfade(true)
-            .build()
-    }
-
     var lastNavigationTime by remember { mutableStateOf(0L) }
     var lastInstance by remember { mutableStateOf<Any?>(null) }
 
@@ -44,7 +37,7 @@ fun App(root: RootComponent) {
         val currentInstance = childStack.active.instance
 
         if (currentInstance != lastInstance && currentTime - lastNavigationTime < 300) {
-            Napier.d(tag = "Navigation") { "Preventing rapid navigation: ${lastInstance} -> $currentInstance" }
+            Napier.d(tag = "Navigation") { "Preventing rapid navigation: $lastInstance -> $currentInstance" }
             return@LaunchedEffect
         }
 

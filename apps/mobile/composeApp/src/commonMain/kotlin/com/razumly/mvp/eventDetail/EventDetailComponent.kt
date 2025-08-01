@@ -241,7 +241,7 @@ class DefaultEventDetailComponent(
     private val _usersTeam = MutableStateFlow<TeamWithPlayers?>(null)
 
     override val validTeams = _userTeams.flatMapLatest { teams ->
-        flowOf(teams.filter { it.team.teamSize == event.teamSizeLimit })
+        flowOf(teams.filter { it.team.teamSize == event.teamSizeLimit && it.team.captainId == currentUser.value.id })
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     override val isEventFull = selectedEvent.map { eventWithRelations ->

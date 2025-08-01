@@ -37,18 +37,13 @@ fun ProfileScreen(component: ProfileComponent) {
             }
         }
     }
-    Scaffold(
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("Profile") },
-            )
-        }
-    ) { innerPadding ->
+    Scaffold(topBar = {
+        CenterAlignedTopAppBar(
+            title = { Text("Profile") },
+        )
+    }) { innerPadding ->
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(navPadding)
+            modifier = Modifier.fillMaxSize().padding(innerPadding).padding(navPadding)
                 .padding(bottom = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -72,8 +67,7 @@ fun ProfileScreen(component: ProfileComponent) {
             )
             Button(
                 onClick = { component.manageStripeAccount() },
-            )
-            { Text("Stripe Dashboard") }
+            ) { Text("Stripe Dashboard") }
 
             Button(
                 onClick = { component.manageRefunds() },
