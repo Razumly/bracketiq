@@ -19,7 +19,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -34,6 +33,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.LoginState
+import com.razumly.mvp.core.presentation.composables.EmailSignInButton
+import com.razumly.mvp.core.presentation.composables.GoogleSignInButton
 import com.razumly.mvp.icons.BaselineVisibility24
 import com.razumly.mvp.icons.BaselineVisibilityOff24
 import com.razumly.mvp.icons.MVPIcons
@@ -223,18 +224,22 @@ fun AuthScreenBase(component: DefaultAuthComponent, onOauth2: () -> Unit?) {
                     Text(if (isSignup) "Create Account" else "Login")
                 }
 
-                TextButton(onClick = { component.toggleIsSignup() }) {
-                    Text(
-                        text = if (isSignup)
-                            "Already have an account? Login"
-                        else
-                            "Don't have an account? Sign Up"
-                    )
-                }
+                Text(
+                    text = if (isSignup)
+                        "Already have an account?"
+                    else
+                        "Don't have an account?"
+                )
 
-                TextButton(onClick = { onOauth2() }) {
-                    Text("Sign in with Google")
-                }
+                EmailSignInButton(
+                    text = if (isSignup) "Sign in with Email" else "Sign up with Email",
+                    onClick = { component.toggleIsSignup() },
+                    modifier = Modifier
+                )
+
+                Text("Or")
+
+                GoogleSignInButton(onClick = { onOauth2() })
             }
         }
     }
