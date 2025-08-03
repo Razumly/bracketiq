@@ -33,6 +33,8 @@ sealed interface EventAbs : MVPDocument {
     val teamIds: List<String>
     val cancellationRefundHours: Int
     val registrationCutoffHours: Int
+    val seedColor: Int
+
     override val id: String
 }
 

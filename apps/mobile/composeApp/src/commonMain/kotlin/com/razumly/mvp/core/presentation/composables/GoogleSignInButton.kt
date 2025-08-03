@@ -29,25 +29,25 @@ internal fun GoogleSignInButton(
     val (buttonIcon, width, height) = when {
         isIOS && isDarkTheme -> {
             val aspectRatio = 199f / 44f
-            val buttonHeight = 44.dp
+            val buttonHeight = 50.dp
             val buttonWidth = buttonHeight * aspectRatio
             Triple(MVPIcons.iOSGoogleButtonDark, buttonWidth, buttonHeight)
         }
         isIOS && !isDarkTheme -> {
             val aspectRatio = 199f / 44f
-            val buttonHeight = 44.dp
+            val buttonHeight = 50.dp
             val buttonWidth = buttonHeight * aspectRatio
             Triple(MVPIcons.iOSGoogleButtonLight, buttonWidth, buttonHeight)
         }
         !isIOS && isDarkTheme -> {
             val aspectRatio = 189f / 40f
-            val buttonHeight = 40.dp
+            val buttonHeight = 50.dp
             val buttonWidth = buttonHeight * aspectRatio
             Triple(MVPIcons.AndroidGoogleButtonDark, buttonWidth, buttonHeight)
         }
         else -> {
             val aspectRatio = 189f / 40f
-            val buttonHeight = 40.dp
+            val buttonHeight = 50.dp
             val buttonWidth = buttonHeight * aspectRatio
             Triple(MVPIcons.AndroidGoogleButtonLight, buttonWidth, buttonHeight)
         }

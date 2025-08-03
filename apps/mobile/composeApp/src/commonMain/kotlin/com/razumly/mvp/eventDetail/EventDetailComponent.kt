@@ -46,7 +46,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 
 interface EventDetailComponent : ComponentContext, IPaymentProcessor {
-    val selectedEvent: StateFlow<EventAbsWithRelations?>
+    val selectedEvent: StateFlow<EventAbsWithRelations>
     val divisionMatches: StateFlow<Map<String, MatchWithRelations>>
     val divisionTeams: StateFlow<Map<String, TeamWithPlayers>>
     val selectedDivision: StateFlow<Division?>
@@ -137,8 +137,8 @@ class DefaultEventDetailComponent(
 
     private lateinit var loadingHandler: LoadingHandler
 
-    override fun setLoadingHandler(handler: LoadingHandler) {
-        loadingHandler = handler
+    override fun setLoadingHandler(loadingHandler: LoadingHandler) {
+        this.loadingHandler = loadingHandler
     }
 
     private val _editedEvent = MutableStateFlow(event)
@@ -159,37 +159,33 @@ class DefaultEventDetailComponent(
         }
     }
 
-    override val selectedEvent: StateFlow<EventAbsWithRelations?> =
+    override val selectedEvent: StateFlow<EventAbsWithRelations> =
         eventAbsRepository.getEventWithRelationsFlow(event).map { result ->
             result.getOrElse {
                 _errorState.value = ErrorMessage(it.message ?: "")
                 EventAbsWithRelations.getEmptyEvent(event)
             }
-        }.stateIn(scope, SharingStarted.Eagerly, null)
+        }.stateIn(scope, SharingStarted.Eagerly, EventAbsWithRelations.getEmptyEvent(event))
 
-    override val isHost = selectedEvent.map { it?.event?.hostId == currentUser.value.id }
+    override val isHost = selectedEvent.map { it.event.hostId == currentUser.value.id }
         .stateIn(scope, SharingStarted.Eagerly, false)
 
     override val eventWithRelations = selectedEvent.flatMapLatest { eventWithPlayers ->
-        if (eventWithPlayers == null) {
-            flowOf(EventWithFullRelations(Tournament(), emptyList(), emptyList(), emptyList()))
-        } else {
-            combine(matchRepository.getMatchesOfTournamentFlow(eventWithPlayers.event.id)
-                .map { result ->
-                    result.getOrElse {
-                        _errorState.value =
-                            ErrorMessage("Error loading matches: ${it.message}"); emptyList()
-                    }
-                }, teamRepository.getTeamsFlow(
-                eventWithPlayers.event.teamIds
-            ).map { result ->
+        combine(matchRepository.getMatchesOfTournamentFlow(eventWithPlayers.event.id)
+            .map { result ->
                 result.getOrElse {
                     _errorState.value =
-                        ErrorMessage("Failed to load teams: ${it.message}"); emptyList()
+                        ErrorMessage("Error loading matches: ${it.message}"); emptyList()
                 }
-            }) { matches, teams ->
-                eventWithPlayers.toEventWithFullRelations(matches, teams)
+            }, teamRepository.getTeamsFlow(
+            eventWithPlayers.event.teamIds
+        ).map { result ->
+            result.getOrElse {
+                _errorState.value =
+                    ErrorMessage("Failed to load teams: ${it.message}"); emptyList()
             }
+        }) { matches, teams ->
+            eventWithPlayers.toEventWithFullRelations(matches, teams)
         }
     }.stateIn(
         scope, SharingStarted.Eagerly, EventWithFullRelations(
@@ -245,11 +241,7 @@ class DefaultEventDetailComponent(
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     override val isEventFull = selectedEvent.map { eventWithRelations ->
-        if (eventWithRelations == null) {
-            checkEventIsFull(event)
-        } else {
-            checkEventIsFull(eventWithRelations.event)
-        }
+        checkEventIsFull(eventWithRelations.event)
     }.stateIn(scope, SharingStarted.Eagerly, checkEventIsFull(event))
 
     private val _isUserInEvent: MutableStateFlow<Boolean> =
@@ -298,12 +290,12 @@ class DefaultEventDetailComponent(
                                 event.playerIds + if (event.teamSignup) _usersTeam.value?.team?.playerIds.orEmpty() else listOf(
                                     currentUser.value.id
                                 )
-                            val update = when (selectedEvent.value?.event!!) {
-                                is Tournament -> (selectedEvent.value?.event as Tournament).copy(
+                            val update = when (selectedEvent.value.event) {
+                                is Tournament -> (selectedEvent.value.event as Tournament).copy(
                                     teamIds = teams.filterNotNull(), playerIds = players
                                 )
 
-                                is EventImp -> (selectedEvent.value?.event as EventImp).copy(
+                                is EventImp -> (selectedEvent.value.event as EventImp).copy(
                                     teamIds = teams.filterNotNull(), playerIds = players
                                 )
                             }
@@ -350,10 +342,9 @@ class DefaultEventDetailComponent(
     }
 
     override fun matchSelected(selectedMatch: MatchWithRelations) {
-        if (selectedEvent.value == null) return
-        when (selectedEvent.value!!.event) {
+        when (selectedEvent.value.event) {
             is Tournament -> onMatchSelected(
-                selectedMatch, selectedEvent.value!!.event as Tournament
+                selectedMatch, selectedEvent.value.event as Tournament
             )
 
             else -> Unit
@@ -361,14 +352,13 @@ class DefaultEventDetailComponent(
     }
 
     override fun selectDivision(division: Division) {
-        if (selectedEvent.value == null) return
         _selectedDivision.value = division
-        _divisionTeams.value = if (!selectedEvent.value!!.event.singleDivision) {
+        _divisionTeams.value = if (!selectedEvent.value.event.singleDivision) {
             eventWithRelations.value.teams.filter { it.team.division == division }
         } else {
             eventWithRelations.value.teams
         }.associateBy { it.team.id }
-        _divisionMatches.value = if (!selectedEvent.value!!.event.singleDivision) {
+        _divisionMatches.value = if (!selectedEvent.value.event.singleDivision) {
             eventWithRelations.value.matches.filter { it.match.division == division }
                 .associateBy { it.match.id }
         } else {
@@ -401,19 +391,18 @@ class DefaultEventDetailComponent(
 
     override fun joinEvent() {
         scope.launch {
-            if (selectedEvent.value == null) return@launch
 
-            if (selectedEvent.value!!.event.price == 0.0 || isEventFull.value || selectedEvent.value!!.event.teamSignup) {
+            if (selectedEvent.value.event.price == 0.0 || isEventFull.value || selectedEvent.value.event.teamSignup) {
                 loadingHandler.showLoading("Joining Event ...")
-                eventAbsRepository.addCurrentUserToEvent(selectedEvent.value!!.event).onSuccess {
+                eventAbsRepository.addCurrentUserToEvent(selectedEvent.value.event).onSuccess {
                     loadingHandler.showLoading("Reloading Event")
-                    eventAbsRepository.getEvent(selectedEvent.value!!.event)
+                    eventAbsRepository.getEvent(selectedEvent.value.event)
                 }.onFailure {
                     _errorState.value = ErrorMessage(it.message ?: "")
                 }
             } else {
                 loadingHandler.showLoading("Creating Purchase Request ...")
-                billingRepository.createPurchaseIntent(selectedEvent.value!!.event)
+                billingRepository.createPurchaseIntent(selectedEvent.value.event)
                     .onSuccess { purchaseIntent ->
                         purchaseIntent?.let { intent ->
                             intent.feeBreakdown?.let { feeBreakdown ->
@@ -434,7 +423,7 @@ class DefaultEventDetailComponent(
                         }
                         loadingHandler.showLoading("Reloading Event")
                         while(!_isUserInEvent.value) {
-                            eventAbsRepository.getEvent(selectedEvent.value!!.event)
+                            eventAbsRepository.getEvent(selectedEvent.value.event)
                         }
                     }.onFailure {
                         _errorState.value = ErrorMessage(it.message ?: "")
@@ -447,20 +436,19 @@ class DefaultEventDetailComponent(
     override fun joinEventAsTeam(team: TeamWithPlayers) {
         scope.launch {
             _usersTeam.value = team
-            if (selectedEvent.value == null) return@launch
 
-            if (selectedEvent.value!!.event.price == 0.0 || isEventFull.value) {
+            if (selectedEvent.value.event.price == 0.0 || isEventFull.value) {
                 loadingHandler.showLoading("Joining Event ...")
-                eventAbsRepository.addTeamToEvent(selectedEvent.value!!.event, team.team)
+                eventAbsRepository.addTeamToEvent(selectedEvent.value.event, team.team)
                     .onSuccess {
                         loadingHandler.showLoading("Reloading Event")
-                        eventAbsRepository.getEvent(selectedEvent.value!!.event)
+                        eventAbsRepository.getEvent(selectedEvent.value.event)
                     }.onFailure {
                         _errorState.value = ErrorMessage(it.message ?: "")
                     }
             } else {
                 loadingHandler.showLoading("Creating Purchase Request ...")
-                billingRepository.createPurchaseIntent(selectedEvent.value!!.event, team.team.id)
+                billingRepository.createPurchaseIntent(selectedEvent.value.event, team.team.id)
                     .onSuccess { purchaseIntent ->
                         purchaseIntent?.let { intent ->
                             intent.feeBreakdown?.let { feeBreakdown ->
@@ -481,7 +469,7 @@ class DefaultEventDetailComponent(
                         }
                         loadingHandler.showLoading("Reloading Event")
                         while(!_isUserInEvent.value) {
-                            eventAbsRepository.getEvent(selectedEvent.value!!.event)
+                            eventAbsRepository.getEvent(selectedEvent.value.event)
                         }
                     }.onFailure {
                         _errorState.value = ErrorMessage(it.message ?: "")
@@ -493,40 +481,40 @@ class DefaultEventDetailComponent(
 
     override fun requestRefund(reason: String) {
         scope.launch {
-            if (!_isUserInEvent.value || selectedEvent.value == null) {
+            if (!_isUserInEvent.value) {
                 return@launch
             }
             loadingHandler.showLoading("Requesting Refund ...")
-            billingRepository.leaveAndRefundEvent(selectedEvent.value!!.event, reason).onFailure {
+            billingRepository.leaveAndRefundEvent(selectedEvent.value.event, reason).onFailure {
                 _errorState.value = ErrorMessage(it.message ?: "")
             }.onSuccess {
-                eventAbsRepository.getEvent(selectedEvent.value!!.event)
+                eventAbsRepository.getEvent(selectedEvent.value.event)
             }
             loadingHandler.showLoading("Reloading Event")
-            eventAbsRepository.getEvent(selectedEvent.value!!.event)
+            eventAbsRepository.getEvent(selectedEvent.value.event)
             loadingHandler.hideLoading()
         }
     }
 
     override fun leaveEvent() {
         scope.launch {
-            if (!_isUserInEvent.value || selectedEvent.value == null) {
+            if (!_isUserInEvent.value) {
                 return@launch
             }
             val result =
-                if (!selectedEvent.value!!.event.teamSignup || checkIsUserFreeAgent(selectedEvent.value!!.event)) {
+                if (!selectedEvent.value.event.teamSignup || checkIsUserFreeAgent(selectedEvent.value.event)) {
                     loadingHandler.showLoading("Leaving Event ...")
-                    eventAbsRepository.removeCurrentUserFromEvent(selectedEvent.value!!.event)
+                    eventAbsRepository.removeCurrentUserFromEvent(selectedEvent.value.event)
                         .onFailure { _errorState.value = ErrorMessage(it.message ?: "") }
                 } else {
                     loadingHandler.showLoading("Team Leaving Event ...")
                     eventAbsRepository.removeTeamFromEvent(
-                        selectedEvent.value!!.event, _usersTeam.value!!
+                        selectedEvent.value.event, _usersTeam.value!!
                     ).onFailure { _errorState.value = ErrorMessage(it.message ?: "") }
                 }
             result.onSuccess {
                 loadingHandler.showLoading("Reloading Event")
-                eventAbsRepository.getEvent(selectedEvent.value!!.event)
+                eventAbsRepository.getEvent(selectedEvent.value.event)
             }
             loadingHandler.hideLoading()
         }
@@ -541,8 +529,7 @@ class DefaultEventDetailComponent(
     }
 
     override fun toggleEdit() {
-        if (selectedEvent.value == null) return
-        _editedEvent.value = selectedEvent.value!!.event
+        _editedEvent.value = selectedEvent.value.event
         _isEditing.value = !_isEditing.value
     }
 
@@ -572,9 +559,8 @@ class DefaultEventDetailComponent(
     }
 
     override fun createNewTeam() {
-        if (selectedEvent.value == null) return
         onNavigateToTeamSettings(
-            selectedEvent.value!!.event.freeAgents, selectedEvent.value!!.event
+            selectedEvent.value.event.freeAgents, selectedEvent.value.event
         )
     }
 
@@ -678,15 +664,15 @@ class DefaultEventDetailComponent(
 
     override fun deleteEvent() {
         scope.launch {
-            if (selectedEvent.value!!.event.price == 0.0) {
+            if (selectedEvent.value.event.price == 0.0) {
                 loadingHandler.showLoading("Deleting Event ...")
-                eventAbsRepository.deleteEvent(selectedEvent.value!!.event).onFailure {
+                eventAbsRepository.deleteEvent(selectedEvent.value.event).onFailure {
                     _errorState.value = ErrorMessage(it.message ?: "")
                 }
                 backCallback.onBack()
             } else {
                 loadingHandler.showLoading("Deleting Event and Refunding ...")
-                billingRepository.deleteAndRefundEvent(selectedEvent.value!!.event).onFailure {
+                billingRepository.deleteAndRefundEvent(selectedEvent.value.event).onFailure {
                     _errorState.value = ErrorMessage(it.message ?: "")
                 }
                 backCallback.onBack()
@@ -698,7 +684,7 @@ class DefaultEventDetailComponent(
     override fun shareEvent() {
         val shareService = shareServiceProvider.getShareService()
         shareService.share(
-            selectedEvent.value!!.event.name, createEventUrl(selectedEvent.value!!.event)
+            selectedEvent.value.event.name, createEventUrl(selectedEvent.value.event)
         )
     }
 

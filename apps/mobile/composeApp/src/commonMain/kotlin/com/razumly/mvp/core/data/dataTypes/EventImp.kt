@@ -1,11 +1,13 @@
 package com.razumly.mvp.core.data.dataTypes
 
+import androidx.compose.ui.graphics.toArgb
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import com.razumly.mvp.core.data.dataTypes.dtos.EventDTO
 import com.razumly.mvp.core.data.dataTypes.enums.Division
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.enums.FieldType
+import com.razumly.mvp.core.presentation.Primary
 import io.appwrite.ID
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
@@ -39,6 +41,7 @@ data class EventImp(
     override val teamIds: List<String>,
     override val cancellationRefundHours: Int,
     override val registrationCutoffHours: Int = 0,
+    override val seedColor: Int,
     @Transient override val eventType: EventType = EventType.EVENT,
     @Transient override val lastUpdated: Instant = Clock.System.now(),
 ): EventAbs {
@@ -69,6 +72,7 @@ data class EventImp(
                 teamIds = listOf(),
                 cancellationRefundHours = 0,
                 registrationCutoffHours = 0,
+                seedColor = Primary.toArgb()
             )
         }
     }
@@ -99,6 +103,7 @@ data class EventImp(
             teamIds = teamIds,
             cancellationRefundHours = cancellationRefundHours,
             registrationCutoffHours = registrationCutoffHours,
+            seedColor = seedColor
         )
     }
 }

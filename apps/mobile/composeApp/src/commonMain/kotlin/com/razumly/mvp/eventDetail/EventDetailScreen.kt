@@ -10,6 +10,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,6 +29,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonColors
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -52,7 +54,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.razumly.mvp.core.data.dataTypes.EventImp
+import com.materialkolor.PaletteStyle
+import com.materialkolor.dynamiccolor.ColorSpec
+import com.materialkolor.ktx.DynamicScheme
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
@@ -80,21 +84,16 @@ fun EventDetailScreen(
     component: EventDetailComponent, mapComponent: MapComponent
 ) {
     val errorHandler = LocalErrorHandler.current
-    val isBracketView by component.isBracketView.collectAsState()
+    val loadingHandler = LocalLoadingHandler.current
     var showDropdownMenu by remember { mutableStateOf(false) }
-    val actualEvent by component.selectedEvent.collectAsState()
+    val selectedEvent by component.selectedEvent.collectAsState()
     val currentUser by component.currentUser.collectAsState()
     var showTeamSelectionDialog by remember { mutableStateOf(false) }
     val validTeams by component.validTeams.collectAsState()
     val showDetails by component.showDetails.collectAsState()
     var animateExpanded by remember { mutableStateOf(false) }
-    val isHost by component.isHost.collectAsState()
-    val isEditing by component.isEditing.collectAsState()
-    val isEventFull by component.isEventFull.collectAsState()
-    var isRefundAutomatic by remember { mutableStateOf(false) }
     val editedEvent by component.editedEvent.collectAsState()
     var showFab by remember { mutableStateOf(false) }
-    val loadingHandler = LocalLoadingHandler.current
     var showOptionsDropdown by remember { mutableStateOf(false) }
     var showDeleteConfirmation by remember { mutableStateOf(false) }
     val showMap by mapComponent.showMap.collectAsState()
@@ -103,12 +102,36 @@ fun EventDetailScreen(
     val showFeeBreakdown by component.showFeeBreakdown.collectAsState()
     val currentFeeBreakdown by component.currentFeeBreakdown.collectAsState()
 
+    val isBracketView by component.isBracketView.collectAsState()
+    var isRefundAutomatic by remember { mutableStateOf(false) }
+    val isHost by component.isHost.collectAsState()
+    val isEditing by component.isEditing.collectAsState()
+    val isEventFull by component.isEventFull.collectAsState()
     val isUserInEvent by component.isUserInEvent.collectAsState()
-
-    val selectedEvent = actualEvent ?: EventWithRelations(EventImp(), null)
     val isFreeAgent by component.isUserFreeAgent.collectAsState()
     val isWaitListed by component.isUserInWaitlist.collectAsState()
     val isCaptain by component.isUserCaptain.collectAsState()
+    val isDark = isSystemInDarkTheme()
+
+    var imageScheme by remember {
+        mutableStateOf(
+            DynamicScheme(
+                seedColor = Color(selectedEvent.event.seedColor),
+                isDark = isDark,
+                specVersion = ColorSpec.SpecVersion.SPEC_2025,
+                style = PaletteStyle.Neutral,
+            )
+        )
+    }
+
+    LaunchedEffect(isEditing, selectedEvent, editedEvent) {
+        imageScheme = DynamicScheme(
+            seedColor = if (isEditing) Color(editedEvent.seedColor) else Color(selectedEvent.event.seedColor),
+            isDark = isDark,
+            specVersion = ColorSpec.SpecVersion.SPEC_2025,
+            style = PaletteStyle.Neutral,
+        )
+    }
 
     val cutoffHours = when (selectedEvent.event.cancellationRefundHours) {
         0 -> 0
@@ -129,14 +152,6 @@ fun EventDetailScreen(
         }
     }
 
-    LaunchedEffect(actualEvent) {
-        if (actualEvent == null) {
-            loadingHandler.showLoading("Loading Event")
-        } else {
-            loadingHandler.hideLoading()
-        }
-    }
-
     LaunchedEffect(Unit) {
         delay(300)
         animateExpanded = true
@@ -151,7 +166,8 @@ fun EventDetailScreen(
                     !showDetails, enter = expandVertically(), exit = shrinkVertically()
                 ) {
                     Box {
-                        EventDetails(paymentProcessor = component,
+                        EventDetails(
+                            paymentProcessor = component,
                             mapComponent = mapComponent,
                             hostHasAccount = currentUser.stripeAccountId?.isNotBlank() == true,
                             onHostCreateAccount = { component.onHostCreateAccount() },
@@ -165,7 +181,15 @@ fun EventDetailScreen(
                             isNewEvent = false,
                             onEventTypeSelected = { component.onTypeSelected(it) },
                             onAddCurrentUser = {},
-                            onSelectFieldCount = { component.selectFieldCount(it) }) { isValid ->
+                            onSelectFieldCount = { component.selectFieldCount(it) },
+                            imageScheme = imageScheme
+                        ) { isValid ->
+                            val buttonColors = ButtonColors(
+                                containerColor = Color(imageScheme.primary),
+                                contentColor = Color(imageScheme.onPrimary),
+                                disabledContainerColor = Color(imageScheme.onSurface),
+                                disabledContentColor = Color(imageScheme.onSurfaceVariant)
+                            )
                             AnimatedContent(
                                 targetState = isEditing,
                                 transitionSpec = { buttonTransitionSpec() },
@@ -177,23 +201,29 @@ fun EventDetailScreen(
                                 ) {
                                     if (editMode) {
                                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            Button(onClick = {
-                                                component.updateEvent()
-                                                component.toggleEdit()
-                                            }, enabled = isValid) {
+                                            Button(
+                                                onClick = {
+                                                    component.updateEvent()
+                                                    component.toggleEdit()
+                                                }, enabled = isValid, colors = buttonColors
+                                            ) {
                                                 Text("Confirm")
                                             }
-                                            Button(onClick = {
-                                                component.toggleEdit()
-                                            }) {
+                                            Button(
+                                                onClick = {
+                                                    component.toggleEdit()
+                                                }, colors = buttonColors
+                                            ) {
                                                 Text("Cancel")
                                             }
                                         }
                                     } else {
-                                        Button(onClick = {
-                                            component.viewEvent()
-                                            showDropdownMenu = false
-                                        }) { Text("View") }
+                                        Button(
+                                            onClick = {
+                                                component.viewEvent()
+                                                showDropdownMenu = false
+                                            }, colors = buttonColors
+                                        ) { Text("View") }
                                         // In your EventDetailScreen composable, update the button section
                                         if (!isUserInEvent) {
                                             if (isEventFull) {
@@ -206,13 +236,16 @@ fun EventDetailScreen(
                                                                 showDropdownMenu = false
                                                             },
                                                             component,
-                                                            "Join Waitlist as Team (Payment Not Required)"
+                                                            "Join Waitlist as Team (Payment Not Required)",
+                                                            colors = buttonColors
                                                         )
                                                     } else {
-                                                        Button(onClick = {
-                                                            showTeamSelectionDialog = true
-                                                            showDropdownMenu = false
-                                                        }) {
+                                                        Button(
+                                                            onClick = {
+                                                                showTeamSelectionDialog = true
+                                                                showDropdownMenu = false
+                                                            }, colors = buttonColors
+                                                        ) {
                                                             Text("Join Waitlist as Team")
                                                         }
                                                     }
@@ -224,20 +257,25 @@ fun EventDetailScreen(
                                                                 showDropdownMenu = false
                                                             },
                                                             component,
-                                                            "Join Waitlist (Payment Not Required)"
+                                                            "Join Waitlist (Payment Not Required)",
+                                                            colors = buttonColors
                                                         )
                                                     } else {
-                                                        Button(onClick = {
-                                                            component.joinEvent()
-                                                            showDropdownMenu = false
-                                                        }) {
+                                                        Button(
+                                                            onClick = {
+                                                                component.joinEvent()
+                                                                showDropdownMenu = false
+                                                            }, colors = buttonColors
+                                                        ) {
                                                             Text("Join Waitlist")
                                                         }
                                                     }
                                                 }
                                             } else {
                                                 if (teamSignup) {
-                                                    Button(onClick = { component.joinEvent() }) {
+                                                    Button(onClick = {
+                                                        component.joinEvent()
+                                                    }, colors = buttonColors) {
                                                         Text("Join as free agent")
                                                     }
                                                     if (selectedEvent.event.price > 0) {
@@ -245,25 +283,37 @@ fun EventDetailScreen(
                                                             onClick = {
                                                                 showTeamSelectionDialog = true
                                                                 showDropdownMenu = false
-                                                            }, component, "Purchase Ticket for Team"
+                                                            },
+                                                            component,
+                                                            "Purchase Ticket for Team",
+                                                            colors = buttonColors
                                                         )
                                                     } else {
-                                                        Button(onClick = {
-                                                            showTeamSelectionDialog = true
-                                                            showDropdownMenu = false
-                                                        }) { Text("Join as Team") }
+                                                        Button(
+                                                            onClick = {
+                                                                showTeamSelectionDialog = true
+                                                                showDropdownMenu = false
+                                                            }, colors = buttonColors
+                                                        ) { Text("Join as Team") }
                                                     }
                                                 } else {
                                                     if (selectedEvent.event.price > 0) {
-                                                        PaymentProcessorButton({
-                                                            component.joinEvent()
-                                                            showDropdownMenu = false
-                                                        }, component, "Purchase Ticket")
+                                                        PaymentProcessorButton(
+                                                            {
+                                                                component.joinEvent()
+                                                                showDropdownMenu = false
+                                                            },
+                                                            component,
+                                                            "Purchase Ticket",
+                                                            colors = buttonColors
+                                                        )
                                                     } else {
-                                                        Button(onClick = {
-                                                            component.joinEvent()
-                                                            showDropdownMenu = false
-                                                        }) { Text("Join") }
+                                                        Button(
+                                                            onClick = {
+                                                                component.joinEvent()
+                                                                showDropdownMenu = false
+                                                            }, colors = buttonColors
+                                                        ) { Text("Join") }
                                                     }
                                                 }
                                             }
@@ -281,14 +331,16 @@ fun EventDetailScreen(
                                             } else {
                                                 "Leave Event"
                                             }
-                                            Button(onClick = {
-                                                if (selectedEvent.event.price > 0 && !isFreeAgent && !isWaitListed) {
-                                                    showRefundReasonDialog = true
-                                                } else {
-                                                    component.leaveEvent()
-                                                }
-                                                showDropdownMenu = false
-                                            }) {
+                                            Button(
+                                                onClick = {
+                                                    if (selectedEvent.event.price > 0 && !isFreeAgent && !isWaitListed) {
+                                                        showRefundReasonDialog = true
+                                                    } else {
+                                                        component.leaveEvent()
+                                                    }
+                                                    showDropdownMenu = false
+                                                }, colors = buttonColors
+                                            ) {
                                                 Text(leaveMessage)
                                             }
                                         }
@@ -305,30 +357,32 @@ fun EventDetailScreen(
                                 IconButton(
                                     { component.backCallback.onBack() },
                                     modifier = Modifier.background(
-                                        Color.White.copy(alpha = 0.7f), shape = CircleShape
+                                        Color(imageScheme.surface).copy(alpha = 0.7f),
+                                        shape = CircleShape
                                     ),
                                 ) {
                                     Icon(
                                         Icons.Default.Close,
                                         contentDescription = "Close",
-                                        tint = MaterialTheme.colorScheme.onSurface
+                                        tint = Color(imageScheme.onSurface)
                                     )
                                 }
                             }
                             Box(
                                 modifier = Modifier.align(Alignment.TopEnd)
-                                    .padding(top = 64.dp, end = 16.dp) // Adjust for status bar
+                                    .padding(top = 64.dp, end = 16.dp)
                             ) {
                                 IconButton(
                                     onClick = { showOptionsDropdown = true },
                                     modifier = Modifier.background(
-                                        Color.White.copy(alpha = 0.7f), shape = CircleShape
+                                        Color(imageScheme.surface).copy(alpha = 0.7f),
+                                        shape = CircleShape
                                     )
                                 ) {
                                     Icon(
                                         Icons.Default.MoreVert,
                                         contentDescription = "More options",
-                                        tint = MaterialTheme.colorScheme.onSurface
+                                        tint = Color(imageScheme.onSurface)
                                     )
                                 }
 

@@ -1,5 +1,6 @@
 package com.razumly.mvp.eventCreate
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -15,16 +16,21 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.arkivanov.decompose.ExperimentalDecomposeApi
 import com.arkivanov.decompose.extensions.compose.experimental.stack.ChildStack
 import com.arkivanov.decompose.extensions.compose.subscribeAsState
+import com.materialkolor.PaletteStyle
+import com.materialkolor.dynamiccolor.ColorSpec
+import com.materialkolor.ktx.DynamicScheme
 import com.razumly.mvp.eventCreate.steps.Preview
 import com.razumly.mvp.eventDetail.EventDetails
 import com.razumly.mvp.eventMap.MapComponent
@@ -47,6 +53,27 @@ fun CreateEventScreen(
     val childStack by component.childStack.subscribeAsState()
     val isEditing = true
     val currentUser by component.currentUser.collectAsState()
+    val isDark = isSystemInDarkTheme()
+
+    var imageScheme by remember {
+        mutableStateOf(
+            DynamicScheme(
+                seedColor = Color(newEventState.seedColor),
+                isDark = isDark,
+                specVersion = ColorSpec.SpecVersion.SPEC_2025,
+                style = PaletteStyle.Neutral,
+            )
+        )
+    }
+
+    LaunchedEffect(newEventState) {
+        imageScheme = DynamicScheme(
+            seedColor = Color(newEventState.seedColor),
+            isDark = isDark,
+            specVersion = ColorSpec.SpecVersion.SPEC_2025,
+            style = PaletteStyle.Neutral,
+        )
+    }
 
     Scaffold(
         modifier = Modifier.padding(LocalNavBarPadding.current),
@@ -112,7 +139,8 @@ fun CreateEventScreen(
                         isNewEvent = true,
                         onEventTypeSelected = { component.onTypeSelected(it) },
                         onAddCurrentUser = {},
-                        onSelectFieldCount = { component.selectFieldCount(it) }
+                        onSelectFieldCount = { component.selectFieldCount(it) },
+                        imageScheme = imageScheme
                     ) { isValid -> canProceed = isValid }
 
                     is CreateEventComponent.Child.Preview -> Preview(

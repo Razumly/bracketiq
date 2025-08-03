@@ -27,44 +27,54 @@ import com.razumly.mvp.core.util.Platform
 
 @Composable
 internal fun EmailSignInButton(
-    text: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    text: String, onClick: () -> Unit, modifier: Modifier = Modifier
 ) {
     val isDarkTheme = isSystemInDarkTheme()
     val isIOS = Platform.isIOS
 
-    val (width, height, fontSize) = when {
-        isIOS -> Triple(199.dp, 44.dp, 16.sp)
-        else -> Triple(189.dp, 40.dp, 14.sp)
-    }
+    val (width, height, sidePadding) = when {
+        isIOS -> {
+            val aspectRatio = 199f / 44f
+            val buttonHeight = 50.dp
+            val buttonWidth = buttonHeight * aspectRatio
+            val paddingRatio = 16f / 44f
+            Triple(buttonWidth, buttonHeight, buttonHeight * paddingRatio)
+        }
 
-    // Platform-specific icon padding
-    val sidePadding = if (isIOS) 16.dp else 12.dp
+        else -> {
+            val aspectRatio = 189f / 40f
+            val buttonHeight = 50.dp
+            val buttonWidth = buttonHeight * aspectRatio
+            val paddingRatio = 12f / 40f
+            Triple(buttonWidth, buttonHeight, buttonHeight * paddingRatio)
+        }
+    }
+    val topPadding = when {
+        isIOS -> 12.dp
+        else -> 10.dp
+    }
+    val fontSize = when {
+        isIOS -> {
+            val aspectRatio = 199f / 44f
+
+        }
+        else -> 14.sp
+    }
 
     val (backgroundColor, borderColor, textColor) = when {
         isDarkTheme -> Triple(
-            Color(0xFF131314),
-            Color(0xFF8E918F),
-            Color(0xFFE3E3E3)
+            Color(0xFF131314), Color(0xFF8E918F), Color(0xFFE3E3E3)
         )
+
         else -> Triple(
-            Color(0xFFFFFFFF),
-            Color(0xFF747775),
-            Color(0xFF1F1F1F)
+            Color(0xFFFFFFFF), Color(0xFF747775), Color(0xFF1F1F1F)
         )
     }
 
-    Box(
-        modifier = modifier
-            .size(width, height)
-            .clip(RoundedCornerShape(height / 2))
-            .background(backgroundColor)
-            .border(1.dp, borderColor, RoundedCornerShape(height / 2))
-            .clickable { onClick() }
-            .padding(horizontal = sidePadding),
-        contentAlignment = Alignment.Center
-    ) {
+    Box(modifier = modifier.size(width, height).clip(RoundedCornerShape(height / 2))
+        .background(backgroundColor).border(1.dp, borderColor, RoundedCornerShape(height / 2))
+        .clickable { onClick() }.padding(horizontal = sidePadding),
+        contentAlignment = Alignment.Center) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -74,13 +84,10 @@ internal fun EmailSignInButton(
                 imageVector = Icons.Filled.Email,
                 contentDescription = "Email icon",
                 tint = textColor,
-                modifier = Modifier.size(20.dp)
+                modifier = Modifier.size(height - topPadding * 2)
             )
             Text(
-                text = text,
-                color = textColor,
-                fontSize = fontSize,
-                fontWeight = FontWeight.Medium
+                text = text, color = textColor, fontSize = 15.sp, fontWeight = FontWeight.Medium
             )
         }
     }

@@ -18,7 +18,8 @@ fun MVPTheme(
         seedColor = Primary,
         isDark = darkTheme,
         specVersion = ColorSpec.SpecVersion.SPEC_2025,
-        style = PaletteStyle.Vibrant
+        style = PaletteStyle.Neutral,
+
     )
     DynamicMaterialExpressiveTheme(
         state = themeState,

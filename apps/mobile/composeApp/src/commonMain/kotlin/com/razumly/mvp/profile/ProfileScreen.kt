@@ -63,7 +63,7 @@ fun ProfileScreen(component: ProfileComponent) {
             PaymentProcessorButton(
                 onClick = { component.manageStripeAccountOnboarding() },
                 component,
-                "Manage Stripe Onboarding"
+                "Manage Stripe Onboarding",
             )
             Button(
                 onClick = { component.manageStripeAccount() },

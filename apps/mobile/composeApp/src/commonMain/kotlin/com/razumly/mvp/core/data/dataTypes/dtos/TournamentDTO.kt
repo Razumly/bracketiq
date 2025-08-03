@@ -43,6 +43,7 @@ data class TournamentDTO(
     val teamIds: List<String>,
     val cancellationRefundHours: Int,
     val registrationCutoffHours: Int,
+    val seedColor: Int,
 )
 
 fun TournamentDTO.toTournament(id: String): Tournament {
@@ -80,5 +81,6 @@ fun TournamentDTO.toTournament(id: String): Tournament {
         cancellationRefundHours = cancellationRefundHours,
         registrationCutoffHours = registrationCutoffHours,
         prize = prize,
+        seedColor = seedColor
     )
 }
