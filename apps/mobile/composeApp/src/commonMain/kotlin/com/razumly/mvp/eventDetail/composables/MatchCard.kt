@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalTime::class)
+
 package com.razumly.mvp.eventDetail.composables
 
 import androidx.compose.foundation.clickable
@@ -37,6 +39,7 @@ import com.razumly.mvp.core.presentation.util.timeFormat
 import com.razumly.mvp.eventDetail.LocalTournamentComponent
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
+import kotlin.time.ExperimentalTime
 
 @Composable
 fun MatchCard(

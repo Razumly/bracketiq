@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalTime::class)
+
 package com.razumly.mvp.eventDetail.composables
 
 import androidx.compose.foundation.Image
@@ -32,6 +34,7 @@ import com.kmpalette.rememberDominantColorState
 import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import io.ktor.http.Url
+import kotlin.time.ExperimentalTime
 
 @Composable
 fun SelectEventImage(

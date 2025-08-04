@@ -91,7 +91,7 @@ actual fun EventMap(
 
     val eventMarkerStates = remember(events) {
         events.associate { event ->
-            event.id to com.google.maps.android.compose.MarkerState(
+            event.id to MarkerState(
                 position = LatLng(event.lat, event.long)
             )
         }

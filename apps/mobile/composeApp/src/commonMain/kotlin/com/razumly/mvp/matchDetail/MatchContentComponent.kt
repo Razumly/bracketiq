@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalTime::class)
+
 package com.razumly.mvp.matchDetail
 
 import com.arkivanov.decompose.ComponentContext
@@ -28,6 +30,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlin.math.ceil
+import kotlin.time.ExperimentalTime
 
 interface MatchContentComponent {
     val matchWithTeams: StateFlow<MatchWithTeams>

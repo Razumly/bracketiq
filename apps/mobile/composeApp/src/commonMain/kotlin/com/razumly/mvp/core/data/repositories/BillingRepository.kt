@@ -12,11 +12,12 @@ import com.razumly.mvp.core.util.jsonMVP
 import io.appwrite.Query
 import io.appwrite.services.Databases
 import io.appwrite.services.Functions
-import kotlin.time.Instant
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
+import kotlin.time.ExperimentalTime
+import kotlin.time.Instant
 
 interface IBillingRepository : IMVPRepository {
     suspend fun createPurchaseIntent(
@@ -270,6 +271,7 @@ private data class GetHostOnboardingLink(
 )
 
 @Serializable
+@OptIn(ExperimentalTime::class)
 private data class CreateAccountResponse(
     val accountId: String,
     val onboardingUrl: String,

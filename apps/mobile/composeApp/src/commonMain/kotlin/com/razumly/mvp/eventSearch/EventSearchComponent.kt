@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalTime::class)
+
 package com.razumly.mvp.eventSearch
 
 import com.arkivanov.decompose.ComponentContext
@@ -31,6 +33,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlin.time.ExperimentalTime
 
 interface EventSearchComponent {
     val locationTracker: LocationTracker

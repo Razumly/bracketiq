@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalTime::class)
+
 package com.razumly.mvp.eventDetail
 
 import com.arkivanov.decompose.ComponentContext
@@ -44,6 +46,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
+import kotlin.time.ExperimentalTime
 
 interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val selectedEvent: StateFlow<EventAbsWithRelations>
