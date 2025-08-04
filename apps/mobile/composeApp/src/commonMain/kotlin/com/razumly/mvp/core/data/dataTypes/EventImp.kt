@@ -9,14 +9,17 @@ import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.enums.FieldType
 import com.razumly.mvp.core.presentation.Primary
 import io.appwrite.ID
-import kotlinx.datetime.Clock
-import kotlinx.datetime.Instant
+import kotlinx.serialization.Contextual
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
+import kotlin.time.Clock
+import kotlin.time.ExperimentalTime
+import kotlin.time.Instant
 
 @Entity
 @Serializable
-data class EventImp(
+@OptIn(ExperimentalTime::class)
+data class EventImp (
     override val hostId: String,
     @PrimaryKey override val id: String,
     override val location: String,
@@ -26,6 +29,7 @@ data class EventImp(
     override val lat: Double,
     override val long: Double,
     override val fieldType: FieldType,
+    @Contextual
     override val start: Instant,
     override val end: Instant,
     override val price: Double,

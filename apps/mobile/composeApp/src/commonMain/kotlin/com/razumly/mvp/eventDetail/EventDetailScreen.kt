@@ -72,14 +72,16 @@ import com.razumly.mvp.eventDetail.composables.TournamentBracketView
 import com.razumly.mvp.eventMap.MapComponent
 import com.razumly.mvp.home.LocalNavBarPadding
 import kotlinx.coroutines.delay
-import kotlinx.datetime.Clock
 import kotlin.math.round
+import kotlin.time.Clock
 import kotlin.time.Duration.Companion.hours
+import kotlin.time.ExperimentalTime
 
 val LocalTournamentComponent =
     compositionLocalOf<EventDetailComponent> { error("No tournament provided") }
 
 @Composable
+@OptIn(ExperimentalTime::class)
 fun EventDetailScreen(
     component: EventDetailComponent, mapComponent: MapComponent
 ) {

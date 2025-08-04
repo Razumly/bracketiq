@@ -9,14 +9,17 @@ import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.enums.FieldType
 import com.razumly.mvp.core.presentation.Primary
 import io.appwrite.ID
-import kotlinx.datetime.Clock
-import kotlinx.datetime.Instant
+import kotlinx.serialization.Contextual
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
+import kotlin.time.Clock
+import kotlin.time.ExperimentalTime
+import kotlin.time.Instant
 
 @Entity
 @Serializable
-data class Tournament(
+@OptIn(ExperimentalTime::class)
+data class Tournament (
     val doubleElimination: Boolean,
     val winnerSetCount: Int,
     val loserSetCount: Int,
@@ -31,6 +34,7 @@ data class Tournament(
     override val divisions: List<Division>,
     override val location: String,
     override val fieldType: FieldType,
+    @Contextual
     override val start: Instant,
     override val end: Instant,
     override val price: Double,

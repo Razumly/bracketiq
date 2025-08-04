@@ -2,10 +2,12 @@ package com.razumly.mvp.core.data.util
 
 import androidx.room.TypeConverter
 import com.razumly.mvp.core.data.dataTypes.enums.Division
-import kotlinx.datetime.Instant
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlin.time.ExperimentalTime
+import kotlin.time.Instant
 
+@OptIn(ExperimentalTime::class)
 class Converters {
     // List<String> converter
     @TypeConverter
@@ -31,11 +33,13 @@ class Converters {
 
     // Instant converter
     @TypeConverter
+    @OptIn(ExperimentalTime::class)
     fun fromInstant(instant: Instant): Long {
         return instant.toEpochMilliseconds()
     }
 
     @TypeConverter
+    @OptIn(ExperimentalTime::class)
     fun toInstant(epochMilli: Long): Instant {
         return Instant.fromEpochMilliseconds(epochMilli)
     }

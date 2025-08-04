@@ -101,7 +101,6 @@ import dev.chrisbanes.haze.materials.CupertinoMaterials
 import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
 import dev.chrisbanes.haze.rememberHazeState
 import dev.icerock.moko.geo.LatLng
-import kotlinx.datetime.Clock
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.format
 import kotlinx.datetime.toLocalDateTime
@@ -114,10 +113,12 @@ import mvp.composeapp.generated.resources.max_teams
 import mvp.composeapp.generated.resources.select_a_value
 import mvp.composeapp.generated.resources.value_too_low
 import org.jetbrains.compose.resources.stringResource
+import kotlin.time.Clock
+import kotlin.time.ExperimentalTime
 
 val localImageScheme = compositionLocalOf<DynamicScheme> { error("No color scheme provided") }
 
-@OptIn(ExperimentalHazeApi::class)
+@OptIn(ExperimentalHazeApi::class, ExperimentalTime::class)
 @Composable
 fun EventDetails(
     paymentProcessor: IPaymentProcessor,

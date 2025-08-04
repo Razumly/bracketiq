@@ -3,12 +3,14 @@ package com.razumly.mvp.core.data.dataTypes.dtos
 import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.razumly.mvp.core.data.dataTypes.enums.Division
 import com.razumly.mvp.core.data.dataTypes.enums.FieldType
-import kotlinx.datetime.Clock
-import kotlinx.datetime.Instant
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
+import kotlin.time.Clock
+import kotlin.time.ExperimentalTime
+import kotlin.time.Instant
 
 @Serializable
+@OptIn(ExperimentalTime::class)
 data class EventDTO(
     @Transient
     val id: String = "",
@@ -36,35 +38,35 @@ data class EventDTO(
     val cancellationRefundHours: Int,
     val registrationCutoffHours: Int,
     val seedColor: Int,
-)
-
-fun EventDTO.toEvent(id: String): EventImp {
-    return EventImp(
-        id = id,
-        location = location,
-        name = name,
-        description = description,
-        divisions = divisions.map { Division.valueOf(it)},
-        fieldType = FieldType.valueOf(fieldType),
-        start = Instant.parse(start),
-        end = Instant.parse(end),
-        price = price,
-        rating = rating,
-        imageUrl = imageUrl,
-        lat = lat,
-        long = long,
-        lastUpdated = Clock.System.now(),
-        hostId = hostId,
-        teamSizeLimit = teamSizeLimit,
-        maxParticipants = maxParticipants,
-        teamSignup = teamSignup,
-        singleDivision = singleDivision,
-        waitList = waitList,
-        freeAgents = freeAgents,
-        playerIds = playerIds,
-        teamIds = teamIds,
-        cancellationRefundHours = cancellationRefundHours,
-        registrationCutoffHours = registrationCutoffHours,
-        seedColor = seedColor
-    )
+) {
+    fun toEvent(id: String): EventImp {
+        return EventImp(
+            id = id,
+            location = location,
+            name = name,
+            description = description,
+            divisions = divisions.map { Division.valueOf(it) },
+            fieldType = FieldType.valueOf(fieldType),
+            start = Instant.parse(start),
+            end = Instant.parse(end),
+            price = price,
+            rating = rating,
+            imageUrl = imageUrl,
+            lat = lat,
+            long = long,
+            lastUpdated = Clock.System.now(),
+            hostId = hostId,
+            teamSizeLimit = teamSizeLimit,
+            maxParticipants = maxParticipants,
+            teamSignup = teamSignup,
+            singleDivision = singleDivision,
+            waitList = waitList,
+            freeAgents = freeAgents,
+            playerIds = playerIds,
+            teamIds = teamIds,
+            cancellationRefundHours = cancellationRefundHours,
+            registrationCutoffHours = registrationCutoffHours,
+            seedColor = seedColor
+        )
+    }
 }

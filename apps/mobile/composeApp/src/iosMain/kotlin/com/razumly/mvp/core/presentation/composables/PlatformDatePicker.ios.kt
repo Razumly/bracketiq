@@ -2,11 +2,13 @@ package com.razumly.mvp.core.presentation.composables
 
 import androidx.compose.runtime.Composable
 import com.razumly.mvp.LocalNativeViewFactory
-import kotlinx.datetime.Clock
-import kotlinx.datetime.Instant
+import kotlin.time.Clock
 import kotlin.time.Duration.Companion.days
+import kotlin.time.ExperimentalTime
+import kotlin.time.Instant
 
 @Composable
+@OptIn(ExperimentalTime::class)
 actual fun PlatformDateTimePicker(
     onDateSelected: (Instant?) -> Unit,
     onDismissRequest: () -> Unit,

@@ -15,8 +15,8 @@ plugins {
     alias(libs.plugins.secrets)
     id("org.kodein.mock.mockmp") version "2.0.0"
     id("kotlin-parcelize")
-    id("com.google.gms.google-services") version "4.4.2"
-    id("co.touchlab.skie") version "0.10.2-preview.2.1.20"
+    id("com.google.gms.google-services") version "4.4.3"
+    id("co.touchlab.skie") version "0.10.5"
 }
 composeCompiler {
     includeSourceInformation = true
@@ -28,6 +28,7 @@ kotlin {
     androidTarget {
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_17)
+            optIn.add("kotlin.time.ExperimentalTime")
         }
     }
 
@@ -88,7 +89,6 @@ kotlin {
                 implementation(libs.coil.network.ktor)
                 implementation(libs.haze.materials)
                 implementation(libs.haze)
-                implementation(libs.kmp.date.time.picker)
                 implementation(libs.androidx.datastore)
                 implementation(libs.datastore.preferences)
                 implementation(libs.materialKolor)
@@ -108,6 +108,8 @@ kotlin {
                 api(libs.koin.core)
                 api(libs.napier)
                 api(libs.permissions)
+                api(libs.permissions.location)
+                api(libs.permissions.notifications)
                 api(libs.geo)
                 api(libs.sdk.for1.kmp)
             }

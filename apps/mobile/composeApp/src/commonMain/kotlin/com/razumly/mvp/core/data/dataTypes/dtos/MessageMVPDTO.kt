@@ -2,7 +2,7 @@ package com.razumly.mvp.core.data.dataTypes.dtos
 
 import androidx.room.PrimaryKey
 import com.razumly.mvp.core.data.dataTypes.MessageMVP
-import kotlinx.datetime.Instant
+import kotlin.time.Instant
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 

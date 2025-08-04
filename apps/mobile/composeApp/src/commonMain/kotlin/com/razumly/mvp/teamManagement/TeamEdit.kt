@@ -39,7 +39,6 @@ import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
-import com.razumly.mvp.core.data.dataTypes.enums.Division
 import com.razumly.mvp.core.presentation.composables.InvitePlayerCard
 import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.SearchPlayerDialog
@@ -62,7 +61,6 @@ fun CreateOrEditTeamDialog(
     isNewTeam: Boolean
 ) {
     var teamName by remember { mutableStateOf(team.team.name ?: "") }
-    var teamDivision by remember { mutableStateOf(team.team.division) }
     var teamSize by remember { mutableStateOf(team.team.teamSize) }
     var showSearchDialog by remember { mutableStateOf(false) }
     var invitedPlayers by remember { mutableStateOf(team.pendingPlayers) }
@@ -99,15 +97,6 @@ fun CreateOrEditTeamDialog(
                 }
             }
 
-            Text("Select Team Division")
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(0, 1, 2, 3, 4, 5).forEach { divisionOrdinal ->
-                    val division = Division.entries.toTypedArray()[divisionOrdinal]
-                    FilterChip(enabled = showEditDetails, selected = division == teamDivision, onClick = {
-                        teamDivision = division
-                    }, label = { Text(division.name) })
-                }
-            }
             Spacer(modifier = Modifier.height(12.dp))
             Text("Players")
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -163,7 +152,6 @@ fun CreateOrEditTeamDialog(
                                 pending = invitedPlayers.map { it.id },
                                 name = teamName,
                                 teamSize = teamSize,
-                                division = teamDivision
                             )
                         )
                     }) {

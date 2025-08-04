@@ -16,9 +16,11 @@ import com.razumly.mvp.home.HomeScreen
 import com.razumly.mvp.userAuth.AuthScreen
 import io.github.aakira.napier.DebugAntilog
 import io.github.aakira.napier.Napier
-import kotlinx.datetime.Clock
+import kotlin.time.Clock
+import kotlin.time.ExperimentalTime
 
 
+@OptIn(ExperimentalTime::class)
 @Composable
 fun App(root: RootComponent) {
     val childStack by root.childStack.subscribeAsState()

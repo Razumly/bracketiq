@@ -3,12 +3,15 @@ package com.razumly.mvp.core.data.dataTypes
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import com.razumly.mvp.core.data.dataTypes.dtos.MessageMVPDTO
-import kotlinx.datetime.Instant
+import kotlinx.serialization.Contextual
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
+import kotlin.time.ExperimentalTime
+import kotlin.time.Instant
 
 @Entity
 @Serializable
+@OptIn(ExperimentalTime::class)
 data class MessageMVP (
     @Transient
     @PrimaryKey
@@ -18,6 +21,7 @@ data class MessageMVP (
     val attachmentUrls: List<String>,
     val chatId: String,
     val readByIds: List<String>,
+    @Contextual
     val sentTime: Instant
 ): MVPDocument {
     fun toMessageMVPDTO() = MessageMVPDTO(

@@ -10,7 +10,6 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import io.appwrite.ID
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,7 +19,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.datetime.Clock
+import kotlin.time.Clock
+import kotlin.time.ExperimentalTime
 
 interface ChatGroupComponent {
     val currentUser: UserData
@@ -33,6 +33,7 @@ interface ChatGroupComponent {
 }
 
 
+@OptIn(ExperimentalTime::class)
 class DefaultChatGroupComponent(
     componentContext: ComponentContext,
     private val chatGroupInit: ChatGroupWithRelations,

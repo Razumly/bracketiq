@@ -1,7 +1,7 @@
 package com.razumly.mvp.core.presentation.composables
 
 import androidx.compose.runtime.Composable
-import kotlinx.datetime.Instant
+import kotlin.time.Instant
 
 @Composable
 expect fun PlatformDateTimePicker(

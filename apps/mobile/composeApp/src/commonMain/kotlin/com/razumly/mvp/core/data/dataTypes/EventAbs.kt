@@ -3,10 +3,12 @@ package com.razumly.mvp.core.data.dataTypes
 import com.razumly.mvp.core.data.dataTypes.enums.Division
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.enums.FieldType
-import kotlinx.datetime.Instant
 import kotlinx.serialization.Serializable
+import kotlin.time.ExperimentalTime
+import kotlin.time.Instant
 
 @Serializable
+@OptIn(ExperimentalTime::class)
 sealed interface EventAbs : MVPDocument {
     val location: String
     val name: String

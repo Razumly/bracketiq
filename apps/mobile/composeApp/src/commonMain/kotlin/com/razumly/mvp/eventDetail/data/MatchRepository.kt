@@ -5,7 +5,6 @@ import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.dtos.MatchDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.toMatch
-import com.razumly.mvp.core.data.dataTypes.toMatchDTO
 import com.razumly.mvp.core.data.repositories.IMVPRepository
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResponse
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
@@ -27,14 +26,17 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import kotlinx.datetime.Clock
-import kotlinx.datetime.Instant
+import kotlinx.serialization.Contextual
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlin.time.Clock
+import kotlin.time.ExperimentalTime
+import kotlin.time.Instant
 
+@OptIn(ExperimentalTime::class)
 interface IMatchRepository : IMVPRepository {
     suspend fun getMatch(matchId: String): Result<MatchMVP>
     fun getMatchFlow(matchId: String): Flow<Result<MatchWithRelations>>
@@ -47,6 +49,7 @@ interface IMatchRepository : IMVPRepository {
     fun setIgnoreMatch(match: MatchMVP?): Result<Unit>
 }
 
+@OptIn(ExperimentalTime::class)
 class MatchRepository(
     private val database: Databases,
     private val databaseService: DatabaseService,
@@ -201,9 +204,10 @@ class MatchRepository(
 }
 
 @Serializable
-@OptIn(ExperimentalSerializationApi::class)
+@OptIn(ExperimentalSerializationApi::class, ExperimentalTime::class)
 data class UpdateMatchArguments(
     @EncodeDefault val task: String = "updateMatch",
+    @Contextual
     val time: Instant,
     val tournament: String,
     val matchId: String,

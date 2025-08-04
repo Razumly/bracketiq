@@ -3,12 +3,14 @@ package com.razumly.mvp.core.data.dataTypes.dtos
 import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.enums.Division
 import com.razumly.mvp.core.data.dataTypes.enums.FieldType
-import kotlinx.datetime.Clock
-import kotlinx.datetime.Instant
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
+import kotlin.time.Clock
+import kotlin.time.ExperimentalTime
+import kotlin.time.Instant
 
 @Serializable
+@OptIn(ExperimentalTime::class)
 data class TournamentDTO(
     val name: String,
     val description: String,
@@ -44,43 +46,43 @@ data class TournamentDTO(
     val cancellationRefundHours: Int,
     val registrationCutoffHours: Int,
     val seedColor: Int,
-)
-
-fun TournamentDTO.toTournament(id: String): Tournament {
-    return Tournament(
-        id = id,
-        name = name,
-        description = description,
-        doubleElimination = doubleElimination,
-        divisions = divisions.map { Division.valueOf(it)},
-        winnerSetCount = winnerSetCount,
-        loserSetCount = loserSetCount,
-        winnerBracketPointsToVictory = winnerBracketPointsToVictory,
-        loserBracketPointsToVictory = loserBracketPointsToVictory,
-        winnerScoreLimitsPerSet = winnerScoreLimitsPerSet,
-        loserScoreLimitsPerSet = loserScoreLimitsPerSet,
-        location = location,
-        fieldType = FieldType.valueOf(fieldType),
-        start = Instant.parse(start),
-        end = Instant.parse(end),
-        hostId = hostId,
-        price = price,
-        rating = rating,
-        imageUrl = imageUrl,
-        lat = lat,
-        long = long,
-        lastUpdated = Clock.System.now(),
-        maxParticipants = maxParticipants,
-        teamSizeLimit = teamSizeLimit,
-        teamSignup = teamSignup,
-        singleDivision = singleDivision,
-        waitList = waitList,
-        freeAgents = freeAgents,
-        playerIds = playerIds,
-        teamIds = teamIds,
-        cancellationRefundHours = cancellationRefundHours,
-        registrationCutoffHours = registrationCutoffHours,
-        prize = prize,
-        seedColor = seedColor
-    )
+) {
+    fun toTournament(id: String): Tournament {
+        return Tournament(
+            id = id,
+            name = name,
+            description = description,
+            doubleElimination = doubleElimination,
+            divisions = divisions.map { Division.valueOf(it) },
+            winnerSetCount = winnerSetCount,
+            loserSetCount = loserSetCount,
+            winnerBracketPointsToVictory = winnerBracketPointsToVictory,
+            loserBracketPointsToVictory = loserBracketPointsToVictory,
+            winnerScoreLimitsPerSet = winnerScoreLimitsPerSet,
+            loserScoreLimitsPerSet = loserScoreLimitsPerSet,
+            location = location,
+            fieldType = FieldType.valueOf(fieldType),
+            start = Instant.parse(start),
+            end = Instant.parse(end),
+            hostId = hostId,
+            price = price,
+            rating = rating,
+            imageUrl = imageUrl,
+            lat = lat,
+            long = long,
+            lastUpdated = Clock.System.now(),
+            maxParticipants = maxParticipants,
+            teamSizeLimit = teamSizeLimit,
+            teamSignup = teamSignup,
+            singleDivision = singleDivision,
+            waitList = waitList,
+            freeAgents = freeAgents,
+            playerIds = playerIds,
+            teamIds = teamIds,
+            cancellationRefundHours = cancellationRefundHours,
+            registrationCutoffHours = registrationCutoffHours,
+            prize = prize,
+            seedColor = seedColor
+        )
+    }
 }

@@ -60,12 +60,14 @@ import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.enums.FieldType
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
 import com.razumly.mvp.eventSearch.util.EventFilter
-import kotlinx.datetime.Clock
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.format
 import kotlinx.datetime.toLocalDateTime
+import kotlin.time.Clock
+import kotlin.time.ExperimentalTime
 
 @Composable
+@OptIn(ExperimentalTime::class)
 fun SearchBox(
     modifier: Modifier = Modifier,
     placeholder: String,
@@ -164,11 +166,13 @@ fun SearchBox(
     }
 }
 
+@OptIn(ExperimentalTime::class)
 private fun isFilterActive(filter: EventFilter): Boolean {
     return filter.eventType != null || filter.field != null || filter.price != null || filter.date != null
 }
 
 @Composable
+@OptIn(ExperimentalTime::class)
 private fun FilterDropdown(
     visible: Boolean,
     currentFilter: EventFilter,
@@ -284,6 +288,7 @@ private fun FilterDropdown(
 }
 
 @Composable
+@OptIn(ExperimentalTime::class)
 private fun EventTypeFilterSection(
     currentFilter: EventFilter, onFilterChange: (EventFilter.() -> EventFilter) -> Unit
 ) {
@@ -320,6 +325,7 @@ private fun EventTypeFilterSection(
 }
 
 @Composable
+@OptIn(ExperimentalTime::class)
 private fun FieldTypeFilterSection(
     currentFilter: EventFilter, onFilterChange: (EventFilter.() -> EventFilter) -> Unit
 ) {
@@ -350,6 +356,7 @@ private fun FieldTypeFilterSection(
 }
 
 @Composable
+@OptIn(ExperimentalTime::class)
 private fun PriceFilterSection(
     currentFilter: EventFilter, onFilterChange: (EventFilter.() -> EventFilter) -> Unit
 ) {
@@ -401,6 +408,7 @@ private fun PriceFilterSection(
 }
 
 @Composable
+@OptIn(ExperimentalTime::class)
 private fun DateFilterSection(
     currentFilter: EventFilter, onStartDateClicked: () -> Unit, onEndDateClicked: () -> Unit
 ) {

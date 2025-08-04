@@ -5,7 +5,7 @@ import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.presentation.PaymentResult
 import com.razumly.mvp.eventMap.MapComponent
 import dev.icerock.moko.geo.LatLng
-import kotlinx.datetime.Instant
+import kotlin.time.Instant
 import platform.UIKit.UIViewController
 
 interface NativeViewFactory {

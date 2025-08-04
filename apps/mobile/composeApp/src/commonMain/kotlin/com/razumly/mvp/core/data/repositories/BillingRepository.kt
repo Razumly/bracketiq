@@ -12,7 +12,7 @@ import com.razumly.mvp.core.util.jsonMVP
 import io.appwrite.Query
 import io.appwrite.services.Databases
 import io.appwrite.services.Functions
-import kotlinx.datetime.Instant
+import kotlin.time.Instant
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
@@ -158,9 +158,6 @@ class BillingRepository(
     override suspend fun getRefundsWithRelations(): Result<List<RefundRequestWithRelations>> =
         runCatching {
             val currentUserId = userRepository.currentUser.value.getOrThrow().id
-
-            val cachedRefunds =
-                databaseService.getRefundRequestDao.getRefundRequestsWithRelations(currentUserId)
 
             val serverRefunds = databases.listDocuments(
                 databaseId = DbConstants.DATABASE_NAME,
