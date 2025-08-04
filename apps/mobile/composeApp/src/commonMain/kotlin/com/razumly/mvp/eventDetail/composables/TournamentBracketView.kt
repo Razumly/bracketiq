@@ -32,11 +32,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.presentation.util.getScreenWidth
 import com.razumly.mvp.core.presentation.util.isScrollingUp
 import com.razumly.mvp.core.util.ceilDiv
 import com.razumly.mvp.eventDetail.LocalTournamentComponent
+import com.razumly.mvp.eventDetail.TeamPosition
 import com.razumly.mvp.home.LocalNavBarPadding
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -45,12 +47,21 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 fun TournamentBracketView(
     showFab: (Boolean) -> Unit,
     onMatchClick: (MatchWithRelations) -> Unit = {},
+    isEditingMatches: Boolean = false, // Add editing mode parameter
+    editableMatches: List<MatchWithRelations> = emptyList(), // Add editable matches
+    onUpdateMatch: ((String, (MatchMVP) -> MatchMVP) -> Unit)? = null, // Add update callback
+    onSelectTeam: ((String, TeamPosition) -> Unit)? = null // Add team selection callback
 ) {
     val component = LocalTournamentComponent.current
     val losersBracket by component.losersBracket.collectAsState()
     val roundsList by component.rounds.collectAsState()
     val columnScrollState = rememberScrollState()
-
+    val displayRounds = if (isEditingMatches) {
+        // Convert editable matches to rounds format
+        convertMatchesToRounds(editableMatches)
+    } else {
+        roundsList
+    }
     val lazyRowState = rememberLazyListState()
     var maxHeightInRowDp by remember { mutableStateOf(Dp.Unspecified) }
     val columnHeight by animateDpAsState(
@@ -185,16 +196,38 @@ fun TournamentBracketView(
                                 ) {
                                     Napier.d("Column: $colIndex, Chunk: $chunkIndex, Filtered Matches count: ${filteredMatches.size}, is visible: $visible")
                                     filteredMatches.forEach { match ->
-                                        MatchCard(
-                                            match = match,
-                                            onClick = {
-                                                if (match != null) {
-                                                    onMatchClick(match)
-                                                }
-                                            },
-                                            modifier = Modifier.height(cardHeight.dp)
-                                                .width(width.dp),
-                                        )
+                                        if (isEditingMatches) {
+                                            // Show editable match card
+                                            EditableMatchCard(
+                                                match = match,
+                                                onUpdateMatch = { updater ->
+                                                    onUpdateMatch?.invoke(match?.match?.id ?: "", updater)
+                                                },
+                                                onSelectTeam1 = {
+                                                    onSelectTeam?.invoke(match?.match?.id ?: "", TeamPosition.TEAM1)
+                                                },
+                                                onSelectTeam2 = {
+                                                    onSelectTeam?.invoke(match?.match?.id ?: "", TeamPosition.TEAM2)
+                                                },
+                                                onSelectRef = {
+                                                    onSelectTeam?.invoke(match?.match?.id ?: "", TeamPosition.REF)
+                                                },
+                                                modifier = Modifier.height(cardHeight.dp)
+                                                    .width(width.dp)
+                                            )
+                                        } else {
+                                            // Show regular match card
+                                            MatchCard(
+                                                match = match,
+                                                onClick = {
+                                                    if (match != null) {
+                                                        onMatchClick(match)
+                                                    }
+                                                },
+                                                modifier = Modifier.height(cardHeight.dp)
+                                                    .width(width.dp)
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -204,4 +237,16 @@ fun TournamentBracketView(
             }
         }
     }
+}
+
+private fun convertMatchesToRounds(matches: List<MatchWithRelations>): List<List<MatchWithRelations?>> {
+    // Group matches by their round (based on tournament structure)
+    // This is a simplified version - you might need to adapt based on your tournament structure
+    return matches.groupBy { match ->
+        // You can determine round by looking at previous matches or other tournament structure
+        // For now, using a simple grouping
+        match.match.matchNumber / 2 // Simple round calculation
+    }.values.map { roundMatches ->
+        roundMatches.map { it as MatchWithRelations? }
+    }.toList()
 }

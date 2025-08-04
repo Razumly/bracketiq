@@ -68,7 +68,7 @@ data class EventImp (
                 imageUrl = "",
                 teamSizeLimit = 2,
                 maxParticipants = 0,
-                singleDivision = false,
+                singleDivision = true,
                 teamSignup = false,
                 waitList = listOf(),
                 freeAgents = listOf(),

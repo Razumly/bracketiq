@@ -83,7 +83,7 @@ data class Tournament (
                 long = 0.0,
                 maxParticipants = 0,
                 teamSizeLimit = 2,
-                singleDivision = false,
+                singleDivision = true,
                 teamSignup = true,
                 waitList = listOf(),
                 freeAgents = listOf(),

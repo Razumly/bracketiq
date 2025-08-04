@@ -67,11 +67,12 @@ import com.razumly.mvp.core.presentation.util.buttonTransitionSpec
 import com.razumly.mvp.core.util.LocalErrorHandler
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.eventDetail.composables.CollapsableHeader
+import com.razumly.mvp.eventDetail.composables.MatchEditControls
 import com.razumly.mvp.eventDetail.composables.ParticipantsView
+import com.razumly.mvp.eventDetail.composables.TeamSelectionDialog
 import com.razumly.mvp.eventDetail.composables.TournamentBracketView
 import com.razumly.mvp.eventMap.MapComponent
 import com.razumly.mvp.home.LocalNavBarPadding
-import kotlinx.coroutines.delay
 import kotlin.math.round
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.hours
@@ -87,13 +88,11 @@ fun EventDetailScreen(
 ) {
     val errorHandler = LocalErrorHandler.current
     val loadingHandler = LocalLoadingHandler.current
-    var showDropdownMenu by remember { mutableStateOf(false) }
     val selectedEvent by component.selectedEvent.collectAsState()
     val currentUser by component.currentUser.collectAsState()
     var showTeamSelectionDialog by remember { mutableStateOf(false) }
     val validTeams by component.validTeams.collectAsState()
     val showDetails by component.showDetails.collectAsState()
-    var animateExpanded by remember { mutableStateOf(false) }
     val editedEvent by component.editedEvent.collectAsState()
     var showFab by remember { mutableStateOf(false) }
     var showOptionsDropdown by remember { mutableStateOf(false) }
@@ -103,6 +102,8 @@ fun EventDetailScreen(
     var refundReason by remember { mutableStateOf("") }
     val showFeeBreakdown by component.showFeeBreakdown.collectAsState()
     val currentFeeBreakdown by component.currentFeeBreakdown.collectAsState()
+    val editableMatches by component.editableMatches.collectAsState()
+    val showTeamDialog by component.showTeamSelectionDialog.collectAsState()
 
     val isBracketView by component.isBracketView.collectAsState()
     var isRefundAutomatic by remember { mutableStateOf(false) }
@@ -114,6 +115,7 @@ fun EventDetailScreen(
     val isWaitListed by component.isUserInWaitlist.collectAsState()
     val isCaptain by component.isUserCaptain.collectAsState()
     val isDark = isSystemInDarkTheme()
+    val isEditingMatches by component.isEditingMatches.collectAsState()
 
     var imageScheme by remember {
         mutableStateOf(
@@ -152,11 +154,6 @@ fun EventDetailScreen(
                 errorHandler.showError(error.message)
             }
         }
-    }
-
-    LaunchedEffect(Unit) {
-        delay(300)
-        animateExpanded = true
     }
 
     CompositionLocalProvider(LocalTournamentComponent provides component) {
@@ -223,7 +220,6 @@ fun EventDetailScreen(
                                         Button(
                                             onClick = {
                                                 component.viewEvent()
-                                                showDropdownMenu = false
                                             }, colors = buttonColors
                                         ) { Text("View") }
                                         // In your EventDetailScreen composable, update the button section
@@ -235,7 +231,6 @@ fun EventDetailScreen(
                                                         PaymentProcessorButton(
                                                             onClick = {
                                                                 showTeamSelectionDialog = true
-                                                                showDropdownMenu = false
                                                             },
                                                             component,
                                                             "Join Waitlist as Team (Payment Not Required)",
@@ -245,7 +240,6 @@ fun EventDetailScreen(
                                                         Button(
                                                             onClick = {
                                                                 showTeamSelectionDialog = true
-                                                                showDropdownMenu = false
                                                             }, colors = buttonColors
                                                         ) {
                                                             Text("Join Waitlist as Team")
@@ -256,7 +250,6 @@ fun EventDetailScreen(
                                                         PaymentProcessorButton(
                                                             {
                                                                 component.joinEvent()
-                                                                showDropdownMenu = false
                                                             },
                                                             component,
                                                             "Join Waitlist (Payment Not Required)",
@@ -266,7 +259,6 @@ fun EventDetailScreen(
                                                         Button(
                                                             onClick = {
                                                                 component.joinEvent()
-                                                                showDropdownMenu = false
                                                             }, colors = buttonColors
                                                         ) {
                                                             Text("Join Waitlist")
@@ -284,7 +276,6 @@ fun EventDetailScreen(
                                                         PaymentProcessorButton(
                                                             onClick = {
                                                                 showTeamSelectionDialog = true
-                                                                showDropdownMenu = false
                                                             },
                                                             component,
                                                             "Purchase Ticket for Team",
@@ -294,7 +285,6 @@ fun EventDetailScreen(
                                                         Button(
                                                             onClick = {
                                                                 showTeamSelectionDialog = true
-                                                                showDropdownMenu = false
                                                             }, colors = buttonColors
                                                         ) { Text("Join as Team") }
                                                     }
@@ -303,7 +293,6 @@ fun EventDetailScreen(
                                                         PaymentProcessorButton(
                                                             {
                                                                 component.joinEvent()
-                                                                showDropdownMenu = false
                                                             },
                                                             component,
                                                             "Purchase Ticket",
@@ -313,7 +302,6 @@ fun EventDetailScreen(
                                                         Button(
                                                             onClick = {
                                                                 component.joinEvent()
-                                                                showDropdownMenu = false
                                                             }, colors = buttonColors
                                                         ) { Text("Join") }
                                                     }
@@ -340,7 +328,6 @@ fun EventDetailScreen(
                                                     } else {
                                                         component.leaveEvent()
                                                     }
-                                                    showDropdownMenu = false
                                                 }, colors = buttonColors
                                             ) {
                                                 Text(leaveMessage)
@@ -435,15 +422,34 @@ fun EventDetailScreen(
                 ) {
                     Column(Modifier.padding(innerPadding).padding(top = 32.dp)) {
                         CollapsableHeader(component)
+                        if (isHost && selectedEvent is TournamentWithRelations) {
+                            MatchEditControls(
+                                isEditing = isEditingMatches,
+                                onStartEdit = component::startEditingMatches,
+                                onCancelEdit = component::cancelEditingMatches,
+                                onCommitEdit = component::commitMatchChanges
+                            )
+                        }
                         Box(Modifier.fillMaxSize()) {
                             when (selectedEvent) {
                                 is TournamentWithRelations -> {
                                     if (isBracketView) {
-                                        TournamentBracketView(showFab = {
-                                            showFab = it
-                                        }) { match ->
-                                            component.matchSelected(match)
-                                        }
+                                        TournamentBracketView(
+                                            showFab = { showFab = it },
+                                            onMatchClick = { match ->
+                                                if (!isEditingMatches) {
+                                                    component.matchSelected(match)
+                                                }
+                                            },
+                                            isEditingMatches = isEditingMatches,
+                                            editableMatches = editableMatches,
+                                            onUpdateMatch = { matchId, updater ->
+                                                component.updateEditableMatch(matchId, updater)
+                                            },
+                                            onSelectTeam = { matchId, position ->
+                                                component.showTeamSelection(matchId, position)
+                                            }
+                                        )
                                     } else {
                                         ParticipantsView(showFab = {
                                             showFab = it
@@ -475,7 +481,19 @@ fun EventDetailScreen(
                 }
             }
 
-            // Dialog for team selection when joining an event that requires team signup
+            showTeamDialog?.let { dialogState ->
+                TeamSelectionDialog(
+                    dialogState = dialogState,
+                    onTeamSelected = { teamId ->
+                        component.selectTeamForMatch(
+                            dialogState.matchId,
+                            dialogState.position,
+                            teamId
+                        )
+                    },
+                    onDismiss = component::dismissTeamSelection
+                )
+            }
             if (showTeamSelectionDialog) {
                 TeamSelectionDialog(teams = validTeams,
                     onTeamSelected = { selectedTeam ->
