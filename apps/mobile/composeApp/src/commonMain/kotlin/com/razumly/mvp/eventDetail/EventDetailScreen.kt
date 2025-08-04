@@ -68,6 +68,7 @@ import com.razumly.mvp.core.util.LocalErrorHandler
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.eventDetail.composables.CollapsableHeader
 import com.razumly.mvp.eventDetail.composables.MatchEditControls
+import com.razumly.mvp.eventDetail.composables.MatchEditDialog
 import com.razumly.mvp.eventDetail.composables.ParticipantsView
 import com.razumly.mvp.eventDetail.composables.TeamSelectionDialog
 import com.razumly.mvp.eventDetail.composables.TournamentBracketView
@@ -104,6 +105,7 @@ fun EventDetailScreen(
     val currentFeeBreakdown by component.currentFeeBreakdown.collectAsState()
     val editableMatches by component.editableMatches.collectAsState()
     val showTeamDialog by component.showTeamSelectionDialog.collectAsState()
+    val showMatchEditDialog by component.showMatchEditDialog.collectAsState()
 
     val isBracketView by component.isBracketView.collectAsState()
     var isRefundAutomatic by remember { mutableStateOf(false) }
@@ -443,11 +445,8 @@ fun EventDetailScreen(
                                             },
                                             isEditingMatches = isEditingMatches,
                                             editableMatches = editableMatches,
-                                            onUpdateMatch = { matchId, updater ->
-                                                component.updateEditableMatch(matchId, updater)
-                                            },
-                                            onSelectTeam = { matchId, position ->
-                                                component.showTeamSelection(matchId, position)
+                                            onEditMatch = { match ->
+                                                component.showMatchEditDialog(match)
                                             }
                                         )
                                     } else {
@@ -492,6 +491,15 @@ fun EventDetailScreen(
                         )
                     },
                     onDismiss = component::dismissTeamSelection
+                )
+            }
+            showMatchEditDialog?.let { dialogState ->
+                MatchEditDialog(
+                    match = dialogState.match,
+                    teams = dialogState.teams,
+                    fields = dialogState.fields,
+                    onDismissRequest = component::dismissMatchEditDialog,
+                    onConfirm = component::updateMatchFromDialog
                 )
             }
             if (showTeamSelectionDialog) {

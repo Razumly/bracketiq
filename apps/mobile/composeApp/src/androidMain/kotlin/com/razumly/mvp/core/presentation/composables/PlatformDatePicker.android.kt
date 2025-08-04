@@ -15,16 +15,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import com.raedghazal.kotlinx_datetime_ext.now
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.LocalTime
+import java.time.ZoneId
+import java.util.Calendar
+import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
-import kotlinx.datetime.LocalDate
-import kotlinx.datetime.LocalDateTime
-import kotlinx.datetime.LocalTime
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.toInstant
-import kotlinx.datetime.toLocalDateTime
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalTime::class)
 @Composable
 actual fun PlatformDateTimePicker(
     onDateSelected: (Instant?) -> Unit,
@@ -36,84 +35,92 @@ actual fun PlatformDateTimePicker(
     if (showPicker) {
         var showDatePicker by remember { mutableStateOf(true) }
         var showTimePicker by remember { mutableStateOf(false) }
-        var selectedDateMillis by remember { mutableStateOf<Long?>(null) }
+        var selectedDate by remember { mutableStateOf<LocalDate?>(null) }
+
+        val currentCalendar = Calendar.getInstance()
         val timeState = rememberTimePickerState(
-            initialHour = LocalDateTime.now().hour,
-            initialMinute = LocalDateTime.now().minute,
+            initialHour = currentCalendar.get(Calendar.HOUR_OF_DAY),
+            initialMinute = currentCalendar.get(Calendar.MINUTE),
             is24Hour = true
         )
-        val timeZone = TimeZone.currentSystemDefault()
 
         if (showDatePicker) {
             val datePickerState = rememberDatePickerState(
                 initialSelectedDateMillis = System.currentTimeMillis(),
-                selectableDates = com.razumly.mvp.core.presentation.composables.PastOrFutureSelectableDates(
-                    canSelectPast
-                ),
+                selectableDates = PastOrFutureSelectableDates(canSelectPast)
             )
 
-            DatePickerDialog(onDismissRequest = onDismissRequest, confirmButton = {
-                TextButton(onClick = {
-                    selectedDateMillis = datePickerState.selectedDateMillis
-                    showDatePicker = false
-                    if (getTime) {
-                        showTimePicker = true
-                    } else {
-                        onDateSelected(selectedDateMillis?.let {
-                            Instant.fromEpochMilliseconds(it).toLocalDateTime(TimeZone.UTC)
-                                .toInstant(timeZone)
-                        })
-                        onDismissRequest()
+            DatePickerDialog(
+                onDismissRequest = onDismissRequest,
+                confirmButton = {
+                    TextButton(onClick = {
+                        datePickerState.selectedDateMillis?.let { millis ->
+                            // Convert millis to LocalDate
+                            selectedDate = java.time.Instant.ofEpochMilli(millis)
+                                .atZone(ZoneId.systemDefault())
+                                .toLocalDate()
+                        }
+                        showDatePicker = false
+
+                        if (getTime) {
+                            showTimePicker = true
+                        } else {
+                            // Return just the date at start of day as kotlin.time.Instant
+                            selectedDate?.let { date ->
+                                val javaInstant = date.atStartOfDay(ZoneId.systemDefault()).toInstant()
+                                val kotlinInstant = Instant.fromEpochMilliseconds(javaInstant.toEpochMilli())
+                                onDateSelected(kotlinInstant)
+                            }
+                            onDismissRequest()
+                        }
+                    }) {
+                        Text("OK")
                     }
-                }) {
-                    Text("OK")
+                },
+                dismissButton = {
+                    TextButton(onClick = onDismissRequest) {
+                        Text("Cancel")
+                    }
                 }
-            }, dismissButton = {
-                TextButton(onClick = onDismissRequest) { Text("Cancel") }
-            }) {
+            ) {
                 DatePicker(state = datePickerState)
             }
         }
 
         if (showTimePicker) {
-            AlertDialog(onDismissRequest = {
-                showTimePicker = false
-                onDismissRequest()
-            }, dismissButton = {
-                TextButton(onClick = onDismissRequest) { Text("Cancel") }
-            }, confirmButton = {
-                TextButton(onClick = {
-                    selectedDateMillis?.let { dateMillis ->
-                        // Combine as local date and time, convert to UTC
-                        val instant = combineLocalDateTimeAndConvertToUtc(
-                            dateMillis = dateMillis,
-                            hour = timeState.hour,
-                            minute = timeState.minute,
-                            timeZone = timeZone
-                        )
-                        onDateSelected(instant)
-                    }
+            AlertDialog(
+                onDismissRequest = {
+                    showTimePicker = false
                     onDismissRequest()
-                }) {
-                    Text("OK")
+                },
+                dismissButton = {
+                    TextButton(onClick = onDismissRequest) {
+                        Text("Cancel")
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        selectedDate?.let { date ->
+                            val time = LocalTime.of(timeState.hour, timeState.minute)
+                            val dateTime = LocalDateTime.of(date, time)
+
+                            // Convert to java.time.Instant, then to kotlin.time.Instant
+                            val javaInstant = dateTime.atZone(ZoneId.systemDefault()).toInstant()
+                            val kotlinInstant = Instant.fromEpochMilliseconds(javaInstant.toEpochMilli())
+                            onDateSelected(kotlinInstant)
+                        }
+                        onDismissRequest()
+                    }) {
+                        Text("OK")
+                    }
+                },
+                text = {
+                    TimePicker(state = timeState)
                 }
-            }, text = {
-                TimePicker(state = timeState)
-            })
+            )
         }
     }
 }
-
-fun combineLocalDateTimeAndConvertToUtc(
-    dateMillis: Long, hour: Int, minute: Int, timeZone: TimeZone
-): Instant {
-    val selectedDate = Instant.fromEpochMilliseconds(dateMillis).toLocalDateTime(TimeZone.UTC).date
-
-    val localDateTime = LocalDateTime(selectedDate, LocalTime(hour, minute))
-
-    return localDateTime.toInstant(timeZone)
-}
-
 
 @OptIn(ExperimentalMaterial3Api::class)
 class PastOrFutureSelectableDates(private val canSelectPast: Boolean) : SelectableDates {

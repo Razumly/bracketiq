@@ -32,13 +32,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.presentation.util.getScreenWidth
 import com.razumly.mvp.core.presentation.util.isScrollingUp
 import com.razumly.mvp.core.util.ceilDiv
 import com.razumly.mvp.eventDetail.LocalTournamentComponent
-import com.razumly.mvp.eventDetail.TeamPosition
 import com.razumly.mvp.home.LocalNavBarPadding
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -47,18 +45,17 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 fun TournamentBracketView(
     showFab: (Boolean) -> Unit,
     onMatchClick: (MatchWithRelations) -> Unit = {},
-    isEditingMatches: Boolean = false, // Add editing mode parameter
-    editableMatches: List<MatchWithRelations> = emptyList(), // Add editable matches
-    onUpdateMatch: ((String, (MatchMVP) -> MatchMVP) -> Unit)? = null, // Add update callback
-    onSelectTeam: ((String, TeamPosition) -> Unit)? = null // Add team selection callback
+    isEditingMatches: Boolean = false,
+    editableMatches: List<MatchWithRelations> = emptyList(),
+    onEditMatch: ((MatchWithRelations) -> Unit)? = null
 ) {
     val component = LocalTournamentComponent.current
     val losersBracket by component.losersBracket.collectAsState()
     val roundsList by component.rounds.collectAsState()
+    val editableRounds by component.editableRounds.collectAsState()
     val columnScrollState = rememberScrollState()
     val displayRounds = if (isEditingMatches) {
-        // Convert editable matches to rounds format
-        convertMatchesToRounds(editableMatches)
+        editableRounds
     } else {
         roundsList
     }
@@ -97,8 +94,10 @@ fun TournamentBracketView(
         // Function to calculate height
         fun calculateMaxHeight(index: Int) {
             var maxSize = 0
-            val itemsInViewCount = lazyRowState.layoutInfo.visibleItemsInfo.size.takeIf { it > 0 } ?: roundsList.size
-            val lastItemInViewIndex = (index + itemsInViewCount - 1).coerceAtMost(roundsList.size - 1)
+            val itemsInViewCount =
+                lazyRowState.layoutInfo.visibleItemsInfo.size.takeIf { it > 0 } ?: roundsList.size
+            val lastItemInViewIndex =
+                (index + itemsInViewCount - 1).coerceAtMost(roundsList.size - 1)
 
             if (roundsList.isNotEmpty() && index < roundsList.size) {
                 roundsList.slice(index..lastItemInViewIndex).forEachIndexed { i, round ->
@@ -106,7 +105,7 @@ fun TournamentBracketView(
                     val halfSize = round.size.ceilDiv(2)
                     val currentIndex = index + i
 
-                    if (!losersBracket && round.any { it?.match?.losersBracket == true} && i != 0) {
+                    if (!losersBracket && round.any { it?.match?.losersBracket == true } && i != 0) {
                         if (round.size * 2 > maxSize) {
                             maxSize = round.size * 2
                             maxHeightIndex = currentIndex
@@ -152,7 +151,7 @@ fun TournamentBracketView(
                 state = lazyRowState,
                 modifier = Modifier.height(boxHeight).fillMaxWidth(),
             ) {
-                itemsIndexed(roundsList, key = { _, round ->
+                itemsIndexed(displayRounds, key = { _, round ->
                     round.filterNotNull().joinToString { it.match.id }
                 }) { colIndex, round ->
                     Column(
@@ -196,38 +195,25 @@ fun TournamentBracketView(
                                 ) {
                                     Napier.d("Column: $colIndex, Chunk: $chunkIndex, Filtered Matches count: ${filteredMatches.size}, is visible: $visible")
                                     filteredMatches.forEach { match ->
-                                        if (isEditingMatches) {
-                                            // Show editable match card
-                                            EditableMatchCard(
-                                                match = match,
-                                                onUpdateMatch = { updater ->
-                                                    onUpdateMatch?.invoke(match?.match?.id ?: "", updater)
-                                                },
-                                                onSelectTeam1 = {
-                                                    onSelectTeam?.invoke(match?.match?.id ?: "", TeamPosition.TEAM1)
-                                                },
-                                                onSelectTeam2 = {
-                                                    onSelectTeam?.invoke(match?.match?.id ?: "", TeamPosition.TEAM2)
-                                                },
-                                                onSelectRef = {
-                                                    onSelectTeam?.invoke(match?.match?.id ?: "", TeamPosition.REF)
-                                                },
-                                                modifier = Modifier.height(cardHeight.dp)
-                                                    .width(width.dp)
-                                            )
+                                        val displayMatch = if (isEditingMatches && editableMatches.isNotEmpty()) {
+                                            editableMatches.find { it.match.id == match?.match?.id } ?: match
                                         } else {
-                                            // Show regular match card
-                                            MatchCard(
-                                                match = match,
-                                                onClick = {
-                                                    if (match != null) {
-                                                        onMatchClick(match)
-                                                    }
-                                                },
-                                                modifier = Modifier.height(cardHeight.dp)
-                                                    .width(width.dp)
-                                            )
+                                            match
                                         }
+
+                                        MatchCard(
+                                            match = displayMatch,
+                                            onClick = {
+                                                if (displayMatch != null) {
+                                                    if (isEditingMatches) {
+                                                        onEditMatch?.invoke(displayMatch)
+                                                    } else {
+                                                        onMatchClick(displayMatch)
+                                                    }
+                                                }
+                                            },
+                                            modifier = Modifier.height(cardHeight.dp).width(width.dp)
+                                        )
                                     }
                                 }
                             }
@@ -237,16 +223,4 @@ fun TournamentBracketView(
             }
         }
     }
-}
-
-private fun convertMatchesToRounds(matches: List<MatchWithRelations>): List<List<MatchWithRelations?>> {
-    // Group matches by their round (based on tournament structure)
-    // This is a simplified version - you might need to adapt based on your tournament structure
-    return matches.groupBy { match ->
-        // You can determine round by looking at previous matches or other tournament structure
-        // For now, using a simple grouping
-        match.match.matchNumber / 2 // Simple round calculation
-    }.values.map { roundMatches ->
-        roundMatches.map { it as MatchWithRelations? }
-    }.toList()
 }

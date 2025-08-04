@@ -76,7 +76,9 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val isUserCaptain: StateFlow<Boolean>
     val isEditingMatches: StateFlow<Boolean>
     val editableMatches: StateFlow<List<MatchWithRelations>>
+    val editableRounds: StateFlow<List<List<MatchWithRelations?>>>
     val showTeamSelectionDialog: StateFlow<TeamSelectionDialogState?>
+    val showMatchEditDialog: StateFlow<MatchEditDialogState?>
 
     fun matchSelected(selectedMatch: MatchWithRelations)
     fun showFeeBreakdown(feeBreakdown: FeeBreakdown, onConfirm: () -> Unit, onCancel: () -> Unit)
@@ -112,12 +114,21 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun showTeamSelection(matchId: String, position: TeamPosition)
     fun selectTeamForMatch(matchId: String, position: TeamPosition, teamId: String?)
     fun dismissTeamSelection()
+    fun showMatchEditDialog(match: MatchWithRelations)
+    fun dismissMatchEditDialog()
+    fun updateMatchFromDialog(updatedMatch: MatchWithRelations)
 }
 
 data class TeamSelectionDialogState(
     val matchId: String,
     val position: TeamPosition,
     val availableTeams: List<TeamWithPlayers>
+)
+
+data class MatchEditDialogState(
+    val match: MatchWithRelations,
+    val teams: List<TeamWithPlayers>,
+    val fields: List<FieldWithMatches>
 )
 
 enum class TeamPosition { TEAM1, TEAM2, REF }
@@ -217,7 +228,13 @@ class DefaultEventDetailComponent(
     )
 
     override val divisionFields = fieldRepository.getFieldsInTournamentWithMatchesFlow(event.id)
-        .map { fields -> fields.filter { it.field.divisions.contains(selectedDivision.value?.name) } }
+        .map { fields ->
+            fields.filter {
+                if (!selectedEvent.value.event.singleDivision) it.field.divisions.contains(
+                    selectedDivision.value?.name
+                ) else true
+            }
+        }
         .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     private val _divisionMatches = MutableStateFlow<Map<String, MatchWithRelations>>(emptyMap())
@@ -286,8 +303,14 @@ class DefaultEventDetailComponent(
     private val _editableMatches = MutableStateFlow<List<MatchWithRelations>>(emptyList())
     override val editableMatches = _editableMatches.asStateFlow()
 
+    private val _editableRounds = MutableStateFlow<List<List<MatchWithRelations?>>>(emptyList())
+    override val editableRounds = _editableRounds.asStateFlow()
+
     private val _showTeamSelectionDialog = MutableStateFlow<TeamSelectionDialogState?>(null)
     override val showTeamSelectionDialog = _showTeamSelectionDialog.asStateFlow()
+
+    private val _showMatchEditDialog = MutableStateFlow<MatchEditDialogState?>(null)
+    override val showMatchEditDialog = _showMatchEditDialog.asStateFlow()
 
     private val shareServiceProvider = ShareServiceProvider()
 
@@ -769,6 +792,12 @@ class DefaultEventDetailComponent(
         scope.launch {
             val currentMatches = eventWithRelations.value.matches
             _editableMatches.value = currentMatches.map { it.copy() }
+            val editableMap = editableMatches.value.associateBy { it.match.id }
+            _editableRounds.value = rounds.value.map { round ->
+                round.map { match ->
+                    match?.let { editableMap[it.match.id] ?: it }
+                }
+            }
             _isEditingMatches.value = true
         }
     }
@@ -897,6 +926,30 @@ class DefaultEventDetailComponent(
         return timeSlots.filter { it.value.size > 1 }
             .map { "${it.key} in ${it.value.joinToString(", ")}" }
             .joinToString("; ")
+    }
+
+    override fun showMatchEditDialog(match: MatchWithRelations) {
+        _showMatchEditDialog.value = MatchEditDialogState(
+            match = match,
+            teams = eventWithRelations.value.teams,
+            fields = divisionFields.value
+        )
+    }
+
+    override fun dismissMatchEditDialog() {
+        _showMatchEditDialog.value = null
+    }
+
+    override fun updateMatchFromDialog(updatedMatch: MatchWithRelations) {
+        val currentMatches = _editableMatches.value.toMutableList()
+        val matchIndex = currentMatches.indexOfFirst { it.match.id == updatedMatch.match.id }
+
+        if (matchIndex != -1) {
+            currentMatches[matchIndex] = updatedMatch
+            _editableMatches.value = currentMatches
+        }
+
+        dismissMatchEditDialog()
     }
 
     data class ValidationResult(
