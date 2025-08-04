@@ -38,7 +38,6 @@ import com.razumly.mvp.core.presentation.util.isScrollingUp
 import com.razumly.mvp.core.util.ceilDiv
 import com.razumly.mvp.eventDetail.LocalTournamentComponent
 import com.razumly.mvp.home.LocalNavBarPadding
-import io.github.aakira.napier.Napier
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 @Composable
@@ -123,7 +122,6 @@ fun TournamentBracketView(
                     }
                 }
 
-                Napier.d("Max Size: $maxSize, maxIndex: $maxHeightIndex")
                 maxHeightInRowDp = maxSize.dp * cardContainerHeight
 
                 if (boxHeight == Dp.Unspecified || maxHeightInRowDp > boxHeight) {
@@ -193,7 +191,6 @@ fun TournamentBracketView(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     verticalArrangement = Arrangement.SpaceAround
                                 ) {
-                                    Napier.d("Column: $colIndex, Chunk: $chunkIndex, Filtered Matches count: ${filteredMatches.size}, is visible: $visible")
                                     filteredMatches.forEach { match ->
                                         val displayMatch = if (isEditingMatches && editableMatches.isNotEmpty()) {
                                             editableMatches.find { it.match.id == match?.match?.id } ?: match

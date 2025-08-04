@@ -21,7 +21,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -32,15 +34,20 @@ import androidx.compose.ui.zIndex
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
-import com.razumly.mvp.core.presentation.matchCard
-import com.razumly.mvp.core.presentation.matchCardBottom
-import com.razumly.mvp.core.presentation.matchCardTop
 import com.razumly.mvp.core.presentation.util.timeFormat
 import com.razumly.mvp.eventDetail.LocalTournamentComponent
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import kotlin.time.ExperimentalTime
 
+val localColors = compositionLocalOf<ColorPallete> { error("No colors provided")}
+
+data class ColorPallete(
+    val primary: Color,
+    val onPrimary: Color,
+    val primaryContainer: Color,
+    val onPrimaryContainer: Color,
+)
 @Composable
 fun MatchCard(
     match: MatchWithRelations?, onClick: () -> Unit, modifier: Modifier = Modifier
@@ -49,66 +56,80 @@ fun MatchCard(
     val teams by component.divisionTeams.collectAsState()
     val matches by component.divisionMatches.collectAsState()
     val fields by component.divisionFields.collectAsState()
-    val matchCardColor = if (match != null && match.match.losersBracket) {
-        MaterialTheme.colorScheme.tertiaryContainer
+    val matchCardColorPallet = if (match != null && match.match.losersBracket) {
+        ColorPallete(MaterialTheme.colorScheme.tertiary,
+            MaterialTheme.colorScheme.onTertiary,
+            MaterialTheme.colorScheme.tertiaryContainer,
+            MaterialTheme.colorScheme.onTertiaryContainer
+        )
     } else {
-        matchCard
+        ColorPallete(MaterialTheme.colorScheme.primary,
+            MaterialTheme.colorScheme.onPrimary,
+            MaterialTheme.colorScheme.primaryContainer,
+            MaterialTheme.colorScheme.onPrimaryContainer
+        )
     }
-    Box(
-        modifier = modifier
-    ) {
-        match?.let {
-            FloatingBox(
-                modifier = Modifier.align(Alignment.TopCenter).offset(y = (-20).dp).zIndex(1f),
-                color = matchCardTop
-            ) {
-                Text(
-                    text = timeFormat.format(
-                        match.match.start.toLocalDateTime(TimeZone.currentSystemDefault()).time
-                    ),
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                    style = MaterialTheme.typography.labelLarge
-                )
-            }
-            Card(
-                modifier = modifier.fillMaxWidth().clickable(onClick = onClick),
-                elevation = CardDefaults.cardElevation(4.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = matchCardColor,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    MatchInfoSection(match, fields)
-                    VerticalDivider()
-                    TeamsSection(
-                        team1 = teams[match.match.team1],
-                        team2 = teams[match.match.team2],
-                        match = match,
-                        matches = matches,
-                    )
-                }
-            }
-            FloatingBox(
-                modifier = Modifier.align(Alignment.BottomCenter).offset(y = 20.dp),
-                color = matchCardBottom
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
+    CompositionLocalProvider(localColors provides matchCardColorPallet) {
+        Box(
+            modifier = modifier
+        ) {
+            match?.let {
+                FloatingBox(
+                    modifier = Modifier.align(Alignment.TopCenter).offset(y = (-20).dp).zIndex(1f),
+                    color = localColors.current.primaryContainer
                 ) {
                     Text(
-                        "Ref: ", style = MaterialTheme.typography.labelLarge
+                        text = timeFormat.format(
+                            match.match.start.toLocalDateTime(TimeZone.currentSystemDefault()).time
+                        ),
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = localColors.current.onPrimaryContainer
                     )
-                    teams[match.match.refId]?.players?.forEach { player ->
-                        Text(
-                            "${player.firstName}.${player.lastName.first()}",
-                            modifier = Modifier.padding(start = 4.dp),
-                            style = MaterialTheme.typography.labelLarge,
-                            overflow = TextOverflow.Ellipsis,
-                            maxLines = 1
+                }
+                Card(
+                    modifier = modifier.fillMaxWidth().clickable(onClick = onClick),
+                    elevation = CardDefaults.cardElevation(4.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = localColors.current.primary,
+                        contentColor = localColors.current.onPrimary
+                    )
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        MatchInfoSection(match, fields)
+                        VerticalDivider(color = localColors.current.onPrimary)
+                        TeamsSection(
+                            team1 = teams[match.match.team1],
+                            team2 = teams[match.match.team2],
+                            match = match,
+                            matches = matches,
                         )
+                    }
+                }
+                FloatingBox(
+                    modifier = Modifier.align(Alignment.BottomCenter).offset(y = 20.dp),
+                    color = localColors.current.primaryContainer
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            "Ref: ",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = localColors.current.onPrimaryContainer
+                        )
+                        teams[match.match.refId]?.players?.forEach { player ->
+                            Text(
+                                "${player.firstName}.${player.lastName.first()}",
+                                modifier = Modifier.padding(start = 4.dp),
+                                style = MaterialTheme.typography.labelLarge,
+                                overflow = TextOverflow.Ellipsis,
+                                maxLines = 1,
+                                color = localColors.current.onPrimaryContainer
+                            )
+                        }
                     }
                 }
             }
@@ -134,9 +155,12 @@ private fun MatchInfoSection(match: MatchWithRelations, fields: List<FieldWithMa
         modifier = Modifier.padding(8.dp).width(IntrinsicSize.Max),
         verticalArrangement = Arrangement.SpaceEvenly
     ) {
-        Text("M: ${match.match.matchNumber}")
-        HorizontalDivider()
-        Text("F: ${fields.find { it.field.id == match.match.field }?.field?.fieldNumber}")
+        Text("M: ${match.match.matchNumber}", color = localColors.current.onPrimary)
+        HorizontalDivider(color = localColors.current.onPrimary)
+        Text(
+            "F: ${fields.find { it.field.id == match.match.field }?.field?.fieldNumber}",
+            color = localColors.current.onPrimary
+        )
     }
 }
 
@@ -154,7 +178,7 @@ private fun TeamsSection(
         val leftMatch = matches[match.previousLeftMatch?.id]
         val rightMatch = matches[match.previousRightMatch?.id]
         TeamRow(team1, match.match.team1Points, leftMatch, match.match.losersBracket)
-        HorizontalDivider(thickness = 1.dp)
+        HorizontalDivider(thickness = 1.dp, color = localColors.current.onPrimary)
         TeamRow(team2, match.match.team2Points, rightMatch, match.match.losersBracket)
     }
 }
@@ -175,7 +199,7 @@ private fun TeamRow(
                     currentTeam.team.name.toString(),
                     Modifier.weight(1f),
                     overflow = TextOverflow.Ellipsis,
-                    maxLines = 1
+                    maxLines = 1, color = localColors.current.onPrimary
                 )
             } else {
                 currentTeam.players.forEach { player ->
@@ -183,7 +207,7 @@ private fun TeamRow(
                         "${player.firstName}.${player.lastName.first()}",
                         Modifier.weight(1f),
                         overflow = TextOverflow.Ellipsis,
-                        maxLines = 1
+                        maxLines = 1, color = localColors.current.onPrimary
                     )
                 }
             }
@@ -192,7 +216,11 @@ private fun TeamRow(
             previousMatch?.match?.matchNumber?.let { matchNumber ->
                 val prefix =
                     if (isLosersBracket && !previousMatch.match.losersBracket) "Loser" else "Winner"
-                Text("$prefix of match #$matchNumber", Modifier.weight(1f))
+                Text(
+                    "$prefix of match #$matchNumber",
+                    Modifier.weight(1f),
+                    color = localColors.current.onPrimary
+                )
             }
         }
     }

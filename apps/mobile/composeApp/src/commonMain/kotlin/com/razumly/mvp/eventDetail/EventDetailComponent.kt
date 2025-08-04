@@ -120,9 +120,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
 }
 
 data class TeamSelectionDialogState(
-    val matchId: String,
-    val position: TeamPosition,
-    val availableTeams: List<TeamWithPlayers>
+    val matchId: String, val position: TeamPosition, val availableTeams: List<TeamWithPlayers>
 )
 
 data class MatchEditDialogState(
@@ -205,8 +203,7 @@ class DefaultEventDetailComponent(
 
     override val eventWithRelations = selectedEvent.flatMapLatest { eventWithPlayers ->
         combine(
-            matchRepository.getMatchesOfTournamentFlow(eventWithPlayers.event.id)
-                .map { result ->
+            matchRepository.getMatchesOfTournamentFlow(eventWithPlayers.event.id).map { result ->
                     result.getOrElse {
                         _errorState.value =
                             ErrorMessage("Error loading matches: ${it.message}"); emptyList()
@@ -227,15 +224,14 @@ class DefaultEventDetailComponent(
         )
     )
 
-    override val divisionFields = fieldRepository.getFieldsInTournamentWithMatchesFlow(event.id)
-        .map { fields ->
-            fields.filter {
-                if (!selectedEvent.value.event.singleDivision) it.field.divisions.contains(
-                    selectedDivision.value?.name
-                ) else true
-            }
-        }
-        .stateIn(scope, SharingStarted.Eagerly, emptyList())
+    override val divisionFields =
+        fieldRepository.getFieldsInTournamentWithMatchesFlow(event.id).map { fields ->
+                fields.filter {
+                    if (!selectedEvent.value.event.singleDivision) it.field.divisions.contains(
+                        selectedDivision.value?.name
+                    ) else true
+                }
+            }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     private val _divisionMatches = MutableStateFlow<Map<String, MatchWithRelations>>(emptyMap())
     override val divisionMatches = _divisionMatches.asStateFlow()
@@ -490,8 +486,7 @@ class DefaultEventDetailComponent(
 
             if (selectedEvent.value.event.price == 0.0 || isEventFull.value) {
                 loadingHandler.showLoading("Joining Event ...")
-                eventAbsRepository.addTeamToEvent(selectedEvent.value.event, team.team)
-                    .onSuccess {
+                eventAbsRepository.addTeamToEvent(selectedEvent.value.event, team.team).onSuccess {
                         loadingHandler.showLoading("Reloading Event")
                         eventAbsRepository.getEvent(selectedEvent.value.event)
                     }.onFailure {
@@ -812,7 +807,6 @@ class DefaultEventDetailComponent(
         scope.launch {
             val matches = _editableMatches.value
 
-            // Validate matches before committing
             val validationResult = validateMatches(matches)
             if (!validationResult.isValid) {
                 _errorState.value = ErrorMessage(validationResult.errorMessage)
@@ -854,9 +848,7 @@ class DefaultEventDetailComponent(
     override fun showTeamSelection(matchId: String, position: TeamPosition) {
         val availableTeams = eventWithRelations.value.teams
         _showTeamSelectionDialog.value = TeamSelectionDialogState(
-            matchId = matchId,
-            position = position,
-            availableTeams = availableTeams
+            matchId = matchId, position = position, availableTeams = availableTeams
         )
     }
 
@@ -876,63 +868,45 @@ class DefaultEventDetailComponent(
     }
 
     private fun validateMatches(matches: List<MatchWithRelations>): ValidationResult {
-        // Check for overlapping match times
         for (i in matches.indices) {
             for (j in i + 1 until matches.size) {
                 val match1 = matches[i].match
                 val match2 = matches[j].match
 
                 if (doMatchesOverlap(match1, match2)) {
-                    return ValidationResult(
-                        isValid = false,
-                        errorMessage = "Match ${match1.matchNumber} and ${match2.matchNumber} have overlapping times"
-                    )
+                    if (match1.field != null && match1.field == match2.field) {
+                        return ValidationResult(
+                            isValid = false,
+                            errorMessage = "Matches #${match1.matchNumber} and #${match2.matchNumber} overlap on the same field"
+                        )
+                    }
+
+                    val match1Teams = setOfNotNull(match1.team1, match1.team2, match1.refId)
+                    val match2Teams = setOfNotNull(match2.team1, match2.team2, match2.refId)
+                    val sharedTeams = match1Teams.intersect(match2Teams)
+
+                    if (sharedTeams.isNotEmpty()) {
+                        return ValidationResult(
+                            isValid = false,
+                            errorMessage = "Matches #${match1.matchNumber} and #${match2.matchNumber} have overlapping participants"
+                        )
+                    }
                 }
             }
         }
-
-        // Check for team conflicts (same team in multiple matches at same time)
-        val teamConflicts = findTeamConflicts(matches.map { it.match })
-        if (teamConflicts.isNotEmpty()) {
-            return ValidationResult(
-                isValid = false,
-                errorMessage = "Team scheduling conflict: $teamConflicts"
-            )
-        }
-
         return ValidationResult(isValid = true, errorMessage = "")
     }
 
     private fun doMatchesOverlap(match1: MatchMVP, match2: MatchMVP): Boolean {
-        return match2.end?.let { match1.start < it } == true && match1.end?.let { match2.start < it } == true
-    }
+        val match1End = match1.end ?: return false
+        val match2End = match2.end ?: return false
 
-    private fun findTeamConflicts(matches: List<MatchMVP>): String {
-        val timeSlots = mutableMapOf<String, MutableList<String>>()
-
-        matches.forEach { match ->
-            match.team1?.let { teamId ->
-                timeSlots.getOrPut(teamId) { mutableListOf() }.add("Match ${match.matchNumber}")
-            }
-            match.team2?.let { teamId ->
-                timeSlots.getOrPut(teamId) { mutableListOf() }.add("Match ${match.matchNumber}")
-            }
-            match.refId?.let { refId ->
-                timeSlots.getOrPut(refId) { mutableListOf() }
-                    .add("Match ${match.matchNumber} (ref)")
-            }
-        }
-
-        return timeSlots.filter { it.value.size > 1 }
-            .map { "${it.key} in ${it.value.joinToString(", ")}" }
-            .joinToString("; ")
+        return match1.start < match2End && match2.start < match1End
     }
 
     override fun showMatchEditDialog(match: MatchWithRelations) {
         _showMatchEditDialog.value = MatchEditDialogState(
-            match = match,
-            teams = eventWithRelations.value.teams,
-            fields = divisionFields.value
+            match = match, teams = eventWithRelations.value.teams, fields = divisionFields.value
         )
     }
 
@@ -953,7 +927,6 @@ class DefaultEventDetailComponent(
     }
 
     data class ValidationResult(
-        val isValid: Boolean,
-        val errorMessage: String
+        val isValid: Boolean, val errorMessage: String
     )
 }
