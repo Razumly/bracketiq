@@ -95,6 +95,7 @@ kotlin {
                 implementation(libs.kmpalette.extensions.network)
                 implementation(libs.kmpalette.core)
                 implementation(libs.lifecycle.coroutines)
+                implementation(libs.jetbrains.kotlin.metadata.jvm)
                 api(libs.androidx.performance.annotation)
                 api(libs.lifecycle)
                 api(libs.kmpnotifier)

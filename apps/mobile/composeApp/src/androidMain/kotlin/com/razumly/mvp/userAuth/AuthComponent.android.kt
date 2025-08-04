@@ -12,7 +12,7 @@ fun DefaultAuthComponent.oauth2Login(activity: ComponentActivity) {
         userRepository.oauth2Login(activity).onSuccess {
             _loginState.value = LoginState.Success
         }.onFailure {
-            _loginState.value = LoginState.Error("Failed To Login")
+            _loginState.value = LoginState.Error("Failed To Login: ${it.message}")
         }
     }
 }

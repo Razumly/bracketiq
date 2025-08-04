@@ -7,22 +7,24 @@ import com.google.api.services.oauth2.model.Userinfo
 import com.google.auth.http.HttpCredentialsAdapter
 import com.google.auth.oauth2.AccessToken
 import com.google.auth.oauth2.OAuth2Credentials
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
-fun getGoogleUserInfo(userToken: String): Userinfo {
-    val googleNetHttpTransport = GoogleNetHttpTransport.newTrustedTransport()
-    val googleJsonFactory = GsonFactory()
+suspend fun getGoogleUserInfo(userToken: String): Userinfo {
+    return withContext(Dispatchers.IO) {
+        val googleNetHttpTransport = GoogleNetHttpTransport.newTrustedTransport()
+        val googleJsonFactory = GsonFactory.getDefaultInstance()
 
-    val oauth2Api = Oauth2.Builder(
-        googleNetHttpTransport,
-        googleJsonFactory,
-        HttpCredentialsAdapter(
-            OAuth2Credentials.create(
-                AccessToken(userToken, null)
-            ))
-    )
-        .build()
+        val oauth2Api = Oauth2.Builder(
+            googleNetHttpTransport,
+            googleJsonFactory,
+            HttpCredentialsAdapter(
+                OAuth2Credentials.create(
+                    AccessToken(userToken, null)
+                )
+            )
+        ).build()
 
-    val userInfo = oauth2Api.Userinfo().v2().Me().get()
-        .execute()
-    return userInfo
+        oauth2Api.Userinfo().v2().Me().get().execute()
+    }
 }

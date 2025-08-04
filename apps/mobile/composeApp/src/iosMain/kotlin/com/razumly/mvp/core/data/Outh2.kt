@@ -1,7 +1,6 @@
 package com.razumly.mvp.core.data
 
 import com.razumly.mvp.core.data.dataTypes.dtos.UserDataDTO
-import com.razumly.mvp.core.data.dataTypes.dtos.toUserData
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.UserRepository
 import com.razumly.mvp.core.util.DbConstants
@@ -28,25 +27,27 @@ suspend fun UserRepository.oauth2Login(): Result<Unit> = kotlin.runCatching {
     return currentUser.value.onFailure {
         return runCatching {
             val userInfo = getGoogleUserInfo(session.providerAccessToken)
+            val newUserData = UserDataDTO(
+                firstName = userInfo.given_name,
+                lastName = userInfo.family_name,
+                userName = "${userInfo.given_name}${ID.unique()}",
+                id = id,
+                teamIds = listOf(),
+                friendIds = listOf(),
+                teamInvites = listOf(),
+                eventInvites = listOf(),
+                tournamentInvites = listOf(),
+                stripeAccountId = "",
+                stripeCustomerId = ""
+            )
             database.createDocument(
                 databaseId = DbConstants.DATABASE_NAME,
                 collectionId = DbConstants.USER_DATA_COLLECTION,
                 documentId = id,
-                data = UserDataDTO(
-                    firstName = userInfo.given_name,
-                    lastName = userInfo.family_name,
-                    userName = "${userInfo.given_name}${ID.unique()}",
-                    id = id,
-                    teamIds = listOf(),
-                    friendIds = listOf(),
-                    teamInvites = listOf(),
-                    eventInvites = listOf(),
-                    tournamentInvites = listOf(),
-                    stripeAccountId = "",
-                    stripeCustomerId = ""
-                ),
+                data = newUserData,
                 nestedType = UserDataDTO::class
-            ).data.toUserData(id)
+            )
+            loadCurrentUser()
         }
     }.map {}
 }

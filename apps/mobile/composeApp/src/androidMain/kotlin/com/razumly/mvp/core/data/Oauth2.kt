@@ -24,12 +24,9 @@ suspend fun UserRepository.oauth2Login(activity: ComponentActivity): Result<Unit
     loadCurrentUser()
 
     return currentUser.value.onFailure {
-        val userInfo = getGoogleUserInfo(session.providerAccessToken)
-        database.createDocument(
-            databaseId = DbConstants.DATABASE_NAME,
-            collectionId = DbConstants.USER_DATA_COLLECTION,
-            documentId = id,
-            data = UserDataDTO(
+        return runCatching {
+            val userInfo = getGoogleUserInfo(session.providerAccessToken)
+            val newUserData = UserDataDTO(
                 firstName = userInfo.givenName,
                 lastName = userInfo.familyName,
                 userName = "${userInfo.givenName}${ID.unique()}",
@@ -41,8 +38,15 @@ suspend fun UserRepository.oauth2Login(activity: ComponentActivity): Result<Unit
                 tournamentInvites = listOf(),
                 stripeAccountId = "",
                 stripeCustomerId = ""
-            ),
-            nestedType = UserDataDTO::class
-        )
+            )
+            database.createDocument(
+                databaseId = DbConstants.DATABASE_NAME,
+                collectionId = DbConstants.USER_DATA_COLLECTION,
+                documentId = id,
+                data = newUserData,
+                nestedType = UserDataDTO::class
+            )
+            loadCurrentUser()
+        }
     }.map{}
 }
