@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalTime::class)
+
 package com.razumly.mvp.core.data.dataTypes.dtos
 
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
@@ -5,6 +7,7 @@ import com.razumly.mvp.core.data.dataTypes.enums.Division
 import kotlin.time.Instant
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
+import kotlin.time.ExperimentalTime
 
 @Serializable
 data class MatchDTO(

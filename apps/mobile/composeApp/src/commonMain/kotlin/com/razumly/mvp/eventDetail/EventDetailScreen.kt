@@ -62,6 +62,7 @@ import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
 import com.razumly.mvp.core.data.repositories.FeeBreakdown
 import com.razumly.mvp.core.presentation.composables.PaymentProcessorButton
+import com.razumly.mvp.core.presentation.composables.PlatformTextField
 import com.razumly.mvp.core.presentation.composables.TeamCard
 import com.razumly.mvp.core.presentation.util.buttonTransitionSpec
 import com.razumly.mvp.core.util.LocalErrorHandler
@@ -612,12 +613,11 @@ fun RefundReasonDialog(
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(bottom = 8.dp)
             )
-            OutlinedTextField(
+            PlatformTextField(
                 value = currentReason,
                 onValueChange = onReasonChange,
-                placeholder = { Text("Enter reason...") },
+                placeholder = "Enter reason...",
                 modifier = Modifier.fillMaxWidth(),
-                maxLines = 3
             )
         }
     }, confirmButton = {

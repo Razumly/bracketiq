@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalTime::class)
+
 package com.razumly.mvp.core.presentation.util
 
 import androidx.compose.animation.AnimatedContentTransitionScope
@@ -32,6 +34,7 @@ import kotlinx.datetime.format.char
 import kotlinx.datetime.toLocalDateTime
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlin.time.ExperimentalTime
 
 fun instantToDateTimeString(instant: Instant): String {
     return instant.toLocalDateTime(timeZone = TimeZone.currentSystemDefault()).toString()
@@ -52,13 +55,13 @@ val timeFormat = LocalTime.Format {
 }
 
 val dateFormat = LocalDate.Format {
-    dayOfMonth()
+    day(padding = Padding.ZERO)
     char(' ')
     monthName(MonthNames.ENGLISH_ABBREVIATED)
 }
 
 val dateTimeFormat = LocalDateTime.Format {
-    dayOfMonth(padding = Padding.NONE)
+    day(padding = Padding.NONE)
     char(' ')
     monthName(MonthNames.ENGLISH_ABBREVIATED)
     char(',')
@@ -70,7 +73,6 @@ val dateTimeFormat = LocalDateTime.Format {
     minute()
     char(' ')
     amPmMarker("AM", "PM")
-
 }
 
 fun Int.teamSizeFormat(): String {

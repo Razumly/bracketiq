@@ -75,17 +75,23 @@ class RootComponent(
             try {
                 permissionsController.providePermission(Permission.LOCATION)
             } catch (deniedAlwaysException: DeniedAlwaysException) {
-                // Permission is always denied
+                Napier.w("Location permission always denied")
             } catch (denied: DeniedException) {
-                // Permission was denied
+                Napier.w("Location permission denied")
+            } catch (e: Exception) {
+                Napier.w("Location permission failed: ${e.message}")
             }
+
             try {
                 permissionsController.providePermission(Permission.REMOTE_NOTIFICATION)
             } catch (deniedAlwaysException: DeniedAlwaysException) {
-                // Permission is always denied
+                Napier.w("Notification permission always denied")
             } catch (denied: DeniedException) {
-                // Permission was denied
+                Napier.w("Notification permission denied")
+            } catch (e: Exception) {
+                Napier.w("Notification permission failed: ${e.message}")
             }
+
             if (permissionsController.isPermissionGranted(Permission.LOCATION)) {
                 Napier.d(tag = "Permissions") { "Location permission granted" }
             } else {
@@ -93,6 +99,7 @@ class RootComponent(
             }
         }
     }
+
 
     @Throws(Throwable::class)
     private fun createChild(

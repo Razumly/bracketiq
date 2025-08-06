@@ -35,6 +35,8 @@ import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.LoginState
 import com.razumly.mvp.core.presentation.composables.EmailSignInButton
 import com.razumly.mvp.core.presentation.composables.GoogleSignInButton
+import com.razumly.mvp.core.presentation.composables.PasswordField
+import com.razumly.mvp.core.presentation.composables.PlatformTextField
 import com.razumly.mvp.icons.BaselineVisibility24
 import com.razumly.mvp.icons.BaselineVisibilityOff24
 import com.razumly.mvp.icons.MVPIcons
@@ -73,116 +75,52 @@ fun AuthScreenBase(component: DefaultAuthComponent, onOauth2: () -> Unit?) {
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 if (isSignup) {
-                    OutlinedTextField(
+                    PlatformTextField(
                         value = firstName,
                         onValueChange = { firstName = it },
-                        label = { Text("First Name") },
-                        modifier = Modifier.fillMaxWidth(),
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Text,
-                            imeAction = ImeAction.Next
-                        ),
-                        singleLine = true
+                        label = "First Name",
+                        modifier = Modifier.fillMaxWidth()
                     )
 
-                    OutlinedTextField(
+                    PlatformTextField(
                         value = lastName,
                         onValueChange = { lastName = it },
-                        label = { Text("Last Name") },
-                        modifier = Modifier.fillMaxWidth(),
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Text,
-                            imeAction = ImeAction.Next
-                        ),
-                        singleLine = true
+                        label = "Last Name",
+                        modifier = Modifier.fillMaxWidth()
                     )
 
-                    OutlinedTextField(
+                    PlatformTextField(
                         value = userName,
                         onValueChange = { userName = it },
-                        label = { Text("Username") },
-                        modifier = Modifier.fillMaxWidth(),
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Text,
-                            imeAction = ImeAction.Next
-                        ),
-                        singleLine = true
+                        label = "Username",
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
 
-                OutlinedTextField(
+                PlatformTextField(
                     value = email,
                     onValueChange = { email = it },
-                    label = { Text("Email") },
-                    modifier = Modifier.fillMaxWidth(),
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Email,
-                        imeAction = ImeAction.Next
-                    ),
-                    singleLine = true
+                    label = "Email",
+                    keyboardType = "email",
+                    modifier = Modifier.fillMaxWidth()
                 )
 
-                OutlinedTextField(
+                // Replace OutlinedTextField with PasswordField
+                PasswordField(
                     value = password,
                     onValueChange = { password = it },
-                    label = { Text("Password") },
-                    modifier = Modifier.fillMaxWidth(),
-                    visualTransformation = if (isPasswordVisible)
-                        VisualTransformation.None
-                    else
-                        PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Password,
-                        imeAction = if (isSignup) ImeAction.Next else ImeAction.Done
-                    ),
+                    label = "Password",
                     isError = passwordError.isNotBlank(),
-                    trailingIcon = {
-                        IconButton(
-                            onClick = { isPasswordVisible = !isPasswordVisible }
-                        ) {
-                            Icon(
-                                if (isPasswordVisible)
-                                    MVPIcons.BaselineVisibilityOff24
-                                else
-                                    MVPIcons.BaselineVisibility24,
-                                contentDescription = "Password visibility"
-                            )
-                        }
-                    },
-                    singleLine = true,
-                    supportingText = {
-                        Text(passwordError, color = MaterialTheme.colorScheme.error)
-                    }
+                    supportingText = passwordError,
+                    modifier = Modifier.fillMaxWidth()
                 )
 
                 if (isSignup) {
-                    OutlinedTextField(
+                    PasswordField(
                         value = confirmPassword,
                         onValueChange = { confirmPassword = it },
-                        label = { Text("Confirm Password") },
-                        modifier = Modifier.fillMaxWidth(),
-                        visualTransformation = if (isConfirmPasswordVisible)
-                            VisualTransformation.None
-                        else
-                            PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Password,
-                            imeAction = ImeAction.Done
-                        ),
-                        trailingIcon = {
-                            IconButton(
-                                onClick = { isConfirmPasswordVisible = !isConfirmPasswordVisible }
-                            ) {
-                                Icon(
-                                    if (isConfirmPasswordVisible)
-                                        MVPIcons.BaselineVisibilityOff24
-                                    else
-                                        MVPIcons.BaselineVisibility24,
-                                    contentDescription = "Confirm password visibility"
-                                )
-                            }
-                        },
-                        singleLine = true
+                        label = "Confirm Password",
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
 

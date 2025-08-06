@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MenuAnchorType
@@ -15,8 +16,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import com.razumly.mvp.core.presentation.composables.DropdownOption
+import com.razumly.mvp.core.presentation.composables.PlatformDropdown
+import com.razumly.mvp.core.presentation.composables.PlatformTextField
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ColumnScope.SetCountDropdown(
     selectedCount: Int,
@@ -24,43 +27,24 @@ fun ColumnScope.SetCountDropdown(
     label: String,
     modifier: Modifier = Modifier
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    val setCountOptions = (1..5).toList()
-
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { expanded = !expanded },
-        modifier = modifier
-    ) {
-        OutlinedTextField(
-            readOnly = true,
-            value = selectedCount.toString(),
-            onValueChange = { },
-            label = { Text(label) },
-            trailingIcon = {
-                ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
-            },
-            colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
-            modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryEditable, true)
+    val setCountOptions = (1..5).map { count ->
+        DropdownOption(
+            value = count.toString(),
+            label = count.toString()
         )
-
-        ExposedDropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false }
-        ) {
-            setCountOptions.forEach { count ->
-                DropdownMenuItem(
-                    text = { Text(count.toString()) },
-                    onClick = {
-                        onCountSelected(count)
-                        expanded = false
-                    },
-                    contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding
-                )
-            }
-        }
     }
+
+    PlatformDropdown(
+        selectedValue = selectedCount.toString(),
+        onSelectionChange = { value ->
+            onCountSelected(value.toInt())
+        },
+        options = setCountOptions,
+        label = label,
+        modifier = modifier.fillMaxWidth()
+    )
 }
+
 
 @Composable
 fun ColumnScope.WinnerSetCountDropdown(

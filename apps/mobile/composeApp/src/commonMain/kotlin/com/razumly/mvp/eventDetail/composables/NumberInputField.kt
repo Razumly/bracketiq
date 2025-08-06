@@ -11,6 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.VisualTransformation
+import com.razumly.mvp.core.presentation.composables.PlatformTextField
 import com.razumly.mvp.core.util.CurrencyAmountInputVisualTransformation
 
 @Composable
@@ -20,43 +21,29 @@ fun NumberInputField(
     label: String,
     onValueChange: (String) -> Unit,
     isError: Boolean,
-    isMoney: Boolean,
     errorMessage: String? = null,
-    keyboardType: KeyboardType = KeyboardType.Number,
     supportingText: String? = null,
     placeholder: String? = null,
     enabled: Boolean = true
 ) {
     Column(modifier = modifier) {
-        OutlinedTextField(
+        PlatformTextField(
             value = if (value == "0") "" else value,
             onValueChange = onValueChange,
             enabled = enabled,
-            label = { Text(label, maxLines = 1) },
-            keyboardOptions = KeyboardOptions(
-                keyboardType = keyboardType,
-                imeAction = ImeAction.Done
-            ),
-            singleLine = true,
+            label = label,
+            keyboardType = "number",
             isError = isError,
             modifier = Modifier.fillMaxWidth(.5f),
-            visualTransformation = if (isMoney) CurrencyAmountInputVisualTransformation() else VisualTransformation.None,
-            supportingText = {
+            supportingText =
                 if (isError && errorMessage != null) {
-                    Text(
-                        text = errorMessage,
-                        color = MaterialTheme.colorScheme.error,
-                    )
+                        errorMessage
                 }
-                else if (supportingText != null) {
-                    Text(supportingText)
-                }
-            },
-            placeholder = {
-                if (placeholder != null) {
-                    Text(placeholder)
-                }
-            }
+                else supportingText ?: ""
+            ,
+            placeholder = placeholder ?: ""
+
+
         )
     }
 }

@@ -14,6 +14,7 @@
 		1E7A95CA2E0A1775001C2FA0 /* StripePaymentSheet in Frameworks */ = {isa = PBXBuildFile; productRef = 1E7A95C92E0A1775001C2FA0 /* StripePaymentSheet */; };
 		1E7DB94E2DEF5BC8006E07CF /* NativeDatePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E7DB94D2DEF5BC8006E07CF /* NativeDatePicker.swift */; };
 		1E7DB9522DEF5D83006E07CF /* IOSNativeViewFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E7DB9512DEF5D83006E07CF /* IOSNativeViewFactory.swift */; };
+		1E8A9C0D2E4298820041B76A /* NativeDropdownViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E8A9C0C2E4298820041B76A /* NativeDropdownViewController.swift */; };
 		1EB972762DDE59850009F818 /* EventMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EB972752DDE59850009F818 /* EventMap.swift */; };
 		1EBA84712D27457000059C7F /* location.gpx in Resources */ = {isa = PBXBuildFile; fileRef = 1EBA84702D27456400059C7F /* location.gpx */; };
 		1ECBBF622DD6BBAB0048A444 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 1ECBBF612DD6BBAB0048A444 /* GoogleService-Info.plist */; };
@@ -30,6 +31,7 @@
 		1E7DB94D2DEF5BC8006E07CF /* NativeDatePicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeDatePicker.swift; sourceTree = "<group>"; };
 		1E7DB9512DEF5D83006E07CF /* IOSNativeViewFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSNativeViewFactory.swift; sourceTree = "<group>"; };
 		1E7DB9532DF0AC89006E07CF /* iosAppRelease.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = iosAppRelease.entitlements; sourceTree = "<group>"; };
+		1E8A9C0C2E4298820041B76A /* NativeDropdownViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeDropdownViewController.swift; sourceTree = "<group>"; };
 		1EB972752DDE59850009F818 /* EventMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventMap.swift; sourceTree = "<group>"; };
 		1EB972772DE38D750009F818 /* iosApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = iosApp.entitlements; sourceTree = "<group>"; };
 		1EBA84702D27456400059C7F /* location.gpx */ = {isa = PBXFileReference; lastKnownFileType = text; path = location.gpx; sourceTree = "<group>"; };
@@ -113,6 +115,7 @@
 				058557D7273AAEEB004C7B11 /* Preview Content */,
 				1ECBBF6A2DD8409D0048A444 /* Secrets.plist */,
 				1EB972752DDE59850009F818 /* EventMap.swift */,
+				1E8A9C0C2E4298820041B76A /* NativeDropdownViewController.swift */,
 				1E7DB9512DEF5D83006E07CF /* IOSNativeViewFactory.swift */,
 				1E7DB94D2DEF5BC8006E07CF /* NativeDatePicker.swift */,
 			);
@@ -286,6 +289,7 @@
 				1E7DB94E2DEF5BC8006E07CF /* NativeDatePicker.swift in Sources */,
 				1EB972762DDE59850009F818 /* EventMap.swift in Sources */,
 				2152FB042600AC8F00CF470E /* iOSApp.swift in Sources */,
+				1E8A9C0D2E4298820041B76A /* NativeDropdownViewController.swift in Sources */,
 				7555FF83242A565900829871 /* ContentView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

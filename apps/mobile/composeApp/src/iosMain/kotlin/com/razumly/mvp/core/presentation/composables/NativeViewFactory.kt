@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalTime::class)
+
 package com.razumly.mvp.core.presentation.composables
 
 import com.razumly.mvp.core.data.dataTypes.EventAbs
@@ -7,6 +9,7 @@ import com.razumly.mvp.eventMap.MapComponent
 import dev.icerock.moko.geo.LatLng
 import kotlin.time.Instant
 import platform.UIKit.UIViewController
+import kotlin.time.ExperimentalTime
 
 interface NativeViewFactory {
     fun createNativeMapView(

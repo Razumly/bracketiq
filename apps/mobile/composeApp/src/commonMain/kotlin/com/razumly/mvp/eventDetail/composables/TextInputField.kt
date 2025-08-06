@@ -10,6 +10,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import com.razumly.mvp.core.presentation.composables.PlatformTextField
 
 @Composable
 fun TextInputField(
@@ -23,32 +24,19 @@ fun TextInputField(
     placeholder: String? = null,
 ) {
     Column(modifier = modifier) {
-        OutlinedTextField(
+        PlatformTextField(
             value = value,
             onValueChange = onValueChange,
-            label = { Text(label, maxLines = 1) },
-            keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Text,
-                imeAction = ImeAction.Done
-            ),
-            singleLine = true,
+            label = label,
             isError = isError,
             modifier = Modifier.fillMaxWidth(),
-            supportingText = {
+            supportingText =
                 if (isError && errorMessage != null) {
-                    Text(
-                        text = errorMessage,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                } else if (supportingText != null) {
-                    Text(supportingText)
-                }
-            },
-            placeholder = {
-                if (placeholder != null) {
-                    Text(placeholder)
-                }
-            }
+                        errorMessage
+                    
+                } else supportingText ?: ""
+            ,
+            placeholder = placeholder ?: ""
         )
     }
 }

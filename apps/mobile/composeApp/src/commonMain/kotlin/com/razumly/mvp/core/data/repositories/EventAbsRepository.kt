@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalTime::class)
+
 package com.razumly.mvp.core.data.repositories
 
 import com.razumly.mvp.core.data.dataTypes.Bounds
@@ -21,6 +23,7 @@ import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlin.time.ExperimentalTime
 
 interface IEventAbsRepository : IMVPRepository {
     fun getEventWithRelationsFlow(event: EventAbs): Flow<Result<EventAbsWithRelations>>

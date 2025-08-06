@@ -13,6 +13,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import com.razumly.mvp.core.presentation.composables.PlatformTextField
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -29,11 +30,11 @@ fun DropdownField(
         expanded = expanded,
         onExpandedChange = { state -> expanded = state }
     ) {
-        OutlinedTextField(
+        PlatformTextField(
             value = value,
             onValueChange = {},
             readOnly = true,
-            label = { Text(label) },
+            label = label,
             trailingIcon = {
                 ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
             },

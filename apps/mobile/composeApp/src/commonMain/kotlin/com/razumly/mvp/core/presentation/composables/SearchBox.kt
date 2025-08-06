@@ -58,6 +58,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.enums.FieldType
+import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
 import com.razumly.mvp.eventSearch.util.EventFilter
 import kotlinx.datetime.TimeZone
@@ -94,12 +95,12 @@ fun SearchBox(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            OutlinedTextField(value = searchInput,
+            PlatformTextField(value = searchInput,
                 onValueChange = { newQuery ->
                     searchInput = newQuery
                     onChange(newQuery)
                 },
-                placeholder = { Text(placeholder) },
+                placeholder = placeholder,
                 leadingIcon = {
                     Icon(
                         imageVector = Icons.Default.Search, contentDescription = "Search"
@@ -118,16 +119,10 @@ fun SearchBox(
                         }
                     }
                 },
-                singleLine = true,
                 modifier = Modifier.weight(1f).onFocusChanged { focusState ->
                     isFocused = focusState.isFocused
                     onFocusChange(focusState.isFocused)
                 },
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = {
-                    onSearch(searchInput)
-                    focusManager.clearFocus()
-                })
             )
 
             if (filter && currentFilter != null) {
@@ -429,39 +424,25 @@ private fun DateFilterSection(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            OutlinedTextField(
+            PlatformTextField(
                 value = currentFilter.date.first.toLocalDateTime(
                     TimeZone.currentSystemDefault()
-                ).format(dateTimeFormat),
+                ).date.format(dateFormat),
                 onValueChange = {},
-                label = { Text("Start Date & Time") },
-                modifier = Modifier.weight(1f)
-                    .clickable(onClick = onStartDateClicked),
+                label = "Start Date & Time",
+                modifier = Modifier.weight(1f),
                 readOnly = true,
-                enabled = false,
-                colors = OutlinedTextFieldDefaults.colors(
-                    disabledContainerColor = OutlinedTextFieldDefaults.colors().focusedContainerColor,
-                    disabledTextColor = OutlinedTextFieldDefaults.colors().focusedTextColor,
-                    disabledLabelColor = OutlinedTextFieldDefaults.colors().focusedLabelColor,
-                    disabledBorderColor = OutlinedTextFieldDefaults.colors().unfocusedIndicatorColor,
-                )
+                onTap = onStartDateClicked
             )
-            OutlinedTextField(
+            PlatformTextField(
                 value = currentFilter.date.second?.toLocalDateTime(
                     TimeZone.currentSystemDefault()
-                )?.format(dateTimeFormat) ?: "Select an End Date",
+                )?.date?.format(dateFormat) ?: "Select an End Date",
                 onValueChange = {},
-                label = { Text("End Date") },
-                modifier = Modifier.weight(1f)
-                    .clickable(onClick = onEndDateClicked),
+                label = "End Date",
+                modifier = Modifier.weight(1f),
                 readOnly = true,
-                enabled = false,
-                colors = OutlinedTextFieldDefaults.colors(
-                    disabledContainerColor = OutlinedTextFieldDefaults.colors().focusedContainerColor,
-                    disabledTextColor = OutlinedTextFieldDefaults.colors().focusedTextColor,
-                    disabledLabelColor = OutlinedTextFieldDefaults.colors().focusedLabelColor,
-                    disabledBorderColor = OutlinedTextFieldDefaults.colors().unfocusedIndicatorColor,
-                )
+                onTap = onEndDateClicked
             )
         }
     }

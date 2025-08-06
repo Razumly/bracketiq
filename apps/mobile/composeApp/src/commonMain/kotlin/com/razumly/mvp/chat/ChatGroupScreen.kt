@@ -32,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.MessageMVP
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.presentation.composables.PlatformTextField
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
 import com.razumly.mvp.home.LocalNavBarPadding
 import kotlinx.datetime.TimeZone
@@ -105,11 +106,11 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    OutlinedTextField(
+                    PlatformTextField(
                         value = input,
                         onValueChange = component::onMessageInputChange,
                         modifier = Modifier.weight(1f),
-                        placeholder = { Text("Type a message...") }
+                        placeholder = "Type a message..."
                     )
 
                     Button(

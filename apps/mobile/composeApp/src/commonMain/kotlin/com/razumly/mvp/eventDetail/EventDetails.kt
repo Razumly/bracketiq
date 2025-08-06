@@ -67,8 +67,12 @@ import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.enums.FieldType
 import com.razumly.mvp.core.presentation.IPaymentProcessor
+import com.razumly.mvp.core.presentation.composables.DropdownOption
+import com.razumly.mvp.core.presentation.composables.MoneyInputField
 import com.razumly.mvp.core.presentation.composables.PaymentProcessorButton
 import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
+import com.razumly.mvp.core.presentation.composables.PlatformDropdown
+import com.razumly.mvp.core.presentation.composables.PlatformTextField
 import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
 import com.razumly.mvp.core.presentation.util.getScreenHeight
@@ -260,18 +264,17 @@ fun EventDetails(
                                     )
                                 },
                                 editContent = {
-                                    OutlinedTextField(value = editEvent.name,
+                                    PlatformTextField(value = editEvent.name,
                                         onValueChange = { onEditEvent { copy(name = it) } },
-                                        label = { Text("Event Name") },
+                                        label = "Event Name",
                                         isError = !isNameValid,
-                                        supportingText = {
+                                        supportingText =
                                             if (!isNameValid) {
-                                                Text(
-                                                    text = stringResource(Res.string.enter_value),
-                                                    color = MaterialTheme.colorScheme.error
-                                                )
+                                                stringResource(Res.string.enter_value)
+                                            } else {
+                                                ""
                                             }
-                                        })
+                                        )
                                 })
 
                             // Location Display
@@ -342,30 +345,38 @@ fun EventDetails(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        DropdownField(
-                                            modifier = Modifier.weight(1.2f),
-                                            value = editEvent.eventType.name,
-                                            label = "Event Type"
-                                        ) { dismiss ->
-                                            EventType.entries.forEach { eventType ->
-                                                DropdownMenuItem(onClick = {
-                                                    dismiss()
-                                                    onEventTypeSelected(eventType)
-                                                }, text = { Text(text = eventType.name) })
-                                            }
-                                        }
-                                        DropdownField(
-                                            modifier = Modifier.weight(1f),
-                                            value = editEvent.fieldType.name,
-                                            label = "Field Type",
-                                        ) { dismiss ->
-                                            FieldType.entries.forEach { fieldType ->
-                                                DropdownMenuItem(onClick = {
-                                                    dismiss()
+                                        PlatformDropdown(
+                                            selectedValue = editEvent.eventType.name,
+                                            onSelectionChange = { selectedValue ->
+                                                val selectedEventType = EventType.entries.find { it.name == selectedValue }
+                                                selectedEventType?.let { onEventTypeSelected(it) }
+                                            },
+                                            options = EventType.entries.map { eventType ->
+                                                DropdownOption(
+                                                    value = eventType.name,
+                                                    label = eventType.name
+                                                )
+                                            },
+                                            label = "Event Type",
+                                            modifier = Modifier.weight(1.2f)
+                                        )
+                                        PlatformDropdown(
+                                            selectedValue = editEvent.fieldType.name,
+                                            onSelectionChange = { selectedValue ->
+                                                val selectedFieldType = FieldType.entries.find { it.name == selectedValue }
+                                                selectedFieldType?.let { fieldType ->
                                                     onEditEvent { copy(fieldType = fieldType) }
-                                                }, text = { Text(text = fieldType.name) })
-                                            }
-                                        }
+                                                }
+                                            },
+                                            options = FieldType.entries.map { fieldType ->
+                                                DropdownOption(
+                                                    value = fieldType.name,
+                                                    label = fieldType.name
+                                                )
+                                            },
+                                            label = "Field Type",
+                                            modifier = Modifier.weight(1f)
+                                        )
                                     }
                                 })
 
@@ -392,22 +403,20 @@ fun EventDetails(
                                             "Create Stripe Connect Account to Change Price",
                                         )
                                     }
-                                    NumberInputField(
+                                    MoneyInputField(
                                         value = (editEvent.price * 100).toInt().toString(),
                                         label = "Price",
                                         enabled = hostHasAccount,
                                         onValueChange = { newText ->
                                             if (newText.isBlank()) {
                                                 onEditEvent { copy(price = 0.0) }
-                                                return@NumberInputField
+                                                return@MoneyInputField
                                             }
                                             val newCleaned = newText.filter { it.isDigit() }
                                             onEditEvent { copy(price = newCleaned.toDouble() / 100) }
                                         },
                                         isError = !isPriceValid,
-                                        isMoney = true,
-                                        errorMessage = stringResource(Res.string.invalid_price),
-                                        supportingText = stringResource(Res.string.free_entry_hint)
+                                        supportingText = if (isPriceValid) stringResource(Res.string.free_entry_hint) else stringResource(Res.string.invalid_price)
                                     )
                                     if (editEvent.price > 0.0) {
                                         CancellationRefundOptions(
@@ -460,37 +469,23 @@ fun EventDetails(
                                         Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        OutlinedTextField(value = editEvent.start.toLocalDateTime(
+                                        PlatformTextField(value = editEvent.start.toLocalDateTime(
                                             TimeZone.currentSystemDefault()
                                         ).format(dateTimeFormat),
                                             onValueChange = {},
-                                            label = { Text("Start Date & Time") },
-                                            modifier = Modifier.weight(1f)
-                                                .clickable(onClick = { showStartPicker = true }),
+                                            label = "Start Date & Time",
+                                            modifier = Modifier.weight(1f),
                                             readOnly = true,
-                                            enabled = false,
-                                            colors = OutlinedTextFieldDefaults.colors(
-                                                disabledContainerColor = OutlinedTextFieldDefaults.colors().focusedContainerColor,
-                                                disabledTextColor = OutlinedTextFieldDefaults.colors().focusedTextColor,
-                                                disabledLabelColor = OutlinedTextFieldDefaults.colors().focusedLabelColor,
-                                                disabledBorderColor = OutlinedTextFieldDefaults.colors().unfocusedIndicatorColor,
-                                            )
+                                            onTap = { showStartPicker = true }
                                         )
-                                        OutlinedTextField(value = editEvent.end.toLocalDateTime(
+                                        PlatformTextField(value = editEvent.end.toLocalDateTime(
                                             TimeZone.currentSystemDefault()
                                         ).format(dateTimeFormat),
                                             onValueChange = {},
-                                            label = { Text("End Date & Time") },
-                                            modifier = Modifier.weight(1f)
-                                                .clickable(onClick = { showEndPicker = true }),
+                                            label = "End Date & Time",
+                                            modifier = Modifier.weight(1f),
                                             readOnly = true,
-                                            enabled = false,
-                                            colors = OutlinedTextFieldDefaults.colors(
-                                                disabledContainerColor = OutlinedTextFieldDefaults.colors().focusedContainerColor,
-                                                disabledTextColor = OutlinedTextFieldDefaults.colors().focusedTextColor,
-                                                disabledLabelColor = OutlinedTextFieldDefaults.colors().focusedLabelColor,
-                                                disabledBorderColor = OutlinedTextFieldDefaults.colors().unfocusedIndicatorColor,
-                                            )
+                                            onTap = { showStartPicker = true }
                                         )
                                     }
                                 })
@@ -571,10 +566,15 @@ fun EventDetails(
                                 editContent = {
                                     Text("Specifics", style = MaterialTheme.typography.titleMedium)
 
+                                    val label = if (!isMaxParticipantsValid) {
+                                        stringResource(Res.string.value_too_low, 1)
+                                    } else {
+                                        if (!editEvent.teamSignup) stringResource(Res.string.max_players)
+                                        else stringResource(Res.string.max_teams)
+                                    }
                                     NumberInputField(
                                         value = editEvent.maxParticipants.toString(),
-                                        label = if (!editEvent.teamSignup) stringResource(Res.string.max_players)
-                                        else stringResource(Res.string.max_teams),
+                                        label = label,
                                         onValueChange = { newValue ->
                                             if (newValue.all { it.isDigit() }) {
                                                 if (newValue.isBlank()) {
@@ -585,8 +585,6 @@ fun EventDetails(
                                             }
                                         },
                                         isError = !isMaxParticipantsValid,
-                                        errorMessage = stringResource(Res.string.value_too_low, 1),
-                                        isMoney = false,
                                     )
                                     TeamSizeLimitDropdown(
                                         selectedTeamSize = editEvent.teamSizeLimit,
@@ -623,19 +621,16 @@ fun EventDetails(
 
                                     // Tournament-specific fields
                                     if (editEvent is Tournament) {
-                                        OutlinedTextField(value = editEvent.prize, onValueChange = {
+                                        PlatformTextField(value = editEvent.prize, onValueChange = {
                                             if (it.length <= 50) onEditTournament {
                                                 copy(
                                                     prize = it
                                                 )
                                             }
-                                        }, label = { Text("Prize") }, supportingText = {
-                                            Text(
-                                                text = "If there is a prize, enter it here"
-                                            )
-                                        })
+                                        }, label = "Prize",
+                                            supportingText = "If there is a prize, enter it here")
 
-                                        NumberInputField(
+                                        PlatformTextField(
                                             value = fieldCount.toString(),
                                             onValueChange = { newValue ->
                                                 if (newValue.all { it.isDigit() }) {
@@ -648,12 +643,12 @@ fun EventDetails(
                                                     }
                                                 }
                                             },
+                                            keyboardType = "number",
                                             label = "Field Count",
                                             isError = !isFieldCountValid,
-                                            isMoney = false,
-                                            errorMessage = stringResource(
+                                            supportingText = if (!isFieldCountValid) stringResource(
                                                 Res.string.value_too_low, 0
-                                            ),
+                                            ) else "",
                                         )
 
                                         WinnerSetCountDropdown(

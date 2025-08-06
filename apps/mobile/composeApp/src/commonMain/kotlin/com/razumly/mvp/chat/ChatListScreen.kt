@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.razumly.mvp.chat.composables.ChatListItem
 import com.razumly.mvp.core.presentation.composables.InvitePlayerCard
+import com.razumly.mvp.core.presentation.composables.PlatformTextField
 import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.SearchPlayerDialog
 import com.razumly.mvp.home.LocalNavBarPadding
@@ -105,12 +106,12 @@ fun NewChatDialog(component: ChatListComponent, onDismiss: () -> Unit) {
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                OutlinedTextField(
+                PlatformTextField(
                     value = newChat.chatGroup.name,
                     onValueChange = {
                         component.updateNewChatField { newChat.chatGroup.copy(name = it) }
                     },
-                    label = { Text("Chat Name") },
+                    label = "Chat Name",
                     modifier = Modifier.fillMaxWidth(),
                 )
                 LazyColumn {

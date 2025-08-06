@@ -2,14 +2,20 @@
 
 package com.razumly.mvp.eventDetail.composables
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.Add
@@ -25,6 +31,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -34,12 +41,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
+import com.razumly.mvp.core.presentation.composables.PlatformTextField
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.format
@@ -56,12 +65,41 @@ fun MatchEditDialog(
     onDismissRequest: () -> Unit,
     onConfirm: (MatchWithRelations) -> Unit
 ) {
+    Box(
+        modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f))
+            .clickable { onDismissRequest() }, contentAlignment = Alignment.Center
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(0.9f).fillMaxHeight(0.8f)
+                .clickable(enabled = false) { }, // Prevent click-through
+            shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface
+        ) {
+            MatchEditDialogContent(
+                match = match,
+                teams = teams,
+                fields = fields,
+                onDismissRequest = onDismissRequest,
+                onConfirm = onConfirm
+            )
+        }
+    }
+}
+
+@Composable
+private fun MatchEditDialogContent(
+    match: MatchWithRelations,
+    teams: List<TeamWithPlayers>,
+    fields: List<FieldWithMatches>,
+    onDismissRequest: () -> Unit,
+    onConfirm: (MatchWithRelations) -> Unit
+) {
     var editedMatch by remember { mutableStateOf(match) }
+
+
     var showTeam1Dropdown by remember { mutableStateOf(false) }
     var showTeam2Dropdown by remember { mutableStateOf(false) }
     var showRefDropdown by remember { mutableStateOf(false) }
     var showFieldDropdown by remember { mutableStateOf(false) }
-    var showStartTimePicker by remember { mutableStateOf(false) }
 
     // Calculate initial duration between start and end
     val initialDuration = remember(match) {
@@ -69,19 +107,23 @@ fun MatchEditDialog(
             endTime - match.match.start
         }
     }
-
-    AlertDialog(onDismissRequest = onDismissRequest, title = {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(16.dp)
+    ) {
+        // Header
         Text(
             text = "Edit Match #${match.match.matchNumber}",
             style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(bottom = 16.dp)
         )
-    }, text = {
+
+        // Scrollable content
         LazyColumn(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Teams Section
+
+
             item {
                 Text(
                     text = "Teams",
@@ -227,19 +269,26 @@ fun MatchEditDialog(
                     })
             }
         }
-    }, confirmButton = {
-        Button(
-            onClick = {
-                onConfirm(editedMatch)
-                onDismissRequest()
-            }) {
-            Text("Save Changes")
+
+        Row(
+            modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            TextButton(
+                onClick = onDismissRequest, modifier = Modifier.weight(1f)
+            ) {
+                Text("Cancel")
+            }
+
+            Button(
+                onClick = {
+                    onConfirm(editedMatch)
+                    onDismissRequest()
+                }, modifier = Modifier.weight(1f)
+            ) {
+                Text("Save Changes")
+            }
         }
-    }, dismissButton = {
-        TextButton(onClick = onDismissRequest) {
-            Text("Cancel")
-        }
-    })
+    }
 }
 
 @Composable
@@ -273,7 +322,7 @@ fun IndividualScoreInputSection(
                         mutableStateOf(team1Scores[index].toString())
                     }
 
-                    OutlinedTextField(
+                    PlatformTextField(
                         value = scoreText,
                         onValueChange = { newText ->
                             scoreText = newText
@@ -284,8 +333,8 @@ fun IndividualScoreInputSection(
                         },
                         modifier = Modifier.width(60.dp),
                         textStyle = MaterialTheme.typography.bodyMedium,
-                        singleLine = true,
-                        placeholder = { Text("0") })
+                        placeholder = "0"
+                    )
                 }
             }
 
@@ -327,7 +376,7 @@ fun IndividualScoreInputSection(
                         mutableStateOf(team2Scores[index].toString())
                     }
 
-                    OutlinedTextField(
+                    PlatformTextField(
                         value = scoreText,
                         onValueChange = { newText ->
                             scoreText = newText
@@ -338,8 +387,8 @@ fun IndividualScoreInputSection(
                         },
                         modifier = Modifier.width(60.dp),
                         textStyle = MaterialTheme.typography.bodyMedium,
-                        singleLine = true,
-                        placeholder = { Text("0") })
+                        placeholder = "0"
+                    )
                 }
             }
 
@@ -378,13 +427,12 @@ fun TeamSelectionField(
     ExposedDropdownMenuBox(
         expanded = expanded, onExpandedChange = onExpandedChange, modifier = modifier
     ) {
-        OutlinedTextField(
+        PlatformTextField(
             value = selectedTeam?.team?.name ?: "Select ${label.lowercase()}",
             onValueChange = {},
             readOnly = true,
-            label = { Text(label) },
+            label = label,
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-            colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
             modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable, true)
                 .fillMaxWidth()
         )
@@ -416,11 +464,11 @@ fun TimePickerField(
 ) {
     var showTimePicker by remember { mutableStateOf(false) }
 
-    OutlinedTextField(
+    PlatformTextField(
         value = selectedTime?.toLocalDateTime(TimeZone.currentSystemDefault())
-        ?.format(dateTimeFormat) ?: "Select time",
+            ?.format(dateTimeFormat) ?: "Select time",
         onValueChange = {},
-        label = { Text(label) },
+        label = label,
         readOnly = true,
         trailingIcon = {
             IconButton(onClick = { showTimePicker = true }) {
@@ -456,13 +504,12 @@ fun FieldSelectionField(
     ExposedDropdownMenuBox(
         expanded = expanded, onExpandedChange = onExpandedChange
     ) {
-        OutlinedTextField(
+        PlatformTextField(
             value = selectedField?.field?.fieldNumber?.toString() ?: "Select field",
             onValueChange = {},
             readOnly = true,
-            label = { Text(label) },
+            label = label,
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-            colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
             modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable, true)
                 .fillMaxWidth()
         )

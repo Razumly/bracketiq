@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalTime::class)
+
 package com.razumly.mvp.core.presentation.composables
 
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -54,6 +56,7 @@ import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.format
 import kotlinx.datetime.toLocalDateTime
+import kotlin.time.ExperimentalTime
 
 @OptIn(
     ExperimentalHazeMaterialsApi::class, ExperimentalHazeApi::class

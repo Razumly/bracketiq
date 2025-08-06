@@ -22,13 +22,17 @@ composeCompiler {
     includeSourceInformation = true
 }
 
+
+compose.resources {
+    generateResClass = always
+}
+
 val mvpVersion = "0.4.3.1"
 val mvpVersionCode = 8
 kotlin {
     androidTarget {
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_17)
-            optIn.add("kotlin.time.ExperimentalTime")
         }
     }
 
@@ -67,6 +71,9 @@ kotlin {
 
 
     sourceSets {
+        all {
+            languageSettings.optIn("kotlin.time.ExperimentalTime")
+        }
         commonMain {
             dependencies {
                 implementation(compose.runtime)

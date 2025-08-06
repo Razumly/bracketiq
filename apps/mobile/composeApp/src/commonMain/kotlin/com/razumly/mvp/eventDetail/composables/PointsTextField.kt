@@ -16,6 +16,7 @@ import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.razumly.mvp.core.presentation.composables.PlatformTextField
 
 
 @Composable
@@ -28,24 +29,13 @@ fun PointsTextField(
     isError: Boolean = false,
     errorMessage: String = ""
 ) {
-    OutlinedTextField(
+    PlatformTextField(
         value = value,
         onValueChange = onValueChange,
-        label = { Text(label) },
+        label = label,
         isError = isError,
-        supportingText = if (isError && errorMessage.isNotEmpty()) {
-            { Text(
-                text = errorMessage,
-                color = MaterialTheme.colorScheme.error
-            ) }
-        } else null,
-        keyboardOptions = KeyboardOptions(
-            keyboardType = KeyboardType.Number,
-            imeAction = ImeAction.Next
-        ),
-        keyboardActions = KeyboardActions(
-            onNext = { nextFocus() }
-        ),
+        supportingText = if (isError && errorMessage.isNotEmpty()) { errorMessage } else "",
+        keyboardType = "numbers",
         modifier = Modifier
             .width(120.dp)
             .focusRequester(focusRequester)

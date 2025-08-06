@@ -77,11 +77,11 @@ class IOSNativeViewFactory: NativeViewFactory {
         }
     
     func createNativePlatformDatePicker(
-        initialDate: Kotlinx_datetimeInstant,
-        minDate: Kotlinx_datetimeInstant,
-        maxDate: Kotlinx_datetimeInstant,
+        initialDate: KotlinInstant,
+        minDate: KotlinInstant,
+        maxDate: KotlinInstant,
         getTime: Bool,
-        onDateSelected: @escaping (Kotlinx_datetimeInstant?) -> Void,
+        onDateSelected: @escaping (KotlinInstant?) -> Void,
         onDismissRequest: @escaping () -> Void
     ) {
         let scenes = UIApplication.shared.connectedScenes
@@ -99,7 +99,7 @@ class IOSNativeViewFactory: NativeViewFactory {
             maxDate: maxDateSwift,
             getTime: getTime,
             onConfirm: { date in
-                let instant = Kotlinx_datetimeInstant.companion.fromEpochMilliseconds(
+                let instant = KotlinInstant.companion.fromEpochMilliseconds(
                     epochMilliseconds: Int64(date.timeIntervalSince1970 * 1000)
                 )
                 onDateSelected(instant)
@@ -171,5 +171,4 @@ class IOSNativeViewFactory: NativeViewFactory {
             return PaymentResult.Failed(error: error.localizedDescription)
         }
     }
-
 }

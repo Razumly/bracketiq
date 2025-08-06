@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalTime::class)
+
 package com.razumly.mvp.core.data.dataTypes.dtos
 
 import androidx.room.PrimaryKey
@@ -5,6 +7,7 @@ import com.razumly.mvp.core.data.dataTypes.MessageMVP
 import kotlin.time.Instant
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
+import kotlin.time.ExperimentalTime
 
 @Serializable
 data class MessageMVPDTO (
