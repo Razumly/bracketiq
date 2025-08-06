@@ -13,13 +13,13 @@ class MvpApp : Application() {
         instance = this
         NotifierManager.initialize(
             configuration = NotificationPlatformConfiguration.Android(
-                notificationIconResId = R.drawable.logo_mvp,
+                notificationIconResId = R.drawable.ic_launcher_foreground,
                 showPushNotification = true,
             )
         )
-        NotifierManager.setLogger({ message ->
+        NotifierManager.setLogger { message ->
             Napier.d(message, tag = "Notifier Manager")
-        })
+        }
         KoinInitializer(applicationContext).init()
     }
 
