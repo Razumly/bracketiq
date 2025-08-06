@@ -475,14 +475,15 @@ fun TimePickerField(
                 Icon(Icons.Default.AccessTime, contentDescription = "Select time")
             }
         },
-        modifier = Modifier.fillMaxWidth().clickable { showTimePicker = true })
+        modifier = Modifier.fillMaxWidth(),
+        onTap = { showTimePicker = true })
 
     if (showTimePicker) {
         PlatformDateTimePicker(
             onDateSelected = { instant ->
-            instant?.let { onTimeSelected(it) }
-            showTimePicker = false
-        },
+                instant?.let { onTimeSelected(it) }
+                showTimePicker = false
+            },
             onDismissRequest = { showTimePicker = false },
             showPicker = showTimePicker,
             getTime = true,
