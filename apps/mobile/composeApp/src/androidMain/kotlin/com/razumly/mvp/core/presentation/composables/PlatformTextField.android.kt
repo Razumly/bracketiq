@@ -1,6 +1,8 @@
 package com.razumly.mvp.core.presentation.composables
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.text.KeyboardOptions
@@ -8,6 +10,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
@@ -48,6 +52,21 @@ actual fun PlatformTextField(
         else -> TextStyle.Default
     }
 
+    val interactionSource = remember { MutableInteractionSource() }
+
+    // Handle clicks via InteractionSource for readonly fields
+    if (readOnly && onTap != null) {
+        LaunchedEffect(interactionSource) {
+            interactionSource.interactions.collect { interaction ->
+                when (interaction) {
+                    is PressInteraction.Press -> {
+                        onTap()
+                    }
+                }
+            }
+        }
+    }
+
     // Apply height modifier if specified
     val finalModifier = if (height != null) {
         modifier.height(height)
@@ -62,6 +81,7 @@ actual fun PlatformTextField(
             val filteredValue = inputFilter?.invoke(newValue) ?: newValue
             onValueChange(filteredValue)
         },
+        interactionSource = interactionSource,
         modifier = finalModifier.clickable(onClick = { onTap }),
         label = if (label.isNotEmpty()) { { Text(label) } } else null,
         placeholder = if (placeholder.isNotEmpty()) { { Text(placeholder) } } else null,

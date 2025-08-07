@@ -19,6 +19,7 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
+import java.time.ZoneOffset
 import java.util.Calendar
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
@@ -55,9 +56,9 @@ actual fun PlatformDateTimePicker(
                 confirmButton = {
                     TextButton(onClick = {
                         datePickerState.selectedDateMillis?.let { millis ->
-                            // Convert millis to LocalDate
+                            // ✅ FIXED: Proper timezone handling for date conversion
                             selectedDate = java.time.Instant.ofEpochMilli(millis)
-                                .atZone(ZoneId.systemDefault())
+                                .atZone(ZoneOffset.UTC) // DatePicker uses UTC
                                 .toLocalDate()
                         }
                         showDatePicker = false
@@ -126,7 +127,13 @@ actual fun PlatformDateTimePicker(
 class PastOrFutureSelectableDates(private val canSelectPast: Boolean) : SelectableDates {
     override fun isSelectableDate(utcTimeMillis: Long): Boolean {
         if (!canSelectPast) {
-            return utcTimeMillis >= System.currentTimeMillis()
+            // ✅ FIXED: Compare UTC dates directly since DatePicker works in UTC
+            val selectedDateUTC = java.time.Instant.ofEpochMilli(utcTimeMillis)
+                .atZone(ZoneOffset.UTC)
+                .toLocalDate()
+            val todayUTC = LocalDate.now(ZoneId.systemDefault())
+
+            return selectedDateUTC >= todayUTC
         }
         return true
     }

@@ -85,6 +85,9 @@ fun EventSearchScreen(
     val isLoadingMore by component.isLoadingMore.collectAsState()
     val hasMoreEvents by component.hasMoreEvents.collectAsState()
     val currentFilter by component.filter.collectAsState()
+    var showFab by remember { mutableStateOf(true) }
+    var showingFilter by remember { mutableStateOf(false) }
+    val isScrollingUp by lazyListState.isScrollingUp()
 
     val loadingHandler = LocalLoadingHandler.current
     val errorHandler = LocalErrorHandler.current
@@ -93,6 +96,10 @@ fun EventSearchScreen(
         LaunchedEffect(events) {
             mapComponent.setEvents(events)
         }
+    }
+
+    LaunchedEffect(isScrollingUp, showMapCard, showingFilter) {
+        showFab = (isScrollingUp || showMapCard) && !showingFilter
     }
 
     LaunchedEffect(Unit) {
@@ -135,11 +142,12 @@ fun EventSearchScreen(
                         },
                         onFilterChange = { update -> component.updateFilter(update) },
                         currentFilter = currentFilter,
+                        onToggleFilter = { showingFilter = it }
                     )
                 }
             },
             floatingActionButton = {
-                AnimatedVisibility(visible = lazyListState.isScrollingUp().value || showMapCard,
+                AnimatedVisibility(visible = showFab,
                     enter = (slideInVertically { it / 2 } + fadeIn()),
                     exit = (slideOutVertically { it / 2 } + fadeOut())) {
                     Button(onClick = {

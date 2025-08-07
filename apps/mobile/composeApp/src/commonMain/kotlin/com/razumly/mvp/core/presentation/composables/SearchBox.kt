@@ -7,7 +7,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,8 +20,6 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Menu
@@ -33,14 +30,13 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,13 +49,11 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.enums.FieldType
 import com.razumly.mvp.core.presentation.util.dateFormat
-import com.razumly.mvp.core.presentation.util.dateTimeFormat
 import com.razumly.mvp.eventSearch.util.EventFilter
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.format
@@ -78,11 +72,16 @@ fun SearchBox(
     onChange: (String) -> Unit,
     onSearch: (String) -> Unit,
     onFocusChange: (Boolean) -> Unit,
-    onPositionChange: (Offset, IntSize) -> Unit
+    onPositionChange: (Offset, IntSize) -> Unit,
+    onToggleFilter: (Boolean) -> Unit,
 ) {
     var searchInput by remember { mutableStateOf("") }
     var isFocused by remember { mutableStateOf(false) }
     var showFilterDropdown by remember { mutableStateOf(false) }
+
+    LaunchedEffect(showFilterDropdown) {
+        onToggleFilter(showFilterDropdown)
+    }
 
     val focusManager = LocalFocusManager.current
 
@@ -163,7 +162,7 @@ fun SearchBox(
 
 @OptIn(ExperimentalTime::class)
 private fun isFilterActive(filter: EventFilter): Boolean {
-    return filter.eventType != null || filter.field != null || filter.price != null || filter.date != null
+    return filter.eventType != null || filter.field != null || filter.price != null || filter.date.second != null
 }
 
 @Composable

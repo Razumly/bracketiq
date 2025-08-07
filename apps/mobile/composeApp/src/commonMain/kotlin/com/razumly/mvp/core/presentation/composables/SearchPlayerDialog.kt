@@ -31,7 +31,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.razumly.mvp.core.data.dataTypes.UserData
-import com.razumly.mvp.core.presentation.util.toTitleCase
 
 
 @Composable
@@ -85,7 +84,8 @@ fun SearchPlayerDialog(
                             searchBoxPosition = position
                             searchBoxSize = size
                         },
-                        onFilterChange = { }
+                        onFilterChange = { },
+                        onToggleFilter = { },
                     )
                 }
             }
