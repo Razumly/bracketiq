@@ -139,7 +139,8 @@ actual fun PlatformTextField(
                     },
                     modifier = Modifier
                         .weight(1f)
-                        .height(fieldHeight),
+                        .height(fieldHeight)
+                        .clip(RoundedCornerShape(5.dp)),
                     update = { textField ->
                         updateUITextField(
                             textField = textField,

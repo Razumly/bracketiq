@@ -890,7 +890,7 @@ fun EventDetails(
                 selectedPlace = null
             }) {
                 Column(Modifier.fillMaxSize()) {
-                    SelectEventImage(selectedPlace = selectedPlace!!,
+                    SelectEventImage(selectedPlace = selectedPlace,
                         onSelectedImage = { onEditEvent(it) })
                     Row(
                         Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly

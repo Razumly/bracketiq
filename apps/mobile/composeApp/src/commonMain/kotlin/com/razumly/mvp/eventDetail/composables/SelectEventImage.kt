@@ -33,16 +33,17 @@ import com.kmpalette.loader.rememberNetworkLoader
 import com.kmpalette.rememberDominantColorState
 import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
+import io.github.aakira.napier.Napier
 import io.ktor.http.Url
 import kotlin.time.ExperimentalTime
 
 @Composable
 fun SelectEventImage(
     modifier: Modifier = Modifier,
-    selectedPlace: MVPPlace,
+    selectedPlace: MVPPlace?,
     onSelectedImage: (EventImp.() -> EventImp) -> Unit
 ) {
-    val imageUrls = selectedPlace.imageUrls
+    val imageUrls = selectedPlace?.imageUrls
     val columnCount = 3
     var selected by remember { mutableStateOf<String?>(null) }
 
@@ -62,37 +63,39 @@ fun SelectEventImage(
         }
     }
 
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(columnCount),
-        modifier = modifier.wrapContentSize(),
-        contentPadding = PaddingValues(4.dp)
-    ) {
-        items(imageUrls) { url ->
-            val painter = rememberAsyncImagePainter(model = url)
-            val painterState = painter.state
-            Box(modifier = Modifier.padding(4.dp).aspectRatio(1f).let { base ->
-                if (selected == url) {
-                    base.border(
-                        width = 2.dp,
-                        color = MaterialTheme.colorScheme.primary,
-                        shape = RoundedCornerShape(4.dp)
-                    )
-                } else base
-            }.clickable {
-                selected = url
-            }) {
-                if (painterState.value is AsyncImagePainter.State.Loading) {
-                    Box(
-                        modifier = Modifier.fillMaxSize()
-                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
+    if (imageUrls != null) {
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(columnCount),
+            modifier = modifier.wrapContentSize(),
+            contentPadding = PaddingValues(4.dp)
+        ) {
+            items(imageUrls) { url ->
+                val painter = rememberAsyncImagePainter(model = url)
+                val painterState = painter.state
+                Box(modifier = Modifier.padding(4.dp).aspectRatio(1f).let { base ->
+                    if (selected == url) {
+                        base.border(
+                            width = 2.dp,
+                            color = MaterialTheme.colorScheme.primary,
+                            shape = RoundedCornerShape(4.dp)
+                        )
+                    } else base
+                }.clickable {
+                    selected = url
+                }) {
+                    if (painterState.value is AsyncImagePainter.State.Loading) {
+                        Box(
+                            modifier = Modifier.fillMaxSize()
+                                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
+                        )
+                    }
+                    Image(
+                        painter = painter,
+                        contentDescription = "Event Image",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
                     )
                 }
-                Image(
-                    painter = painter,
-                    contentDescription = "Event Image",
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
             }
         }
     }
