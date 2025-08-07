@@ -76,14 +76,18 @@ fun SearchBox(
     onToggleFilter: (Boolean) -> Unit,
 ) {
     var searchInput by remember { mutableStateOf("") }
-    var isFocused by remember { mutableStateOf(false) }
+    val focusManager = rememberPlatformFocusManager()
     var showFilterDropdown by remember { mutableStateOf(false) }
+    val composeFocusManager = LocalFocusManager.current
 
     LaunchedEffect(showFilterDropdown) {
         onToggleFilter(showFilterDropdown)
     }
-
-    val focusManager = LocalFocusManager.current
+    LaunchedEffect(Unit) {
+        focusManager.setFocusChangeListener { isFocused ->
+            onFocusChange(isFocused || searchInput.isNotEmpty())
+        }
+    }
 
     Column(modifier = modifier.fillMaxWidth().onGloballyPositioned { coordinates ->
         val position = coordinates.positionInRoot()
@@ -94,7 +98,8 @@ fun SearchBox(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            PlatformTextField(value = searchInput,
+            PlatformTextField(
+                value = searchInput,
                 onValueChange = { newQuery ->
                     searchInput = newQuery
                     onChange(newQuery)
@@ -102,7 +107,8 @@ fun SearchBox(
                 placeholder = placeholder,
                 leadingIcon = {
                     Icon(
-                        imageVector = Icons.Default.Search, contentDescription = "Search"
+                        imageVector = Icons.Default.Search,
+                        contentDescription = "Search"
                     )
                 },
                 trailingIcon = {
@@ -111,17 +117,19 @@ fun SearchBox(
                             searchInput = ""
                             onChange("")
                             focusManager.clearFocus()
+                            composeFocusManager.clearFocus()
                         }) {
                             Icon(
-                                imageVector = Icons.Default.Clear, contentDescription = "Clear"
+                                imageVector = Icons.Default.Clear,
+                                contentDescription = "Clear"
                             )
                         }
                     }
                 },
-                modifier = Modifier.weight(1f).onFocusChanged { focusState ->
-                    isFocused = focusState.isFocused
-                    onFocusChange(focusState.isFocused)
-                },
+                modifier = Modifier.weight(1f),
+                onFocusChange = { isFocused ->
+                    onFocusChange(isFocused || searchInput.isNotEmpty())
+                }
             )
 
             if (filter && currentFilter != null) {
@@ -428,21 +436,21 @@ private fun DateFilterSection(
                     TimeZone.currentSystemDefault()
                 ).date.format(dateFormat),
                 onValueChange = {},
-                label = "Start Date & Time",
                 modifier = Modifier.weight(1f),
+                label = "Start Date & Time",
                 readOnly = true,
                 onTap = onStartDateClicked
-            )
+            ) { }
             PlatformTextField(
                 value = currentFilter.date.second?.toLocalDateTime(
                     TimeZone.currentSystemDefault()
                 )?.date?.format(dateFormat) ?: "Select an End Date",
                 onValueChange = {},
-                label = "End Date",
                 modifier = Modifier.weight(1f),
+                label = "End Date",
                 readOnly = true,
                 onTap = onEndDateClicked
-            )
+            ) { }
         }
     }
 }

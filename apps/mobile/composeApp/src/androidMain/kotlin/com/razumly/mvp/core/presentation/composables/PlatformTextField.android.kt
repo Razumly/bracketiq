@@ -1,10 +1,18 @@
 package com.razumly.mvp.core.presentation.composables
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -12,6 +20,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
@@ -20,6 +29,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.util.CurrencyAmountInputVisualTransformation
 
 @Composable
@@ -42,8 +52,19 @@ actual fun PlatformTextField(
     height: Dp?,
     contentPadding: PaddingValues?,
     inputFilter: ((String) -> String)?,
-    onTap: (() -> Unit)?
+    onTap: (() -> Unit)?,
+    onFocusChange: ((Boolean) -> Unit)?
 ) {
+    // Create or get focus manager
+    val focusManager = rememberPlatformFocusManager() as AndroidFocusManager
+
+    // Set up focus change listener
+    LaunchedEffect(onFocusChange) {
+        onFocusChange?.let { callback ->
+            focusManager.setFocusChangeListener(callback)
+        }
+    }
+
     // Create the final text style
     val finalTextStyle = when {
         textStyle != null && fontSize != null -> textStyle.copy(fontSize = fontSize)
@@ -52,64 +73,84 @@ actual fun PlatformTextField(
         else -> TextStyle.Default
     }
 
-    val interactionSource = remember { MutableInteractionSource() }
-
-    // Handle clicks via InteractionSource for readonly fields
-    if (readOnly && onTap != null) {
-        LaunchedEffect(interactionSource) {
-            interactionSource.interactions.collect { interaction ->
-                when (interaction) {
-                    is PressInteraction.Press -> {
-                        onTap()
-                    }
-                }
-            }
-        }
-    }
-
-    // Apply height modifier if specified
     val finalModifier = if (height != null) {
         modifier.height(height)
     } else {
         modifier
     }
 
-    OutlinedTextField(
-        value = value,
-        onValueChange = { newValue ->
-            // Apply input filter if provided
-            val filteredValue = inputFilter?.invoke(newValue) ?: newValue
-            onValueChange(filteredValue)
-        },
-        interactionSource = interactionSource,
-        modifier = finalModifier.clickable(onClick = { onTap }),
-        label = if (label.isNotEmpty()) { { Text(label) } } else null,
-        placeholder = if (placeholder.isNotEmpty()) { { Text(placeholder) } } else null,
-        enabled = enabled,
-        readOnly = readOnly,
-        textStyle = finalTextStyle,
-        visualTransformation = if (isPassword) {
-            PasswordVisualTransformation()
-        } else if (keyboardType == "money") {
-            CurrencyAmountInputVisualTransformation()
-        } else {
-            VisualTransformation.None
-        },
-        keyboardOptions = KeyboardOptions(
-            keyboardType = when (keyboardType) {
-                "email" -> KeyboardType.Email
-                "number", "money" -> KeyboardType.Number
-                "password" -> KeyboardType.Password
-                else -> KeyboardType.Text
+    // Handle tap-only fields differently
+    if (readOnly && onTap != null) {
+        // Use a clickable Box for tap-only fields to avoid focus conflicts
+        Box(
+            modifier = finalModifier
+                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(4.dp))
+                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(4.dp))
+                .clickable(onClick = onTap)
+                .padding(16.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                leadingIcon?.let {
+                    it()
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
+
+                Text(
+                    text = value.ifEmpty { placeholder },
+                    style = finalTextStyle.copy(
+                        color = if (value.isEmpty())
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        else
+                            MaterialTheme.colorScheme.onSurface
+                    ),
+                    modifier = Modifier.weight(1f)
+                )
+
+                trailingIcon?.let {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    it()
+                }
+            }
+        }
+    } else {
+        // Use OutlinedTextField with integrated focus manager
+        OutlinedTextField(
+            value = value,
+            onValueChange = { newValue ->
+                val filteredValue = inputFilter?.invoke(newValue) ?: newValue
+                onValueChange(filteredValue)
             },
-            imeAction = ImeAction.Next
-        ),
-        isError = isError,
-        supportingText = if (supportingText.isNotEmpty()) {
-            { Text(supportingText, color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant) }
-        } else null,
-        trailingIcon = trailingIcon,
-        leadingIcon = leadingIcon,
-        singleLine = true
-    )
+            modifier = finalModifier
+                .platformFocusable(focusManager, enabled), // Apply focus manager
+            label = if (label.isNotEmpty()) { { Text(label) } } else null,
+            placeholder = if (placeholder.isNotEmpty()) { { Text(placeholder) } } else null,
+            enabled = enabled,
+            readOnly = readOnly,
+            textStyle = finalTextStyle,
+            visualTransformation = if (isPassword) {
+                PasswordVisualTransformation()
+            } else if (keyboardType == "money") {
+                CurrencyAmountInputVisualTransformation()
+            } else {
+                VisualTransformation.None
+            },
+            keyboardOptions = KeyboardOptions(
+                keyboardType = when (keyboardType) {
+                    "email" -> KeyboardType.Email
+                    "number", "money" -> KeyboardType.Number
+                    "password" -> KeyboardType.Password
+                    else -> KeyboardType.Text
+                },
+                imeAction = ImeAction.Next
+            ),
+            isError = isError,
+            supportingText = if (supportingText.isNotEmpty()) {
+                { Text(supportingText, color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant) }
+            } else null,
+            trailingIcon = trailingIcon,
+            leadingIcon = leadingIcon,
+            singleLine = true
+        )
+    }
 }

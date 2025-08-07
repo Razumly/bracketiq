@@ -67,22 +67,22 @@ actual fun PlatformDropdown(
         PlatformTextField(
             value = displayValue,
             onValueChange = { },
-            readOnly = true,
+            modifier = Modifier
+                .fillMaxWidth()
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable, true),
             label = label,
             placeholder = placeholder,
             isError = isError,
             supportingText = supportingText,
             enabled = enabled,
-            leadingIcon = leadingIcon,
-            height = height,
-            contentPadding = contentPadding,
+            readOnly = true,
             trailingIcon = {
                 ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
             },
-            modifier = Modifier
-                .fillMaxWidth()
-                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable, true)
-        )
+            leadingIcon = leadingIcon,
+            height = height,
+            contentPadding = contentPadding
+        ) { }
 
         ExposedDropdownMenu(
             expanded = expanded,

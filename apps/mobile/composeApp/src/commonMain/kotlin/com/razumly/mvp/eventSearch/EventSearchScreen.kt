@@ -11,8 +11,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -41,6 +44,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -88,6 +92,25 @@ fun EventSearchScreen(
     var showFab by remember { mutableStateOf(true) }
     var showingFilter by remember { mutableStateOf(false) }
     val isScrollingUp by lazyListState.isScrollingUp()
+    val density = LocalDensity.current
+    var overlayTopOffset by remember { mutableStateOf(0.dp)}
+    var overlayStartOffset by remember { mutableStateOf(0.dp)}
+    var overlayWidth by remember { mutableStateOf(0.dp)}
+
+
+    LaunchedEffect(searchBoxSize, searchBoxPosition) {
+        overlayTopOffset = with(density) {
+            searchBoxPosition.y.toDp() + searchBoxSize.height.toDp() + 4.dp
+        }
+
+        overlayStartOffset = with(density) {
+            searchBoxPosition.x.toDp()
+        }
+
+        overlayWidth = with(density) {
+            searchBoxSize.width.toDp()
+        }
+    }
 
     val loadingHandler = LocalLoadingHandler.current
     val errorHandler = LocalErrorHandler.current
@@ -212,10 +235,15 @@ fun EventSearchScreen(
         }
 
         SearchOverlay(
+            modifier = Modifier
+                .width(overlayWidth)
+                .heightIn(max = 400.dp)
+                .offset(
+                    x = overlayStartOffset,
+                    y = overlayTopOffset
+                ),
             isVisible = showSearchOverlay,
             searchQuery = searchQuery,
-            searchBoxPosition = searchBoxPosition,
-            searchBoxSize = searchBoxSize,
             onDismiss = {
                 showSearchOverlay = false
             },

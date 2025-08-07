@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -50,7 +51,17 @@ actual fun PlatformTextField(
     contentPadding: PaddingValues?,
     inputFilter: ((String) -> String)?,
     onTap: (() -> Unit)?,
+    onFocusChange: ((Boolean) -> Unit)?
 ) {
+    val focusManager = rememberPlatformFocusManager() as IOSFocusManager
+
+    // Set up focus change listener
+    LaunchedEffect(onFocusChange) {
+        onFocusChange?.let { callback ->
+            focusManager.setFocusChangeListener(callback)
+        }
+    }
+
     val fieldHeight = height ?: 44.dp
     val actualFontSize = fontSize ?: textStyle?.fontSize ?: 16.sp
     val paddingModifier = if (contentPadding != null) {
@@ -85,9 +96,8 @@ actual fun PlatformTextField(
                 }
             }
 
-            // Always use Compose components for tap-enabled fields
-            if (onTap != null) {
-                // Pure Compose implementation for clickable fields
+            // For tap-only fields (like date pickers), use a simple clickable Box
+            if (onTap != null && readOnly) {
                 Box(
                     modifier = Modifier
                         .weight(1f)
@@ -102,10 +112,7 @@ actual fun PlatformTextField(
                             else MaterialTheme.colorScheme.outline,
                             RoundedCornerShape(8.dp)
                         )
-                        .clickable(
-                            enabled = enabled,
-                            onClick = onTap
-                        )
+                        .clickable(onClick = onTap)
                         .padding(horizontal = 12.dp),
                     contentAlignment = Alignment.CenterStart
                 ) {
@@ -121,25 +128,27 @@ actual fun PlatformTextField(
                     )
                 }
             } else {
-                // Use UITextField only for actual text input
+                // For interactive fields, use UITextField with focus manager
                 UIKitView(
                     factory = {
                         createUITextField(
                             placeholder = placeholder,
                             text = value,
-                            onTextChanged = if (readOnly) { _ -> } else { newValue ->
+                            onTextChanged = { newValue ->
                                 val filteredValue = inputFilter?.invoke(newValue) ?: newValue
                                 onValueChange(filteredValue)
                             },
                             isSecure = isPassword,
                             keyboardType = keyboardType,
                             enabled = enabled && !readOnly,
-                            fontSize = actualFontSize
+                            fontSize = actualFontSize,
+                            focusManager = focusManager
                         )
                     },
                     modifier = Modifier
                         .weight(1f)
                         .height(fieldHeight)
+                        .platformFocusable(focusManager, enabled)
                         .clip(RoundedCornerShape(5.dp)),
                     update = { textField ->
                         updateUITextField(
@@ -151,7 +160,7 @@ actual fun PlatformTextField(
                             enabled = enabled && !readOnly,
                             fontSize = actualFontSize
                         )
-                    },
+                    }
                 )
             }
 
@@ -179,7 +188,6 @@ actual fun PlatformTextField(
 }
 
 
-// Simplified createUITextField without the problematic onTap handling
 @OptIn(ExperimentalForeignApi::class)
 fun createUITextField(
     placeholder: String,
@@ -188,7 +196,8 @@ fun createUITextField(
     isSecure: Boolean,
     keyboardType: String,
     enabled: Boolean,
-    fontSize: TextUnit = 16.sp
+    fontSize: TextUnit = 16.sp,
+    focusManager: IOSFocusManager
 ): UITextField {
     val textField = UITextField()
 
@@ -213,8 +222,11 @@ fun createUITextField(
         else -> textField.keyboardType = UIKeyboardTypeDefault
     }
 
-    // Create and set delegate
-    val delegate = TextFieldDelegate(onTextChanged)
+    // Attach focus manager to this text field
+    focusManager.attachToTextField(textField)
+
+    // Create focus-aware delegate
+    val delegate = FocusAwareTextFieldDelegate(onTextChanged, focusManager)
     textField.delegate = delegate
 
     // Store the delegate to prevent garbage collection
@@ -229,9 +241,9 @@ fun createUITextField(
 }
 
 
-// UITextField delegate class to handle text changes
-class TextFieldDelegate(
-    private val onTextChanged: (String) -> Unit
+class EnhancedTextFieldDelegate(
+    private val onTextChanged: (String) -> Unit,
+    private val onFocusChanged: (Boolean) -> Unit
 ) : NSObject(), UITextFieldDelegateProtocol {
 
     @OptIn(ExperimentalForeignApi::class)
@@ -247,6 +259,14 @@ class TextFieldDelegate(
         )
         onTextChanged(newText)
         return true
+    }
+
+    override fun textFieldDidBeginEditing(textField: UITextField) {
+        onFocusChanged(true)
+    }
+
+    override fun textFieldDidEndEditing(textField: UITextField) {
+        onFocusChanged(false)
     }
 }
 

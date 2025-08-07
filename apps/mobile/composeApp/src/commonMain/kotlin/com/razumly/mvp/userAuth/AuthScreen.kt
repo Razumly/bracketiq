@@ -11,13 +11,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -27,19 +23,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.LoginState
 import com.razumly.mvp.core.presentation.composables.EmailSignInButton
 import com.razumly.mvp.core.presentation.composables.GoogleSignInButton
 import com.razumly.mvp.core.presentation.composables.PasswordField
 import com.razumly.mvp.core.presentation.composables.PlatformTextField
-import com.razumly.mvp.icons.BaselineVisibility24
-import com.razumly.mvp.icons.BaselineVisibilityOff24
-import com.razumly.mvp.icons.MVPIcons
 
 @Composable
 fun AuthScreenBase(component: DefaultAuthComponent, onOauth2: () -> Unit?) {
@@ -78,32 +67,32 @@ fun AuthScreenBase(component: DefaultAuthComponent, onOauth2: () -> Unit?) {
                     PlatformTextField(
                         value = firstName,
                         onValueChange = { firstName = it },
-                        label = "First Name",
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                        modifier = Modifier.fillMaxWidth(),
+                        label = "First Name"
+                    ) { }
 
                     PlatformTextField(
                         value = lastName,
                         onValueChange = { lastName = it },
-                        label = "Last Name",
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                        modifier = Modifier.fillMaxWidth(),
+                        label = "Last Name"
+                    ) { }
 
                     PlatformTextField(
                         value = userName,
                         onValueChange = { userName = it },
-                        label = "Username",
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                        modifier = Modifier.fillMaxWidth(),
+                        label = "Username"
+                    ) { }
                 }
 
                 PlatformTextField(
                     value = email,
                     onValueChange = { email = it },
+                    modifier = Modifier.fillMaxWidth(),
                     label = "Email",
-                    keyboardType = "email",
-                    modifier = Modifier.fillMaxWidth()
-                )
+                    keyboardType = "email"
+                ) { }
 
                 // Replace OutlinedTextField with PasswordField
                 PasswordField(

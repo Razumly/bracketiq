@@ -3,7 +3,6 @@ package com.razumly.mvp.eventDetail
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearOutSlowInEasing
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,12 +23,10 @@ import androidx.compose.material.icons.filled.Place
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonColors
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -82,7 +79,6 @@ import com.razumly.mvp.core.presentation.util.toDivisionCase
 import com.razumly.mvp.core.presentation.util.toTitleCase
 import com.razumly.mvp.core.presentation.util.transitionSpec
 import com.razumly.mvp.eventDetail.composables.CancellationRefundOptions
-import com.razumly.mvp.eventDetail.composables.DropdownField
 import com.razumly.mvp.eventDetail.composables.LoserSetCountDropdown
 import com.razumly.mvp.eventDetail.composables.MultiSelectDropdownField
 import com.razumly.mvp.eventDetail.composables.NumberInputField
@@ -264,7 +260,8 @@ fun EventDetails(
                                     )
                                 },
                                 editContent = {
-                                    PlatformTextField(value = editEvent.name,
+                                    PlatformTextField(
+                                        value = editEvent.name,
                                         onValueChange = { onEditEvent { copy(name = it) } },
                                         label = "Event Name",
                                         isError = !isNameValid,
@@ -274,7 +271,7 @@ fun EventDetails(
                                             } else {
                                                 ""
                                             }
-                                        )
+                                    ) { }
                                 })
 
                             // Location Display
@@ -469,24 +466,26 @@ fun EventDetails(
                                         Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        PlatformTextField(value = editEvent.start.toLocalDateTime(
-                                            TimeZone.currentSystemDefault()
-                                        ).format(dateTimeFormat),
+                                        PlatformTextField(
+                                            value = editEvent.start.toLocalDateTime(
+                                                TimeZone.currentSystemDefault()
+                                            ).format(dateTimeFormat),
                                             onValueChange = {},
+                                            modifier = Modifier.weight(1f),
                                             label = "Start Date & Time",
-                                            modifier = Modifier.weight(1f),
                                             readOnly = true,
                                             onTap = { showStartPicker = true }
-                                        )
-                                        PlatformTextField(value = editEvent.end.toLocalDateTime(
-                                            TimeZone.currentSystemDefault()
-                                        ).format(dateTimeFormat),
+                                        ) { }
+                                        PlatformTextField(
+                                            value = editEvent.end.toLocalDateTime(
+                                                TimeZone.currentSystemDefault()
+                                            ).format(dateTimeFormat),
                                             onValueChange = {},
-                                            label = "End Date & Time",
                                             modifier = Modifier.weight(1f),
+                                            label = "End Date & Time",
                                             readOnly = true,
                                             onTap = { showStartPicker = true }
-                                        )
+                                        ) { }
                                     }
                                 })
 
@@ -621,14 +620,16 @@ fun EventDetails(
 
                                     // Tournament-specific fields
                                     if (editEvent is Tournament) {
-                                        PlatformTextField(value = editEvent.prize, onValueChange = {
-                                            if (it.length <= 50) onEditTournament {
-                                                copy(
-                                                    prize = it
-                                                )
-                                            }
-                                        }, label = "Prize",
-                                            supportingText = "If there is a prize, enter it here")
+                                        PlatformTextField(
+                                            value = editEvent.prize, onValueChange = {
+                                                if (it.length <= 50) onEditTournament {
+                                                    copy(
+                                                        prize = it
+                                                    )
+                                                }
+                                            }, label = "Prize",
+                                            supportingText = "If there is a prize, enter it here"
+                                        ) { }
 
                                         PlatformTextField(
                                             value = fieldCount.toString(),
@@ -643,13 +644,13 @@ fun EventDetails(
                                                     }
                                                 }
                                             },
-                                            keyboardType = "number",
                                             label = "Field Count",
+                                            keyboardType = "number",
                                             isError = !isFieldCountValid,
                                             supportingText = if (!isFieldCountValid) stringResource(
                                                 Res.string.value_too_low, 0
                                             ) else "",
-                                        )
+                                        ) { }
 
                                         WinnerSetCountDropdown(
                                             selectedCount = editEvent.winnerSetCount,
@@ -889,32 +890,35 @@ fun EventDetails(
                 showImageSelector = false
                 selectedPlace = null
             }) {
-                Column(Modifier.fillMaxSize()) {
-                    SelectEventImage(selectedPlace = selectedPlace,
-                        onSelectedImage = { onEditEvent(it) })
-                    Row(
-                        Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly
-                    ) {
-                        Button(
-                            onClick = {
-                                showImageSelector = false
-                                onEditEvent { copy(imageUrl = "") }
-                                onPlaceSelected(null)
-                            }, colors = ButtonColors(
-                                containerColor = MaterialTheme.colorScheme.errorContainer,
-                                contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                                disabledContainerColor = MaterialTheme.colorScheme.onSurface,
-                                disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                Card {
+                    Column(Modifier.fillMaxSize()) {
+                        SelectEventImage(
+                            selectedPlace = selectedPlace,
+                            onSelectedImage = { onEditEvent(it) })
+                        Row(
+                            Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly
                         ) {
-                            Text("Cancel")
-                        }
-                        Button(enabled = editEvent.imageUrl.isNotEmpty(), onClick = {
-                            showImageSelector = false
-                            mapComponent.toggleMap()
-                            selectedPlace = null
-                        }) {
-                            Text("Confirm")
+                            Button(
+                                onClick = {
+                                    showImageSelector = false
+                                    onEditEvent { copy(imageUrl = "") }
+                                    onPlaceSelected(null)
+                                }, colors = ButtonColors(
+                                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                                    disabledContainerColor = MaterialTheme.colorScheme.onSurface,
+                                    disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            ) {
+                                Text("Cancel")
+                            }
+                            Button(enabled = editEvent.imageUrl.isNotEmpty(), onClick = {
+                                showImageSelector = false
+                                mapComponent.toggleMap()
+                                selectedPlace = null
+                            }) {
+                                Text("Confirm")
+                            }
                         }
                     }
                 }

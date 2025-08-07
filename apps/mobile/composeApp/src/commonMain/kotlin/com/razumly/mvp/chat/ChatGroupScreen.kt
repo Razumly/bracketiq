@@ -18,7 +18,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -111,7 +110,7 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
                         onValueChange = component::onMessageInputChange,
                         modifier = Modifier.weight(1f),
                         placeholder = "Type a message..."
-                    )
+                    ) { }
 
                     Button(
                         onClick = component::sendMessage,

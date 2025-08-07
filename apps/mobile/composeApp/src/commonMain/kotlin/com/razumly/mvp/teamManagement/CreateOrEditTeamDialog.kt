@@ -24,7 +24,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonColors
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -40,6 +39,7 @@ import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.presentation.composables.InvitePlayerCard
+import com.razumly.mvp.core.presentation.composables.PlatformTextField
 import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.SearchPlayerDialog
 import com.razumly.mvp.core.presentation.util.teamSizeFormat
@@ -78,14 +78,15 @@ fun CreateOrEditTeamDialog(
             Text("Team Setup", style = MaterialTheme.typography.titleLarge)
             Spacer(modifier = Modifier.height(8.dp))
 
-            OutlinedTextField(value = teamName,
+            PlatformTextField(
+                value = teamName,
                 onValueChange = {
                     teamName = it
                 },
-                label = { Text("Team Name") },
                 modifier = Modifier.fillMaxWidth(),
+                label = "Team Name",
                 readOnly = !showEditDetails
-            )
+            ) { }
 
             Spacer(modifier = Modifier.height(12.dp))
             Text("Select Team Size")

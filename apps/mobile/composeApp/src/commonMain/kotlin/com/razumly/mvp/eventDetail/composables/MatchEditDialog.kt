@@ -20,7 +20,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Remove
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -30,7 +29,6 @@ import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -332,9 +330,9 @@ fun IndividualScoreInputSection(
                             onTeam1ScoreChange(newScores)
                         },
                         modifier = Modifier.width(60.dp),
-                        textStyle = MaterialTheme.typography.bodyMedium,
-                        placeholder = "0"
-                    )
+                        placeholder = "0",
+                        textStyle = MaterialTheme.typography.bodyMedium
+                    ) { }
                 }
             }
 
@@ -386,9 +384,9 @@ fun IndividualScoreInputSection(
                             onTeam2ScoreChange(newScores)
                         },
                         modifier = Modifier.width(60.dp),
-                        textStyle = MaterialTheme.typography.bodyMedium,
-                        placeholder = "0"
-                    )
+                        placeholder = "0",
+                        textStyle = MaterialTheme.typography.bodyMedium
+                    ) { }
                 }
             }
 
@@ -430,12 +428,12 @@ fun TeamSelectionField(
         PlatformTextField(
             value = selectedTeam?.team?.name ?: "Select ${label.lowercase()}",
             onValueChange = {},
-            readOnly = true,
-            label = label,
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
             modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable, true)
-                .fillMaxWidth()
-        )
+                .fillMaxWidth(),
+            label = label,
+            readOnly = true,
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) }
+        ) { }
 
         ExposedDropdownMenu(
             expanded = expanded, onDismissRequest = { onExpandedChange(false) }) {
@@ -468,6 +466,7 @@ fun TimePickerField(
         value = selectedTime?.toLocalDateTime(TimeZone.currentSystemDefault())
             ?.format(dateTimeFormat) ?: "Select time",
         onValueChange = {},
+        modifier = Modifier.fillMaxWidth(),
         label = label,
         readOnly = true,
         trailingIcon = {
@@ -475,8 +474,8 @@ fun TimePickerField(
                 Icon(Icons.Default.AccessTime, contentDescription = "Select time")
             }
         },
-        modifier = Modifier.fillMaxWidth(),
-        onTap = { showTimePicker = true })
+        onTap = { showTimePicker = true }
+    ) { }
 
     if (showTimePicker) {
         PlatformDateTimePicker(
@@ -508,12 +507,12 @@ fun FieldSelectionField(
         PlatformTextField(
             value = selectedField?.field?.fieldNumber?.toString() ?: "Select field",
             onValueChange = {},
-            readOnly = true,
-            label = label,
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
             modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable, true)
-                .fillMaxWidth()
-        )
+                .fillMaxWidth(),
+            label = label,
+            readOnly = true,
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) }
+        ) { }
 
         ExposedDropdownMenu(
             expanded = expanded, onDismissRequest = { onExpandedChange(false) }) {

@@ -30,28 +30,13 @@ import androidx.compose.ui.zIndex
 
 @Composable
 fun SearchOverlay(
+    modifier: Modifier = Modifier,
     isVisible: Boolean,
     searchQuery: String,
-    searchBoxPosition: Offset,
-    searchBoxSize: IntSize,
     onDismiss: () -> Unit,
     suggestions: @Composable () -> Unit,
     initial: @Composable () -> Unit
 ) {
-    val density = LocalDensity.current
-
-    // Calculate overlay position based on search box
-    val overlayTopOffset = with(density) {
-        searchBoxPosition.y.toDp() + searchBoxSize.height.toDp() + 4.dp // 4dp gap
-    }
-
-    val overlayStartOffset = with(density) {
-        searchBoxPosition.x.toDp()
-    }
-
-    val overlayWidth = with(density) {
-        searchBoxSize.width.toDp()
-    }
     if (isVisible) {
         // Full-screen overlay that captures touches
         Box(
@@ -66,13 +51,7 @@ fun SearchOverlay(
         ) {
             // Dropdown positioned at the top
             Card(
-                modifier = Modifier
-                    .width(overlayWidth)
-                    .heightIn(max = 400.dp)
-                    .offset(
-                        x = overlayStartOffset,
-                        y = overlayTopOffset
-                    )
+                modifier = modifier
                     .clickable(
                         indication = null,
                         interactionSource = remember { MutableInteractionSource() }

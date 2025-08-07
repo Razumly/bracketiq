@@ -46,5 +46,5 @@ fun PasswordField(
                 )
             }
         }
-    )
+    ) { }
 }

@@ -27,5 +27,6 @@ expect fun PlatformTextField(
     height: Dp? = null,
     contentPadding: PaddingValues? = null,
     inputFilter: ((String) -> String)? = null,
-    onTap: (() -> Unit)? = null
+    onTap: (() -> Unit)? = null,
+    onFocusChange: ((Boolean) -> Unit)? = null
 )

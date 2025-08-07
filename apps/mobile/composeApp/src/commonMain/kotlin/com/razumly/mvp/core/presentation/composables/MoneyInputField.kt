@@ -28,5 +28,5 @@ fun MoneyInputField(
         enabled = enabled,
         readOnly = readOnly,
         inputFilter = MoneyInputUtils::moneyInputFilter
-    )
+    ) { }
 }

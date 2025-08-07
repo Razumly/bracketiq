@@ -37,7 +37,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuDefaults
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -616,9 +615,9 @@ fun RefundReasonDialog(
             PlatformTextField(
                 value = currentReason,
                 onValueChange = onReasonChange,
-                placeholder = "Enter reason...",
                 modifier = Modifier.fillMaxWidth(),
-            )
+                placeholder = "Enter reason...",
+            ) { }
         }
     }, confirmButton = {
         Button(
