@@ -27,7 +27,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.razumly.mvp.icons.MVPIcons
@@ -130,8 +129,8 @@ fun MatchDetailScreen(
             .background(
                 brush = Brush.verticalGradient(
                     colors = listOf(
-                        Color(0xFFFF8C00),
-                        Color(0xFFFFD700)
+                        MaterialTheme.colorScheme.tertiaryContainer,
+                        MaterialTheme.colorScheme.primaryContainer,
                     )
                 )
             ),
@@ -148,30 +147,30 @@ fun MatchDetailScreen(
                 component.updateScore(isTeam1 = true, increment = false)
             },
             enabled = canIncrement,
-            modifier = Modifier.weight(1f)
+            modifier = Modifier.weight(1f),
         )
 
         Row(
             modifier = Modifier
                 .background(
-                    color = Color.White.copy(alpha = 0.2f),
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f),
                     shape = RoundedCornerShape(20.dp)
                 )
                 .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
             Text(
                 text = "Match: ${match.match.matchNumber}",
-                color = Color.White,
+                color = MaterialTheme.colorScheme.onSurface,
                 style = MaterialTheme.typography.titleLarge
             )
             Text(
                 text = " | ",
-                color = Color.White,
+                color = MaterialTheme.colorScheme.onSurface,
                 style = MaterialTheme.typography.titleLarge
             )
             Text(
                 text = stringResource(Res.string.set_number, currentSet + 1),
-                color = Color.White,
+                color = MaterialTheme.colorScheme.onSurface,
                 style = MaterialTheme.typography.titleLarge
             )
         }
@@ -221,7 +220,7 @@ fun ScoreCard(
                 contentDescription = "Decrease score",
                 modifier = Modifier
                     .size(48.dp),
-                tint = Color.White,
+                tint = MaterialTheme.colorScheme.onSurface
             )
         }
 
@@ -232,13 +231,13 @@ fun ScoreCard(
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleMedium,
-                color = Color.White
+                color = MaterialTheme.colorScheme.onSurface
             )
 
             Text(
                 text = score,
                 style = MaterialTheme.typography.displayLarge,
-                color = Color.White,
+                color = MaterialTheme.colorScheme.onSurface,
                 fontSize = 64.sp
             )
         }
@@ -253,7 +252,7 @@ fun ScoreCard(
                 contentDescription = "Increase score",
                 modifier = Modifier
                     .size(48.dp),
-                tint = Color.White
+                tint = MaterialTheme.colorScheme.onSurface
             )
         }
     }
