@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -22,6 +23,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -53,16 +56,16 @@ actual fun PlatformTextField(
     contentPadding: PaddingValues?,
     inputFilter: ((String) -> String)?,
     onTap: (() -> Unit)?,
-    onFocusChange: ((Boolean) -> Unit)?
+    imeAction: ImeAction,
+    externalFocusManager: PlatformFocusManager?
 ) {
-    // Create or get focus manager
-    val focusManager = rememberPlatformFocusManager() as AndroidFocusManager
+    val focusManager = externalFocusManager ?: rememberPlatformFocusManager()
+    val androidManager = focusManager as AndroidFocusManager
+    val composeFocusManager = LocalFocusManager.current
 
-    // Set up focus change listener
-    LaunchedEffect(onFocusChange) {
-        onFocusChange?.let { callback ->
-            focusManager.setFocusChangeListener(callback)
-        }
+    // Set compose focus manager
+    LaunchedEffect(Unit) {
+        androidManager.setComposeFocusManager(composeFocusManager)
     }
 
     // Create the final text style
@@ -114,17 +117,20 @@ actual fun PlatformTextField(
             }
         }
     } else {
-        // Use OutlinedTextField with integrated focus manager
+        // Use OutlinedTextField with enhanced keyboard handling
         OutlinedTextField(
             value = value,
             onValueChange = { newValue ->
                 val filteredValue = inputFilter?.invoke(newValue) ?: newValue
                 onValueChange(filteredValue)
             },
-            modifier = finalModifier
-                .platformFocusable(focusManager, enabled), // Apply focus manager
-            label = if (label.isNotEmpty()) { { Text(label) } } else null,
-            placeholder = if (placeholder.isNotEmpty()) { { Text(placeholder) } } else null,
+            modifier = finalModifier.platformFocusable(androidManager, enabled),
+            label = if (label.isNotEmpty()) {
+                { Text(label) }
+            } else null,
+            placeholder = if (placeholder.isNotEmpty()) {
+                { Text(placeholder) }
+            } else null,
             enabled = enabled,
             readOnly = readOnly,
             textStyle = finalTextStyle,
@@ -142,11 +148,22 @@ actual fun PlatformTextField(
                     "password" -> KeyboardType.Password
                     else -> KeyboardType.Text
                 },
-                imeAction = ImeAction.Next
+                imeAction = imeAction
+            ),
+            keyboardActions = KeyboardActions(
+                onNext = { androidManager.handleNextAction() },
+                onDone = { androidManager.handleDoneAction() },
+                onGo = { androidManager.handleDoneAction() },
+                onSend = { androidManager.handleDoneAction() }
             ),
             isError = isError,
             supportingText = if (supportingText.isNotEmpty()) {
-                { Text(supportingText, color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant) }
+                {
+                    Text(
+                        supportingText,
+                        color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             } else null,
             trailingIcon = trailingIcon,
             leadingIcon = leadingIcon,

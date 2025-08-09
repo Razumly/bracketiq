@@ -617,7 +617,7 @@ fun RefundReasonDialog(
                 onValueChange = onReasonChange,
                 modifier = Modifier.fillMaxWidth(),
                 placeholder = "Enter reason...",
-            ) { }
+            )
         }
     }, confirmButton = {
         Button(

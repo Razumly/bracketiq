@@ -110,7 +110,7 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
                         onValueChange = component::onMessageInputChange,
                         modifier = Modifier.weight(1f),
                         placeholder = "Type a message..."
-                    ) { }
+                    )
 
                     Button(
                         onClick = component::sendMessage,

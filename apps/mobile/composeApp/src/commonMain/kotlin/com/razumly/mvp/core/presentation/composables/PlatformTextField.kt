@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 
@@ -28,5 +29,6 @@ expect fun PlatformTextField(
     contentPadding: PaddingValues? = null,
     inputFilter: ((String) -> String)? = null,
     onTap: (() -> Unit)? = null,
-    onFocusChange: ((Boolean) -> Unit)? = null
+    imeAction: ImeAction = ImeAction.Next,
+    externalFocusManager: PlatformFocusManager? = null
 )

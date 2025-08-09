@@ -38,6 +38,6 @@ fun PointsTextField(
         keyboardType = "numbers",
         isError = isError,
         supportingText = if (isError && errorMessage.isNotEmpty()) { errorMessage } else ""
-    ) { }
+    )
 }
 

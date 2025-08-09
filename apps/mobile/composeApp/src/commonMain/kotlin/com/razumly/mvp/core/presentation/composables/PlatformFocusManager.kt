@@ -8,12 +8,19 @@ data class PlatformFocusState(
     val canRequestFocus: Boolean = true
 )
 
+// PlatformFocusManager.kt
 interface PlatformFocusManager {
     val focusState: PlatformFocusState
     fun requestFocus()
     fun clearFocus()
+
+    // New callback methods
     fun setFocusChangeListener(onFocusChanged: (Boolean) -> Unit)
+    fun setOnNextAction(onNext: () -> Unit)
+    fun setOnDoneAction(onDone: () -> Unit)
+    fun clearCallbacks()
 }
+
 
 @Composable
 expect fun rememberPlatformFocusManager(): PlatformFocusManager

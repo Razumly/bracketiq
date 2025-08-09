@@ -31,6 +31,6 @@ fun TextInputField(
                         errorMessage
 
                 } else supportingText ?: ""
-        ) { }
+        )
     }
 }

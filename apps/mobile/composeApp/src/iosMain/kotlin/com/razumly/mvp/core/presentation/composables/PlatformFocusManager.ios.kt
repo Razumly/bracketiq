@@ -9,9 +9,12 @@ import platform.UIKit.*
 import platform.darwin.NSObject
 import platform.objc.*
 
+// PlatformFocusManager.ios.kt
 class IOSFocusManager : PlatformFocusManager {
     private var _focusState by mutableStateOf(PlatformFocusState())
     private var onFocusChangedCallback: ((Boolean) -> Unit)? = null
+    private var onNextCallback: (() -> Unit)? = null
+    private var onDoneCallback: (() -> Unit)? = null
     private var currentTextField: UITextField? = null
 
     override val focusState: PlatformFocusState
@@ -29,6 +32,21 @@ class IOSFocusManager : PlatformFocusManager {
         onFocusChangedCallback = onFocusChanged
     }
 
+    override fun setOnNextAction(onNext: () -> Unit) {
+        onNextCallback = onNext
+    }
+
+    override fun setOnDoneAction(onDone: () -> Unit) {
+        onDoneCallback = onDone
+    }
+
+    override fun clearCallbacks() {
+        onFocusChangedCallback = null
+        onNextCallback = null
+        onDoneCallback = null
+    }
+
+    // Internal methods
     internal fun attachToTextField(textField: UITextField) {
         currentTextField = textField
     }
@@ -36,6 +54,14 @@ class IOSFocusManager : PlatformFocusManager {
     internal fun updateFocusState(isFocused: Boolean) {
         _focusState = _focusState.copy(isFocused = isFocused)
         onFocusChangedCallback?.invoke(isFocused)
+    }
+
+    internal fun handleNextAction() {
+        onNextCallback?.invoke()
+    }
+
+    internal fun handleDoneAction() {
+        onDoneCallback?.invoke()
     }
 }
 

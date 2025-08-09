@@ -36,6 +36,6 @@ fun NumberInputField(
             enabled = enabled
 
 
-        ) { }
+        )
     }
 }

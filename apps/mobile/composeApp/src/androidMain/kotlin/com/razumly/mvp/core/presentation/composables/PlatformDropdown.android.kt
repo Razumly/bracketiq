@@ -82,7 +82,7 @@ actual fun PlatformDropdown(
             leadingIcon = leadingIcon,
             height = height,
             contentPadding = contentPadding
-        ) { }
+        )
 
         ExposedDropdownMenu(
             expanded = expanded,

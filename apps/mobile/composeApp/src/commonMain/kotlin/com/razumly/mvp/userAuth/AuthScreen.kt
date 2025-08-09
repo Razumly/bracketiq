@@ -16,6 +16,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -23,12 +24,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.LoginState
 import com.razumly.mvp.core.presentation.composables.EmailSignInButton
 import com.razumly.mvp.core.presentation.composables.GoogleSignInButton
 import com.razumly.mvp.core.presentation.composables.PasswordField
 import com.razumly.mvp.core.presentation.composables.PlatformTextField
+import com.razumly.mvp.core.presentation.composables.rememberPlatformFocusManager
 
 @Composable
 fun AuthScreenBase(component: DefaultAuthComponent, onOauth2: () -> Unit?) {
@@ -38,8 +41,6 @@ fun AuthScreenBase(component: DefaultAuthComponent, onOauth2: () -> Unit?) {
     var firstName by remember { mutableStateOf("") }
     var lastName by remember { mutableStateOf("") }
     var userName by remember { mutableStateOf("") }
-    var isPasswordVisible by remember { mutableStateOf(false) }
-    var isConfirmPasswordVisible by remember { mutableStateOf(false) }
 
     val passwordError by component.passwordError.collectAsState()
     val loginState by component.loginState.collectAsState()
@@ -48,15 +49,39 @@ fun AuthScreenBase(component: DefaultAuthComponent, onOauth2: () -> Unit?) {
     val isPasswordValid = password.length in 8..256
     val isConfirmPasswordValid = confirmPassword.length in 8..256
 
+    // Focus managers for field navigation
+    val firstNameFocusManager = rememberPlatformFocusManager()
+    val lastNameFocusManager = rememberPlatformFocusManager()
+    val userNameFocusManager = rememberPlatformFocusManager()
+    val emailFocusManager = rememberPlatformFocusManager()
+    val passwordFocusManager = rememberPlatformFocusManager()
+    val confirmPasswordFocusManager = rememberPlatformFocusManager()
+
+    val handleSubmit = {
+        if (isSignup) {
+            component.onSignup(email, password, confirmPassword, firstName, lastName, userName)
+        } else {
+            component.onLogin(email, password)
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        firstNameFocusManager.setOnNextAction { lastNameFocusManager.requestFocus() }
+        lastNameFocusManager.setOnNextAction { userNameFocusManager.requestFocus() }
+        userNameFocusManager.setOnNextAction { emailFocusManager.requestFocus() }
+        emailFocusManager.setOnNextAction { passwordFocusManager.requestFocus() }
+        passwordFocusManager.setOnDoneAction { handleSubmit() }
+    }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .imePadding() // This handles keyboard insets
+            .imePadding()
             .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
-        contentPadding = PaddingValues(bottom = 16.dp) // Extra padding at bottom
+        contentPadding = PaddingValues(bottom = 16.dp)
     ) {
         item {
             Column(
@@ -68,22 +93,28 @@ fun AuthScreenBase(component: DefaultAuthComponent, onOauth2: () -> Unit?) {
                         value = firstName,
                         onValueChange = { firstName = it },
                         modifier = Modifier.fillMaxWidth(),
-                        label = "First Name"
-                    ) { }
+                        label = "First Name",
+                        imeAction = ImeAction.Next,
+                        externalFocusManager = firstNameFocusManager
+                    )
 
                     PlatformTextField(
                         value = lastName,
                         onValueChange = { lastName = it },
                         modifier = Modifier.fillMaxWidth(),
-                        label = "Last Name"
-                    ) { }
+                        label = "Last Name",
+                        imeAction = ImeAction.Next,
+                        externalFocusManager = lastNameFocusManager
+                    )
 
                     PlatformTextField(
                         value = userName,
                         onValueChange = { userName = it },
                         modifier = Modifier.fillMaxWidth(),
-                        label = "Username"
-                    ) { }
+                        label = "Username",
+                        imeAction = ImeAction.Next,
+                        externalFocusManager = userNameFocusManager
+                    )
                 }
 
                 PlatformTextField(
@@ -91,25 +122,32 @@ fun AuthScreenBase(component: DefaultAuthComponent, onOauth2: () -> Unit?) {
                     onValueChange = { email = it },
                     modifier = Modifier.fillMaxWidth(),
                     label = "Email",
-                    keyboardType = "email"
-                ) { }
+                    keyboardType = "email",
+                    imeAction = ImeAction.Next,
+                    externalFocusManager = emailFocusManager
+                )
 
-                // Replace OutlinedTextField with PasswordField
-                PasswordField(
+                PlatformTextField(
                     value = password,
                     onValueChange = { password = it },
                     label = "Password",
+                    isPassword = true,
                     isError = passwordError.isNotBlank(),
                     supportingText = passwordError,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    imeAction = if (isSignup) ImeAction.Next else ImeAction.Done,
+                    externalFocusManager = passwordFocusManager
                 )
 
                 if (isSignup) {
-                    PasswordField(
+                    PlatformTextField(
                         value = confirmPassword,
                         onValueChange = { confirmPassword = it },
                         label = "Confirm Password",
-                        modifier = Modifier.fillMaxWidth()
+                        isPassword = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        imeAction = ImeAction.Done,
+                        externalFocusManager = confirmPasswordFocusManager
                     )
                 }
 
@@ -123,22 +161,18 @@ fun AuthScreenBase(component: DefaultAuthComponent, onOauth2: () -> Unit?) {
                             modifier = Modifier.padding(vertical = 8.dp)
                         )
                     }
+
                     LoginState.Loading -> {
                         CircularProgressIndicator(
                             modifier = Modifier.padding(16.dp)
                         )
                     }
+
                     else -> {}
                 }
 
                 Button(
-                    onClick = {
-                        if (isSignup) {
-                            component.onSignup(email, password, confirmPassword, firstName, lastName, userName)
-                        } else {
-                            component.onLogin(email, password)
-                        }
-                    },
+                    onClick = handleSubmit,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 8.dp),
@@ -165,12 +199,12 @@ fun AuthScreenBase(component: DefaultAuthComponent, onOauth2: () -> Unit?) {
                 )
 
                 Text("Or")
-
                 GoogleSignInButton(onClick = { onOauth2() })
             }
         }
     }
 }
+
 
 @Composable
 expect fun AuthScreen(component: DefaultAuthComponent)

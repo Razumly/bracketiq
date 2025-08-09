@@ -271,7 +271,7 @@ fun EventDetails(
                                             } else {
                                                 ""
                                             }
-                                    ) { }
+                                    )
                                 })
 
                             // Location Display
@@ -475,7 +475,7 @@ fun EventDetails(
                                             label = "Start Date & Time",
                                             readOnly = true,
                                             onTap = { showStartPicker = true }
-                                        ) { }
+                                        )
                                         PlatformTextField(
                                             value = editEvent.end.toLocalDateTime(
                                                 TimeZone.currentSystemDefault()
@@ -485,7 +485,7 @@ fun EventDetails(
                                             label = "End Date & Time",
                                             readOnly = true,
                                             onTap = { showStartPicker = true }
-                                        ) { }
+                                        )
                                     }
                                 })
 
@@ -629,7 +629,7 @@ fun EventDetails(
                                                 }
                                             }, label = "Prize",
                                             supportingText = "If there is a prize, enter it here"
-                                        ) { }
+                                        )
 
                                         PlatformTextField(
                                             value = fieldCount.toString(),
@@ -650,7 +650,7 @@ fun EventDetails(
                                             supportingText = if (!isFieldCountValid) stringResource(
                                                 Res.string.value_too_low, 0
                                             ) else "",
-                                        ) { }
+                                        )
 
                                         WinnerSetCountDropdown(
                                             selectedCount = editEvent.winnerSetCount,

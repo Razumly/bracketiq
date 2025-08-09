@@ -39,7 +39,7 @@ fun DropdownField(
             trailingIcon = {
                 ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
             }
-        ) { }
+        )
         ExposedDropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false }

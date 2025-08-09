@@ -112,7 +112,7 @@ fun NewChatDialog(component: ChatListComponent, onDismiss: () -> Unit) {
                     },
                     modifier = Modifier.fillMaxWidth(),
                     label = "Chat Name",
-                ) { }
+                )
                 LazyColumn {
                     items(newChat.users) {
                         Row(

@@ -86,7 +86,7 @@ fun CreateOrEditTeamDialog(
                 modifier = Modifier.fillMaxWidth(),
                 label = "Team Name",
                 readOnly = !showEditDetails
-            ) { }
+            )
 
             Spacer(modifier = Modifier.height(12.dp))
             Text("Select Team Size")

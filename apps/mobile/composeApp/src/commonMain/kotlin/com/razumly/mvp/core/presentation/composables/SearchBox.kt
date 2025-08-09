@@ -78,7 +78,6 @@ fun SearchBox(
     var searchInput by remember { mutableStateOf("") }
     val focusManager = rememberPlatformFocusManager()
     var showFilterDropdown by remember { mutableStateOf(false) }
-    val composeFocusManager = LocalFocusManager.current
 
     LaunchedEffect(showFilterDropdown) {
         onToggleFilter(showFilterDropdown)
@@ -117,7 +116,6 @@ fun SearchBox(
                             searchInput = ""
                             onChange("")
                             focusManager.clearFocus()
-                            composeFocusManager.clearFocus()
                         }) {
                             Icon(
                                 imageVector = Icons.Default.Clear,
@@ -127,9 +125,7 @@ fun SearchBox(
                     }
                 },
                 modifier = Modifier.weight(1f),
-                onFocusChange = { isFocused ->
-                    onFocusChange(isFocused || searchInput.isNotEmpty())
-                }
+                externalFocusManager = focusManager
             )
 
             if (filter && currentFilter != null) {
@@ -440,7 +436,7 @@ private fun DateFilterSection(
                 label = "Start Date & Time",
                 readOnly = true,
                 onTap = onStartDateClicked
-            ) { }
+            )
             PlatformTextField(
                 value = currentFilter.date.second?.toLocalDateTime(
                     TimeZone.currentSystemDefault()
@@ -450,7 +446,7 @@ private fun DateFilterSection(
                 label = "End Date",
                 readOnly = true,
                 onTap = onEndDateClicked
-            ) { }
+            )
         }
     }
 }

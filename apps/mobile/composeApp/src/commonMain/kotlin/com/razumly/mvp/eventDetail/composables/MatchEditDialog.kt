@@ -332,7 +332,7 @@ fun IndividualScoreInputSection(
                         modifier = Modifier.width(60.dp),
                         placeholder = "0",
                         textStyle = MaterialTheme.typography.bodyMedium
-                    ) { }
+                    )
                 }
             }
 
@@ -386,7 +386,7 @@ fun IndividualScoreInputSection(
                         modifier = Modifier.width(60.dp),
                         placeholder = "0",
                         textStyle = MaterialTheme.typography.bodyMedium
-                    ) { }
+                    )
                 }
             }
 
@@ -433,7 +433,7 @@ fun TeamSelectionField(
             label = label,
             readOnly = true,
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) }
-        ) { }
+        )
 
         ExposedDropdownMenu(
             expanded = expanded, onDismissRequest = { onExpandedChange(false) }) {
@@ -475,7 +475,7 @@ fun TimePickerField(
             }
         },
         onTap = { showTimePicker = true }
-    ) { }
+    )
 
     if (showTimePicker) {
         PlatformDateTimePicker(
@@ -512,7 +512,7 @@ fun FieldSelectionField(
             label = label,
             readOnly = true,
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) }
-        ) { }
+        )
 
         ExposedDropdownMenu(
             expanded = expanded, onDismissRequest = { onExpandedChange(false) }) {
