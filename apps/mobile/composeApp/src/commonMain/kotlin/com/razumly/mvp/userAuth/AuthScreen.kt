@@ -1,7 +1,10 @@
 package com.razumly.mvp.userAuth
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
@@ -57,6 +60,15 @@ fun AuthScreenBase(component: DefaultAuthComponent, onOauth2: () -> Unit?) {
     val passwordFocusManager = rememberPlatformFocusManager()
     val confirmPasswordFocusManager = rememberPlatformFocusManager()
 
+    val allFocusManagers = listOf(
+        firstNameFocusManager,
+        lastNameFocusManager,
+        userNameFocusManager,
+        emailFocusManager,
+        passwordFocusManager,
+        confirmPasswordFocusManager
+    )
+
     val handleSubmit = {
         if (isSignup) {
             component.onSignup(email, password, confirmPassword, firstName, lastName, userName)
@@ -73,133 +85,130 @@ fun AuthScreenBase(component: DefaultAuthComponent, onOauth2: () -> Unit?) {
         passwordFocusManager.setOnDoneAction { handleSubmit() }
     }
 
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .imePadding()
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-        contentPadding = PaddingValues(bottom = 16.dp)
+    Box(
+        modifier = Modifier.fillMaxSize().clickable(
+            indication = null,
+            interactionSource = remember { MutableInteractionSource() },
+            onClick = { allFocusManagers.forEach { it.clearFocus() } },
+        )
     ) {
-        item {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                if (isSignup) {
-                    PlatformTextField(
-                        value = firstName,
-                        onValueChange = { firstName = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = "First Name",
-                        imeAction = ImeAction.Next,
-                        externalFocusManager = firstNameFocusManager
-                    )
-
-                    PlatformTextField(
-                        value = lastName,
-                        onValueChange = { lastName = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = "Last Name",
-                        imeAction = ImeAction.Next,
-                        externalFocusManager = lastNameFocusManager
-                    )
-
-                    PlatformTextField(
-                        value = userName,
-                        onValueChange = { userName = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = "Username",
-                        imeAction = ImeAction.Next,
-                        externalFocusManager = userNameFocusManager
-                    )
-                }
-
-                PlatformTextField(
-                    value = email,
-                    onValueChange = { email = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = "Email",
-                    keyboardType = "email",
-                    imeAction = ImeAction.Next,
-                    externalFocusManager = emailFocusManager
-                )
-
-                PlatformTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    label = "Password",
-                    isPassword = true,
-                    isError = passwordError.isNotBlank(),
-                    supportingText = passwordError,
-                    modifier = Modifier.fillMaxWidth(),
-                    imeAction = if (isSignup) ImeAction.Next else ImeAction.Done,
-                    externalFocusManager = passwordFocusManager
-                )
-
-                if (isSignup) {
-                    PlatformTextField(
-                        value = confirmPassword,
-                        onValueChange = { confirmPassword = it },
-                        label = "Confirm Password",
-                        isPassword = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        imeAction = ImeAction.Done,
-                        externalFocusManager = confirmPasswordFocusManager
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                when (loginState) {
-                    is LoginState.Error -> {
-                        Text(
-                            text = (loginState as LoginState.Error).message,
-                            color = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
-                    }
-
-                    LoginState.Loading -> {
-                        CircularProgressIndicator(
-                            modifier = Modifier.padding(16.dp)
-                        )
-                    }
-
-                    else -> {}
-                }
-
-                Button(
-                    onClick = handleSubmit,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 8.dp),
-                    enabled = email.isNotBlank() &&
-                            password.isNotBlank() &&
-                            isPasswordValid &&
-                            (!isSignup || (confirmPassword.isNotBlank() && isConfirmPasswordValid)) &&
-                            loginState !is LoginState.Loading
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
+                .imePadding().padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+            contentPadding = PaddingValues(bottom = 16.dp)
+        ) {
+            item {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text(if (isSignup) "Create Account" else "Login")
+                    if (isSignup) {
+                        PlatformTextField(
+                            value = firstName,
+                            onValueChange = { firstName = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = "First Name",
+                            imeAction = ImeAction.Next,
+                            externalFocusManager = firstNameFocusManager
+                        )
+
+                        PlatformTextField(
+                            value = lastName,
+                            onValueChange = { lastName = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = "Last Name",
+                            imeAction = ImeAction.Next,
+                            externalFocusManager = lastNameFocusManager
+                        )
+
+                        PlatformTextField(
+                            value = userName,
+                            onValueChange = { userName = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = "Username",
+                            imeAction = ImeAction.Next,
+                            externalFocusManager = userNameFocusManager
+                        )
+                    }
+
+                    PlatformTextField(
+                        value = email,
+                        onValueChange = { email = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = "Email",
+                        keyboardType = "email",
+                        imeAction = ImeAction.Next,
+                        externalFocusManager = emailFocusManager
+                    )
+
+                    PlatformTextField(
+                        value = password,
+                        onValueChange = { password = it },
+                        label = "Password",
+                        isPassword = true,
+                        isError = passwordError.isNotBlank(),
+                        supportingText = passwordError,
+                        modifier = Modifier.fillMaxWidth(),
+                        imeAction = if (isSignup) ImeAction.Next else ImeAction.Done,
+                        externalFocusManager = passwordFocusManager
+                    )
+
+                    if (isSignup) {
+                        PlatformTextField(
+                            value = confirmPassword,
+                            onValueChange = { confirmPassword = it },
+                            label = "Confirm Password",
+                            isPassword = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            imeAction = ImeAction.Done,
+                            externalFocusManager = confirmPasswordFocusManager
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    when (loginState) {
+                        is LoginState.Error -> {
+                            Text(
+                                text = (loginState as LoginState.Error).message,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.padding(vertical = 8.dp)
+                            )
+                        }
+
+                        LoginState.Loading -> {
+                            CircularProgressIndicator(
+                                modifier = Modifier.padding(16.dp)
+                            )
+                        }
+
+                        else -> {}
+                    }
+
+                    Button(
+                        onClick = handleSubmit,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                        enabled = email.isNotBlank() && password.isNotBlank() && isPasswordValid && (!isSignup || (confirmPassword.isNotBlank() && isConfirmPasswordValid)) && loginState !is LoginState.Loading
+                    ) {
+                        Text(if (isSignup) "Create Account" else "Login")
+                    }
+
+                    Text(
+                        text = if (isSignup) "Already have an account?"
+                        else "Don't have an account?"
+                    )
+
+                    EmailSignInButton(
+                        text = if (isSignup) "Sign in with Email" else "Sign up with Email",
+                        onClick = { component.toggleIsSignup() },
+                        modifier = Modifier
+                    )
+
+                    Text("Or")
+                    GoogleSignInButton(onClick = { onOauth2() })
                 }
-
-                Text(
-                    text = if (isSignup)
-                        "Already have an account?"
-                    else
-                        "Don't have an account?"
-                )
-
-                EmailSignInButton(
-                    text = if (isSignup) "Sign in with Email" else "Sign up with Email",
-                    onClick = { component.toggleIsSignup() },
-                    modifier = Modifier
-                )
-
-                Text("Or")
-                GoogleSignInButton(onClick = { onOauth2() })
             }
         }
     }

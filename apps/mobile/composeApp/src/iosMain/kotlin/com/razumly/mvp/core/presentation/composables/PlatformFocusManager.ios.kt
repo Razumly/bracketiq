@@ -8,6 +8,7 @@ import platform.Foundation.*
 import platform.UIKit.*
 import platform.darwin.NSObject
 import platform.objc.*
+import kotlin.experimental.ExperimentalNativeApi
 
 // PlatformFocusManager.ios.kt
 class IOSFocusManager : PlatformFocusManager {
@@ -26,6 +27,48 @@ class IOSFocusManager : PlatformFocusManager {
 
     override fun clearFocus() {
         currentTextField?.resignFirstResponder()
+        // Also dismiss any keyboard that might be showing
+        dismissKeyboardGlobally()
+    }
+
+    @OptIn(ExperimentalNativeApi::class)
+    private fun dismissKeyboardGlobally() {
+        val application = UIApplication.sharedApplication
+        val scenes = application.connectedScenes
+
+        // Find the active window scene
+        val activeWindowScene = scenes.firstOrNull { scene ->
+            scene is UIWindowScene && scene.activationState == UISceneActivationStateForegroundActive
+        } as? UIWindowScene
+
+        // For iOS 15+ use the keyWindow property
+        if (activeWindowScene != null) {
+            // Try to get the key window using the modern approach
+            val keyWindow = if (kotlin.native.Platform.osFamily == kotlin.native.OsFamily.IOS) {
+                // For iOS 15+, use the keyWindow property of UIWindowScene
+                activeWindowScene.keyWindow
+            } else {
+                null
+            }
+
+            // If keyWindow is available, use it
+            if (keyWindow != null) {
+                keyWindow.endEditing(true)
+            } else {
+                // Fallback: iterate through all windows and end editing on each
+                activeWindowScene.windows.forEach { window ->
+                }
+            }
+        } else {
+            // Ultimate fallback: use the legacy approach for older iOS versions
+            @Suppress("DEPRECATION")
+            application.keyWindow?.endEditing(true)
+        }
+    }
+
+
+    fun dismissKeyboard() {
+        dismissKeyboardGlobally()
     }
 
     override fun setFocusChangeListener(onFocusChanged: (Boolean) -> Unit) {

@@ -84,6 +84,7 @@ struct iOSApp: App {
     var body: some Scene {
         WindowGroup {
             ComposeView(deepLinkUrl: deepLinkUrl)
+                .ignoresSafeArea(.keyboard)
                 .id(deepLinkId) // Use the ID instead of URL string
                 .onAppear {
                     if let pendingUrl = AppDelegate.pendingDeepLink {

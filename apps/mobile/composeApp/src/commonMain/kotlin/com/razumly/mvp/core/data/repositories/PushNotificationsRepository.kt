@@ -101,7 +101,7 @@ class PushNotificationsRepository(
         }
         val managerListener = object : NotifierManager.Listener {
             override fun onNewToken(token: String) {
-                runBlocking {
+                scope.launch {
                     runCatching{
                         if (_pushTarget.value.isNotBlank()) {
                             account.updatePushTarget(_pushTarget.value, token)
