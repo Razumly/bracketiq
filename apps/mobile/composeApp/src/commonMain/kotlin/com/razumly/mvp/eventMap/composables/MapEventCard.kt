@@ -50,101 +50,18 @@ fun MapEventCard(
     event: EventAbs,
     modifier: Modifier = Modifier
 ) {
-    Column(
-        modifier = modifier,
-        horizontalAlignment = Alignment.CenterHorizontally
+    // Always use info window style - no triangle pointer needed
+    Card(
+        modifier = modifier
+            .width(240.dp)
+            .wrapContentHeight(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        shape = RoundedCornerShape(12.dp)
     ) {
-        // Main card content
-        Card(
-            modifier = Modifier
-                .width(200.dp)
-                .wrapContentHeight(),
-            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surface
-            ),
-            shape = RoundedCornerShape(12.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                // Event Name
-                Text(
-                    text = event.name,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-
-                // Location
-                Text(
-                    text = event.location,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                // Event Type and Field Type
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = event.eventType.name,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.weight(1f)
-                    )
-
-                    Text(
-                        text = event.fieldType.name,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.secondary,
-                        textAlign = TextAlign.End
-                    )
-                }
-
-                // Price
-                Text(
-                    text = "$${event.price}",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.align(Alignment.CenterHorizontally)
-                )
-            }
-        }
-
-        // Fixed pointer triangle
-        Canvas(
-            modifier = Modifier.size(20.dp, 10.dp)
-        ) {
-            val path = Path().apply {
-                moveTo(size.width / 2, size.height)
-                lineTo(size.width * 0.3f, 0f)
-                lineTo(size.width * 0.7f, 0f)
-                close()
-            }
-
-            // Draw the triangle with proper colors
-            drawPath(
-                path = path,
-                color = Color.White,
-                style = Fill
-            )
-
-            drawPath(
-                path = path,
-                color = Color.Gray.copy(alpha = 0.2f),
-                style = Stroke(width = 1.dp.toPx())
-            )
-        }
+        EventCardContent(event)
     }
 }
 
@@ -157,7 +74,6 @@ fun MapPOICard(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Fixed POI card with proper shadow
         Card(
             modifier = Modifier
                 .wrapContentWidth()
@@ -175,24 +91,6 @@ fun MapPOICard(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
-            )
-        }
-
-        // Fixed pointer triangle for POI
-        Canvas(
-            modifier = Modifier.size(16.dp, 8.dp)
-        ) {
-            val path = Path().apply {
-                moveTo(size.width / 2, size.height)
-                lineTo(size.width * 0.25f, 0f)
-                lineTo(size.width * 0.75f, 0f)
-                close()
-            }
-
-            drawPath(
-                path = path,
-                color = Color(0xFFE7E0EC),
-                style = Fill
             )
         }
     }
@@ -266,4 +164,63 @@ fun MaterialMarker(
         )
     }
 }
+
+@Composable
+private fun EventCardContent(event: EventAbs) {
+    Column(
+        modifier = Modifier.padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        // Event Name
+        Text(
+            text = event.name,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+
+        // Location
+        Text(
+            text = event.location,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        // Event Type and Field Type
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = event.eventType.name,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.weight(1f)
+            )
+
+            Text(
+                text = event.fieldType.name,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.secondary,
+                textAlign = TextAlign.End
+            )
+        }
+
+        // Price
+        Text(
+            text = "$${event.price}",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.align(Alignment.CenterHorizontally)
+        )
+    }
+}
+
 

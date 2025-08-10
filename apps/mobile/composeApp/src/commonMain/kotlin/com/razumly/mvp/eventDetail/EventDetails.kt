@@ -891,7 +891,7 @@ fun EventDetails(
                 selectedPlace = null
             }) {
                 Card {
-                    Column(Modifier.fillMaxSize()) {
+                    Column(Modifier.fillMaxWidth()) {
                         SelectEventImage(
                             selectedPlace = selectedPlace,
                             onSelectedImage = { onEditEvent(it) })

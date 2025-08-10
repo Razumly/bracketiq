@@ -1,5 +1,6 @@
 package com.razumly.mvp.eventMap
 
+import android.graphics.Bitmap
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
@@ -8,10 +9,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.wrapContentSize
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SearchBar
 import androidx.compose.material3.SearchBarDefaults
 import androidx.compose.material3.Text
@@ -27,11 +26,10 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import com.google.android.gms.maps.CameraUpdateFactory
+import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.LatLngBounds
@@ -40,29 +38,20 @@ import com.google.android.libraries.places.api.model.Place
 import com.google.maps.android.compose.GoogleMap
 import com.google.maps.android.compose.MapProperties
 import com.google.maps.android.compose.MapUiSettings
-import com.google.maps.android.compose.MarkerComposable
+import com.google.maps.android.compose.MarkerInfoWindow
 import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.presentation.util.CircularRevealShape
 import com.razumly.mvp.core.util.toGoogle
-import com.razumly.mvp.eventMap.composables.AnimatedMarkerContent
 import com.razumly.mvp.eventMap.composables.MapEventCard
 import com.razumly.mvp.eventMap.composables.MapPOICard
-import com.razumly.mvp.eventMap.composables.MaterialMarker
 import dev.icerock.moko.geo.compose.BindLocationTrackerEffect
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Collections.emptyList
-
-sealed class MapMarkerSelection {
-    data object None : MapMarkerSelection()
-    data class POI(val poi: PointOfInterest) : MapMarkerSelection()
-    data class Event(val eventId: String) : MapMarkerSelection()
-    data class SearchedPlace(val placeId: String) : MapMarkerSelection()
-}
 
 @Composable
 actual fun EventMap(
@@ -80,36 +69,20 @@ actual fun EventMap(
     val showMap by component.showMap.collectAsState()
     var searchedPlaces by remember { mutableStateOf<List<Place>>(emptyList()) }
     val events by component.events.collectAsState()
-
     val defaultZoom = 12f
     val defaultDurationMs = 1000
     val initCameraState = focusedLocation.toGoogle()
     val cameraPositionState = rememberCameraPositionState()
 
-    var selectedMarker by remember { mutableStateOf<MapMarkerSelection>(MapMarkerSelection.None) }
+    var selectedPOI by remember { mutableStateOf<PointOfInterest?>(null) }
     var isAnimating by remember { mutableStateOf(false) }
+    val poiMarkerState = remember { MarkerState() }
 
-    val eventMarkerStates = remember(events) {
-        events.associate { event ->
-            event.id to MarkerState(
-                position = LatLng(event.lat, event.long)
-            )
-        }
-    }
-
-    val placeMarkerStates = remember(searchedPlaces) {
-        searchedPlaces.associate { place ->
-            place.id to MarkerState(
-                position = place.location!!
-            )
-        }
-    }
-
-    val focusedEventMarkerState = remember(focusedEvent) {
-        focusedEvent?.let { event ->
-            com.google.maps.android.compose.MarkerState(
-                position = LatLng(event.lat, event.long)
-            )
+    LaunchedEffect(selectedPOI) {
+        selectedPOI?.let { poi ->
+            poiMarkerState.position = poi.latLng
+            delay(100)
+            poiMarkerState.showInfoWindow()
         }
     }
 
@@ -126,132 +99,122 @@ actual fun EventMap(
                 CameraUpdateFactory.newLatLngZoom(initCameraState, defaultZoom)
             )
         }
-    }
 
-    var currentCameraState by remember { mutableStateOf(cameraPositionState) }
-    LaunchedEffect(cameraPositionState) {
-        snapshotFlow { cameraPositionState }.collect { newTarget ->
-            currentCameraState = newTarget
-        }
-    }
-
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .graphicsLayer {
-                alpha = if (animationProgress > 0f) 1f else 0f
+        var currentCameraState by remember { mutableStateOf(cameraPositionState) }
+        LaunchedEffect(cameraPositionState) {
+            snapshotFlow { cameraPositionState }.collect { newTarget ->
+                currentCameraState = newTarget
             }
-            .clip(CircularRevealShape(animationProgress, revealCenter)),
-    ) {
-        GoogleMap(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(top = 160.dp),
-            cameraPositionState = cameraPositionState,
-            properties = MapProperties(isMyLocationEnabled = true),
-            uiSettings = MapUiSettings(zoomControlsEnabled = false),
-            onPOIClick = { poi ->
-                if (canClickPOI && !isAnimating) {
-                    selectedMarker = MapMarkerSelection.POI(poi)
-                    isAnimating = true
-                    scope.launch {
-                        cameraPositionState.animate(
-                            CameraUpdateFactory.newCameraPosition(
-                                CameraPosition.fromLatLngZoom(poi.latLng, defaultZoom)
-                            ),
-                            durationMs = 500
-                        )
-                        delay(300)
-                        isAnimating = false
+        }
+
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .clip(CircularRevealShape(animationProgress, revealCenter)),
+        ) {
+            GoogleMap(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(top = 160.dp),
+                cameraPositionState = cameraPositionState,
+                properties = MapProperties(isMyLocationEnabled = true),
+                uiSettings = MapUiSettings(zoomControlsEnabled = false),
+                onPOIClick = { poi ->
+                    if (canClickPOI && !isAnimating) {
+                        selectedPOI = poi
+                        isAnimating = true
+                        scope.launch {
+                            cameraPositionState.animate(
+                                CameraUpdateFactory.newCameraPosition(
+                                    CameraPosition.fromLatLngZoom(poi.latLng, defaultZoom)
+                                ),
+                                durationMs = 500
+                            )
+                            delay(300)
+                            isAnimating = false
+                        }
                     }
                 }
-            }
-        ) {
-            // Event markers (only show when not in POI selection mode)
-            if (!canClickPOI) {
-                events.forEach { event ->
-                    eventMarkerStates[event.id]?.let { markerState ->
-                        val isExpanded = selectedMarker is MapMarkerSelection.Event &&
-                                (selectedMarker as MapMarkerSelection.Event).eventId == event.id
+            ) {
+                // Event markers with info windows (only show when not in POI selection mode)
+                if (!canClickPOI) {
+                    events.forEach { event ->
+                        val markerState = remember(event.id) {
+                            MarkerState(position = LatLng(event.lat, event.long))
+                        }
 
-                        MarkerComposable(
+                        MarkerInfoWindow(
                             state = markerState,
-                            onClick = {
-                                if (!isExpanded) {
-                                    selectedMarker = MapMarkerSelection.Event(event.id)
-                                } else {
-                                    onEventSelected(event)
-                                }
-                                true
+                            icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE),
+                            onClick = { marker -> false }, // Show info window
+                            onInfoWindowClick = { marker ->
+                                onEventSelected(event)
                             }
-                        ) {
-                            AnimatedMarkerContent(
-                                isExpanded = isExpanded,
-                                markerContent = {
-                                    MaterialMarker(
-                                        text = "$${event.price.toInt()}",
-                                        backgroundColor = MaterialTheme.colorScheme.surface
-                                    )
-                                },
-                                expandedContent = {
-                                    MapEventCard(
-                                        event = event,
-                                        modifier = Modifier.wrapContentSize()
-                                    )
-                                }
+                        ) { marker ->
+                            MapEventCard(
+                                event = event,
+                                modifier = Modifier.wrapContentSize()
                             )
                         }
                     }
                 }
-            }
 
-            // Searched places markers
-            searchedPlaces.forEach { place ->
-                placeMarkerStates[place.id]?.let { markerState ->
-                    val isExpanded = selectedMarker is MapMarkerSelection.SearchedPlace &&
-                            (selectedMarker as MapMarkerSelection.SearchedPlace).placeId == place.id
+                // Searched places with INFO WINDOWS (Fixed!)
+                searchedPlaces.forEach { place ->
+                    val markerState = remember(place.id) {
+                        MarkerState(position = place.location!!)
+                    }
 
-                    MarkerComposable(
+                    MarkerInfoWindow(
                         state = markerState,
-                        onClick = {
-                            if (!isExpanded) {
-                                selectedMarker = MapMarkerSelection.SearchedPlace(place.id!!)
-                            } else {
-                                scope.launch {
-                                    onPlaceSelected(component.getMVPPlace(place))
-                                }
+                        icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_GREEN),
+                        onClick = { marker -> false },
+                        onInfoWindowClick = { marker ->
+                            scope.launch {
+                                onPlaceSelected(component.getMVPPlace(place))
                             }
-                            true
                         }
-                    ) {
-                        AnimatedMarkerContent(
-                            isExpanded = isExpanded,
-                            markerContent = {
-                                MaterialMarker(
-                                    text = place.displayName?.take(1)?.uppercase() ?: "P",
-                                    backgroundColor = MaterialTheme.colorScheme.surface
-                                )
-                            },
-                            expandedContent = {
-                                MapPOICard(
-                                    name = place.displayName ?: "Unknown Place",
-                                    modifier = Modifier.wrapContentSize()
-                                )
-                            }
+                    ) { marker ->
+                        // Info window content for searched places
+                        MapPOICard(
+                            name = place.displayName ?: "Unknown Place",
+                            modifier = Modifier.wrapContentSize()
                         )
                     }
                 }
-            }
 
-            // Focused Event (always visible)
-            focusedEventMarkerState?.let { markerState ->
-                MarkerComposable(
-                    state = markerState,
-                    onClick = {
-                        focusedEvent?.let { onEventSelected(it) }
-                        true
+                selectedPOI?.let { poi ->
+                    MarkerInfoWindow(
+                        state = poiMarkerState,
+                        // Use a transparent or very small icon since POI already has its own icon
+                        icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_GREEN),
+                        onClick = { marker -> false }, // Show info window
+                        onInfoWindowClick = { marker ->
+                            scope.launch {
+                                onPlaceSelected(createMVPPlaceFromPOI(poi))
+                            }
+                        }
+                    ) { marker ->
+                        MapPOICard(
+                            name = poi.name,
+                            modifier = Modifier.wrapContentSize()
+                        )
                     }
-                ) {
-                    focusedEvent?.let { event ->
+                }
+
+                // Focused Event (always visible)
+                focusedEvent?.let { event ->
+                    val focusedMarkerState = remember(event.id) {
+                        MarkerState(position = LatLng(event.lat, event.long))
+                    }
+
+                    MarkerInfoWindow(
+                        state = focusedMarkerState,
+                        icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED),
+                        onClick = { marker -> false },
+                        onInfoWindowClick = { marker ->
+                            onEventSelected(event)
+                        }
+                    ) { marker ->
                         MapEventCard(
                             event = event,
                             modifier = Modifier.wrapContentSize()
@@ -259,83 +222,55 @@ actual fun EventMap(
                     }
                 }
             }
-        }
 
-        // POI Card Overlay (rendered above the map to fix z-index issues)
-        if (selectedMarker is MapMarkerSelection.POI) {
-            val poi = (selectedMarker as MapMarkerSelection.POI).poi
-            val projection = currentCameraState.projection
-            if (projection != null) {
-                val screenPoint = projection.toScreenLocation(poi.latLng)
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .wrapContentSize(Alignment.TopStart)
-                        .graphicsLayer {
-                            translationX = screenPoint.x - 75f
-                            translationY = screenPoint.y - 80f
-                        }
-                ) {
-                    MapPOICard(
-                        name = poi.name,
-                        modifier = Modifier
-                            .wrapContentSize()
-                            .shadow(8.dp, RoundedCornerShape(12.dp))
-                    )
-                }
-            }
-        }
-
-        // Search bar
-        if (canClickPOI) {
-            currentCameraState.projection?.visibleRegion?.latLngBounds?.let {
-                MapSearchBar(
-                    Modifier
-                        .padding(horizontal = 16.dp)
-                        .fillMaxWidth(),
-                    component,
-                    currentCameraState.position.target,
-                    it
-                ) { newPlaces ->
-                    selectedMarker = MapMarkerSelection.None
-                    searchedPlaces = newPlaces
-                    if (newPlaces.size > 1) {
-                        val bounds = LatLngBounds.builder()
-                        newPlaces.forEach { place ->
-                            bounds.include(place.location!!) // Fixed: using location
-                        }
-                        scope.launch {
-                            cameraPositionState.animate(
-                                CameraUpdateFactory.newLatLngBounds(bounds.build(), 100),
-                                defaultDurationMs
-                            )
-                        }
-                    } else if (newPlaces.isNotEmpty()) {
-                        scope.launch {
-                            val location = newPlaces.first().location
-                            cameraPositionState.animate(
-                                CameraUpdateFactory.newLatLngZoom(location!!, defaultZoom),
-                                defaultDurationMs
-                            )
+            // Search bar and other UI components remain the same...
+            if (canClickPOI) {
+                currentCameraState.projection?.visibleRegion?.latLngBounds?.let {
+                    MapSearchBar(
+                        Modifier
+                            .padding(horizontal = 16.dp)
+                            .fillMaxWidth(),
+                        component,
+                        currentCameraState.position.target,
+                        it
+                    ) { newPlaces ->
+                        selectedPOI = null // Clear POI selection when searching
+                        searchedPlaces = newPlaces
+                        if (newPlaces.size > 1) {
+                            val bounds = LatLngBounds.builder()
+                            newPlaces.forEach { place ->
+                                bounds.include(place.location!!)
+                            }
+                            scope.launch {
+                                cameraPositionState.animate(
+                                    CameraUpdateFactory.newLatLngBounds(bounds.build(), 100),
+                                    defaultDurationMs
+                                )
+                            }
+                        } else if (newPlaces.isNotEmpty()) {
+                            scope.launch {
+                                val location = newPlaces.first().location
+                                cameraPositionState.animate(
+                                    CameraUpdateFactory.newLatLngZoom(location!!, defaultZoom),
+                                    defaultDurationMs
+                                )
+                            }
                         }
                     }
                 }
             }
-        }
 
-        if (onBackPressed != null) {
-            MapFloatingActionButton(
-                onCloseMap = onBackPressed,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 128.dp)
-            )
+            if (onBackPressed != null) {
+                MapFloatingActionButton(
+                    onCloseMap = onBackPressed,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 128.dp)
+                )
+            }
         }
     }
 }
-
-
-
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -413,13 +348,13 @@ fun MapSearchBar(
     }
 }
 
-@Composable
-private fun rememberUpdatedMarkerState(
-    key: String, position: LatLng
-): MarkerState {
-    return remember(key) { MarkerState(position = position) }.apply {
-        if (this.position != position) {
-            this.position = position
-        }
-    }
+private suspend fun createMVPPlaceFromPOI(poi: PointOfInterest): MVPPlace {
+    // Convert POI to MVPPlace - you'll need to implement this based on your data structure
+    return MVPPlace(
+        id = poi.placeId,
+        name = poi.name,
+        lat = poi.latLng.latitude,
+        long = poi.latLng.longitude,
+        // Add other required fields with default or derived values
+    )
 }

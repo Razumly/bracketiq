@@ -1,6 +1,7 @@
 package com.razumly.mvp.eventMap
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -12,11 +13,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.UIKitViewController
 import com.razumly.mvp.LocalNativeViewFactory
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
+import com.razumly.mvp.core.presentation.localAllFocusManagers
 import dev.icerock.moko.geo.LatLng
 
 @Composable
@@ -41,8 +44,14 @@ actual fun EventMap(
         }
     }
 
+    val allFocusManagers = localAllFocusManagers.current
+
     if (showMap) {
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(modifier = Modifier.fillMaxSize().pointerInput(Unit) {
+            detectTapGestures {
+                allFocusManagers.forEach { it.clearFocus() }
+            }
+        }) {
             UIKitViewController(
                 modifier = modifier.fillMaxSize().background(Color.Transparent),
                 factory = {

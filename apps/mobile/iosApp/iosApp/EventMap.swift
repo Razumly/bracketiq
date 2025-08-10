@@ -151,7 +151,6 @@ struct EventMap: View {
 
 struct GoogleMapView: UIViewRepresentable {
     let component: MapComponent
-    let currentLocation: LatLng?
     let events: [EventAbs]
     let canClickPOI: Bool
     let focusedLocation: LatLng?
@@ -161,36 +160,10 @@ struct GoogleMapView: UIViewRepresentable {
     let places: [MVPPlace]
     let revealCenter: CGPoint
     
-    init(
-        component: MapComponent,
-        currentLocation: LatLng? = nil,
-        events: [EventAbs],
-        canClickPOI: Bool = false,
-        focusedLocation: LatLng? = nil,
-        focusedEvent: EventAbs? = nil,
-        onEventSelected: @escaping (EventAbs) -> Void,
-        onPlaceSelected: @escaping (MVPPlace) -> Void,
-        places: [MVPPlace],
-        revealCenter: CGPoint
-    ){
-        self.component = component
-        self.currentLocation = currentLocation
-        self.events = events
-        self.canClickPOI = canClickPOI
-        self.focusedLocation = focusedLocation
-        self.focusedEvent = focusedEvent
-        self.onEventSelected = onEventSelected
-        self.onPlaceSelected = onPlaceSelected
-        self.places = places
-        self.revealCenter = revealCenter
-    }
-    
     func makeUIView(context: Context) -> GMSMapView {
         let camera: GMSCameraPosition
         if let f = focusedLocation {
             camera = .camera(withLatitude: f.latitude, longitude: f.longitude, zoom: 12)
-        } else if let loc = currentLocation {
-            camera = .camera(withLatitude: loc.latitude, longitude: loc.longitude, zoom: 12)
         } else {
             camera = .camera(withLatitude: 0.0, longitude: 0.0, zoom: 2)
         }
@@ -198,98 +171,69 @@ struct GoogleMapView: UIViewRepresentable {
         let options = GMSMapViewOptions()
         options.camera = camera
         options.frame = .zero
-        let mapView = GMSMapView.init(options: options)
         
-        // Configure map for maximum POI visibility
+        let mapView = GMSMapView.init(options: options)
         mapView.isMyLocationEnabled = true
         mapView.delegate = context.coordinator
         mapView.mapType = .normal
-        
-        // Enable all POI types
         mapView.settings.consumesGesturesInView = false
         mapView.settings.scrollGestures = true
         mapView.settings.zoomGestures = true
         
-        // Debug: Check if POI clicks are working
-        print("Map created with canClickPOI: \(canClickPOI)")
-        
         return mapView
     }
-
-
     
     func updateUIView(_ mapView: GMSMapView, context: Context) {
-        // Clear place markers when new places array comes in
-        if !places.isEmpty {
-            context.coordinator.clearPlaceMarkers()
-            context.coordinator.currentPOIMarker?.map = nil
-            context.coordinator.currentPOIMarker = nil
-        }
+        // Clear existing markers
+        mapView.clear()
+        context.coordinator.clearAllMarkers()
         
-        if let fe = focusedEvent, context.coordinator.lastEventId != fe.id {
-            mapView.clear()
-            context.coordinator.currentPOIMarker = nil
-            context.coordinator.placeMarkers.removeAll()
-            
-            let pos = CLLocationCoordinate2D(latitude: fe.lat, longitude: fe.long)
-            let camera = GMSCameraPosition.camera(withTarget: pos, zoom: 12)
-            mapView.animate(to: camera)
-            context.coordinator.lastEventId = fe.id
-            
+        // Add focused event marker
+        if let fe = focusedEvent {
             let coord = CLLocationCoordinate2D(latitude: fe.lat, longitude: fe.long)
-            let m = GMSMarker(position: coord)
-            m.title = fe.name
-            m.snippet = "\(fe.fieldType) – $\(fe.price)"
-            m.userData = fe
-            m.map = mapView
+            let marker = GMSMarker(position: coord)
+            marker.title = fe.name
+            marker.snippet = "\(fe.fieldType.name) – $\(fe.price)"
+            marker.userData = EventMarkerData(event: fe)
+            marker.icon = GMSMarker.markerImage(with: .red)
+            marker.map = mapView
             
-        } else if let fc = focusedLocation,
-                  context.coordinator.lastFocus ?? (0.0, 0.0) != (fc.latitude, fc.longitude) {
-            mapView.clear()
-            context.coordinator.currentPOIMarker = nil
-            context.coordinator.placeMarkers.removeAll()
-            
-            let pos = CLLocationCoordinate2D(latitude: fc.latitude, longitude: fc.longitude)
-            let camera = GMSCameraPosition.camera(withTarget: pos, zoom: 12)
+            let camera = GMSCameraPosition.camera(withTarget: coord, zoom: 12)
             mapView.animate(to: camera)
-            context.coordinator.lastFocus = (fc.latitude, fc.longitude)
         }
         
         // Add event markers (only when not in POI selection mode)
         if !canClickPOI {
             for event in events {
                 let coord = CLLocationCoordinate2D(latitude: event.lat, longitude: event.long)
-                let m = GMSMarker(position: coord)
-                m.title = event.name
-                m.snippet = "\(event.fieldType) – $\(event.price)"
-                m.userData = event
-                m.map = mapView
+                let marker = GMSMarker(position: coord)
+                marker.title = event.name
+                marker.snippet = "\(event.fieldType.name) – $\(event.price)"
+                marker.userData = EventMarkerData(event: event)
+                marker.icon = GMSMarker.markerImage(with: .blue)
+                marker.map = mapView
             }
         }
         
-        // Add suggestion place markers and track them
+        // Add searched places markers
         for place in places {
             let coord = CLLocationCoordinate2D(latitude: place.lat, longitude: place.long)
             let marker = GMSMarker(position: coord)
             marker.title = place.name
-            marker.userData = place
+            marker.userData = PlaceMarkerData(place: place)
+            marker.icon = GMSMarker.markerImage(with: .green)
             marker.map = mapView
             
-            // Track this marker
             context.coordinator.placeMarkers.append(marker)
             
-            // Animate to the suggestion place if it's the only one
             if places.count == 1 {
                 let camera = GMSCameraPosition.camera(withTarget: coord, zoom: 15)
                 mapView.animate(to: camera)
-                // Show the info window automatically for suggestion places
+                // Show info window automatically
                 mapView.selectedMarker = marker
             }
         }
     }
-
-
-
     
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -306,98 +250,213 @@ struct GoogleMapView: UIViewRepresentable {
 
 class Coordinator: NSObject, GMSMapViewDelegate {
     let parent: GoogleMapView
-    var lastFocus: (Double, Double)?
-    var lastEventId: String?
-    var selectedMarker: GMSMarker?
-    var currentPOIMarker: GMSMarker? // Track the current POI marker
-    var placeMarkers: [GMSMarker] = [] // Track place markers from searches/suggestions
+    let onEventSelected: (EventAbs) -> Void
+    let onPlaceSelected: (MVPPlace) -> Void
     
-    init(
-        parent: GoogleMapView,
-        onEventSelected: @escaping (EventAbs) -> Void,
-        onPlaceSelected: @escaping (MVPPlace) -> Void
-    ) {
+    var placeMarkers: [GMSMarker] = []
+    var currentPOIMarker: GMSMarker?
+    
+    init(parent: GoogleMapView,
+         onEventSelected: @escaping (EventAbs) -> Void,
+         onPlaceSelected: @escaping (MVPPlace) -> Void) {
         self.parent = parent
+        self.onEventSelected = onEventSelected
+        self.onPlaceSelected = onPlaceSelected
     }
     
-    // Helper method to clear place markers
-    func clearPlaceMarkers() {
-        placeMarkers.forEach { $0.map = nil }
+    func clearAllMarkers() {
         placeMarkers.removeAll()
-    }
-    
-    // Handle POI clicks
-    func mapView(
-        _ mapView: GMSMapView,
-        didTapPOIWithPlaceID placeID: String,
-        name: String,
-        location: CLLocationCoordinate2D
-    ) {
-        print("POI tapped: \(name) with ID: \(placeID)")
-        guard parent.canClickPOI else {
-            print("POI clicks disabled")
-            return
-        }
-        
-        print("Processing POI click for: \(name)")
-        
-        // Clear the previous POI marker if it exists
-        currentPOIMarker?.map = nil
         currentPOIMarker = nil
-        
-        mapView.animate(to: GMSCameraPosition.camera(withTarget: location, zoom: 12))
-        
-        // Create a new marker for the POI
-        let marker = GMSMarker(position: location)
-        marker.title = name
-        marker.userData = placeID
-        marker.map = mapView
-        
-        // Track this as the current POI marker
-        currentPOIMarker = marker
-        
-        // Show the info window
-        mapView.selectedMarker = marker
-        selectedMarker = marker
     }
     
-    // Handle marker tap (show info window)
+    // MARK: - Custom Info Windows
+    
+    // This method creates custom info windows (like Android's MarkerInfoWindow)
+    func mapView(_ mapView: GMSMapView, markerInfoWindow marker: GMSMarker) -> UIView? {
+        if let eventData = marker.userData as? EventMarkerData {
+            return createEventInfoWindow(for: eventData.event)
+        } else if let placeData = marker.userData as? PlaceMarkerData {
+            return createPlaceInfoWindow(for: placeData.place)
+        } else if let poiData = marker.userData as? POIMarkerData {
+            return createPOIInfoWindow(for: poiData.name)
+        }
+        return nil
+    }
+    
+    // MARK: - Marker Click Handling
+    
     func mapView(_ mapView: GMSMapView, didTap marker: GMSMarker) -> Bool {
+        // Show the custom info window
         mapView.selectedMarker = marker
-        selectedMarker = marker
-        return true
+        return true // Return true to prevent default behavior
     }
     
-    // Handle info window tap (trigger the action)
+    // Handle info window clicks (equivalent to onInfoWindowClick in Android)
     func mapView(_ mapView: GMSMapView, didTapInfoWindowOf marker: GMSMarker) {
-        if let event = marker.userData as? EventAbs {
-            parent.onEventSelected(event)
-        } else if let placeID = marker.userData as? String {
+        if let eventData = marker.userData as? EventMarkerData {
+            onEventSelected(eventData.event)
+        } else if let placeData = marker.userData as? PlaceMarkerData {
+            onPlaceSelected(placeData.place)
+        } else if let poiData = marker.userData as? POIMarkerData {
+            // Handle POI selection - convert to MVPPlace
             Task {
                 do {
-                    let place = try await self.parent.component.getPlace(placeId: placeID)
+                    let place = try await parent.component.getPlace(placeId: poiData.placeId)
                     if let place = place {
                         await MainActor.run {
-                            self.parent.onPlaceSelected(place)
+                            self.onPlaceSelected(place)
                         }
                     }
                 } catch {
                     print("Error getting place details: \(error)")
                 }
             }
-        } else if let place = marker.userData as? MVPPlace {
-            parent.onPlaceSelected(place)
         }
     }
     
-    // Clear selected markers when tapping elsewhere
-    func mapView(_ mapView: GMSMapView, didTapAt coordinate: CLLocationCoordinate2D) {
-        selectedMarker = nil
-        // Optionally clear POI marker when tapping empty space
-        // currentPOIMarker?.map = nil
-        // currentPOIMarker = nil
+    // MARK: - POI Click Handling
+    
+    func mapView(_ mapView: GMSMapView,
+                 didTapPOIWithPlaceID placeID: String,
+                 name: String,
+                 location: CLLocationCoordinate2D) {
+        guard parent.canClickPOI else { return }
+        
+        // Clear previous POI marker
+        currentPOIMarker?.map = nil
+        
+        // Create new marker for POI with custom info window
+        let marker = GMSMarker(position: location)
+        marker.title = name
+        marker.userData = POIMarkerData(name: name, placeId: placeID)
+        // Use transparent icon since POI already has its own icon
+        marker.icon = GMSMarker.markerImage(with: .green)
+        marker.map = mapView
+        
+        currentPOIMarker = marker
+        
+        // Show info window immediately
+        mapView.selectedMarker = marker
+        
+        // Animate to POI location
+        let camera = GMSCameraPosition.camera(withTarget: location, zoom: 12)
+        mapView.animate(to: camera)
+    }
+    
+    // MARK: - Custom Info Window Creation
+    
+    private func createEventInfoWindow(for event: EventAbs) -> UIView {
+        let containerView = UIView(frame: CGRect(x: 0, y: 0, width: 240, height: 160))
+        containerView.backgroundColor = UIColor.systemBackground
+        containerView.layer.cornerRadius = 12
+        containerView.layer.shadowColor = UIColor.black.cgColor
+        containerView.layer.shadowOffset = CGSize(width: 0, height: 2)
+        containerView.layer.shadowOpacity = 0.3
+        containerView.layer.shadowRadius = 8
+        
+        // Event name
+        let nameLabel = UILabel(frame: CGRect(x: 12, y: 12, width: 216, height: 40))
+        nameLabel.text = event.name
+        nameLabel.font = UIFont.boldSystemFont(ofSize: 16)
+        nameLabel.numberOfLines = 2
+        nameLabel.textColor = UIColor.label
+        containerView.addSubview(nameLabel)
+        
+        // Location
+        let locationLabel = UILabel(frame: CGRect(x: 12, y: 52, width: 216, height: 20))
+        locationLabel.text = event.location
+        locationLabel.font = UIFont.systemFont(ofSize: 14)
+        locationLabel.textColor = UIColor.secondaryLabel
+        containerView.addSubview(locationLabel)
+        
+        // Event type and field type
+        let typeLabel = UILabel(frame: CGRect(x: 12, y: 76, width: 108, height: 16))
+        typeLabel.text = event.eventType.name
+        typeLabel.font = UIFont.systemFont(ofSize: 12)
+        typeLabel.textColor = UIColor.systemBlue
+        containerView.addSubview(typeLabel)
+        
+        let fieldLabel = UILabel(frame: CGRect(x: 120, y: 76, width: 108, height: 16))
+        fieldLabel.text = event.fieldType.name
+        fieldLabel.font = UIFont.systemFont(ofSize: 12)
+        fieldLabel.textColor = UIColor.systemPurple
+        fieldLabel.textAlignment = .right
+        containerView.addSubview(fieldLabel)
+        
+        // Price
+        let priceLabel = UILabel(frame: CGRect(x: 12, y: 100, width: 216, height: 30))
+        priceLabel.text = "$\(event.price)"
+        priceLabel.font = UIFont.boldSystemFont(ofSize: 20)
+        priceLabel.textColor = UIColor.systemBlue
+        priceLabel.textAlignment = .center
+        containerView.addSubview(priceLabel)
+        
+        return containerView
+    }
+    
+    private func createPlaceInfoWindow(for place: MVPPlace) -> UIView {
+        let containerView = UIView(frame: CGRect(x: 0, y: 0, width: 200, height: 60))
+        containerView.backgroundColor = UIColor.systemBackground
+        containerView.layer.cornerRadius = 8
+        containerView.layer.shadowColor = UIColor.black.cgColor
+        containerView.layer.shadowOffset = CGSize(width: 0, height: 2)
+        containerView.layer.shadowOpacity = 0.2
+        containerView.layer.shadowRadius = 4
+        
+        let nameLabel = UILabel(frame: CGRect(x: 12, y: 12, width: 176, height: 36))
+        nameLabel.text = place.name
+        nameLabel.font = UIFont.systemFont(ofSize: 14)
+        nameLabel.numberOfLines = 2
+        nameLabel.textColor = UIColor.label
+        containerView.addSubview(nameLabel)
+        
+        return containerView
+    }
+    
+    private func createPOIInfoWindow(for name: String) -> UIView {
+        let containerView = UIView(frame: CGRect(x: 0, y: 0, width: 200, height: 50))
+        containerView.backgroundColor = UIColor.systemBackground
+        containerView.layer.cornerRadius = 8
+        containerView.layer.shadowColor = UIColor.black.cgColor
+        containerView.layer.shadowOffset = CGSize(width: 0, height: 2)
+        containerView.layer.shadowOpacity = 0.2
+        containerView.layer.shadowRadius = 4
+        
+        let nameLabel = UILabel(frame: CGRect(x: 12, y: 12, width: 176, height: 26))
+        nameLabel.text = name
+        nameLabel.font = UIFont.systemFont(ofSize: 14)
+        nameLabel.textColor = UIColor.label
+        containerView.addSubview(nameLabel)
+        
+        return containerView
+    }
+    
+    private func createTransparentIcon() -> UIImage {
+        let size = CGSize(width: 1, height: 1)
+        UIGraphicsBeginImageContextWithOptions(size, false, 0)
+        UIColor.clear.setFill()
+        UIRectFill(CGRect(origin: .zero, size: size))
+        let image = UIGraphicsGetImageFromCurrentImageContext()
+        UIGraphicsEndImageContext()
+        return image ?? UIImage()
     }
 }
+
+// MARK: - Marker Data Types
+
+struct EventMarkerData {
+    let event: EventAbs
+}
+
+struct PlaceMarkerData {
+    let place: MVPPlace
+}
+
+struct POIMarkerData {
+    let name: String
+    let placeId: String
+}
+
 
 
 struct MapSearchBar: View {
