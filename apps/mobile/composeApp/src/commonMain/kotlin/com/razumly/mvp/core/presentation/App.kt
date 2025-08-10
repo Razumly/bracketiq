@@ -1,16 +1,25 @@
 package com.razumly.mvp.core.presentation
 
+import androidx.collection.MutableObjectList
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import coil3.ImageLoader
 import coil3.compose.setSingletonImageLoaderFactory
 import coil3.request.crossfade
 import com.arkivanov.decompose.extensions.compose.stack.Children
 import com.arkivanov.decompose.extensions.compose.subscribeAsState
+import com.razumly.mvp.core.presentation.composables.PlatformFocusManager
 import com.razumly.mvp.core.presentation.util.backAnimation
 import com.razumly.mvp.home.HomeScreen
 import com.razumly.mvp.userAuth.AuthScreen
@@ -19,6 +28,8 @@ import io.github.aakira.napier.Napier
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 
+val localAllFocusManagers =
+    compositionLocalOf<MutableObjectList<PlatformFocusManager>> { error("No List Provided") }
 
 @OptIn(ExperimentalTime::class)
 @Composable
@@ -29,6 +40,8 @@ fun App(root: RootComponent) {
 
     var lastNavigationTime by remember { mutableStateOf(0L) }
     var lastInstance by remember { mutableStateOf<Any?>(null) }
+
+    val allFocusManagers = MutableObjectList<PlatformFocusManager>()
 
     LaunchedEffect(Unit) {
         root.requestInitialPermissions()
@@ -48,35 +61,36 @@ fun App(root: RootComponent) {
     }
 
     setSingletonImageLoaderFactory { context ->
-        ImageLoader
-            .Builder(context)
-            .crossfade(true)
-            .build()
+        ImageLoader.Builder(context).crossfade(true).build()
     }
 
-    Children(
-        stack = childStack,
-        animation = backAnimation(
-            backHandler = root.backHandler,
-            onBack = {
-                // If top is Home, do nothing (no going back to Login)
-                val top = childStack.active.instance
-                if (top is RootComponent.Child.Home) {
-                    Napier.d(tag="Navigation") { "Ignoring back - at Home screen." }
-                } else {
-                    root.onBackClicked()
+    CompositionLocalProvider(localAllFocusManagers provides allFocusManagers) {
+        Box(modifier = Modifier.fillMaxSize().pointerInput(Unit) {
+            detectTapGestures {
+                allFocusManagers.forEach { it.clearFocus() }
+            }
+        }) {
+            Children(
+                stack = childStack, animation = backAnimation(
+                backHandler = root.backHandler, onBack = {
+                    val top = childStack.active.instance
+                    if (top is RootComponent.Child.Home) {
+                        Napier.d(tag = "Navigation") { "Ignoring back - at Home screen." }
+                    } else {
+                        root.onBackClicked()
+                    }
+                })) { child ->
+                when (val instance = child.instance) {
+                    is RootComponent.Child.Login -> {
+                        Napier.d(tag = "Navigation") { "Navigating to Login Screen" }
+                        AuthScreen(component = instance.component)
+                    }
+
+                    is RootComponent.Child.Home -> {
+                        Napier.d(tag = "Navigation") { "Navigating to Home Screen" }
+                        HomeScreen(instance.component)
+                    }
                 }
-            }
-        )
-    ) { child ->
-        when (val instance = child.instance) {
-            is RootComponent.Child.Login -> {
-                Napier.d(tag = "Navigation") { "Navigating to Login Screen" }
-                AuthScreen(component = instance.component)
-            }
-            is RootComponent.Child.Home -> {
-                Napier.d(tag = "Navigation") { "Navigating to Home Screen" }
-                HomeScreen(instance.component)
             }
         }
     }

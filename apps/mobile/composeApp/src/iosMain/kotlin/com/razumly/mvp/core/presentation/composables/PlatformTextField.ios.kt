@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -24,6 +25,7 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.UIKitView
+import com.razumly.mvp.core.presentation.localAllFocusManagers
 import kotlinx.cinterop.*
 import platform.Foundation.*
 import platform.UIKit.*
@@ -55,6 +57,16 @@ actual fun PlatformTextField(
     externalFocusManager: PlatformFocusManager?
 ) {
     val focusManager = externalFocusManager ?: rememberPlatformFocusManager()
+
+    val allFocusManagers = localAllFocusManagers.current
+
+    DisposableEffect(focusManager) {
+        allFocusManagers.add(focusManager)
+        onDispose {
+            allFocusManagers.remove(focusManager)
+        }
+    }
+
     val iosFocusManager = focusManager as IOSFocusManager
 
     val fieldHeight = height ?: 44.dp

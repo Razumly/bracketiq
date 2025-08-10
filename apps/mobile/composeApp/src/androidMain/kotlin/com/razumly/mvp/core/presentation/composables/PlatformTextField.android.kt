@@ -19,6 +19,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -33,6 +34,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import com.razumly.mvp.core.presentation.localAllFocusManagers
 import com.razumly.mvp.core.util.CurrencyAmountInputVisualTransformation
 
 @Composable
@@ -60,6 +62,14 @@ actual fun PlatformTextField(
     externalFocusManager: PlatformFocusManager?
 ) {
     val focusManager = externalFocusManager ?: rememberPlatformFocusManager()
+    val allFocusManagers = localAllFocusManagers.current
+
+    DisposableEffect(focusManager) {
+        allFocusManagers.add(focusManager)
+        onDispose {
+            allFocusManagers.remove(focusManager)
+        }
+    }
     val androidManager = focusManager as AndroidFocusManager
     val composeFocusManager = LocalFocusManager.current
 

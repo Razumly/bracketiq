@@ -1,5 +1,6 @@
 package com.razumly.mvp.userAuth
 
+import androidx.collection.mutableObjectListOf
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -19,6 +20,8 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.DisposableEffectResult
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -35,6 +38,7 @@ import com.razumly.mvp.core.presentation.composables.GoogleSignInButton
 import com.razumly.mvp.core.presentation.composables.PasswordField
 import com.razumly.mvp.core.presentation.composables.PlatformTextField
 import com.razumly.mvp.core.presentation.composables.rememberPlatformFocusManager
+import com.razumly.mvp.core.presentation.localAllFocusManagers
 
 @Composable
 fun AuthScreenBase(component: DefaultAuthComponent, onOauth2: () -> Unit?) {
@@ -60,15 +64,6 @@ fun AuthScreenBase(component: DefaultAuthComponent, onOauth2: () -> Unit?) {
     val passwordFocusManager = rememberPlatformFocusManager()
     val confirmPasswordFocusManager = rememberPlatformFocusManager()
 
-    val allFocusManagers = listOf(
-        firstNameFocusManager,
-        lastNameFocusManager,
-        userNameFocusManager,
-        emailFocusManager,
-        passwordFocusManager,
-        confirmPasswordFocusManager
-    )
-
     val handleSubmit = {
         if (isSignup) {
             component.onSignup(email, password, confirmPassword, firstName, lastName, userName)
@@ -86,11 +81,7 @@ fun AuthScreenBase(component: DefaultAuthComponent, onOauth2: () -> Unit?) {
     }
 
     Box(
-        modifier = Modifier.fillMaxSize().clickable(
-            indication = null,
-            interactionSource = remember { MutableInteractionSource() },
-            onClick = { allFocusManagers.forEach { it.clearFocus() } },
-        )
+        modifier = Modifier.fillMaxSize()
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
