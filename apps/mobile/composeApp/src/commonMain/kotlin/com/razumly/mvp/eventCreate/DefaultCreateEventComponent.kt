@@ -23,6 +23,8 @@ import com.razumly.mvp.core.data.repositories.IFieldRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentProcessor
+import com.razumly.mvp.core.util.ErrorMessage
+import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.eventCreate.CreateEventComponent.Child
 import com.razumly.mvp.eventCreate.CreateEventComponent.Config
 import kotlinx.coroutines.Dispatchers
@@ -43,12 +45,13 @@ interface CreateEventComponent: IPaymentProcessor {
     val childStack: Value<ChildStack<Config, Child>>
     val canProceed: StateFlow<Boolean>
     val selectedPlace: StateFlow<MVPPlace?>
-    val errorMessage: StateFlow<String?>
     val defaultEvent: StateFlow<EventWithRelations>
     val currentUser: StateFlow<UserData?>
+    val errorState: StateFlow<ErrorMessage?>
 
     fun updateEventField(update: EventImp.() -> EventImp)
     fun updateTournamentField(update: Tournament.() -> Tournament)
+    fun setLoadingHandler(loadingHandler: LoadingHandler)
     fun createEvent()
     fun nextStep()
     fun previousStep()
@@ -107,8 +110,8 @@ class DefaultCreateEventComponent(
     private val _selectedPlace = MutableStateFlow<MVPPlace?>(null)
     override val selectedPlace = _selectedPlace.asStateFlow()
 
-    private val _errorMessage = MutableStateFlow<String?>(null)
-    override val errorMessage = _errorMessage.asStateFlow()
+    private val _errorState = MutableStateFlow<ErrorMessage?>(null)
+    override val errorState = _errorState.asStateFlow()
 
     private val _addUserToEvent = MutableStateFlow(false)
 
@@ -116,6 +119,12 @@ class DefaultCreateEventComponent(
         .stateIn(scope, SharingStarted.Eagerly, null)
 
     private val _fieldCount = MutableStateFlow(0)
+
+    private lateinit var loadingHandler: LoadingHandler
+
+    override fun setLoadingHandler(loadingHandler: LoadingHandler) {
+        this.loadingHandler = loadingHandler
+    }
 
     override val childStack = childStack(
         source = navigation,
@@ -145,14 +154,16 @@ class DefaultCreateEventComponent(
 
     override fun createEvent() {
         scope.launch {
+            loadingHandler.showLoading("Creating event...")
             eventRepository.createEvent(newEventState.value).onSuccess {
                 onEventCreated()
                 if (_fieldCount.value > 0) {
                     fieldRepository.createFields(newEventState.value.id, _fieldCount.value)
                 }
             }.onFailure {
-                _errorMessage.value = it.message
+                _errorState.value = ErrorMessage(it.message ?: "")
             }
+            loadingHandler.hideLoading()
         }
     }
 
@@ -178,7 +189,7 @@ class DefaultCreateEventComponent(
                 url = onboardingUrl,
             )
         }.onFailure { error ->
-            _errorMessage.value = error.message
+            _errorState.value = ErrorMessage(error.message ?: "")
         }
     }
 

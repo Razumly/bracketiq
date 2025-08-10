@@ -97,7 +97,6 @@ actual fun PlatformTextField(
         // Use a clickable Box for tap-only fields to avoid focus conflicts
         Box(
             modifier = finalModifier
-                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(4.dp))
                 .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(4.dp))
                 .clickable(onClick = onTap)
                 .padding(16.dp),

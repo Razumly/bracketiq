@@ -31,6 +31,8 @@ import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.ktx.DynamicScheme
+import com.razumly.mvp.core.util.LocalErrorHandler
+import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.eventCreate.steps.Preview
 import com.razumly.mvp.eventDetail.EventDetails
 import com.razumly.mvp.eventMap.MapComponent
@@ -54,6 +56,17 @@ fun CreateEventScreen(
     val isEditing = true
     val currentUser by component.currentUser.collectAsState()
     val isDark = isSystemInDarkTheme()
+    val loadingHandler = LocalLoadingHandler.current
+    val errorHandler = LocalErrorHandler.current
+
+    LaunchedEffect(Unit) {
+        component.setLoadingHandler(loadingHandler)
+        component.errorState.collect { error ->
+            if (error != null) {
+                errorHandler.showError(error.message)
+            }
+        }
+    }
 
     var imageScheme by remember {
         mutableStateOf(

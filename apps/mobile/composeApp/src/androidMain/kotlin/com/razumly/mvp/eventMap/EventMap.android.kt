@@ -190,7 +190,7 @@ actual fun EventMap(
                         onClick = { marker -> false }, // Show info window
                         onInfoWindowClick = { marker ->
                             scope.launch {
-                                onPlaceSelected(createMVPPlaceFromPOI(poi))
+                                onPlaceSelected(component.getPlace(poi.placeId))
                             }
                         }
                     ) { marker ->
@@ -346,15 +346,4 @@ fun MapSearchBar(
             }
         }
     }
-}
-
-private suspend fun createMVPPlaceFromPOI(poi: PointOfInterest): MVPPlace {
-    // Convert POI to MVPPlace - you'll need to implement this based on your data structure
-    return MVPPlace(
-        id = poi.placeId,
-        name = poi.name,
-        lat = poi.latLng.latitude,
-        long = poi.latLng.longitude,
-        // Add other required fields with default or derived values
-    )
 }
