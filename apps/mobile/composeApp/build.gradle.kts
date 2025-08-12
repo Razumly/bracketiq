@@ -193,6 +193,7 @@ android {
         getByName("release") {
             isMinifyEnabled = false
         }
+
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

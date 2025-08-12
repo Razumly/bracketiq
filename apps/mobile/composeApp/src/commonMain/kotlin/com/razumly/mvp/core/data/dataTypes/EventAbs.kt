@@ -36,6 +36,7 @@ sealed interface EventAbs : MVPDocument {
     val cancellationRefundHours: Int
     val registrationCutoffHours: Int
     val seedColor: Int
+    val isTaxed: Boolean
 
     override val id: String
 }

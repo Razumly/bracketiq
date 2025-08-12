@@ -247,7 +247,8 @@ fun EventDetails(
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             // Event Title - Animated
-                            AnimatedCardSection(isOnSurface = false,
+                            AnimatedCardSection(
+                                isOnSurface = false,
                                 isEditMode = editView,
                                 animationDelay = 0,
                                 hazeState = hazeState,
@@ -265,12 +266,11 @@ fun EventDetails(
                                         onValueChange = { onEditEvent { copy(name = it) } },
                                         label = "Event Name",
                                         isError = !isNameValid,
-                                        supportingText =
-                                            if (!isNameValid) {
-                                                stringResource(Res.string.enter_value)
-                                            } else {
-                                                ""
-                                            }
+                                        supportingText = if (!isNameValid) {
+                                            stringResource(Res.string.enter_value)
+                                        } else {
+                                            ""
+                                        }
                                     )
                                 })
 
@@ -307,7 +307,8 @@ fun EventDetails(
                             }
 
                             // Description Card
-                            AnimatedCardSection(isEditMode = editView,
+                            AnimatedCardSection(
+                                isEditMode = editView,
                                 animationDelay = 100,
                                 hazeState = hazeState,
                                 viewContent = {
@@ -328,7 +329,8 @@ fun EventDetails(
                                 })
 
                             // Event Type Card
-                            AnimatedCardSection(isEditMode = editView,
+                            AnimatedCardSection(
+                                isEditMode = editView,
                                 animationDelay = 150,
                                 hazeState = hazeState,
                                 viewContent = {
@@ -345,13 +347,13 @@ fun EventDetails(
                                         PlatformDropdown(
                                             selectedValue = editEvent.eventType.name,
                                             onSelectionChange = { selectedValue ->
-                                                val selectedEventType = EventType.entries.find { it.name == selectedValue }
+                                                val selectedEventType =
+                                                    EventType.entries.find { it.name == selectedValue }
                                                 selectedEventType?.let { onEventTypeSelected(it) }
                                             },
                                             options = EventType.entries.map { eventType ->
                                                 DropdownOption(
-                                                    value = eventType.name,
-                                                    label = eventType.name
+                                                    value = eventType.name, label = eventType.name
                                                 )
                                             },
                                             label = "Event Type",
@@ -360,15 +362,15 @@ fun EventDetails(
                                         PlatformDropdown(
                                             selectedValue = editEvent.fieldType.name,
                                             onSelectionChange = { selectedValue ->
-                                                val selectedFieldType = FieldType.entries.find { it.name == selectedValue }
+                                                val selectedFieldType =
+                                                    FieldType.entries.find { it.name == selectedValue }
                                                 selectedFieldType?.let { fieldType ->
                                                     onEditEvent { copy(fieldType = fieldType) }
                                                 }
                                             },
                                             options = FieldType.entries.map { fieldType ->
                                                 DropdownOption(
-                                                    value = fieldType.name,
-                                                    label = fieldType.name
+                                                    value = fieldType.name, label = fieldType.name
                                                 )
                                             },
                                             label = "Field Type",
@@ -378,11 +380,13 @@ fun EventDetails(
                                 })
 
                             // Price Card
-                            AnimatedCardSection(isEditMode = editView,
+                            AnimatedCardSection(
+                                isEditMode = editView,
                                 animationDelay = 200,
                                 hazeState = hazeState,
                                 viewContent = {
                                     CardSection("Price", event.price.moneyFormat())
+
                                     CardSection(
                                         "Refund Policy", when (event.cancellationRefundHours) {
                                             0 -> "Automatic Refund"
@@ -413,9 +417,18 @@ fun EventDetails(
                                             onEditEvent { copy(price = newCleaned.toDouble() / 100) }
                                         },
                                         isError = !isPriceValid,
-                                        supportingText = if (isPriceValid) stringResource(Res.string.free_entry_hint) else stringResource(Res.string.invalid_price)
+                                        supportingText = if (isPriceValid) stringResource(Res.string.free_entry_hint) else stringResource(
+                                            Res.string.invalid_price
+                                        )
                                     )
                                     if (editEvent.price > 0.0) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text("Is Taxed")
+                                            Checkbox(
+                                                checked = editEvent.isTaxed, onCheckedChange = {
+                                                    onEditEvent { copy(isTaxed = it) }
+                                                })
+                                        }
                                         CancellationRefundOptions(
                                             selectedOption = editEvent.cancellationRefundHours,
                                             onOptionSelected = {
@@ -430,7 +443,8 @@ fun EventDetails(
                                     }
                                 })
 
-                            AnimatedCardSection(isEditMode = editView,
+                            AnimatedCardSection(
+                                isEditMode = editView,
                                 animationDelay = 250,
                                 hazeState = hazeState,
                                 viewContent = {
@@ -455,7 +469,8 @@ fun EventDetails(
                                 })
 
                             // Date Card
-                            AnimatedCardSection(isEditMode = editView,
+                            AnimatedCardSection(
+                                isEditMode = editView,
                                 animationDelay = 300,
                                 hazeState = hazeState,
                                 viewContent = {
@@ -474,8 +489,7 @@ fun EventDetails(
                                             modifier = Modifier.weight(1f),
                                             label = "Start Date & Time",
                                             readOnly = true,
-                                            onTap = { showStartPicker = true }
-                                        )
+                                            onTap = { showStartPicker = true })
                                         PlatformTextField(
                                             value = editEvent.end.toLocalDateTime(
                                                 TimeZone.currentSystemDefault()
@@ -484,13 +498,13 @@ fun EventDetails(
                                             modifier = Modifier.weight(1f),
                                             label = "End Date & Time",
                                             readOnly = true,
-                                            onTap = { showStartPicker = true }
-                                        )
+                                            onTap = { showStartPicker = true })
                                     }
                                 })
 
                             // Divisions Card
-                            AnimatedCardSection(isEditMode = editView,
+                            AnimatedCardSection(
+                                isEditMode = editView,
                                 animationDelay = 350,
                                 hazeState = hazeState,
                                 viewContent = {
@@ -513,7 +527,8 @@ fun EventDetails(
                                 })
 
                             // Specifics Card
-                            AnimatedCardSection(isEditMode = editView,
+                            AnimatedCardSection(
+                                isEditMode = editView,
                                 animationDelay = 400,
                                 hazeState = hazeState,
                                 viewContent = {
@@ -596,7 +611,8 @@ fun EventDetails(
                                             verticalAlignment = Alignment.CenterVertically,
                                             modifier = Modifier.padding(top = 8.dp)
                                         ) {
-                                            Checkbox(checked = editEvent.teamSignup,
+                                            Checkbox(
+                                                checked = editEvent.teamSignup,
                                                 onCheckedChange = { onEditEvent { copy(teamSignup = it) } })
                                             Text(text = "Team Event")
                                         }
@@ -608,8 +624,8 @@ fun EventDetails(
                                                 verticalAlignment = Alignment.CenterVertically,
                                                 modifier = Modifier.padding(top = 8.dp)
                                             ) {
-                                                Checkbox(checked = addSelfToEvent,
-                                                    onCheckedChange = {
+                                                Checkbox(
+                                                    checked = addSelfToEvent, onCheckedChange = {
                                                         addSelfToEvent = it
                                                         onAddCurrentUser(it)
                                                     })
@@ -621,13 +637,15 @@ fun EventDetails(
                                     // Tournament-specific fields
                                     if (editEvent is Tournament) {
                                         PlatformTextField(
-                                            value = editEvent.prize, onValueChange = {
+                                            value = editEvent.prize,
+                                            onValueChange = {
                                                 if (it.length <= 50) onEditTournament {
                                                     copy(
                                                         prize = it
                                                     )
                                                 }
-                                            }, label = "Prize",
+                                            },
+                                            label = "Prize",
                                             supportingText = "If there is a prize, enter it here"
                                         )
 
@@ -656,7 +674,8 @@ fun EventDetails(
                                             selectedCount = editEvent.winnerSetCount,
                                             onCountSelected = { newValue ->
                                                 onEditTournament {
-                                                    copy(winnerSetCount = newValue,
+                                                    copy(
+                                                        winnerSetCount = newValue,
                                                         winnerBracketPointsToVictory = List(newValue) { 21 })
                                                 }
                                             },
@@ -683,7 +702,8 @@ fun EventDetails(
                                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                                             ) {
                                                 repeat(constrainedWinnerSetCount) { index ->
-                                                    PointsTextField(value = editEvent.winnerBracketPointsToVictory.getOrNull(
+                                                    PointsTextField(
+                                                        value = editEvent.winnerBracketPointsToVictory.getOrNull(
                                                         index
                                                     )?.toString() ?: "",
                                                         label = "Set ${index + 1} Points",
@@ -736,7 +756,8 @@ fun EventDetails(
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
-                                            Checkbox(checked = editEvent.doubleElimination,
+                                            Checkbox(
+                                                checked = editEvent.doubleElimination,
                                                 onCheckedChange = { checked ->
                                                     onEditTournament {
                                                         copy(
@@ -755,7 +776,8 @@ fun EventDetails(
                                                     selectedCount = editEvent.loserSetCount,
                                                     onCountSelected = { newValue ->
                                                         onEditTournament {
-                                                            copy(loserSetCount = newValue,
+                                                            copy(
+                                                                loserSetCount = newValue,
                                                                 loserBracketPointsToVictory = List(
                                                                     newValue
                                                                 ) { 21 })
@@ -785,7 +807,8 @@ fun EventDetails(
                                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                                             ) {
                                                 repeat(constrainedLoserSetCount) { index ->
-                                                    PointsTextField(value = editEvent.loserBracketPointsToVictory.getOrNull(
+                                                    PointsTextField(
+                                                        value = editEvent.loserBracketPointsToVictory.getOrNull(
                                                         index
                                                     )?.toString() ?: "",
                                                         label = "Set ${index + 1} Points",
@@ -798,16 +821,17 @@ fun EventDetails(
                                                                         newValue.toInt()
                                                                     }
                                                                 onEditTournament {
-                                                                    copy(loserBracketPointsToVictory = editEvent.loserBracketPointsToVictory.toMutableList()
-                                                                        .apply {
-                                                                            while (size <= index) add(
-                                                                                0
-                                                                            )
-                                                                            set(
-                                                                                index,
-                                                                                loserPoints
-                                                                            )
-                                                                        })
+                                                                    copy(
+                                                                        loserBracketPointsToVictory = editEvent.loserBracketPointsToVictory.toMutableList()
+                                                                            .apply {
+                                                                                while (size <= index) add(
+                                                                                    0
+                                                                                )
+                                                                                set(
+                                                                                    index,
+                                                                                    loserPoints
+                                                                                )
+                                                                            })
                                                                 }
                                                             }
                                                         },
@@ -893,8 +917,7 @@ fun EventDetails(
                 Card {
                     Column(Modifier.fillMaxWidth()) {
                         SelectEventImage(
-                            selectedPlace = selectedPlace,
-                            onSelectedImage = { onEditEvent(it) })
+                            selectedPlace = selectedPlace, onSelectedImage = { onEditEvent(it) })
                         Row(
                             Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly
                         ) {
@@ -1001,7 +1024,8 @@ fun BackgroundImage(modifier: Modifier, imageUrl: String) {
                 contentScale = ContentScale.Crop,
             )
 
-            AsyncImage(model = imageUrl,
+            AsyncImage(
+                model = imageUrl,
                 contentDescription = "Flipped Hazy Background",
                 modifier = Modifier.fillMaxSize().graphicsLayer {
                     clip = true

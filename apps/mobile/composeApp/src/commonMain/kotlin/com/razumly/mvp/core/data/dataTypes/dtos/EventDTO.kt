@@ -38,6 +38,7 @@ data class EventDTO(
     val cancellationRefundHours: Int,
     val registrationCutoffHours: Int,
     val seedColor: Int,
+    val isTaxed: Boolean,
 ) {
     fun toEvent(id: String): EventImp {
         return EventImp(
@@ -66,7 +67,8 @@ data class EventDTO(
             teamIds = teamIds,
             cancellationRefundHours = cancellationRefundHours,
             registrationCutoffHours = registrationCutoffHours,
-            seedColor = seedColor
+            seedColor = seedColor,
+            isTaxed = isTaxed
         )
     }
 }

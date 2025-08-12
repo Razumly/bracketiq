@@ -46,6 +46,7 @@ data class EventImp (
     override val cancellationRefundHours: Int,
     override val registrationCutoffHours: Int = 0,
     override val seedColor: Int,
+    override val isTaxed: Boolean,
     @Transient override val eventType: EventType = EventType.EVENT,
     @Transient override val lastUpdated: Instant = Clock.System.now(),
 ): EventAbs {
@@ -76,7 +77,8 @@ data class EventImp (
                 teamIds = listOf(),
                 cancellationRefundHours = 0,
                 registrationCutoffHours = 0,
-                seedColor = Primary.toArgb()
+                seedColor = Primary.toArgb(),
+                isTaxed = false
             )
         }
     }
@@ -107,7 +109,8 @@ data class EventImp (
             teamIds = teamIds,
             cancellationRefundHours = cancellationRefundHours,
             registrationCutoffHours = registrationCutoffHours,
-            seedColor = seedColor
+            seedColor = seedColor,
+            isTaxed = isTaxed
         )
     }
 }

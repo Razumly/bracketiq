@@ -169,7 +169,9 @@ class DefaultCreateEventComponent(
 
     override fun createAccount() {
         scope.launch {
+            loadingHandler.showLoading("Getting stripe onboarding URL...")
             handleStripeAccountCreation()
+            loadingHandler.hideLoading()
         }
     }
 

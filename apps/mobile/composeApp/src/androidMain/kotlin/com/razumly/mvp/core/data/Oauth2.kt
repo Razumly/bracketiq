@@ -36,8 +36,7 @@ suspend fun UserRepository.oauth2Login(activity: ComponentActivity): Result<Unit
                 teamInvites = listOf(),
                 eventInvites = listOf(),
                 tournamentInvites = listOf(),
-                stripeAccountId = "",
-                stripeCustomerId = ""
+                hasStripeAccount = false
             )
             database.createDocument(
                 databaseId = DbConstants.DATABASE_NAME,

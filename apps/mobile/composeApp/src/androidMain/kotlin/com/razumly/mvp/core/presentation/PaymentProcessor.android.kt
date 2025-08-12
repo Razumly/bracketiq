@@ -28,7 +28,7 @@ actual open class PaymentProcessor : IPaymentProcessor {
                 it.paymentIntent!!, PaymentSheet.Configuration(
                     merchantDisplayName = "MVP",
                     customer = _customerConfig,
-                    allowsDelayedPaymentMethods = true
+                    allowsDelayedPaymentMethods = true,
                 )
             )
         }

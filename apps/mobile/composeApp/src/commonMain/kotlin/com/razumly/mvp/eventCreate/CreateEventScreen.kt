@@ -139,7 +139,7 @@ fun CreateEventScreen(
                 when (child.instance) {
                     is CreateEventComponent.Child.EventInfo -> EventDetails(
                         paymentProcessor = component,
-                        hostHasAccount = currentUser?.stripeAccountId?.isNotBlank() == true,
+                        hostHasAccount = currentUser?.hasStripeAccount ?: false,
                         onHostCreateAccount = { component.createAccount() },
                         mapComponent = mapComponent,
                         eventWithRelations = defaultEvent,

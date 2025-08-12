@@ -46,6 +46,7 @@ data class TournamentDTO(
     val cancellationRefundHours: Int,
     val registrationCutoffHours: Int,
     val seedColor: Int,
+    val isTaxed: Boolean,
 ) {
     fun toTournament(id: String): Tournament {
         return Tournament(
@@ -82,7 +83,8 @@ data class TournamentDTO(
             cancellationRefundHours = cancellationRefundHours,
             registrationCutoffHours = registrationCutoffHours,
             prize = prize,
-            seedColor = seedColor
+            seedColor = seedColor,
+            isTaxed = isTaxed
         )
     }
 }

@@ -52,6 +52,7 @@ data class Tournament (
     override val cancellationRefundHours: Int,
     override val registrationCutoffHours: Int = 0,
     override val seedColor: Int,
+    override val isTaxed: Boolean,
     @Transient override val eventType: EventType = EventType.TOURNAMENT,
     @Transient override val lastUpdated: Instant = Clock.System.now(),
     override val maxParticipants: Int,
@@ -92,7 +93,8 @@ data class Tournament (
                 cancellationRefundHours = 0,
                 registrationCutoffHours = 0,
                 prize = "",
-                seedColor = Primary.toArgb()
+                seedColor = Primary.toArgb(),
+                isTaxed = false
             )
         }
     }
@@ -122,7 +124,8 @@ data class Tournament (
             teamIds = event.teamIds,
             cancellationRefundHours = event.cancellationRefundHours,
             registrationCutoffHours = event.registrationCutoffHours,
-            seedColor = seedColor
+            seedColor = seedColor,
+            isTaxed = event.isTaxed
         )
     }
     fun toEvent(): EventImp {
@@ -152,7 +155,8 @@ data class Tournament (
             teamIds = teamIds,
             cancellationRefundHours = cancellationRefundHours,
             registrationCutoffHours = registrationCutoffHours,
-            seedColor = seedColor
+            seedColor = seedColor,
+            isTaxed = isTaxed
         )
     }
     fun toTournamentDTO(): TournamentDTO {
@@ -189,7 +193,8 @@ data class Tournament (
             cancellationRefundHours = cancellationRefundHours,
             registrationCutoffHours = registrationCutoffHours,
             prize = prize,
-            seedColor = seedColor
+            seedColor = seedColor,
+            isTaxed = isTaxed
         )
     }
 }

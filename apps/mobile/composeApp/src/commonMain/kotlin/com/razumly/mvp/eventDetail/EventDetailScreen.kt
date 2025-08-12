@@ -170,7 +170,7 @@ fun EventDetailScreen(
                         EventDetails(
                             paymentProcessor = component,
                             mapComponent = mapComponent,
-                            hostHasAccount = currentUser.stripeAccountId?.isNotBlank() == true,
+                            hostHasAccount = currentUser.hasStripeAccount == true,
                             onHostCreateAccount = { component.onHostCreateAccount() },
                             eventWithRelations = selectedEvent,
                             editEvent = editedEvent,

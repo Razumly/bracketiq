@@ -25,7 +25,6 @@ interface IBillingRepository : IMVPRepository {
     ): Result<PurchaseIntent?>
 
     suspend fun createAccount(): Result<String>
-    suspend fun createCustomer(): Result<Unit>
     suspend fun getOnboardingLink(): Result<String>
     suspend fun leaveAndRefundEvent(event: EventAbs, reason: String): Result<Unit>
     suspend fun deleteAndRefundEvent(event: EventAbs): Result<Unit>
@@ -79,36 +78,20 @@ class BillingRepository(
                 async = false,
             ).responseBody
         )
-        userRepository.updateUser(user.copy(stripeAccountId = response.accountId))
         response.onboardingUrl
-    }
-
-    override suspend fun createCustomer(): Result<Unit> = runCatching {
-        val user = userRepository.currentUser.value.getOrThrow()
-        val response = jsonMVP.decodeFromString<CreateAccountResponse>(
-            functions.createExecution(
-                functionId = DbConstants.BILLING_FUNCTION,
-                body = jsonMVP.encodeToString(
-                    CreateCustomer(user.id)
-                ),
-                async = false,
-            ).responseBody
-        )
-        userRepository.updateUser(user.copy(stripeCustomerId = response.accountId))
     }
 
     override suspend fun getOnboardingLink(): Result<String> = runCatching {
         val user = userRepository.currentUser.value.getOrThrow()
-        if (user.stripeAccountId?.isBlank() == true) throw Exception("User has no stripe account")
+        if (user.hasStripeAccount == true) throw Exception("User has no stripe account")
 
         val response = jsonMVP.decodeFromString<CreateAccountResponse>(
             functions.createExecution(
                 functionId = DbConstants.BILLING_FUNCTION,
-                body = jsonMVP.encodeToString(user.stripeAccountId?.let { GetHostOnboardingLink(it) }),
+                body = jsonMVP.encodeToString(GetHostOnboardingLink(user.id)),
                 async = false,
             ).responseBody
         )
-        userRepository.updateUser(user.copy(stripeAccountId = response.accountId))
         response.onboardingUrl
     }
 
@@ -266,14 +249,13 @@ private data class CreateCustomer(
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable
 private data class GetHostOnboardingLink(
-    val accountId: String,
+    val userId: String,
     @EncodeDefault val command: String = "get_host_onboarding_link",
 )
 
 @Serializable
 @OptIn(ExperimentalTime::class)
 private data class CreateAccountResponse(
-    val accountId: String,
     val onboardingUrl: String,
     val expiresAt: Long,
 ) {
