@@ -154,7 +154,7 @@ fun EventDetails(
     // Validation states
     var isNameValid by remember { mutableStateOf(editEvent.name.isNotBlank()) }
     var isPriceValid by remember { mutableStateOf(editEvent.price >= 0) }
-    var isMaxParticipantsValid by remember { mutableStateOf(editEvent.maxParticipants > 2) }
+    var isMaxParticipantsValid by remember { mutableStateOf(editEvent.maxParticipants > 1) }
     var isTeamSizeValid by remember { mutableStateOf(editEvent.teamSizeLimit >= 2) }
     var isWinnerSetCountValid by remember { mutableStateOf(true) }
     var isLoserSetCountValid by remember { mutableStateOf(true) }
@@ -173,7 +173,7 @@ fun EventDetails(
     LaunchedEffect(editEvent, fieldCount) {
         isNameValid = editEvent.name.isNotBlank()
         isPriceValid = editEvent.price >= 0
-        isMaxParticipantsValid = editEvent.maxParticipants > 2
+        isMaxParticipantsValid = editEvent.maxParticipants > 1
         isTeamSizeValid = editEvent.teamSizeLimit >= 2
         isLocationValid =
             editEvent.location.isNotBlank() && editEvent.lat != 0.0 && editEvent.long != 0.0
@@ -580,12 +580,9 @@ fun EventDetails(
                                 editContent = {
                                     Text("Specifics", style = MaterialTheme.typography.titleMedium)
 
-                                    val label = if (!isMaxParticipantsValid) {
-                                        stringResource(Res.string.value_too_low, 1)
-                                    } else {
+                                    val label =
                                         if (!editEvent.teamSignup) stringResource(Res.string.max_players)
                                         else stringResource(Res.string.max_teams)
-                                    }
                                     NumberInputField(
                                         value = editEvent.maxParticipants.toString(),
                                         label = label,
@@ -599,6 +596,10 @@ fun EventDetails(
                                             }
                                         },
                                         isError = !isMaxParticipantsValid,
+                                        errorMessage = if (isMaxParticipantsValid) "" else stringResource(
+                                            Res.string.value_too_low,
+                                            1
+                                        )
                                     )
                                     TeamSizeLimitDropdown(
                                         selectedTeamSize = editEvent.teamSizeLimit,
@@ -704,8 +705,8 @@ fun EventDetails(
                                                 repeat(constrainedWinnerSetCount) { index ->
                                                     PointsTextField(
                                                         value = editEvent.winnerBracketPointsToVictory.getOrNull(
-                                                        index
-                                                    )?.toString() ?: "",
+                                                            index
+                                                        )?.toString() ?: "",
                                                         label = "Set ${index + 1} Points",
                                                         onValueChange = { newValue ->
                                                             if (newValue.all { it.isDigit() } && newValue.length <= 2) {
@@ -809,8 +810,8 @@ fun EventDetails(
                                                 repeat(constrainedLoserSetCount) { index ->
                                                     PointsTextField(
                                                         value = editEvent.loserBracketPointsToVictory.getOrNull(
-                                                        index
-                                                    )?.toString() ?: "",
+                                                            index
+                                                        )?.toString() ?: "",
                                                         label = "Set ${index + 1} Points",
                                                         onValueChange = { newValue ->
                                                             if (newValue.all { it.isDigit() } && newValue.length <= 2) {

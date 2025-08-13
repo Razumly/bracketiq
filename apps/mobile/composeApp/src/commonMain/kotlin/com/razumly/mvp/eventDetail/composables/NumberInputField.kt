@@ -34,8 +34,6 @@ fun NumberInputField(
                 else supportingText ?: ""
             ,
             enabled = enabled
-
-
         )
     }
 }
