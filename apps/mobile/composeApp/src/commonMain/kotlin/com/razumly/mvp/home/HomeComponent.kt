@@ -39,14 +39,14 @@ import kotlinx.serialization.Serializable
 import org.koin.core.parameter.parametersOf
 import org.koin.mp.KoinPlatform.getKoin
 
-interface HomeComponent {
+interface HomeComponent: ComponentContext {
     val childStack: Value<ChildStack<*, Child>>
     val selectedPage: StateFlow<Config>
 
     fun onTabSelected(page: Config)
     fun handleDeepLink(deepLinkNav: DeepLinkNav?)
 
-    fun onBack()
+    fun onBackClicked()
 
     sealed class Child {
         data class Search(
@@ -130,7 +130,7 @@ class DefaultHomeComponent(
         }, serializer = Config.serializer(), handleBackButton = true, childFactory = ::createChild
     )
 
-    override fun onBack() {
+    override fun onBackClicked() {
         if (childStack.value.backStack.isNotEmpty()) {
             navigation.pop()
         }
@@ -178,7 +178,7 @@ class DefaultHomeComponent(
                         config.event,
                         ::onMatchSelected,
                         ::onNavigateToTeamSettings,
-                        ::onBack,
+                        ::onBackClicked,
                     )
                 }.value, _koin.inject<MapComponent> {
                     parametersOf(componentContext)
@@ -226,14 +226,14 @@ class DefaultHomeComponent(
             is Config.Teams -> Child.Teams(
                 _koin.inject<DefaultTeamManagementComponent> {
                     parametersOf(
-                        componentContext, config.freeAgents, config.event, ::onBack
+                        componentContext, config.freeAgents, config.event, ::onBackClicked
                     )
                 }.value
             )
 
             is Config.Events -> Child.Events(
                 _koin.inject<DefaultEventManagementComponent> {
-                    parametersOf(componentContext, ::onEventSelected, ::onBack)
+                    parametersOf(componentContext, ::onEventSelected, ::onBackClicked)
                 }.value
             )
 

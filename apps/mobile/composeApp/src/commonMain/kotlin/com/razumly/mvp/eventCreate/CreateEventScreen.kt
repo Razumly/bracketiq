@@ -31,6 +31,7 @@ import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.ktx.DynamicScheme
+import com.razumly.mvp.core.presentation.util.backAnimation
 import com.razumly.mvp.core.util.LocalErrorHandler
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.eventCreate.steps.Preview
@@ -135,7 +136,10 @@ fun CreateEventScreen(
         },
         floatingActionButtonPosition = FabPosition.Center,
         content = {
-            ChildStack(childStack) { child ->
+            ChildStack(childStack, animation = backAnimation(
+                backHandler = component.backHandler,
+                onBack = component::onBackClicked,
+            )) { child ->
                 when (child.instance) {
                     is CreateEventComponent.Child.EventInfo -> EventDetails(
                         paymentProcessor = component,

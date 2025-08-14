@@ -19,10 +19,9 @@ import coil3.compose.setSingletonImageLoaderFactory
 import coil3.request.crossfade
 import com.arkivanov.decompose.ExperimentalDecomposeApi
 import com.arkivanov.decompose.extensions.compose.experimental.stack.ChildStack
-import com.arkivanov.decompose.extensions.compose.experimental.stack.animation.fade
-import com.arkivanov.decompose.extensions.compose.experimental.stack.animation.stackAnimation
 import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import com.razumly.mvp.core.presentation.composables.PlatformFocusManager
+import com.razumly.mvp.core.presentation.util.backAnimation
 import com.razumly.mvp.home.HomeScreen
 import com.razumly.mvp.userAuth.AuthScreen
 import io.github.aakira.napier.DebugAntilog
@@ -73,7 +72,10 @@ fun App(root: RootComponent) {
             }
         }) {
             ChildStack(
-                stack = childStack, animation = stackAnimation(fade())
+                stack = childStack, animation = backAnimation(
+                    backHandler = root.backHandler,
+                    onBack = root::onBackClicked,
+                )
             ) { child ->
                 when (val instance = child.instance) {
                     is RootComponent.Child.Login -> {

@@ -34,12 +34,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.arkivanov.decompose.ExperimentalDecomposeApi
 import com.arkivanov.decompose.extensions.compose.experimental.stack.ChildStack
-import com.arkivanov.decompose.extensions.compose.experimental.stack.animation.fade
-import com.arkivanov.decompose.extensions.compose.experimental.stack.animation.stackAnimation
 import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import com.razumly.mvp.chat.ChatGroupScreen
 import com.razumly.mvp.chat.ChatListScreen
 import com.razumly.mvp.core.presentation.composables.MVPBottomNavBar
+import com.razumly.mvp.core.presentation.util.backAnimation
 import com.razumly.mvp.core.util.ErrorHandlerImpl
 import com.razumly.mvp.core.util.LoadingHandlerImpl
 import com.razumly.mvp.core.util.LocalErrorHandler
@@ -131,10 +130,12 @@ private fun HomeContent(
     paddingValues: PaddingValues, component: HomeComponent
 ) {
     val childStack by component.childStack.subscribeAsState()
-    Napier.d(tag = "HomeScreen") { "Current tab: ${childStack.active.configuration}" }
     CompositionLocalProvider(LocalNavBarPadding provides paddingValues) {
         ChildStack(
-            stack = childStack, animation = stackAnimation(fade())
+            stack = childStack, animation = backAnimation(
+                backHandler = component.backHandler,
+                onBack = component::onBackClicked,
+            )
         ) { child ->
             Box(
                 modifier = Modifier.fillMaxSize()

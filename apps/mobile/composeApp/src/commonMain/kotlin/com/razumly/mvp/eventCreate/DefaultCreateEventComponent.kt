@@ -39,7 +39,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlin.time.ExperimentalTime
 
-interface CreateEventComponent: IPaymentProcessor {
+interface CreateEventComponent: IPaymentProcessor, ComponentContext {
     val newEventState: StateFlow<EventAbs>
     val currentEventType: StateFlow<EventType>
     val childStack: Value<ChildStack<Config, Child>>
@@ -49,6 +49,7 @@ interface CreateEventComponent: IPaymentProcessor {
     val currentUser: StateFlow<UserData?>
     val errorState: StateFlow<ErrorMessage?>
 
+    fun onBackClicked()
     fun updateEventField(update: EventImp.() -> EventImp)
     fun updateTournamentField(update: Tournament.() -> Tournament)
     fun setLoadingHandler(loadingHandler: LoadingHandler)
@@ -124,6 +125,12 @@ class DefaultCreateEventComponent(
 
     override fun setLoadingHandler(loadingHandler: LoadingHandler) {
         this.loadingHandler = loadingHandler
+    }
+
+    override fun onBackClicked() {
+        if (childStack.value.backStack.isNotEmpty()) {
+            navigation.pop()
+        }
     }
 
     override val childStack = childStack(
