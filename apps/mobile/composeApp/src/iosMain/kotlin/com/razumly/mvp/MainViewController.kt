@@ -4,6 +4,9 @@ package com.razumly.mvp
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.material3.Text
@@ -23,6 +26,7 @@ import dev.icerock.moko.permissions.ios.PermissionsController
 import kotlin.experimental.ExperimentalObjCName
 import io.github.aakira.napier.Napier
 import com.arkivanov.decompose.ExperimentalDecomposeApi
+import com.arkivanov.decompose.extensions.compose.stack.animation.predictiveback.PredictiveBackGestureIcon
 import com.arkivanov.decompose.extensions.compose.stack.animation.predictiveback.PredictiveBackGestureOverlay
 import com.arkivanov.essenty.backhandler.BackDispatcher
 import com.razumly.mvp.core.presentation.composables.NativeViewFactory
@@ -77,8 +81,14 @@ fun MainViewController(
 
             PredictiveBackGestureOverlay(
                 backDispatcher = backDispatcher,
-                backIcon = { progress, edge -> },
-                modifier = Modifier,
+                backIcon = { progress, _ ->
+                    PredictiveBackGestureIcon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        progress = progress,
+                    )
+                },
+                modifier = Modifier.fillMaxSize(),
+                endEdgeEnabled = false,
                 onClose = { }
             ) {
                 root?.let {

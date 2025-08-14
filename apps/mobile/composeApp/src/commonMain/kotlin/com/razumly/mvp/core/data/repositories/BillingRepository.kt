@@ -121,9 +121,13 @@ class BillingRepository(
         }
 
     override suspend fun deleteAndRefundEvent(event: EventAbs): Result<Unit> = runCatching {
+        val isTournament = when (event) {
+            is Tournament -> true
+            else -> false
+        }
         val response = functions.createExecution(
             DbConstants.BILLING_FUNCTION,
-            jsonMVP.encodeToString(RefundFullEvent(eventId = event.id))
+            jsonMVP.encodeToString(RefundFullEvent(eventId = event.id, isTournament = isTournament))
         )
 
         val refundResponse = jsonMVP.decodeFromString<RefundResponse>(response.responseBody)
@@ -299,6 +303,7 @@ data class RefundApiRequest(
 data class RefundFullEvent(
     @EncodeDefault val command: String = "refund_all_payments",
     val eventId: String,
+    val isTournament: Boolean,
 )
 
 @Serializable
