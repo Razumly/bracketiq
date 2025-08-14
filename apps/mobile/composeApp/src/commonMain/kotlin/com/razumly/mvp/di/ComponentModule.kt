@@ -22,7 +22,7 @@ import com.razumly.mvp.userAuth.DefaultAuthComponent
 import org.koin.dsl.module
 
 val componentModule = module {
-    single { (componentContext: ComponentContext, deepLinkNav: DeepLinkNav?) ->
+    factory { (componentContext: ComponentContext, deepLinkNav: DeepLinkNav?) ->
         RootComponent(
             componentContext = componentContext,
             permissionsController = get(),

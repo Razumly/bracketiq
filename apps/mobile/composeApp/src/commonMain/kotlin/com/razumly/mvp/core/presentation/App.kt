@@ -17,10 +17,12 @@ import androidx.compose.ui.input.pointer.pointerInput
 import coil3.ImageLoader
 import coil3.compose.setSingletonImageLoaderFactory
 import coil3.request.crossfade
-import com.arkivanov.decompose.extensions.compose.stack.Children
+import com.arkivanov.decompose.ExperimentalDecomposeApi
+import com.arkivanov.decompose.extensions.compose.experimental.stack.ChildStack
+import com.arkivanov.decompose.extensions.compose.experimental.stack.animation.fade
+import com.arkivanov.decompose.extensions.compose.experimental.stack.animation.stackAnimation
 import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import com.razumly.mvp.core.presentation.composables.PlatformFocusManager
-import com.razumly.mvp.core.presentation.util.backAnimation
 import com.razumly.mvp.home.HomeScreen
 import com.razumly.mvp.userAuth.AuthScreen
 import io.github.aakira.napier.DebugAntilog
@@ -31,7 +33,7 @@ import kotlin.time.ExperimentalTime
 val localAllFocusManagers =
     compositionLocalOf<MutableObjectList<PlatformFocusManager>> { error("No List Provided") }
 
-@OptIn(ExperimentalTime::class)
+@OptIn(ExperimentalTime::class, ExperimentalDecomposeApi::class)
 @Composable
 fun App(root: RootComponent) {
     val childStack by root.childStack.subscribeAsState()
@@ -70,16 +72,9 @@ fun App(root: RootComponent) {
                 allFocusManagers.forEach { it.clearFocus() }
             }
         }) {
-            Children(
-                stack = childStack, animation = backAnimation(
-                backHandler = root.backHandler, onBack = {
-                    val top = childStack.active.instance
-                    if (top is RootComponent.Child.Home) {
-                        Napier.d(tag = "Navigation") { "Ignoring back - at Home screen." }
-                    } else {
-                        root.onBackClicked()
-                    }
-                })) { child ->
+            ChildStack(
+                stack = childStack, animation = stackAnimation(fade())
+            ) { child ->
                 when (val instance = child.instance) {
                     is RootComponent.Child.Login -> {
                         Napier.d(tag = "Navigation") { "Navigating to Login Screen" }
