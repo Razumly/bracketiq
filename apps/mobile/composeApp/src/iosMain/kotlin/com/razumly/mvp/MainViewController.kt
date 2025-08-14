@@ -82,10 +82,6 @@ fun MainViewController(
             PredictiveBackGestureOverlay(
                 backDispatcher = backDispatcher,
                 backIcon = { progress, _ ->
-                    PredictiveBackGestureIcon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        progress = progress,
-                    )
                 },
                 modifier = Modifier.fillMaxSize(),
                 endEdgeEnabled = false,
