@@ -21,6 +21,7 @@ googleApiServicesOauth2 = "v2-rev20200213-2.0.0"
 googleAuthLibraryOauth2Http = "1.37.1"
 googleHttpClientGson = "2.0.0"
 hazeMaterials = "1.6.10"
+imagepickerkmp = "1.0.21"
 kmpalette = "3.1.0"
 kmpnotifier = "1.6.0"
 koin = "4.1.0"
@@ -61,6 +62,7 @@ browser = "1.8.0"
 androidx-core = { module = "androidx.test:core", version.ref = "core" }
 androidx-performance-annotation = { module = "androidx.performance:performance-annotation", version.ref = "performanceAnnotation" }
 firebase-messaging = { module = "com.google.firebase:firebase-messaging", version.ref = "firebaseMessaging" }
+imagepickerkmp = { module = "io.github.ismoy:imagepickerkmp", version.ref = "imagepickerkmp" }
 jetbrains-kotlin-metadata-jvm = { module = "org.jetbrains.kotlin:kotlin-metadata-jvm", version.ref = "kotlin" }
 kmpnotifier = { module = "io.github.mirzemehdi:kmpnotifier", version.ref = "kmpnotifier" }
 lifecycle = { module = "com.arkivanov.essenty:lifecycle", version.ref = "lifecycle" }

@@ -103,6 +103,7 @@ kotlin {
                 implementation(libs.kmpalette.core)
                 implementation(libs.lifecycle.coroutines)
                 implementation(libs.jetbrains.kotlin.metadata.jvm)
+                implementation(libs.imagepickerkmp)
                 api(libs.androidx.performance.annotation)
                 api(libs.lifecycle)
                 api(libs.kmpnotifier)

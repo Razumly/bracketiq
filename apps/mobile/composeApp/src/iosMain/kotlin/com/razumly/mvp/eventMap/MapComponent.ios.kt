@@ -22,7 +22,6 @@ import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -107,7 +106,7 @@ actual class MapComponent(
      */
     suspend fun getPlace(placeId: String): MVPPlace? {
         val url = "https://places.googleapis.com/v1/places/$placeId" +
-                "?fields=name,location,photos,displayName"
+                "?fields=name,location,displayName"
 
         return try {
             val response = httpClient.get(url) {
@@ -120,7 +119,6 @@ actual class MapComponent(
                 id = placeId,
                 lat = response.location.latitude,
                 long = response.location.longitude,
-                imageUrls = getPhotoUrisForPlace(response.photos),
             )
         } catch (t: Throwable) {
             _error.value = t.message
@@ -149,16 +147,29 @@ actual class MapComponent(
             val resp = httpClient.post("https://places.googleapis.com/v1/places:autocomplete") {
                 header("Content-Type", "application/json")
                 header("X-Goog-Api-Key", apiKey)
-                header("X-Goog-FieldMask", "suggestions.placePrediction.placeId,suggestions.placePrediction.text.text")
+                header(
+                    "X-Goog-FieldMask",
+                    "suggestions.placePrediction.placeId,suggestions.placePrediction.text.text"
+                )
                 setBody(reqBody)
             }
             Napier.d("Response: ${resp.bodyAsText()}")
             val body: AutoCompleteResponse = resp.body()
 
             body.suggestions.map { sug ->
-                when (sug){
-                    is Suggestion.PlacePrediction -> sug.placePrediction.let { pp -> MVPPlace(name = pp.text.text, id = pp.placeId) }
-                    is Suggestion.QueryPrediction -> MVPPlace(name = sug.queryPrediction.text, id = "Query")
+                when (sug) {
+                    is Suggestion.PlacePrediction -> sug.placePrediction.let { pp ->
+                        MVPPlace(
+                            name = pp.text.text,
+                            id = pp.placeId
+                        )
+                    }
+
+                    is Suggestion.QueryPrediction -> MVPPlace(
+                        name = sug.queryPrediction.text,
+                        id = "Query"
+                    )
+
                     else -> throw SerializationException("Unknown Suggestion kind: ${sug::class.simpleName}")
                 }
             }
@@ -194,7 +205,7 @@ actual class MapComponent(
             val resp = httpClient.post("https://places.googleapis.com/v1/places:searchText") {
                 header("Content-Type", "application/json")
                 header("X-Goog-Api-Key", apiKey)
-                header("X-Goog-FieldMask", "places.displayName,places.photos,places.location")
+                header("X-Goog-FieldMask", "places.displayName,places.location")
                 setBody(requestBody)
             }
             Napier.d("Response: ${resp.bodyAsText()}")
@@ -205,7 +216,6 @@ actual class MapComponent(
                     id = place.id,
                     lat = place.location.latitude,
                     long = place.location.longitude,
-                    imageUrls = getPhotoUrisForPlace(place.photos)
                 )
             }
         } catch (t: Throwable) {
@@ -215,17 +225,6 @@ actual class MapComponent(
         }
     }
 
-    /**
-     * Fetch the photo URIs for each photo resource name returned by the new API.
-     */
-    private suspend fun getPhotoUrisForPlace(photos: List<PhotoRef>): List<String> = coroutineScope {
-        // 2) concurrently fetch each media URL
-        photos.map { photo ->
-            "https://places.googleapis.com/v1/${photo.name}/media" +
-                    "?key=$apiKey" +
-                    "&maxWidthPx=1920&maxHeightPx=1080"
-        }
-    }
 
     suspend fun getEvents() {
         _isLoading.value = true
@@ -250,7 +249,7 @@ actual class MapComponent(
         _isLoading.value = false
     }
 
-    class Cleanup(private val locationTracker: LocationTracker): InstanceKeeper.Instance {
+    class Cleanup(private val locationTracker: LocationTracker) : InstanceKeeper.Instance {
         override fun onDestroy() {
             locationTracker.stopTracking()
         }
@@ -299,7 +298,7 @@ sealed class Suggestion {
     data class QueryPrediction(val queryPrediction: StructuredMainText) : Suggestion()
 
     object Serializer : JsonContentPolymorphicSerializer<Suggestion>(Suggestion::class) {
-        override fun selectDeserializer(element: JsonElement): DeserializationStrategy<out Suggestion> {
+        override fun selectDeserializer(element: JsonElement): DeserializationStrategy<Suggestion> {
             val obj = element.jsonObject
             return when {
                 "placePrediction" in obj -> PlacePrediction.serializer()
@@ -364,4 +363,11 @@ data class LocalizedText(val text: String, val languageCode: String)
 data class LatLngDto(val latitude: Double, val longitude: Double)
 
 @Serializable
-data class PhotoRef(val name: String, val widthPx: Int, val heightPx: Int, val authorAttributions: List<AuthorAttribution>, val flagContentUri: String, val googleMapsUri: String)
+data class PhotoRef(
+    val name: String,
+    val widthPx: Int,
+    val heightPx: Int,
+    val authorAttributions: List<AuthorAttribution>,
+    val flagContentUri: String,
+    val googleMapsUri: String
+)

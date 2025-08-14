@@ -106,6 +106,7 @@ fun EventDetailScreen(
     val editableMatches by component.editableMatches.collectAsState()
     val showTeamDialog by component.showTeamSelectionDialog.collectAsState()
     val showMatchEditDialog by component.showMatchEditDialog.collectAsState()
+    val eventImageUrls by component.eventImageUrls.collectAsState()
 
     val isBracketView by component.isBracketView.collectAsState()
     var isRefundAutomatic by remember { mutableStateOf(false) }
@@ -171,19 +172,21 @@ fun EventDetailScreen(
                             paymentProcessor = component,
                             mapComponent = mapComponent,
                             hostHasAccount = currentUser.hasStripeAccount == true,
-                            onHostCreateAccount = { component.onHostCreateAccount() },
                             eventWithRelations = selectedEvent,
                             editEvent = editedEvent,
                             navPadding = LocalNavBarPadding.current,
-                            onPlaceSelected = { component.selectPlace(it) },
                             editView = isEditing,
-                            onEditEvent = { update -> component.editEventField(update) },
-                            onEditTournament = { update -> component.editTournamentField(update) },
                             isNewEvent = false,
-                            onEventTypeSelected = { component.onTypeSelected(it) },
                             onAddCurrentUser = {},
-                            onSelectFieldCount = { component.selectFieldCount(it) },
-                            imageScheme = imageScheme
+                            imageScheme = imageScheme,
+                            imageUrls = eventImageUrls,
+                            onHostCreateAccount = component::onHostCreateAccount,
+                            onPlaceSelected = component::selectPlace,
+                            onEditEvent = component::editEventField,
+                            onEditTournament = component::editTournamentField,
+                            onEventTypeSelected = component::onTypeSelected,
+                            onSelectFieldCount = component::selectFieldCount,
+                            onUploadSelected = component::onUploadSelected,
                         ) { isValid ->
                             val buttonColors = ButtonColors(
                                 containerColor = Color(imageScheme.primary),

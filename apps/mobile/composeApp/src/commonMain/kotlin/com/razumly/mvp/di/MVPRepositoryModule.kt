@@ -12,10 +12,12 @@ import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IEventAbsRepository
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
+import com.razumly.mvp.core.data.repositories.IImagesRepository
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.ITournamentRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.data.repositories.ImagesRepository
 import com.razumly.mvp.core.data.repositories.PushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.TeamRepository
 import com.razumly.mvp.core.data.repositories.TournamentRepository
@@ -61,4 +63,9 @@ val MVPRepositoryModule = module {
             get(), get(), get(), get(), get(), get()
         )
     } bind IBillingRepository::class
+    single {
+        ImagesRepository(
+            get(), get()
+        )
+    } bind IImagesRepository::class
 }

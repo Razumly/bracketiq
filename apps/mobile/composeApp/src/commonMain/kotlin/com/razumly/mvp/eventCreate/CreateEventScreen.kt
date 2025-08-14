@@ -54,6 +54,7 @@ fun CreateEventScreen(
     val defaultEvent by component.defaultEvent.collectAsState()
     val newEventState by component.newEventState.collectAsState()
     val childStack by component.childStack.subscribeAsState()
+    val eventImageUrls by component.eventImageUrls.collectAsState()
     val isEditing = true
     val currentUser by component.currentUser.collectAsState()
     val isDark = isSystemInDarkTheme()
@@ -143,21 +144,23 @@ fun CreateEventScreen(
                 when (child.instance) {
                     is CreateEventComponent.Child.EventInfo -> EventDetails(
                         paymentProcessor = component,
-                        hostHasAccount = currentUser?.hasStripeAccount ?: false,
-                        onHostCreateAccount = { component.createAccount() },
                         mapComponent = mapComponent,
+                        hostHasAccount = currentUser?.hasStripeAccount ?: false,
                         eventWithRelations = defaultEvent,
                         editEvent = newEventState,
                         navPadding = LocalNavBarPadding.current,
-                        onPlaceSelected = { component.selectPlace(it) },
                         editView = isEditing,
-                        onEditEvent = { update -> component.updateEventField(update) },
-                        onEditTournament = { update -> component.updateTournamentField(update) },
                         isNewEvent = true,
-                        onEventTypeSelected = { component.onTypeSelected(it) },
                         onAddCurrentUser = {},
-                        onSelectFieldCount = { component.selectFieldCount(it) },
-                        imageScheme = imageScheme
+                        imageScheme = imageScheme,
+                        imageUrls = eventImageUrls,
+                        onHostCreateAccount = component::createAccount,
+                        onPlaceSelected = component::selectPlace,
+                        onEditEvent = component::updateEventField,
+                        onEditTournament = component::updateTournamentField,
+                        onEventTypeSelected = component::onTypeSelected,
+                        onSelectFieldCount = component::selectFieldCount,
+                        onUploadSelected = component::onUploadSelected
                     ) { isValid -> canProceed = isValid }
 
                     is CreateEventComponent.Child.Preview -> Preview(

@@ -72,6 +72,7 @@ val componentModule = module {
             onNavigateToTeamSettings = onNavigateToTeamSettings,
             onBack = onBack,
             billingRepository = get(),
+            imageRepository = get(),
         )
     }
 
@@ -82,7 +83,8 @@ val componentModule = module {
             userRepository = get(),
             eventRepository = get(),
             fieldRepository = get(),
-            billingRepository = get()
+            billingRepository = get(),
+            imageRepository = get()
         )
     }
 

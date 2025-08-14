@@ -140,7 +140,6 @@ private fun HomeContent(
             Box(
                 modifier = Modifier.fillMaxSize()
             ) {
-                // Screen content
                 when (val instance = child.instance) {
                     is HomeComponent.Child.Search -> {
                         Napier.d(tag = "Navigation") { "Navigating to Search Screen" }

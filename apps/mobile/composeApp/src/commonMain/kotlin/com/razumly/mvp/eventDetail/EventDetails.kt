@@ -19,6 +19,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PictureInPicture
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonColors
@@ -101,6 +102,9 @@ import dev.chrisbanes.haze.materials.CupertinoMaterials
 import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
 import dev.chrisbanes.haze.rememberHazeState
 import dev.icerock.moko.geo.LatLng
+import io.github.aakira.napier.Napier
+import io.github.ismoy.imagepickerkmp.GalleryPhotoHandler
+import io.github.ismoy.imagepickerkmp.GalleryPickerLauncher
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.format
 import kotlinx.datetime.toLocalDateTime
@@ -137,6 +141,8 @@ fun EventDetails(
     onEventTypeSelected: (EventType) -> Unit,
     onSelectFieldCount: (Int) -> Unit,
     imageScheme: DynamicScheme,
+    imageUrls: List<String>,
+    onUploadSelected: (GalleryPhotoHandler.PhotoResult) -> Unit,
     joinButton: @Composable (isValid: Boolean) -> Unit
 ) {
     val event = eventWithRelations.event
@@ -148,7 +154,7 @@ fun EventDetails(
     var showEndPicker by remember { mutableStateOf(false) }
     var revealCenter by remember { mutableStateOf(Offset.Zero) }
     var showImageSelector by rememberSaveable { mutableStateOf(false) }
-    var selectedPlace by remember { mutableStateOf<MVPPlace?>(null) }
+    var showUploadImagePicker by rememberSaveable { mutableStateOf(false) }
     var previousSelection by remember { mutableStateOf<LatLng?>(null) }
 
     // Validation states
@@ -163,6 +169,7 @@ fun EventDetails(
     var isLocationValid by remember { mutableStateOf(editEvent.location.isNotBlank() && editEvent.lat != 0.0 && editEvent.long != 0.0) }
     var isFieldCountValid by remember { mutableStateOf(true) }
     var isSkillLevelValid by remember { mutableStateOf(true) }
+    var isUploadingImage by remember { mutableStateOf(false) }
 
     var fieldCount by remember { mutableStateOf(0) }
     var selectedDivisions by remember { mutableStateOf(editEvent.divisions) }
@@ -294,6 +301,13 @@ fun EventDetails(
                             ) {
                                 Icon(Icons.Default.Place, contentDescription = null)
                                 Text(if (!editView) "View on Map" else "Edit Location")
+                            }
+                            Button(
+                                onClick = { showImageSelector = true },
+                                modifier = Modifier.align(Alignment.CenterHorizontally)
+                            ) {
+                                Icon(Icons.Default.PictureInPicture, contentDescription = null)
+                                Text("Choose Image")
                             }
                             if (!isLocationValid) {
                                 Text(
@@ -597,8 +611,7 @@ fun EventDetails(
                                         },
                                         isError = !isMaxParticipantsValid,
                                         errorMessage = if (isMaxParticipantsValid) "" else stringResource(
-                                            Res.string.value_too_low,
-                                            1
+                                            Res.string.value_too_low, 1
                                         )
                                     )
                                     TeamSizeLimitDropdown(
@@ -857,7 +870,6 @@ fun EventDetails(
                 }
             }
         }
-// Date Pickers and Map (same as before)
         PlatformDateTimePicker(
             onDateSelected = { selectedInstant ->
                 onEditEvent { copy(start = selectedInstant ?: Clock.System.now()) }
@@ -886,8 +898,6 @@ fun EventDetails(
             onPlaceSelected = { place ->
                 if (editView) {
                     onPlaceSelected(place)
-                    selectedPlace = place
-                    showImageSelector = true
                     previousSelection = LatLng(place.lat, place.long)
                 }
             },
@@ -910,15 +920,42 @@ fun EventDetails(
             onBackPressed = { mapComponent.toggleMap() },
         )
 
-        if (showImageSelector && selectedPlace != null) {
+
+        // ImagePickerKMP Integration
+        if (showUploadImagePicker) {
+            GalleryPickerLauncher(
+                onPhotosSelected = { photos ->
+                    showUploadImagePicker = false
+                    if (photos.isNotEmpty()) {
+                        isUploadingImage = true
+                        onUploadSelected(photos.first())
+                        isUploadingImage = false
+                    }
+                },
+                onError = { error ->
+                    Napier.d("Error uploading image: $error")
+                    showUploadImagePicker = false
+                },
+                onDismiss = {
+                    showUploadImagePicker = false
+                },
+                allowMultiple = false,
+                mimeTypes = listOf("image/jpeg", "image/png", "image/webp")
+            )
+        }
+
+        if (showImageSelector) {
             Dialog(onDismissRequest = {
                 showImageSelector = false
-                selectedPlace = null
             }) {
                 Card {
                     Column(Modifier.fillMaxWidth()) {
                         SelectEventImage(
-                            selectedPlace = selectedPlace, onSelectedImage = { onEditEvent(it) })
+                            onSelectedImage = { onEditEvent(it) },
+                            imageUrls = imageUrls,
+                            onUploadSelected = { showUploadImagePicker = true },
+                            isUploading = isUploadingImage
+                        )
                         Row(
                             Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly
                         ) {
@@ -926,7 +963,6 @@ fun EventDetails(
                                 onClick = {
                                     showImageSelector = false
                                     onEditEvent { copy(imageUrl = "") }
-                                    onPlaceSelected(null)
                                 }, colors = ButtonColors(
                                     containerColor = MaterialTheme.colorScheme.errorContainer,
                                     contentColor = MaterialTheme.colorScheme.onErrorContainer,
@@ -938,8 +974,6 @@ fun EventDetails(
                             }
                             Button(enabled = editEvent.imageUrl.isNotEmpty(), onClick = {
                                 showImageSelector = false
-                                mapComponent.toggleMap()
-                                selectedPlace = null
                             }) {
                                 Text("Confirm")
                             }

@@ -1,6 +1,7 @@
 package com.razumly.mvp.core.util
 
 object DbConstants {
+    const val APPWRITE_ENDPOINT = "https://cloud.appwrite.io/v1"
     const val DATABASE_NAME = "mvp"
     const val EVENT_COLLECTION = "pickupEvents"
     const val CHAT_GROUP_COLLECTION = "chatGroup"
@@ -25,5 +26,4 @@ object DbConstants {
     const val CHAT_GROUPS_CHANNEL = "databases.$DATABASE_NAME.collections.$CHAT_GROUP_COLLECTION.documents"
     const val MESSAGES_CHANNEL = "databases.$DATABASE_NAME.collections.$MESSAGES_COLLECTION.documents"
     const val USER_CHANNEL = "databases.$DATABASE_NAME.collections.$USER_DATA_COLLECTION.documents"
-
 }

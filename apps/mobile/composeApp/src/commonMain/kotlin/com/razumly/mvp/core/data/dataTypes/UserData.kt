@@ -18,6 +18,7 @@ data class UserData(
     val eventInvites: List<String>,
     val tournamentInvites: List<String>,
     val hasStripeAccount: Boolean?,
+    val uploadedImages: List<String>,
     @PrimaryKey override val id: String,
 ) : MVPDocument {
     companion object {
@@ -32,6 +33,7 @@ data class UserData(
                 eventInvites = emptyList(),
                 tournamentInvites = emptyList(),
                 hasStripeAccount = false,
+                uploadedImages = emptyList(),
                 id = ""
             )
         }
@@ -51,6 +53,7 @@ data class UserData(
             eventInvites,
             tournamentInvites,
             hasStripeAccount,
+            uploadedImages,
             id
         )
     }

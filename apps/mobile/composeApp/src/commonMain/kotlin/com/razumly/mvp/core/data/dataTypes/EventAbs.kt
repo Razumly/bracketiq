@@ -46,5 +46,4 @@ fun EventAbs.toMVPPlace() = MVPPlace(
     id = this.id,
     lat = this.lat,
     long = this.long,
-    imageUrls = listOf(this.imageUrl)
 )

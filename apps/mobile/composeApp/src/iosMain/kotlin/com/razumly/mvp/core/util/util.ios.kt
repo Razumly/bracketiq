@@ -4,3 +4,5 @@ actual object Platform {
     actual val name: String = "iOS"
     actual val isIOS: Boolean = true
 }
+
+actual val projectId = AppSecrets.mvpProjectId

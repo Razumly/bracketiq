@@ -1,6 +1,5 @@
 package com.razumly.mvp.eventMap
 
-import android.graphics.Bitmap
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
@@ -135,7 +134,6 @@ actual fun EventMap(
                     }
                 }
             ) {
-                // Event markers with info windows (only show when not in POI selection mode)
                 if (!canClickPOI) {
                     events.forEach { event ->
                         val markerState = remember(event.id) {
@@ -145,10 +143,10 @@ actual fun EventMap(
                         MarkerInfoWindow(
                             state = markerState,
                             icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE),
-                            onClick = { marker -> false }, // Show info window
-                            onInfoWindowClick = { marker ->
+                            onClick = { marker ->
                                 onEventSelected(event)
-                            }
+                                false // Show info window
+                            },
                         ) { marker ->
                             MapEventCard(
                                 event = event,
@@ -166,13 +164,13 @@ actual fun EventMap(
 
                     MarkerInfoWindow(
                         state = markerState,
-                        icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_GREEN),
-                        onClick = { marker -> false },
-                        onInfoWindowClick = { marker ->
+                        icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE),
+                        onClick = { marker ->
                             scope.launch {
                                 onPlaceSelected(component.getMVPPlace(place))
                             }
-                        }
+                            false
+                        },
                     ) { marker ->
                         // Info window content for searched places
                         MapPOICard(
@@ -185,14 +183,13 @@ actual fun EventMap(
                 selectedPOI?.let { poi ->
                     MarkerInfoWindow(
                         state = poiMarkerState,
-                        // Use a transparent or very small icon since POI already has its own icon
-                        icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_GREEN),
-                        onClick = { marker -> false }, // Show info window
-                        onInfoWindowClick = { marker ->
+                        icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE),
+                        onClick = { marker ->
                             scope.launch {
                                 onPlaceSelected(component.getPlace(poi.placeId))
                             }
-                        }
+                            false // Show info window
+                        },
                     ) { marker ->
                         MapPOICard(
                             name = poi.name,
@@ -201,7 +198,6 @@ actual fun EventMap(
                     }
                 }
 
-                // Focused Event (always visible)
                 focusedEvent?.let { event ->
                     val focusedMarkerState = remember(event.id) {
                         MarkerState(position = LatLng(event.lat, event.long))
@@ -210,10 +206,10 @@ actual fun EventMap(
                     MarkerInfoWindow(
                         state = focusedMarkerState,
                         icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED),
-                        onClick = { marker -> false },
-                        onInfoWindowClick = { marker ->
+                        onClick = { marker ->
                             onEventSelected(event)
-                        }
+                            false
+                        },
                     ) { marker ->
                         MapEventCard(
                             event = event,

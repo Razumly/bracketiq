@@ -4,11 +4,9 @@ import com.razumly.mvp.core.data.dataTypes.Bounds
 import dev.icerock.moko.geo.LatLng
 import dev.icerock.moko.geo.LocationTracker
 import io.appwrite.models.Document
-import io.appwrite.serializers.DynamicLookupSerializer
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.modules.SerializersModule
 import kotlin.math.PI
 import kotlin.math.absoluteValue
 import kotlin.math.acos
@@ -78,3 +76,5 @@ expect object Platform {
     val name: String
     val isIOS: Boolean
 }
+
+expect val projectId: String

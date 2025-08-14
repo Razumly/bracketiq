@@ -21,16 +21,20 @@ import com.razumly.mvp.core.data.repositories.FeeBreakdown
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IEventAbsRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
+import com.razumly.mvp.core.data.repositories.IImagesRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentResult
 import com.razumly.mvp.core.presentation.util.ShareServiceProvider
+import com.razumly.mvp.core.presentation.util.convertPhotoResultToInputFile
 import com.razumly.mvp.core.presentation.util.createEventUrl
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.eventDetail.data.IMatchRepository
+import io.github.ismoy.imagepickerkmp.GalleryPhotoHandler
+import io.github.ismoy.imagepickerkmp.GalleryPhotoHandler.PhotoResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
@@ -79,6 +83,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val editableRounds: StateFlow<List<List<MatchWithRelations?>>>
     val showTeamSelectionDialog: StateFlow<TeamSelectionDialogState?>
     val showMatchEditDialog: StateFlow<MatchEditDialogState?>
+    val eventImageUrls: StateFlow<List<String>>
 
     fun matchSelected(selectedMatch: MatchWithRelations)
     fun showFeeBreakdown(feeBreakdown: FeeBreakdown, onConfirm: () -> Unit, onCancel: () -> Unit)
@@ -117,6 +122,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun showMatchEditDialog(match: MatchWithRelations)
     fun dismissMatchEditDialog()
     fun updateMatchFromDialog(updatedMatch: MatchWithRelations)
+    fun onUploadSelected(photo: PhotoResult)
 }
 
 data class TeamSelectionDialogState(
@@ -150,12 +156,13 @@ class DefaultEventDetailComponent(
     componentContext: ComponentContext,
     userRepository: IUserRepository,
     fieldRepository: IFieldRepository,
-    private val billingRepository: IBillingRepository,
     event: EventAbs,
     onBack: () -> Unit,
+    private val billingRepository: IBillingRepository,
     private val eventAbsRepository: IEventAbsRepository,
     private val matchRepository: IMatchRepository,
     private val teamRepository: ITeamRepository,
+    private val imageRepository: IImagesRepository,
     private val onMatchSelected: (MatchWithRelations, Tournament) -> Unit,
     private val onNavigateToTeamSettings: (freeAgents: List<String>, event: EventAbs?) -> Unit
 ) : EventDetailComponent, PaymentProcessor(), ComponentContext by componentContext {
@@ -190,6 +197,10 @@ class DefaultEventDetailComponent(
         }
     }
 
+    override val eventImageUrls = imageRepository
+        .getUserImagesFlow()
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
+
     override val selectedEvent: StateFlow<EventAbsWithRelations> =
         eventAbsRepository.getEventWithRelationsFlow(event).map { result ->
             result.getOrElse {
@@ -204,11 +215,11 @@ class DefaultEventDetailComponent(
     override val eventWithRelations = selectedEvent.flatMapLatest { eventWithPlayers ->
         combine(
             matchRepository.getMatchesOfTournamentFlow(eventWithPlayers.event.id).map { result ->
-                    result.getOrElse {
-                        _errorState.value =
-                            ErrorMessage("Error loading matches: ${it.message}"); emptyList()
-                    }
-                }, teamRepository.getTeamsFlow(
+                result.getOrElse {
+                    _errorState.value =
+                        ErrorMessage("Error loading matches: ${it.message}"); emptyList()
+                }
+            }, teamRepository.getTeamsFlow(
                 eventWithPlayers.event.teamIds
             ).map { result ->
                 result.getOrElse {
@@ -226,12 +237,12 @@ class DefaultEventDetailComponent(
 
     override val divisionFields =
         fieldRepository.getFieldsInTournamentWithMatchesFlow(event.id).map { fields ->
-                fields.filter {
-                    if (!selectedEvent.value.event.singleDivision) it.field.divisions.contains(
-                        selectedDivision.value?.name
-                    ) else true
-                }
-            }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+            fields.filter {
+                if (!selectedEvent.value.event.singleDivision) it.field.divisions.contains(
+                    selectedDivision.value?.name
+                ) else true
+            }
+        }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     private val _divisionMatches = MutableStateFlow<Map<String, MatchWithRelations>>(emptyMap())
     override val divisionMatches = _divisionMatches.asStateFlow()
@@ -436,6 +447,12 @@ class DefaultEventDetailComponent(
         generateRounds()
     }
 
+    override fun onUploadSelected(photo: PhotoResult) {
+        scope.launch {
+            imageRepository.uploadImage(convertPhotoResultToInputFile(photo))
+        }
+    }
+
     override fun joinEvent() {
         scope.launch {
 
@@ -487,11 +504,11 @@ class DefaultEventDetailComponent(
             if (selectedEvent.value.event.price == 0.0 || isEventFull.value) {
                 loadingHandler.showLoading("Joining Event ...")
                 eventAbsRepository.addTeamToEvent(selectedEvent.value.event, team.team).onSuccess {
-                        loadingHandler.showLoading("Reloading Event")
-                        eventAbsRepository.getEvent(selectedEvent.value.event)
-                    }.onFailure {
-                        _errorState.value = ErrorMessage(it.message ?: "")
-                    }
+                    loadingHandler.showLoading("Reloading Event")
+                    eventAbsRepository.getEvent(selectedEvent.value.event)
+                }.onFailure {
+                    _errorState.value = ErrorMessage(it.message ?: "")
+                }
             } else {
                 loadingHandler.showLoading("Creating Purchase Request ...")
                 billingRepository.createPurchaseIntent(selectedEvent.value.event, team.team.id)

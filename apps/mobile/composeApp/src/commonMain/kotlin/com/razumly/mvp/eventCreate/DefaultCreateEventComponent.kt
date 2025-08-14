@@ -20,13 +20,16 @@ import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IEventAbsRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
+import com.razumly.mvp.core.data.repositories.IImagesRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentProcessor
+import com.razumly.mvp.core.presentation.util.convertPhotoResultToInputFile
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.eventCreate.CreateEventComponent.Child
 import com.razumly.mvp.eventCreate.CreateEventComponent.Config
+import io.github.ismoy.imagepickerkmp.GalleryPhotoHandler.PhotoResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -48,6 +51,7 @@ interface CreateEventComponent: IPaymentProcessor, ComponentContext {
     val defaultEvent: StateFlow<EventWithRelations>
     val currentUser: StateFlow<UserData?>
     val errorState: StateFlow<ErrorMessage?>
+    val eventImageUrls: StateFlow<List<String>>
 
     fun onBackClicked()
     fun updateEventField(update: EventImp.() -> EventImp)
@@ -64,6 +68,7 @@ interface CreateEventComponent: IPaymentProcessor, ComponentContext {
     fun addUserToEvent(add: Boolean)
     fun selectFieldCount(count: Int)
     fun createAccount()
+    fun onUploadSelected(photo: PhotoResult)
 
     sealed class Child {
         data object EventInfo : Child()
@@ -86,6 +91,7 @@ class DefaultCreateEventComponent(
     private val eventRepository: IEventAbsRepository,
     private val fieldRepository: IFieldRepository,
     private val billingRepository: IBillingRepository,
+    private val imageRepository: IImagesRepository,
     val onEventCreated: () -> Unit
 ) : CreateEventComponent, PaymentProcessor(), ComponentContext by componentContext {
     private val navigation = StackNavigation<Config>()
@@ -119,6 +125,9 @@ class DefaultCreateEventComponent(
     override val currentUser = userRepository.currentUser.map { it.getOrThrow() }
         .stateIn(scope, SharingStarted.Eagerly, null)
 
+    override val eventImageUrls = imageRepository
+        .getUserImagesFlow()
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
     private val _fieldCount = MutableStateFlow(0)
 
     private lateinit var loadingHandler: LoadingHandler
@@ -189,6 +198,12 @@ class DefaultCreateEventComponent(
                 (_newEventState.value as Tournament).updateTournamentFromEvent(
                     (_newEventState.value as Tournament).toEvent().update()
                 )
+        }
+    }
+
+    override fun onUploadSelected(photo: PhotoResult) {
+        scope.launch {
+            imageRepository.uploadImage(convertPhotoResultToInputFile(photo))
         }
     }
 

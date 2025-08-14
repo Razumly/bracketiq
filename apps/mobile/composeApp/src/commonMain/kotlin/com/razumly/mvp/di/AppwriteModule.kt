@@ -5,6 +5,7 @@ import io.appwrite.services.Databases
 import io.appwrite.services.Functions
 import io.appwrite.services.Messaging
 import io.appwrite.services.Realtime
+import io.appwrite.services.Storage
 import org.koin.core.module.Module
 import org.koin.dsl.module
 
@@ -25,5 +26,8 @@ val appwriteModule = module {
     }
     single {
         Messaging(get())
+    }
+    single {
+        Storage(get())
     }
 }
