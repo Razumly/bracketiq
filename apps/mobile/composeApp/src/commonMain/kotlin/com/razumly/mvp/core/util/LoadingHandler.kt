@@ -12,6 +12,7 @@ data class LoadingState(
 )
 
 interface LoadingHandler {
+    val loadingState: StateFlow<LoadingState>
     fun showLoading(message: String, progress: Float? = null)
     fun hideLoading()
     fun updateProgress(progress: Float)
@@ -19,7 +20,7 @@ interface LoadingHandler {
 
 class LoadingHandlerImpl : LoadingHandler {
     private val _loadingState = MutableStateFlow(LoadingState())
-    val loadingState: StateFlow<LoadingState> = _loadingState.asStateFlow()
+    override val loadingState: StateFlow<LoadingState> = _loadingState.asStateFlow()
 
     override fun showLoading(message: String, progress: Float?) {
         _loadingState.value = LoadingState(true, message, progress)

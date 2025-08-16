@@ -187,6 +187,7 @@ fun EventDetailScreen(
                             onEventTypeSelected = component::onTypeSelected,
                             onSelectFieldCount = component::selectFieldCount,
                             onUploadSelected = component::onUploadSelected,
+                            onDeleteImage = component::deleteImage,
                         ) { isValid ->
                             val buttonColors = ButtonColors(
                                 containerColor = Color(imageScheme.primary),

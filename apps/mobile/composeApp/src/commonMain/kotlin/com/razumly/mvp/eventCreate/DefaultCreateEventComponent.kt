@@ -69,6 +69,7 @@ interface CreateEventComponent: IPaymentProcessor, ComponentContext {
     fun selectFieldCount(count: Int)
     fun createAccount()
     fun onUploadSelected(photo: PhotoResult)
+    fun deleteImage(url: String)
 
     sealed class Child {
         data object EventInfo : Child()
@@ -192,18 +193,22 @@ class DefaultCreateEventComponent(
     }
 
     override fun updateEventField(update: EventImp.() -> EventImp) {
-        when (_newEventState.value) {
-            is EventImp -> _newEventState.value = (_newEventState.value as EventImp).update()
-            is Tournament -> _newEventState.value =
-                (_newEventState.value as Tournament).updateTournamentFromEvent(
-                    (_newEventState.value as Tournament).toEvent().update()
-                )
+        scope.launch {
+            when (_newEventState.value) {
+                is EventImp -> _newEventState.value = (_newEventState.value as EventImp).update()
+                is Tournament -> _newEventState.value =
+                    (_newEventState.value as Tournament).updateTournamentFromEvent(
+                        (_newEventState.value as Tournament).toEvent().update()
+                    )
+            }
         }
     }
 
     override fun onUploadSelected(photo: PhotoResult) {
         scope.launch {
+            loadingHandler.showLoading("Uploading image...")
             imageRepository.uploadImage(convertPhotoResultToInputFile(photo))
+            loadingHandler.hideLoading()
         }
     }
 
@@ -218,8 +223,10 @@ class DefaultCreateEventComponent(
     }
 
     override fun updateTournamentField(update: Tournament.() -> Tournament) {
-        if (_newEventState.value is Tournament) {
-            _newEventState.value = (_newEventState.value as Tournament).update()
+        scope.launch {
+            if (_newEventState.value is Tournament) {
+                _newEventState.value = (_newEventState.value as Tournament).update()
+            }
         }
     }
 
@@ -262,6 +269,14 @@ class DefaultCreateEventComponent(
             updateEventField { copy(playerIds = listOf(currentUser.value?.id!!)) }
         } else {
             updateEventField { copy(playerIds = listOf()) }
+        }
+    }
+
+    override fun deleteImage(url: String) {
+        scope.launch {
+            loadingHandler.showLoading("Deleting image...")
+            imageRepository.deleteImage(url)
+            loadingHandler.hideLoading()
         }
     }
 

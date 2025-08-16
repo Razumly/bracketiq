@@ -11,16 +11,19 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PictureInPicture
 import androidx.compose.material.icons.filled.Place
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonColors
 import androidx.compose.material3.ButtonDefaults
@@ -30,6 +33,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -51,6 +55,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -128,21 +133,22 @@ fun EventDetails(
     paymentProcessor: IPaymentProcessor,
     mapComponent: MapComponent,
     hostHasAccount: Boolean,
-    onHostCreateAccount: () -> Unit,
+    imageScheme: DynamicScheme,
+    imageUrls: List<String>,
     eventWithRelations: EventAbsWithRelations,
     editEvent: EventAbs,
-    navPadding: PaddingValues = PaddingValues(),
-    onPlaceSelected: (MVPPlace?) -> Unit,
     editView: Boolean,
+    navPadding: PaddingValues = PaddingValues(),
+    isNewEvent: Boolean,
+    onHostCreateAccount: () -> Unit,
+    onPlaceSelected: (MVPPlace?) -> Unit,
     onEditEvent: (EventImp.() -> EventImp) -> Unit,
     onEditTournament: (Tournament.() -> Tournament) -> Unit,
-    isNewEvent: Boolean,
     onAddCurrentUser: (Boolean) -> Unit,
     onEventTypeSelected: (EventType) -> Unit,
     onSelectFieldCount: (Int) -> Unit,
-    imageScheme: DynamicScheme,
-    imageUrls: List<String>,
     onUploadSelected: (GalleryPhotoHandler.PhotoResult) -> Unit,
+    onDeleteImage: (String) -> Unit,
     joinButton: @Composable (isValid: Boolean) -> Unit
 ) {
     val event = eventWithRelations.event
@@ -927,9 +933,7 @@ fun EventDetails(
                 onPhotosSelected = { photos ->
                     showUploadImagePicker = false
                     if (photos.isNotEmpty()) {
-                        isUploadingImage = true
                         onUploadSelected(photos.first())
-                        isUploadingImage = false
                     }
                 },
                 onError = { error ->
@@ -944,41 +948,48 @@ fun EventDetails(
             )
         }
 
+        var showImageDelete by remember { mutableStateOf(false) }
+        var deleteImageURL by remember { mutableStateOf("") }
         if (showImageSelector) {
             Dialog(onDismissRequest = {
                 showImageSelector = false
             }) {
                 Card {
-                    Column(Modifier.fillMaxWidth()) {
-                        SelectEventImage(
-                            onSelectedImage = { onEditEvent(it) },
-                            imageUrls = imageUrls,
-                            onUploadSelected = { showUploadImagePicker = true },
-                            isUploading = isUploadingImage
-                        )
-                        Row(
-                            Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly
-                        ) {
-                            Button(
-                                onClick = {
-                                    showImageSelector = false
-                                    onEditEvent { copy(imageUrl = "") }
-                                }, colors = ButtonColors(
-                                    containerColor = MaterialTheme.colorScheme.errorContainer,
-                                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                                    disabledContainerColor = MaterialTheme.colorScheme.onSurface,
-                                    disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            ) {
+                    SelectEventImage(
+                        onSelectedImage = { onEditEvent(it) },
+                        imageUrls = imageUrls,
+                        onUploadSelected = { showUploadImagePicker = true },
+                        onDeleteImage = {
+                            showImageDelete = true
+                            deleteImageURL = it
+                        },
+                        onConfirm = { showImageSelector = false },
+                        onCancel = {
+                            onEditEvent { copy(imageUrl = "") }
+                            showImageSelector = false
+                        })
+                }
+
+
+                if (showImageDelete) {
+                    AlertDialog(
+                        onDismissRequest = { showImageDelete = false },
+                        title = { Text("Delete Image") },
+                        text = { Text("Are you sure you want to delete this image?") },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                onDeleteImage(deleteImageURL)
+                                onEditEvent { copy(imageUrl = "") }
+                                showImageDelete = false
+                            }) {
+                                Text("Delete")
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showImageDelete = false }) {
                                 Text("Cancel")
                             }
-                            Button(enabled = editEvent.imageUrl.isNotEmpty(), onClick = {
-                                showImageSelector = false
-                            }) {
-                                Text("Confirm")
-                            }
-                        }
-                    }
+                        })
                 }
             }
         }
@@ -1047,31 +1058,45 @@ fun ColumnScope.CardSection(
 
 @Composable
 fun BackgroundImage(modifier: Modifier, imageUrl: String) {
-    val imageHeight = (getScreenHeight() * 0.75f)
-    Column(
-        modifier,
-    ) {
+    val imageHeight = (getScreenHeight() * 0.75f).dp
+    var imageWidth by remember { mutableStateOf(0.dp) }
+    val density = LocalDensity.current
+
+    Column(modifier) {
         if (imageUrl.isNotBlank()) {
+            // First image: Fixed height, width determined by aspect ratio
             AsyncImage(
                 model = imageUrl,
                 contentDescription = "Event Image",
-                modifier = Modifier.height(imageHeight.dp),
+                modifier = Modifier
+                    .height(imageHeight)
+                    .onGloballyPositioned { layoutCoordinates ->
+                        val widthPx = layoutCoordinates.size.width
+                        imageWidth = with(density) { widthPx.toDp() }
+                    },
                 contentScale = ContentScale.Crop,
             )
 
-            AsyncImage(
-                model = imageUrl,
-                contentDescription = "Flipped Hazy Background",
-                modifier = Modifier.fillMaxSize().graphicsLayer {
-                    clip = true
-                    rotationX = 180f
-                }.graphicsLayer {
-                    transformOrigin = TransformOrigin(0.5f, 1f)
-                    scaleY = 50f
-                }.blur(32.dp),
-                contentScale = ContentScale.Crop,
-                clipToBounds = true
-            )
+            // Second image: Match the measured width of the first image
+            if (imageWidth > 0.dp) { // Only show when width is measured
+                AsyncImage(
+                    model = imageUrl,
+                    contentDescription = "Flipped Hazy Background",
+                    modifier = Modifier
+                        .width(imageWidth)
+                        .fillMaxHeight()
+                        .graphicsLayer {
+                            clip = true
+                            rotationX = 180f
+                        }
+                        .graphicsLayer {
+                            transformOrigin = TransformOrigin(0.5f, 1f)
+                            scaleY = 50f // Adjust vertical scaling as needed
+                        }
+                        .blur(16.dp),
+                    contentScale = ContentScale.Crop,
+                )
+            }
         }
     }
 }

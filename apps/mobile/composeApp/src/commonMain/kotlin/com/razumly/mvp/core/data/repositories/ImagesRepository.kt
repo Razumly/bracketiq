@@ -13,12 +13,11 @@ interface IImagesRepository {
     suspend fun getUserImages(): Result<List<String>>
     fun getUserImagesFlow(): Flow<List<String>>
     suspend fun addImageToUser(imageUrl: String): Result<Unit>
-    suspend fun deleteImage(fileId: String): Result<Unit>
+    suspend fun deleteImage(url: String): Result<Unit>
 }
 
 class ImagesRepository(
-    private val storage: Storage,
-    private val userRepository: IUserRepository
+    private val storage: Storage, private val userRepository: IUserRepository
 ) : IImagesRepository {
 
     companion object {
@@ -38,7 +37,8 @@ class ImagesRepository(
         )
 
         // Generate the public URL for the uploaded file
-        val imageUrl = "${DbConstants.APPWRITE_ENDPOINT}/storage/buckets/$BUCKET_ID/files/${file.id}/view?project=${projectId}"
+        val imageUrl =
+            "${DbConstants.APPWRITE_ENDPOINT}/storage/buckets/$BUCKET_ID/files/${file.id}/view?project=${projectId}"
 
         addImageToUser(imageUrl).getOrThrow()
 
@@ -51,8 +51,7 @@ class ImagesRepository(
     }
 
     override fun getUserImagesFlow(): Flow<List<String>> {
-        return userRepository.currentUser
-            .map { it.getOrThrow().uploadedImages }
+        return userRepository.currentUser.map { it.getOrThrow().uploadedImages }
     }
 
     override suspend fun addImageToUser(imageUrl: String): Result<Unit> = runCatching {
@@ -64,7 +63,11 @@ class ImagesRepository(
         userRepository.updateUser(updatedUser).getOrThrow()
     }
 
-    override suspend fun deleteImage(fileId: String): Result<Unit> = runCatching {
+    override suspend fun deleteImage(url: String): Result<Unit> = runCatching {
+        val regex = Regex("files/(.*)/")
+        val fileId = regex.find(url)?.groupValues?.first() ?: throw IllegalArgumentException("Invalid URL format")
+        val user = userRepository.currentUser.value.getOrThrow()
+        userRepository.updateUser(user.copy(uploadedImages = user.uploadedImages.filter { it != url }))
         storage.deleteFile(BUCKET_ID, fileId)
     }
 }

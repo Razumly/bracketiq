@@ -123,6 +123,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun dismissMatchEditDialog()
     fun updateMatchFromDialog(updatedMatch: MatchWithRelations)
     fun onUploadSelected(photo: PhotoResult)
+    fun deleteImage(url: String)
 }
 
 data class TeamSelectionDialogState(
@@ -453,6 +454,14 @@ class DefaultEventDetailComponent(
         }
     }
 
+    override fun deleteImage(url: String) {
+        scope.launch {
+            loadingHandler.showLoading("Deleting Image ...")
+            imageRepository.deleteImage(url)
+            loadingHandler.hideLoading()
+        }
+    }
+
     override fun joinEvent() {
         scope.launch {
 
@@ -597,12 +606,14 @@ class DefaultEventDetailComponent(
     }
 
     override fun editEventField(update: EventImp.() -> EventImp) {
-        when (_editedEvent.value) {
-            is EventImp -> _editedEvent.value = (_editedEvent.value as EventImp).update()
-            is Tournament -> {
-                var event = (_editedEvent.value as Tournament).toEvent()
-                event = event.update()
-                _editedEvent.value = Tournament().updateTournamentFromEvent(event)
+        scope.launch {
+            when (_editedEvent.value) {
+                is EventImp -> _editedEvent.value = (_editedEvent.value as EventImp).update()
+                is Tournament -> {
+                    var event = (_editedEvent.value as Tournament).toEvent()
+                    event = event.update()
+                    _editedEvent.value = Tournament().updateTournamentFromEvent(event)
+                }
             }
         }
     }

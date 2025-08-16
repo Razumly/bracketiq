@@ -37,7 +37,8 @@ suspend fun UserRepository.oauth2Login(): Result<Unit> = kotlin.runCatching {
                 teamInvites = listOf(),
                 eventInvites = listOf(),
                 tournamentInvites = listOf(),
-                hasStripeAccount = false
+                hasStripeAccount = false,
+                uploadedImages = listOf()
             )
             database.createDocument(
                 databaseId = DbConstants.DATABASE_NAME,

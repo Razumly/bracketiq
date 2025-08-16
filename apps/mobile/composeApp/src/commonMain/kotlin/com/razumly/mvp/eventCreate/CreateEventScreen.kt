@@ -160,7 +160,8 @@ fun CreateEventScreen(
                         onEditTournament = component::updateTournamentField,
                         onEventTypeSelected = component::onTypeSelected,
                         onSelectFieldCount = component::selectFieldCount,
-                        onUploadSelected = component::onUploadSelected
+                        onUploadSelected = component::onUploadSelected,
+                        onDeleteImage = component::deleteImage,
                     ) { isValid -> canProceed = isValid }
 
                     is CreateEventComponent.Child.Preview -> Preview(

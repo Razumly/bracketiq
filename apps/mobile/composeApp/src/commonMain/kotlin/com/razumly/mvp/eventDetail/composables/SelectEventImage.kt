@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,6 +23,8 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonColors
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -36,6 +39,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
@@ -44,6 +48,7 @@ import coil3.compose.rememberAsyncImagePainter
 import com.kmpalette.loader.rememberNetworkLoader
 import com.kmpalette.rememberDominantColorState
 import com.razumly.mvp.core.data.dataTypes.EventImp
+import com.razumly.mvp.core.util.LocalLoadingHandler
 import io.ktor.http.Url
 import kotlin.time.ExperimentalTime
 
@@ -51,9 +56,11 @@ import kotlin.time.ExperimentalTime
 fun SelectEventImage(
     modifier: Modifier = Modifier,
     onSelectedImage: (EventImp.() -> EventImp) -> Unit,
+    onDeleteImage: (String) -> Unit,
     imageUrls: List<String>,
     onUploadSelected: () -> Unit,
-    isUploading: Boolean = false
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit
 ) {
     val columnCount = 3
     var selected by remember { mutableStateOf<String?>(null) }
@@ -62,14 +69,24 @@ fun SelectEventImage(
     val loader = rememberNetworkLoader()
     val dominantColorState = rememberDominantColorState(loader)
 
+    val loadingHandler = LocalLoadingHandler.current
+    var isUploading by remember { mutableStateOf(false) }
+    var isColorReady by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        loadingHandler.loadingState.collect { state ->
+            isUploading = state.isLoading
+        }
+    }
+
     LaunchedEffect(selected) {
         if (selected?.startsWith("https") == true) {
             loader.load(Url(selected!!))
             dominantColorState.updateFrom(Url(selected!!))
+            isColorReady = true
             onSelectedImage {
                 copy(
-                    imageUrl = selected!!,
-                    seedColor = dominantColorState.color.toArgb()
+                    imageUrl = selected!!, seedColor = dominantColorState.color.toArgb()
                 )
             }
         }
@@ -78,8 +95,7 @@ fun SelectEventImage(
     Column(modifier = modifier.wrapContentSize()) {
         if (showUploadError != null) {
             Card(
-                modifier = Modifier.fillMaxWidth().padding(8.dp),
-                colors = CardDefaults.cardColors(
+                modifier = Modifier.fillMaxWidth().padding(8.dp), colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.errorContainer
                 )
             ) {
@@ -99,18 +115,47 @@ fun SelectEventImage(
             // Display existing images
             items(imageUrls) { url ->
                 SelectableImageItem(
-                    imageUrl = url,
-                    isSelected = selected == url,
-                    onSelect = { selected = url }
-                )
+                    imageUrl = url, isSelected = selected == url, onSelect = {
+                        selected = url
+                        isColorReady = false
+                    })
             }
 
             // Add upload button as the last item
             item {
                 UploadImageButton(
-                    isUploading = isUploading,
-                    onUpload = onUploadSelected
+                    isUploading = isUploading, onUpload = onUploadSelected
                 )
+            }
+        }
+
+        Row(
+            Modifier.fillMaxWidth().padding(4.dp), horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            Button(
+                onClick = onCancel, colors = ButtonColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    disabledContainerColor = MaterialTheme.colorScheme.onSurface,
+                    disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            ) {
+                Text("Cancel")
+            }
+            Button(
+                onClick = { onDeleteImage(selected!!) }, colors = ButtonColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    disabledContainerColor = MaterialTheme.colorScheme.onSurface,
+                    disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                ), enabled = selected?.isNotBlank() == true
+            ) {
+                Text("Delete")
+            }
+            Button(
+                enabled = selected?.isNotBlank() == true && isColorReady, onClick = onConfirm
+            ) {
+                Text("Confirm")
             }
         }
     }
@@ -118,32 +163,21 @@ fun SelectEventImage(
 
 @Composable
 private fun SelectableImageItem(
-    imageUrl: String,
-    isSelected: Boolean,
-    onSelect: () -> Unit
+    imageUrl: String, isSelected: Boolean, onSelect: () -> Unit
 ) {
     val painter = rememberAsyncImagePainter(model = imageUrl)
     val painterState = painter.state
 
-    Box(
-        modifier = Modifier
-            .padding(4.dp)
-            .aspectRatio(1f)
-            .let { base ->
-                if (isSelected) {
-                    base.border(
-                        width = 2.dp,
-                        color = MaterialTheme.colorScheme.primary,
-                        shape = RoundedCornerShape(4.dp)
-                    )
-                } else base
-            }
-            .clickable { onSelect() }
-    ) {
+    Box(modifier = Modifier.padding(4.dp).aspectRatio(1f).clip(CardDefaults.shape).let { base ->
+        if (isSelected) {
+            base.border(
+                width = 3.dp, color = MaterialTheme.colorScheme.primary, shape = CardDefaults.shape
+            )
+        } else base
+    }.clickable { onSelect() }) {
         if (painterState.value is AsyncImagePainter.State.Loading) {
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
+                modifier = Modifier.fillMaxSize()
                     .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
             ) {
                 CircularProgressIndicator(
@@ -163,21 +197,16 @@ private fun SelectableImageItem(
 
 @Composable
 private fun UploadImageButton(
-    isUploading: Boolean,
-    onUpload: () -> Unit
+    isUploading: Boolean, onUpload: () -> Unit
 ) {
     Card(
-        modifier = Modifier
-            .padding(4.dp)
-            .aspectRatio(1f)
-            .clickable(enabled = !isUploading) { onUpload() },
-        colors = CardDefaults.cardColors(
+        modifier = Modifier.padding(4.dp).aspectRatio(1f)
+            .clickable(enabled = !isUploading) { onUpload() }, colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant
         )
     ) {
         Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
+            modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center
         ) {
             if (isUploading) {
                 Column(
@@ -186,8 +215,7 @@ private fun UploadImageButton(
                 ) {
                     CircularProgressIndicator(modifier = Modifier.size(24.dp))
                     Text(
-                        text = "Uploading...",
-                        style = MaterialTheme.typography.bodySmall
+                        text = "Uploading...", style = MaterialTheme.typography.bodySmall
                     )
                 }
             } else {
