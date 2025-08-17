@@ -58,6 +58,9 @@ kotlin {
         podfile = project.file("../iosApp/Podfile")
 
         pod("GooglePlaces")
+        pod("IQKeyboardManagerSwift") {
+            extraOpts += listOf("-compiler-option", "-fmodules")
+        }
         framework {
             baseName = "ComposeApp"
             isStatic = true

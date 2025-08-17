@@ -57,7 +57,6 @@ actual fun PlatformTextField(
     externalFocusManager: PlatformFocusManager?
 ) {
     val focusManager = externalFocusManager ?: rememberPlatformFocusManager()
-
     val allFocusManagers = localAllFocusManagers.current
 
     DisposableEffect(focusManager) {
@@ -68,7 +67,6 @@ actual fun PlatformTextField(
     }
 
     val iosFocusManager = focusManager as IOSFocusManager
-
     val fieldHeight = height ?: 44.dp
     val actualFontSize = fontSize ?: textStyle?.fontSize ?: 16.sp
     val paddingModifier = if (contentPadding != null) {
@@ -135,10 +133,10 @@ actual fun PlatformTextField(
                     )
                 }
             } else {
-                // For interactive fields, use UITextField
+                // For interactive fields, use UITextField - SIMPLIFIED!
                 UIKitView(
                     factory = {
-                        createEnhancedUITextField(
+                        createSimpleUITextField(
                             placeholder = placeholder,
                             text = value,
                             onTextChanged = { newValue ->
@@ -159,7 +157,7 @@ actual fun PlatformTextField(
                         .platformFocusable(iosFocusManager, enabled)
                         .clip(RoundedCornerShape(5.dp)),
                     update = { textField ->
-                        updateEnhancedUITextField(
+                        updateSimpleUITextField(
                             textField = textField,
                             text = value,
                             placeholder = placeholder,
@@ -196,8 +194,9 @@ actual fun PlatformTextField(
     }
 }
 
+// SIMPLIFIED: No keyboard handling needed!
 @OptIn(ExperimentalForeignApi::class)
-fun createEnhancedUITextField(
+fun createSimpleUITextField(
     placeholder: String,
     text: String,
     onTextChanged: (String) -> Unit,
@@ -208,16 +207,14 @@ fun createEnhancedUITextField(
     focusManager: IOSFocusManager,
     imeAction: ImeAction = ImeAction.Next
 ): UITextField {
-    val textField = UITextField()
+    val textField = UITextField() // Just regular UITextField - no custom subclass!
 
-    // Basic setup
+    // Basic setup only
     textField.text = text
     textField.placeholder = placeholder
     textField.borderStyle = UITextBorderStyle.UITextBorderStyleRoundedRect
     textField.secureTextEntry = isSecure
     textField.enabled = enabled
-
-    // Apply font size
     textField.font = UIFont.systemFontOfSize(fontSize.value.toDouble())
 
     // Set keyboard type
@@ -228,11 +225,10 @@ fun createEnhancedUITextField(
             textField.keyboardType = UIKeyboardTypeDefault
             textField.secureTextEntry = true
         }
-
         else -> textField.keyboardType = UIKeyboardTypeDefault
     }
 
-    // Set return key type based on IME action
+    // Set return key type
     textField.returnKeyType = when (imeAction) {
         ImeAction.Next -> UIReturnKeyType.UIReturnKeyNext
         ImeAction.Done -> UIReturnKeyType.UIReturnKeyDone
@@ -241,17 +237,16 @@ fun createEnhancedUITextField(
         else -> UIReturnKeyType.UIReturnKeyDefault
     }
 
-    // Attach focus manager to this text field
     focusManager.attachToTextField(textField)
 
-    // Create enhanced delegate with navigation support
-    val delegate = EnhancedNavigationTextFieldDelegate(
+    // Keep your existing delegate for focus management
+    val delegate = SimpleTextFieldDelegate(
         onTextChanged = onTextChanged,
         focusManager = focusManager
     )
+
     textField.delegate = delegate
 
-    // Store the delegate to prevent garbage collection
     objc_setAssociatedObject(
         textField as Any,
         "textFieldDelegate".cstr as CValuesRef<*>?,
@@ -262,7 +257,7 @@ fun createEnhancedUITextField(
     return textField
 }
 
-fun updateEnhancedUITextField(
+fun updateSimpleUITextField(
     textField: UITextField,
     text: String,
     placeholder: String,
@@ -280,8 +275,6 @@ fun updateEnhancedUITextField(
     textField.placeholder = placeholder
     textField.secureTextEntry = isSecure
     textField.enabled = enabled
-
-    // Apply font size
     textField.font = UIFont.systemFontOfSize(fontSize.value.toDouble())
 
     // Update keyboard type
@@ -292,7 +285,6 @@ fun updateEnhancedUITextField(
             textField.keyboardType = UIKeyboardTypeDefault
             textField.secureTextEntry = true
         }
-
         else -> textField.keyboardType = UIKeyboardTypeDefault
     }
 
@@ -306,7 +298,8 @@ fun updateEnhancedUITextField(
     }
 }
 
-class EnhancedNavigationTextFieldDelegate(
+// Simplified delegate - only handles text changes and focus
+class SimpleTextFieldDelegate(
     private val onTextChanged: (String) -> Unit,
     private val focusManager: IOSFocusManager
 ) : NSObject(), UITextFieldDelegateProtocol {
@@ -337,18 +330,14 @@ class EnhancedNavigationTextFieldDelegate(
     override fun textFieldShouldReturn(textField: UITextField): Boolean {
         when (textField.returnKeyType) {
             UIReturnKeyType.UIReturnKeyNext -> {
-                // Execute the next callback through focus manager
                 focusManager.handleNextAction()
                 return false // Keep keyboard open for next field
             }
-
             UIReturnKeyType.UIReturnKeyDone, UIReturnKeyType.UIReturnKeyGo, UIReturnKeyType.UIReturnKeySend -> {
-                // Execute done callback and dismiss keyboard
                 textField.resignFirstResponder()
                 focusManager.handleDoneAction()
                 return true
             }
-
             else -> {
                 textField.resignFirstResponder()
                 return true

@@ -66,11 +66,7 @@ fun App(root: RootComponent) {
     }
 
     CompositionLocalProvider(localAllFocusManagers provides allFocusManagers) {
-        Box(modifier = Modifier.fillMaxSize().pointerInput(Unit) {
-            detectTapGestures {
-                allFocusManagers.forEach { it.clearFocus() }
-            }
-        }) {
+        Box(modifier = Modifier.fillMaxSize()) {
             ChildStack(
                 stack = childStack, animation = backAnimation(
                     backHandler = root.backHandler,

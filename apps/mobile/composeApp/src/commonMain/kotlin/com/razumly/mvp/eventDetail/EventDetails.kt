@@ -238,7 +238,19 @@ fun EventDetails(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Spacer(Modifier.height(getScreenHeight().dp / 2))
+                        if (editView) {
+                            Spacer(Modifier.height(getScreenHeight().dp / 4))
+                            Button(
+                                onClick = { showImageSelector = true },
+                                modifier = Modifier.align(Alignment.CenterHorizontally)
+                            ) {
+                                Icon(Icons.Default.PictureInPicture, contentDescription = null)
+                                Text("Choose Image")
+                            }
+                            Spacer(Modifier.height(getScreenHeight().dp / 4))
+                        } else {
+                            Spacer(Modifier.height(getScreenHeight().dp / 2))
+                        }
                         Column(
                             Modifier.fillMaxWidth().hazeEffect(hazeState) {
                                 inputScale = HazeInputScale.Fixed(0.5f)
@@ -307,13 +319,6 @@ fun EventDetails(
                             ) {
                                 Icon(Icons.Default.Place, contentDescription = null)
                                 Text(if (!editView) "View on Map" else "Edit Location")
-                            }
-                            Button(
-                                onClick = { showImageSelector = true },
-                                modifier = Modifier.align(Alignment.CenterHorizontally)
-                            ) {
-                                Icon(Icons.Default.PictureInPicture, contentDescription = null)
-                                Text("Choose Image")
                             }
                             if (!isLocationValid) {
                                 Text(

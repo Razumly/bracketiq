@@ -3,6 +3,7 @@ import ComposeApp
 import FirebaseCore
 import FirebaseMessaging
 import GoogleMaps
+import IQKeyboardManagerSwift
 
 class AppDelegate: NSObject, UIApplicationDelegate {
     private let apiKey: String = {
@@ -19,9 +20,15 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     static var pendingDeepLink: URL?
     
     func application(_ application: UIApplication,
-                    didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
+        
         FirebaseApp.configure()
         GMSServices.provideAPIKey(apiKey)
+        
+        // ADD: Configure IQKeyboardManager globally
+        IQKeyboardManager.shared.isEnabled = true
+        IQKeyboardManager.shared.resignOnTouchOutside = true
+        IQKeyboardManager.shared.keyboardDistance = 10
         
         NotifierManager.shared.initialize(configuration: NotificationPlatformConfigurationIos(
             showPushNotification: true,
