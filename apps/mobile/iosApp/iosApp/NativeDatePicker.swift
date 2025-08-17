@@ -1,11 +1,10 @@
 //
-//  NativeDatePicker.swift
-//  iosApp
+// NativeDatePicker.swift
+// iosApp
 //
-//  Created by Elesey Razumovskiy on 6/3/25.
-//  Copyright © 2025 orgName. All rights reserved.
+// Created by Elesey Razumovskiy on 6/3/25.
+// Copyright © 2025 orgName. All rights reserved.
 //
-
 
 import SwiftUI
 import UIKit
@@ -66,6 +65,9 @@ struct DateTimePickerView: View {
 }
 
 class DateTimePickerViewController: UIHostingController<DateTimePickerView> {
+    private let onDismissCallback: () -> Void
+    private var hasCalledDismiss = false
+    
     init(
         initialDate: Date,
         minDate: Date,
@@ -74,18 +76,48 @@ class DateTimePickerViewController: UIHostingController<DateTimePickerView> {
         onConfirm: @escaping (Date) -> Void,
         onDismiss: @escaping () -> Void
     ) {
+        self.onDismissCallback = onDismiss
+        
         let view = DateTimePickerView(
             initialDate: initialDate,
             minDate: minDate,
             maxDate: maxDate,
             getTime: getTime,
-            onConfirm: onConfirm,
-            onDismiss: onDismiss
+            onConfirm: { date in
+                onConfirm(date)
+                // Don't call onDismiss here since the caller handles dismissal
+            },
+            onDismiss: {
+                onDismiss()
+                // Don't call onDismiss here since the caller handles dismissal
+            }
         )
+        
         super.init(rootView: view)
     }
     
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+    
+    // SOLUTION: Override viewDidDisappear to catch swipe-to-dismiss
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        
+        // Only call dismiss callback if we haven't already called it
+        // and the view controller is being dismissed (not just hidden)
+        if !hasCalledDismiss && isBeingDismissed {
+            hasCalledDismiss = true
+            onDismissCallback()
+        }
+    }
+    
+    // ALTERNATIVE: Override dismiss methods to ensure callback is called
+    override func dismiss(animated flag: Bool, completion: (() -> Void)? = nil) {
+        if !hasCalledDismiss {
+            hasCalledDismiss = true
+            onDismissCallback()
+        }
+        super.dismiss(animated: flag, completion: completion)
     }
 }

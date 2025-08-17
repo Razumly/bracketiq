@@ -523,7 +523,7 @@ fun EventDetails(
                                             modifier = Modifier.weight(1f),
                                             label = "End Date & Time",
                                             readOnly = true,
-                                            onTap = { showStartPicker = true })
+                                            onTap = { showEndPicker = true })
                                     }
                                 })
 
