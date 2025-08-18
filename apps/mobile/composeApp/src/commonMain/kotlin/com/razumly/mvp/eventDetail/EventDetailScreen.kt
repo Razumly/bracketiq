@@ -209,7 +209,6 @@ fun EventDetailScreen(
                                             Button(
                                                 onClick = {
                                                     component.updateEvent()
-                                                    component.toggleEdit()
                                                 }, enabled = isValid, colors = buttonColors
                                             ) {
                                                 Text("Confirm")

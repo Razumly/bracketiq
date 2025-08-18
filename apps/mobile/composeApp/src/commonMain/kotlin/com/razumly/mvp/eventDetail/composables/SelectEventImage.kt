@@ -66,29 +66,12 @@ fun SelectEventImage(
     var selected by remember { mutableStateOf<String?>(null) }
     var showUploadError by remember { mutableStateOf<String?>(null) }
 
-    val loader = rememberNetworkLoader()
-    val dominantColorState = rememberDominantColorState(loader)
-
     val loadingHandler = LocalLoadingHandler.current
     var isUploading by remember { mutableStateOf(false) }
-    var isColorReady by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         loadingHandler.loadingState.collect { state ->
             isUploading = state.isLoading
-        }
-    }
-
-    LaunchedEffect(selected) {
-        if (selected?.startsWith("https") == true) {
-            loader.load(Url(selected!!))
-            dominantColorState.updateFrom(Url(selected!!))
-            isColorReady = true
-            onSelectedImage {
-                copy(
-                    imageUrl = selected!!, seedColor = dominantColorState.color.toArgb()
-                )
-            }
         }
     }
 
@@ -117,7 +100,11 @@ fun SelectEventImage(
                 SelectableImageItem(
                     imageUrl = url, isSelected = selected == url, onSelect = {
                         selected = url
-                        isColorReady = false
+                        onSelectedImage {
+                            copy(
+                                imageUrl = url
+                            )
+                        }
                     })
             }
 
@@ -153,7 +140,7 @@ fun SelectEventImage(
                 Text("Delete")
             }
             Button(
-                enabled = selected?.isNotBlank() == true && isColorReady, onClick = onConfirm
+                enabled = selected?.isNotBlank() == true, onClick = onConfirm
             ) {
                 Text("Confirm")
             }
