@@ -94,7 +94,7 @@ data class Tournament (
                 registrationCutoffHours = 0,
                 prize = "",
                 seedColor = Primary.toArgb(),
-                isTaxed = false
+                isTaxed = true
             )
         }
     }

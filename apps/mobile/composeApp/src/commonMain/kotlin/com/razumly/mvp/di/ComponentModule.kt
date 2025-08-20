@@ -73,6 +73,7 @@ val componentModule = module {
             onBack = onBack,
             billingRepository = get(),
             imageRepository = get(),
+            notificationsRepository = get(),
         )
     }
 

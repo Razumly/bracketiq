@@ -78,7 +78,7 @@ data class EventImp (
                 cancellationRefundHours = 0,
                 registrationCutoffHours = 0,
                 seedColor = Primary.toArgb(),
-                isTaxed = false
+                isTaxed = true
             )
         }
     }

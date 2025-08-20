@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Announcement
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -70,6 +71,7 @@ import com.razumly.mvp.eventDetail.composables.CollapsableHeader
 import com.razumly.mvp.eventDetail.composables.MatchEditControls
 import com.razumly.mvp.eventDetail.composables.MatchEditDialog
 import com.razumly.mvp.eventDetail.composables.ParticipantsView
+import com.razumly.mvp.eventDetail.composables.SendNotificationDialog
 import com.razumly.mvp.eventDetail.composables.TeamSelectionDialog
 import com.razumly.mvp.eventDetail.composables.TournamentBracketView
 import com.razumly.mvp.eventMap.MapComponent
@@ -91,16 +93,10 @@ fun EventDetailScreen(
     val loadingHandler = LocalLoadingHandler.current
     val selectedEvent by component.selectedEvent.collectAsState()
     val currentUser by component.currentUser.collectAsState()
-    var showTeamSelectionDialog by remember { mutableStateOf(false) }
     val validTeams by component.validTeams.collectAsState()
     val showDetails by component.showDetails.collectAsState()
     val editedEvent by component.editedEvent.collectAsState()
-    var showFab by remember { mutableStateOf(false) }
-    var showOptionsDropdown by remember { mutableStateOf(false) }
-    var showDeleteConfirmation by remember { mutableStateOf(false) }
     val showMap by mapComponent.showMap.collectAsState()
-    var showRefundReasonDialog by remember { mutableStateOf(false) }
-    var refundReason by remember { mutableStateOf("") }
     val showFeeBreakdown by component.showFeeBreakdown.collectAsState()
     val currentFeeBreakdown by component.currentFeeBreakdown.collectAsState()
     val editableMatches by component.editableMatches.collectAsState()
@@ -119,6 +115,14 @@ fun EventDetailScreen(
     val isCaptain by component.isUserCaptain.collectAsState()
     val isDark = isSystemInDarkTheme()
     val isEditingMatches by component.isEditingMatches.collectAsState()
+
+    var showTeamSelectionDialog by remember { mutableStateOf(false) }
+    var showFab by remember { mutableStateOf(false) }
+    var showOptionsDropdown by remember { mutableStateOf(false) }
+    var showDeleteConfirmation by remember { mutableStateOf(false) }
+    var showRefundReasonDialog by remember { mutableStateOf(false) }
+    var refundReason by remember { mutableStateOf("") }
+    var showNotifyDialog by remember { mutableStateOf(false) }
 
     var imageScheme by remember {
         mutableStateOf(
@@ -380,11 +384,13 @@ fun EventDetailScreen(
                                     )
                                 }
 
-                                DropdownMenu(expanded = showOptionsDropdown,
+                                DropdownMenu(
+                                    expanded = showOptionsDropdown,
                                     onDismissRequest = { showOptionsDropdown = false }) {
                                     // Edit option
                                     if (isHost) {
-                                        DropdownMenuItem(text = { Text("Edit") }, onClick = {
+                                        DropdownMenuItem(
+                                            text = { Text("Edit") }, onClick = {
                                             component.toggleEdit()
                                             showOptionsDropdown = false
                                         }, leadingIcon = {
@@ -401,7 +407,23 @@ fun EventDetailScreen(
                                     })
 
                                     if (isHost) {
-                                        DropdownMenuItem(text = { Text("Delete") }, onClick = {
+                                        DropdownMenuItem(
+                                            text = { Text("Notify Players") },
+                                            onClick = {
+                                                showNotifyDialog = true
+                                                showOptionsDropdown = false
+                                            },
+                                            leadingIcon = {
+                                                Icon(
+                                                    Icons.AutoMirrored.Filled.Announcement,
+                                                    contentDescription = null,
+                                                )
+                                            })
+                                    }
+
+                                    if (isHost) {
+                                        DropdownMenuItem(
+                                            text = { Text("Delete") }, onClick = {
                                             showDeleteConfirmation = true
                                             showOptionsDropdown = false
                                         }, leadingIcon = {
@@ -450,8 +472,7 @@ fun EventDetailScreen(
                                             editableMatches = editableMatches,
                                             onEditMatch = { match ->
                                                 component.showMatchEditDialog(match)
-                                            }
-                                        )
+                                            })
                                     } else {
                                         ParticipantsView(showFab = {
                                             showFab = it
@@ -485,15 +506,11 @@ fun EventDetailScreen(
 
             showTeamDialog?.let { dialogState ->
                 TeamSelectionDialog(
-                    dialogState = dialogState,
-                    onTeamSelected = { teamId ->
+                    dialogState = dialogState, onTeamSelected = { teamId ->
                         component.selectTeamForMatch(
-                            dialogState.matchId,
-                            dialogState.position,
-                            teamId
+                            dialogState.matchId, dialogState.position, teamId
                         )
-                    },
-                    onDismiss = component::dismissTeamSelection
+                    }, onDismiss = component::dismissTeamSelection
                 )
             }
             showMatchEditDialog?.let { dialogState ->
@@ -506,7 +523,8 @@ fun EventDetailScreen(
                 )
             }
             if (showTeamSelectionDialog) {
-                TeamSelectionDialog(teams = validTeams,
+                TeamSelectionDialog(
+                    teams = validTeams,
                     onTeamSelected = { selectedTeam ->
                         showTeamSelectionDialog = false
                         component.joinEventAsTeam(selectedTeam)
@@ -519,7 +537,8 @@ fun EventDetailScreen(
                 )
             }
             if (showDeleteConfirmation) {
-                AlertDialog(onDismissRequest = { showDeleteConfirmation = false },
+                AlertDialog(
+                    onDismissRequest = { showDeleteConfirmation = false },
                     title = { Text("Delete Event") },
                     text = {
                         Text(
@@ -549,8 +568,20 @@ fun EventDetailScreen(
                     })
             }
 
+            if (showNotifyDialog) {
+                SendNotificationDialog(onSend = {
+                    component.sendNotification(
+                        title = "Event Notification", message = "Event Notification"
+                    )
+                    showNotifyDialog = false
+                }, onDismiss = {
+                    showNotifyDialog = false
+                })
+            }
+
             if (showRefundReasonDialog) {
-                RefundReasonDialog(currentReason = refundReason,
+                RefundReasonDialog(
+                    currentReason = refundReason,
                     onReasonChange = { refundReason = it },
                     onConfirm = {
                         component.requestRefund(refundReason)
@@ -564,7 +595,8 @@ fun EventDetailScreen(
             }
 
             if (showFeeBreakdown && currentFeeBreakdown != null) {
-                FeeBreakdownDialog(feeBreakdown = currentFeeBreakdown!!,
+                FeeBreakdownDialog(
+                    feeBreakdown = currentFeeBreakdown!!,
                     onConfirm = { component.confirmFeeBreakdown() },
                     onCancel = { component.dismissFeeBreakdown() })
             }
@@ -581,7 +613,8 @@ fun TeamSelectionDialog(
     onDismiss: () -> Unit,
     onCreateTeam: () -> Unit
 ) {
-    AlertDialog(onDismissRequest = onDismiss,
+    AlertDialog(
+        onDismissRequest = onDismiss,
         title = { Text("Select a Team of size $sizeLimit") },
         text = {
             // List only valid teams

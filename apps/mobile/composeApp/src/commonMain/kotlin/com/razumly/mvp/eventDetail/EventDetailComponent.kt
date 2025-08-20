@@ -22,6 +22,7 @@ import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IEventAbsRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
 import com.razumly.mvp.core.data.repositories.IImagesRepository
+import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.presentation.IPaymentProcessor
@@ -33,7 +34,6 @@ import com.razumly.mvp.core.presentation.util.createEventUrl
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.eventDetail.data.IMatchRepository
-import io.github.ismoy.imagepickerkmp.GalleryPhotoHandler
 import io.github.ismoy.imagepickerkmp.GalleryPhotoHandler.PhotoResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -124,6 +124,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun updateMatchFromDialog(updatedMatch: MatchWithRelations)
     fun onUploadSelected(photo: PhotoResult)
     fun deleteImage(url: String)
+    fun sendNotification(title: String, message: String)
 }
 
 data class TeamSelectionDialogState(
@@ -159,6 +160,7 @@ class DefaultEventDetailComponent(
     fieldRepository: IFieldRepository,
     event: EventAbs,
     onBack: () -> Unit,
+    private val notificationsRepository: IPushNotificationsRepository,
     private val billingRepository: IBillingRepository,
     private val eventAbsRepository: IEventAbsRepository,
     private val matchRepository: IMatchRepository,
@@ -935,6 +937,18 @@ class DefaultEventDetailComponent(
         _showMatchEditDialog.value = MatchEditDialogState(
             match = match, teams = eventWithRelations.value.teams, fields = divisionFields.value
         )
+    }
+
+    override fun sendNotification(title: String, message: String) {
+        scope.launch {
+            notificationsRepository.sendEventNotification(
+                eventWithRelations.value.event.id,
+                title,
+                message
+            ).onFailure {
+                _errorState.value = ErrorMessage(("Failed to send message: " + it.message))
+            }
+        }
     }
 
     override fun dismissMatchEditDialog() {
