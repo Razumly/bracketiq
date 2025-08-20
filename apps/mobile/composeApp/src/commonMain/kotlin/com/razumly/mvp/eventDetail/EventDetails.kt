@@ -3,6 +3,7 @@ package com.razumly.mvp.eventDetail
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -31,6 +33,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardColors
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
@@ -56,12 +59,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.offset
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.zIndex
 import coil3.compose.AsyncImage
@@ -186,6 +191,7 @@ fun EventDetails(
     var selectedDivisions by remember { mutableStateOf(editEvent.divisions) }
     var addSelfToEvent by remember { mutableStateOf(false) }
 
+    val roundedCornerSize = 32.dp
     val currentLocation by mapComponent.currentLocation.collectAsState()
 
     LaunchedEffect(editEvent, fieldCount) {
@@ -232,35 +238,29 @@ fun EventDetails(
     }
 
     CompositionLocalProvider(localImageScheme provides imageScheme) {
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
             // LazyColumn fills entire space
             LazyColumn(
                 state = lazyListState,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(
-                    bottom = navPadding.calculateBottomPadding() + 32.dp
+                    bottom = navPadding.calculateBottomPadding() + 32.dp,
                 ),
-                verticalArrangement = Arrangement.spacedBy(0.dp), // No spacing between items for seamless overlap
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 // Image as first item - will scroll with content
                 item {
                     BackgroundImage(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height((getScreenHeight() * 0.6f).dp),
+                        modifier = Modifier.fillMaxWidth().height((getScreenHeight() * 0.5f).dp),
                         imageUrl = if (!editView) event.imageUrl else editEvent.imageUrl,
                     ) {
                         if (editView) {
                             Button(
                                 onClick = { showImageSelector = true },
-                                modifier = Modifier
-                                    .align(Alignment.Center)
-                                    .size(120.dp),
+                                modifier = Modifier.align(Alignment.Center).size(120.dp),
                                 shape = RoundedCornerShape(16.dp),
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color.Black,
-                                    contentColor = Color.White
+                                    containerColor = Color.Black, contentColor = Color.White
                                 ),
                                 contentPadding = PaddingValues(16.dp),
                                 elevation = ButtonDefaults.buttonElevation(defaultElevation = 8.dp)
@@ -289,18 +289,17 @@ fun EventDetails(
                 // First content card - overlapping the image
                 item {
                     Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .offset(y = (-32).dp), // Negative offset to overlap image by corner radius amount
+                        modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(
-                            topStart = 32.dp, topEnd = 32.dp, bottomStart = 0.dp, bottomEnd = 0.dp
+                            topStart = roundedCornerSize,
+                            topEnd = roundedCornerSize,
+                            bottomStart = 0.dp,
+                            bottomEnd = 0.dp
                         ),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                     ) {
                         Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
+                            modifier = Modifier.fillMaxWidth().padding(16.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
@@ -344,8 +343,7 @@ fun EventDetails(
                                     revealCenter = it.boundsInWindow().center
                                 },
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color.Black,
-                                    contentColor = Color.White
+                                    containerColor = Color.Black, contentColor = Color.White
                                 )
                             ) {
                                 Icon(Icons.Default.Place, contentDescription = null)
@@ -719,8 +717,8 @@ fun EventDetails(
                                 repeat(constrainedWinnerSetCount) { index ->
                                     PointsTextField(
                                         value = editEvent.winnerBracketPointsToVictory.getOrNull(
-                                            index
-                                        )?.toString() ?: "",
+                                        index
+                                    )?.toString() ?: "",
                                         label = "Set ${index + 1} Points",
                                         onValueChange = { newValue ->
                                             if (newValue.all { it.isDigit() } && newValue.length <= 2) {
@@ -818,8 +816,8 @@ fun EventDetails(
                                 repeat(constrainedLoserSetCount) { index ->
                                     PointsTextField(
                                         value = editEvent.loserBracketPointsToVictory.getOrNull(
-                                            index
-                                        )?.toString() ?: "",
+                                        index
+                                    )?.toString() ?: "",
                                         label = "Set ${index + 1} Points",
                                         onValueChange = { newValue ->
                                             if (newValue.all { it.isDigit() } && newValue.length <= 2) {
@@ -854,24 +852,10 @@ fun EventDetails(
                                         })
                                 }
                             }
-                        }
-                    }
-                })
-                item {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(
-                            topStart = 0.dp, topEnd = 0.dp, bottomStart = 16.dp, bottomEnd = 16.dp
-                        ),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                    ) {
-                        Column(
-                            modifier = Modifier.fillMaxWidth().padding(16.dp)
-                        ) {
                             Spacer(Modifier.height(32.dp))
                         }
                     }
-                }
+                })
             }
         }
     }
@@ -929,16 +913,16 @@ fun EventDetails(
     if (showUploadImagePicker) {
         GalleryPickerLauncher(
             onPhotosSelected = { photos ->
-                showUploadImagePicker = false
-                if (photos.isNotEmpty()) {
-                    onUploadSelected(photos.first())
-                }
-            }, onError = { error ->
-                Napier.d("Error uploading image: $error")
-                showUploadImagePicker = false
-            }, onDismiss = {
-                showUploadImagePicker = false
-            }, allowMultiple = false, mimeTypes = listOf("image/jpeg", "image/png", "image/webp")
+            showUploadImagePicker = false
+            if (photos.isNotEmpty()) {
+                onUploadSelected(photos.first())
+            }
+        }, onError = { error ->
+            Napier.d("Error uploading image: $error")
+            showUploadImagePicker = false
+        }, onDismiss = {
+            showUploadImagePicker = false
+        }, allowMultiple = false, mimeTypes = listOf("image/jpeg", "image/png", "image/webp")
         )
     }
 
@@ -949,10 +933,10 @@ fun EventDetails(
     val dominantColorState = rememberDominantColorState(loader)
 
     LaunchedEffect(editEvent.imageUrl) {
-        if (editEvent.imageUrl?.startsWith("https") == true) {
+        if (editEvent.imageUrl.startsWith("https") == true) {
             isColorLoaded = false
-            loader.load(Url(editEvent.imageUrl!!))
-            dominantColorState.updateFrom(Url(editEvent.imageUrl!!))
+            loader.load(Url(editEvent.imageUrl))
+            dominantColorState.updateFrom(Url(editEvent.imageUrl))
             onEditEvent { copy(imageUrl = editEvent.imageUrl) }
             isColorLoaded = true
         }
@@ -1011,25 +995,29 @@ fun LazyListScope.animatedCardSection(
 ) {
     item {
         Card(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxSize(),
             shape = RectangleShape,
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         ) {
-            AnimatedContent(
-                targetState = isEditMode,
-                transitionSpec = { transitionSpec(animationDelay) },
-                label = "cardTransition"
-            ) { editMode ->
-                Column(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    if (editMode) {
-                        editContent()
-                    } else {
-                        viewContent()
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp, horizontal = 16.dp),
+            ) {
+                AnimatedContent(
+                    targetState = isEditMode,
+                    transitionSpec = { transitionSpec(animationDelay) },
+                    label = "cardTransition"
+                ) { editMode ->
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (editMode) {
+                            editContent()
+                        } else {
+                            viewContent()
+                        }
                     }
                 }
             }
@@ -1057,17 +1045,15 @@ fun ColumnScope.CardSection(
 
 @Composable
 fun BackgroundImage(
-    modifier: Modifier,
-    imageUrl: String,
-    content: @Composable BoxScope.() -> Unit
+    modifier: Modifier, imageUrl: String, content: @Composable BoxScope.() -> Unit
 ) {
     Box(modifier) { // Use the passed modifier directly
         if (imageUrl.isNotBlank()) {
             AsyncImage(
                 model = imageUrl,
                 contentDescription = "Event Image",
-                modifier = Modifier.fillMaxSize(), // Fill the entire Box
                 contentScale = ContentScale.Crop,
+                modifier = Modifier.wrapContentSize(Alignment.Center, unbounded = true)
             )
         }
         content()
