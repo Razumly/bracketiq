@@ -183,7 +183,7 @@ private fun HomeContent(
                         TeamManagementScreen(instance.component)
                     }
 
-                    is HomeComponent.Child.Events -> {
+                    is HomeComponent.Child.EventManagement -> {
                         Napier.d(tag = "Navigation") { "Navigating to Events Screen" }
                         EventManagementScreen(instance.component)
                     }

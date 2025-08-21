@@ -22,6 +22,15 @@ fun <T, R> Document<T>.convert(converter: (T) -> R): Document<R> {
     return Document(id, collectionId, databaseId, createdAt, updatedAt, permissions, converter(data))
 }
 
+val emailAddressRegex = Regex(
+    "[a-zA-Z0-9+._%\\-]{1,256}" +
+            "@" +
+            "[a-zA-Z0-9][a-zA-Z0-9\\-]{0,64}" +
+            "(" +
+            "\\." +
+            "[a-zA-Z0-9][a-zA-Z0-9\\-]{0,25}" +
+            ")+"
+)
 fun getBounds(radius: Double, latitude: Double, longitude: Double): Bounds {
     val earthCircumference = 24902.0
     val deltaLatitude = 360.0 * radius / earthCircumference
@@ -45,7 +54,7 @@ fun calcDistance(start: LatLng, end: LatLng): Double {
                 end.longitude - start.longitude
             )
         ) * 3959
-    } catch (e: Exception) {
+    } catch (_: Exception) {
         0.0
     }
 }

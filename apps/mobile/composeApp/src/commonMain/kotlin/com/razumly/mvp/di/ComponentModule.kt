@@ -16,6 +16,8 @@ import com.razumly.mvp.eventSearch.DefaultEventSearchComponent
 import com.razumly.mvp.home.DefaultHomeComponent
 import com.razumly.mvp.matchDetail.DefaultMatchContentComponent
 import com.razumly.mvp.profile.DefaultProfileComponent
+import com.razumly.mvp.profile.profileDetails.DefaultProfileDetailsComponent
+import com.razumly.mvp.profile.profileDetails.ProfileDetailsComponent
 import com.razumly.mvp.refundManager.DefaultRefundManagerComponent
 import com.razumly.mvp.teamManagement.DefaultTeamManagementComponent
 import com.razumly.mvp.userAuth.DefaultAuthComponent
@@ -160,6 +162,13 @@ val componentModule = module {
             onEventSelected = onEventSelected,
             eventAbsRepository = get(),
             onBack = onBack,
+        )
+    }
+
+    factory<ProfileDetailsComponent> { params ->
+        DefaultProfileDetailsComponent(
+            componentContext = params.get(),
+            userRepository = get()
         )
     }
 }

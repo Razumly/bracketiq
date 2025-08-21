@@ -1,84 +1,30 @@
 package com.razumly.mvp.profile
 
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
-import androidx.compose.material3.CenterAlignedTopAppBar
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
-import com.razumly.mvp.core.presentation.composables.PaymentProcessorButton
-import com.razumly.mvp.core.util.LocalErrorHandler
-import com.razumly.mvp.core.util.LocalLoadingHandler
-import com.razumly.mvp.home.LocalNavBarPadding
+import androidx.compose.runtime.getValue
+import com.arkivanov.decompose.ExperimentalDecomposeApi
+import com.arkivanov.decompose.extensions.compose.experimental.stack.ChildStack
+import com.arkivanov.decompose.extensions.compose.subscribeAsState
+import com.razumly.mvp.profile.profileDetails.ProfileDetailsScreen
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalDecomposeApi::class)
 @Composable
 fun ProfileScreen(component: ProfileComponent) {
-    val errorHandler = LocalErrorHandler.current
-    val navPadding = LocalNavBarPadding.current
-    val loadingHandler = LocalLoadingHandler.current
+    val childStack by component.childStack.subscribeAsState()
 
-    LaunchedEffect(Unit) {
-        component.setLoadingHandler(loadingHandler)
-    }
-
-
-    LaunchedEffect(Unit) {
-        component.errorState.collect { error ->
-            if (error != null) {
-                errorHandler.showError(error.message)
-            }
-        }
-    }
-    Scaffold(topBar = {
-        CenterAlignedTopAppBar(
-            title = { Text("Profile") },
-        )
-    }) { innerPadding ->
-        Column(
-            modifier = Modifier.fillMaxSize().padding(innerPadding).padding(navPadding)
-                .padding(bottom = 16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Button(onClick = { component.manageTeams() }) {
-                Text("Manage Teams")
-            }
-            Button(
-                onClick = { component.clearCache() },
-            ) {
-                Text("Clear Cache")
-            }
-            Button(
-                onClick = { component.manageEvents() },
-            ) {
-                Text("Manage Events")
-            }
-            PaymentProcessorButton(
-                onClick = { component.manageStripeAccountOnboarding() },
-                component,
-                "Manage Stripe Onboarding",
-            )
-            Button(
-                onClick = { component.manageStripeAccount() },
-            ) { Text("Stripe Dashboard") }
-
-            Button(
-                onClick = { component.manageRefunds() },
-            ) {
-                Text("Manage Refunds")
+    ChildStack(
+        stack = childStack,
+    ) { child ->
+        when (val instance = child.instance) {
+            is ProfileComponent.Child.ProfileHome -> {
+                ProfileHomeScreen(component = instance.component)
             }
 
-            Button(
-                onClick = { component.onLogout() },
-            ) {
-                Text("Logout")
+            is ProfileComponent.Child.ProfileDetails -> {
+                ProfileDetailsScreen(
+                    component = instance.component,
+                    onBack = component::onBackClicked
+                )
             }
         }
     }

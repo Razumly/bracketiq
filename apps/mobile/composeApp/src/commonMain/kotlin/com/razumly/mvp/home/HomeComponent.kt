@@ -65,7 +65,7 @@ interface HomeComponent: ComponentContext {
 
         data class Profile(val component: ProfileComponent) : Child()
         data class Teams(val component: DefaultTeamManagementComponent) : Child()
-        data class Events(val component: DefaultEventManagementComponent) : Child()
+        data class EventManagement(val component: DefaultEventManagementComponent) : Child()
         data class RefundManager(val component: DefaultRefundManagerComponent) : Child()
     }
 
@@ -231,7 +231,7 @@ class DefaultHomeComponent(
                 }.value
             )
 
-            is Config.Events -> Child.Events(
+            is Config.Events -> Child.EventManagement(
                 _koin.inject<DefaultEventManagementComponent> {
                     parametersOf(componentContext, ::onEventSelected, ::onBackClicked)
                 }.value
