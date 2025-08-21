@@ -42,8 +42,8 @@ import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.RefundRequestWithRelations
 import com.razumly.mvp.core.presentation.composables.EventCard
 import com.razumly.mvp.core.presentation.composables.PlayerCard
-import com.razumly.mvp.core.util.LocalErrorHandler
 import com.razumly.mvp.core.util.LocalLoadingHandler
+import com.razumly.mvp.core.util.LocalPopupHandler
 import com.razumly.mvp.home.LocalNavBarPadding
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -51,7 +51,7 @@ import com.razumly.mvp.home.LocalNavBarPadding
 fun RefundManagerScreen(
     component: RefundManagerComponent,
 ) {
-    val errorHandler = LocalErrorHandler.current
+    val popupHandler = LocalPopupHandler.current
     val navPadding = LocalNavBarPadding.current
     val loadingHandler = LocalLoadingHandler.current
 
@@ -65,7 +65,7 @@ fun RefundManagerScreen(
     LaunchedEffect(Unit) {
         component.errorState.collect { error ->
             if (error != null) {
-                errorHandler.showError(error.message)
+                popupHandler.showPopup(error)
             }
         }
     }

@@ -5,7 +5,6 @@ package com.razumly.mvp.eventDetail
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.backhandler.BackCallback
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
-import com.razumly.mvp.core.data.dataTypes.BillingAddress
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.EventAbsWithRelations
 import com.razumly.mvp.core.data.dataTypes.EventImp
@@ -26,6 +25,7 @@ import com.razumly.mvp.core.data.repositories.IImagesRepository
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentResult
@@ -34,11 +34,14 @@ import com.razumly.mvp.core.presentation.util.convertPhotoResultToInputFile
 import com.razumly.mvp.core.presentation.util.createEventUrl
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
+import com.razumly.mvp.core.util.empty
 import com.razumly.mvp.eventDetail.data.IMatchRepository
+import io.appwrite.models.User
 import io.github.ismoy.imagepickerkmp.GalleryPhotoHandler.PhotoResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -52,6 +55,9 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
+import kotlin.time.Clock
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 import kotlin.time.ExperimentalTime
 
 interface EventDetailComponent : ComponentContext, IPaymentProcessor {
@@ -174,6 +180,9 @@ class DefaultEventDetailComponent(
     override val currentUser = userRepository.currentUser.map { it.getOrThrow() }
         .stateIn(scope, SharingStarted.Eagerly, UserData())
 
+    private val _currentAccount = userRepository.currentAccount.map { it.getOrThrow() }
+        .stateIn(scope, SharingStarted.Eagerly, User.empty<Map<String, Any>>())
+
     private val _errorState = MutableStateFlow<ErrorMessage?>(null)
     override val errorState = _errorState.asStateFlow()
 
@@ -276,12 +285,6 @@ class DefaultEventDetailComponent(
 
     private var pendingPaymentAction: (() -> Unit)? = null
 
-    private val billingAddress = userRepository.getBillingAddressFlow().map {
-        it.getOrElse { BillingAddress.empty() }
-    }.stateIn(
-        scope = scope, started = SharingStarted.Eagerly, initialValue = BillingAddress.empty()
-    )
-
     private val _userTeams = currentUser.flatMapLatest {
         teamRepository.getTeamsWithPlayersFlow(it.id).map { result ->
             result.getOrElse {
@@ -332,11 +335,6 @@ class DefaultEventDetailComponent(
 
     init {
         backHandler.register(backCallback)
-        handleAddressResult = { billingAddress ->
-            scope.launch {
-                userRepository.createOrUpdateBillingAddress(billingAddress)
-            }
-        }
         scope.launch {
             _isEditing.collect { isEditing ->
                 backCallback.isEnabled = isEditing
@@ -415,6 +413,30 @@ class DefaultEventDetailComponent(
         scope.launch {
             _divisionMatches.collect { generateRounds() }
         }
+        scope.launch {
+            paymentResult.collect { result ->
+                when (result) {
+                    PaymentResult.Canceled -> {
+                        _errorState.value = ErrorMessage("Payment Canceled")
+                    }
+                    is PaymentResult.Failed -> {
+                        _errorState.value = ErrorMessage(result.error)
+                    }
+                    PaymentResult.Completed -> {
+                        _errorState.value = null
+
+                        loadingHandler.showLoading("Reloading Event")
+                        val userJoinedSuccessfully = waitForUserInEventWithTimeout()
+                        if (!userJoinedSuccessfully) {
+                            loadingHandler.hideLoading()
+                            _errorState.value =
+                                ErrorMessage("Failed to confirm event join. Please reload event.")
+                        }
+                    }
+                    null -> {}
+                }
+            }
+        }
     }
 
     override fun matchSelected(selectedMatch: MatchWithRelations) {
@@ -486,30 +508,11 @@ class DefaultEventDetailComponent(
                     _errorState.value = ErrorMessage(it.message ?: "")
                 }
             } else {
-                presentAddressElement(billingAddress.value)
                 loadingHandler.showLoading("Creating Purchase Request ...")
                 billingRepository.createPurchaseIntent(selectedEvent.value.event)
                     .onSuccess { purchaseIntent ->
-                        purchaseIntent?.let { intent ->
-                            intent.feeBreakdown?.let { feeBreakdown ->
-                                showFeeBreakdown(feeBreakdown, onConfirm = {
-                                    scope.launch {
-                                        setPaymentIntent(intent)
-                                        loadingHandler.showLoading("Waiting for Payment Completion ..")
-                                        presentPaymentSheet()
-                                    }
-                                }, onCancel = {
-                                    loadingHandler.hideLoading()
-                                })
-                            } ?: run {
-                                setPaymentIntent(intent)
-                                loadingHandler.showLoading("Waiting for Payment Completion ..")
-                                presentPaymentSheet()
-                            }
-                        }
-                        loadingHandler.showLoading("Reloading Event")
-                        while (!_isUserInEvent.value) {
-                            eventAbsRepository.getEvent(selectedEvent.value.event)
+                        purchaseIntent?.let {
+                            processPurchaseIntent(it)
                         }
                     }.onFailure {
                         _errorState.value = ErrorMessage(it.message ?: "")
@@ -532,30 +535,11 @@ class DefaultEventDetailComponent(
                     _errorState.value = ErrorMessage(it.message ?: "")
                 }
             } else {
-                presentAddressElement(billingAddress.value)
                 loadingHandler.showLoading("Creating Purchase Request ...")
                 billingRepository.createPurchaseIntent(selectedEvent.value.event, team.team.id)
                     .onSuccess { purchaseIntent ->
-                        purchaseIntent?.let { intent ->
-                            intent.feeBreakdown?.let { feeBreakdown ->
-                                showFeeBreakdown(feeBreakdown, onConfirm = {
-                                    scope.launch {
-                                        setPaymentIntent(intent)
-                                        loadingHandler.showLoading("Waiting for Payment Completion ..")
-                                        presentPaymentSheet()
-                                    }
-                                }, onCancel = {
-                                    loadingHandler.hideLoading()
-                                })
-                            } ?: run {
-                                setPaymentIntent(intent)
-                                loadingHandler.showLoading("Waiting for Payment Completion ..")
-                                presentPaymentSheet()
-                            }
-                        }
-                        loadingHandler.showLoading("Reloading Event")
-                        while (!_isUserInEvent.value) {
-                            eventAbsRepository.getEvent(selectedEvent.value.event)
+                        purchaseIntent?.let {
+                            processPurchaseIntent(it)
                         }
                     }.onFailure {
                         _errorState.value = ErrorMessage(it.message ?: "")
@@ -563,6 +547,29 @@ class DefaultEventDetailComponent(
             }
             loadingHandler.hideLoading()
         }
+    }
+
+    private suspend fun processPurchaseIntent(intent: PurchaseIntent) {
+        intent.feeBreakdown?.let { feeBreakdown ->
+            showFeeBreakdown(feeBreakdown, onConfirm = {
+                scope.launch {
+                    showPaymentSheet(intent)
+                }
+            }, onCancel = {
+                loadingHandler.hideLoading()
+            })
+        } ?: run {
+            showPaymentSheet(intent)
+        }
+        loadingHandler.showLoading("Reloading Event")
+    }
+
+    private suspend fun showPaymentSheet(intent: PurchaseIntent) {
+        setPaymentIntent(intent)
+        loadingHandler.showLoading("Waiting for Payment Completion ..")
+        presentPaymentSheet(
+            _currentAccount.value.email, currentUser.value.fullName
+        )
     }
 
     override fun requestRefund(reason: String) {
@@ -975,6 +982,27 @@ class DefaultEventDetailComponent(
         }
 
         dismissMatchEditDialog()
+    }
+
+    private suspend fun waitForUserInEventWithTimeout(
+        timeoutS: Duration = 30.seconds, checkIntervalS: Duration = 1.seconds
+    ): Boolean {
+        val startTime = Clock.System.now()
+
+        while (!_isUserInEvent.value) {
+            if (Clock.System.now() - startTime > timeoutS) {
+                return false
+            }
+
+            try {
+                eventAbsRepository.getEvent(selectedEvent.value.event)
+                delay(checkIntervalS)
+            } catch (e: Exception) {
+                delay(checkIntervalS * 2)
+            }
+        }
+
+        return true // User successfully appeared in event
     }
 
     data class ValidationResult(

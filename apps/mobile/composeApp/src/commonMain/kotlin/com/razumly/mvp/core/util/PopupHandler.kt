@@ -13,21 +13,21 @@ data class ErrorMessage(
     val duration: SnackbarDuration = SnackbarDuration.Short
 )
 
-interface ErrorHandler {
-    fun showError(error: ErrorMessage)
-    fun showError(message: String)
+interface PopupHandler {
+    fun showPopup(error: ErrorMessage)
+    fun showPopup(message: String)
     fun clearError()
 }
 
-class ErrorHandlerImpl : ErrorHandler {
+class PopupHandlerImpl : PopupHandler {
     private val _errorState = MutableStateFlow<ErrorMessage?>(null)
     val errorState: StateFlow<ErrorMessage?> = _errorState.asStateFlow()
 
-    override fun showError(error: ErrorMessage) {
+    override fun showPopup(error: ErrorMessage) {
         _errorState.value = error
     }
 
-    override fun showError(message: String) {
+    override fun showPopup(message: String) {
         _errorState.value = ErrorMessage(message)
     }
 
@@ -36,6 +36,6 @@ class ErrorHandlerImpl : ErrorHandler {
     }
 }
 
-val LocalErrorHandler = compositionLocalOf<ErrorHandler> {
+val LocalPopupHandler = compositionLocalOf<PopupHandler> {
     error("No ErrorHandler provided")
 }

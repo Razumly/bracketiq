@@ -52,8 +52,8 @@ import com.razumly.mvp.core.presentation.composables.SearchBox
 import com.razumly.mvp.core.presentation.composables.SearchOverlay
 import com.razumly.mvp.core.presentation.util.isScrollingUp
 import com.razumly.mvp.core.presentation.util.toTitleCase
-import com.razumly.mvp.core.util.LocalErrorHandler
 import com.razumly.mvp.core.util.LocalLoadingHandler
+import com.razumly.mvp.core.util.LocalPopupHandler
 import com.razumly.mvp.eventMap.EventMap
 import com.razumly.mvp.eventMap.MapComponent
 import com.razumly.mvp.home.LocalNavBarPadding
@@ -113,7 +113,7 @@ fun EventSearchScreen(
     }
 
     val loadingHandler = LocalLoadingHandler.current
-    val errorHandler = LocalErrorHandler.current
+    val popupHandler = LocalPopupHandler.current
 
     if (showMapCard) {
         LaunchedEffect(events) {
@@ -129,7 +129,7 @@ fun EventSearchScreen(
         component.setLoadingHandler(loadingHandler)
         component.errorState.collect { error ->
             if (error != null) {
-                errorHandler.showError(error.message)
+                popupHandler.showPopup(error)
             }
         }
     }

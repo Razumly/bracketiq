@@ -31,7 +31,6 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
@@ -39,24 +38,20 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.presentation.composables.PlatformTextField
-import com.razumly.mvp.core.presentation.composables.StripeButton
-import com.razumly.mvp.core.util.LocalErrorHandler
 import com.razumly.mvp.core.util.LocalLoadingHandler
+import com.razumly.mvp.core.util.LocalPopupHandler
 import com.razumly.mvp.core.util.emailAddressRegex
-import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileDetailsScreen(
     component: ProfileDetailsComponent, onBack: () -> Unit
 ) {
-    val errorHandler = LocalErrorHandler.current
+    val popupHandler = LocalPopupHandler.current
     val loadingHandler = LocalLoadingHandler.current
-    val scope = rememberCoroutineScope()
 
     val currentUser by component.currentUser.collectAsState()
     val currentAccount by component.currentAccount.collectAsState()
-    val currentBillingAddress by component.currentBillingAddress.collectAsState()
 
     // Form state
     var email by remember { mutableStateOf("") }
@@ -67,14 +62,6 @@ fun ProfileDetailsScreen(
     var confirmPassword by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
     var confirmPasswordVisible by remember { mutableStateOf(false) }
-
-    // Billing address state
-    var billingLine1 by remember { mutableStateOf("") }
-    var billingLine2 by remember { mutableStateOf("") }
-    var billingCity by remember { mutableStateOf("") }
-    var billingState by remember { mutableStateOf("") }
-    var billingPostalCode by remember { mutableStateOf("") }
-    var billingCountry by remember { mutableStateOf("") }
 
     val isEmailValid by remember {
         derivedStateOf {
@@ -93,37 +80,34 @@ fun ProfileDetailsScreen(
             password.isBlank() || password == confirmPassword
         }
     }
-    val isBillingValid by remember {
-        derivedStateOf {
-            billingLine1.isNotBlank() && billingCity.isNotBlank() && billingState.isNotBlank() && billingPostalCode.isNotBlank() && billingCountry.isNotBlank()
-        }
-    }
 
     val isFormValid by remember {
         derivedStateOf {
-            isEmailValid && isFirstNameValid && isLastNameValid && isPasswordValid && isBillingValid
+            isEmailValid && isFirstNameValid && isLastNameValid && isPasswordValid
         }
     }
 
     // Initialize form with current data
-    LaunchedEffect(currentUser, currentBillingAddress, currentAccount) {
+    LaunchedEffect(currentUser, currentAccount) {
         userName = currentUser.userName
         firstName = currentUser.firstName
         lastName = currentUser.lastName
         email = currentAccount.email
-        billingLine1 = currentBillingAddress?.line1 ?: ""
-        billingLine2 = currentBillingAddress?.line2 ?: ""
-        billingCity = currentBillingAddress?.city ?: ""
-        billingState = currentBillingAddress?.state ?: ""
-        billingPostalCode = currentBillingAddress?.postalCode ?: ""
-        billingCountry = currentBillingAddress?.country ?: ""
     }
 
     LaunchedEffect(Unit) {
         component.setLoadingHandler(loadingHandler)
         component.errorState.collect { error ->
             if (error != null) {
-                errorHandler.showError(error.message)
+                popupHandler.showPopup(error)
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        component.message.collect { message ->
+            if (message != null) {
+                popupHandler.showPopup(message)
             }
         }
     }
@@ -249,40 +233,19 @@ fun ProfileDetailsScreen(
             // Save Button
             Button(
                 onClick = {
-                    scope.launch {
-                        try {
-                            component.updateProfile(
-                                firstName = firstName,
-                                lastName = lastName,
-                                email = email,
-                                password = password,
-                                userName = userName,
-                            ).onFailure { error ->
-                                errorHandler.showError("Failed to update profile: ${error.message}")
-                                return@launch
-                            }
-
-                            onBack()
-                        } catch (e: Exception) {
-                            errorHandler.showError("Failed to update profile: ${e.message}")
-                        }
-                    }
+                    component.updateProfile(
+                        firstName = firstName,
+                        lastName = lastName,
+                        email = email,
+                        password = password,
+                        userName = userName,
+                    )
                 },
                 modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
                 enabled = isFormValid
             ) {
                 Text("Save Profile Changes")
             }
-
-            StripeButton(
-                onClick = {
-                    currentBillingAddress?.let {
-                        component.presentAddressElement(it)
-                    }
-                },
-                paymentProcessor = component,
-                text = "Update Billing Address",
-            )
 
             Spacer(modifier = Modifier.height(32.dp))
         }

@@ -65,8 +65,8 @@ import com.razumly.mvp.core.presentation.composables.PlatformTextField
 import com.razumly.mvp.core.presentation.composables.StripeButton
 import com.razumly.mvp.core.presentation.composables.TeamCard
 import com.razumly.mvp.core.presentation.util.buttonTransitionSpec
-import com.razumly.mvp.core.util.LocalErrorHandler
 import com.razumly.mvp.core.util.LocalLoadingHandler
+import com.razumly.mvp.core.util.LocalPopupHandler
 import com.razumly.mvp.eventDetail.composables.CollapsableHeader
 import com.razumly.mvp.eventDetail.composables.MatchEditControls
 import com.razumly.mvp.eventDetail.composables.MatchEditDialog
@@ -89,7 +89,7 @@ val LocalTournamentComponent =
 fun EventDetailScreen(
     component: EventDetailComponent, mapComponent: MapComponent
 ) {
-    val errorHandler = LocalErrorHandler.current
+    val popupHandler = LocalPopupHandler.current
     val loadingHandler = LocalLoadingHandler.current
     val selectedEvent by component.selectedEvent.collectAsState()
     val currentUser by component.currentUser.collectAsState()
@@ -158,7 +158,7 @@ fun EventDetailScreen(
         component.setLoadingHandler(loadingHandler)
         component.errorState.collect { error ->
             if (error != null) {
-                errorHandler.showError(error.message)
+                popupHandler.showPopup(error)
             }
         }
     }

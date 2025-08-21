@@ -39,10 +39,10 @@ import com.razumly.mvp.chat.ChatGroupScreen
 import com.razumly.mvp.chat.ChatListScreen
 import com.razumly.mvp.core.presentation.composables.MVPBottomNavBar
 import com.razumly.mvp.core.presentation.util.backAnimation
-import com.razumly.mvp.core.util.ErrorHandlerImpl
 import com.razumly.mvp.core.util.LoadingHandlerImpl
-import com.razumly.mvp.core.util.LocalErrorHandler
 import com.razumly.mvp.core.util.LocalLoadingHandler
+import com.razumly.mvp.core.util.LocalPopupHandler
+import com.razumly.mvp.core.util.PopupHandlerImpl
 import com.razumly.mvp.eventCreate.CreateEventScreen
 import com.razumly.mvp.eventDetail.EventDetailScreen
 import com.razumly.mvp.eventManagement.EventManagementScreen
@@ -59,14 +59,14 @@ val LocalNavBarPadding = compositionLocalOf<PaddingValues> { error("No padding v
 @Composable
 fun HomeScreen(component: HomeComponent) {
     val selectedPage by component.selectedPage.collectAsState()
-    val errorHandler = remember { ErrorHandlerImpl() }
+    val popupHandler = remember { PopupHandlerImpl() }
     val loadingHandler = remember { LoadingHandlerImpl() }
     val loadingState by loadingHandler.loadingState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
 
-    LaunchedEffect(errorHandler) {
-        errorHandler.errorState.collect { error ->
+    LaunchedEffect(popupHandler) {
+        popupHandler.errorState.collect { error ->
             error?.let { errorMessage ->
                 Napier.e(tag = "ErrorHandler") { "Showing error: ${errorMessage.message}" }
 
@@ -84,7 +84,7 @@ fun HomeScreen(component: HomeComponent) {
                     } catch (e: Exception) {
                         Napier.e(tag = "ErrorHandler") { "Failed to show error: ${e.message}" }
                     } finally {
-                        errorHandler.clearError()
+                        popupHandler.clearError()
                     }
                 }
             }
@@ -92,7 +92,7 @@ fun HomeScreen(component: HomeComponent) {
     }
 
     CompositionLocalProvider(
-        LocalErrorHandler provides errorHandler, LocalLoadingHandler provides loadingHandler
+        LocalPopupHandler provides popupHandler, LocalLoadingHandler provides loadingHandler
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             MVPBottomNavBar(

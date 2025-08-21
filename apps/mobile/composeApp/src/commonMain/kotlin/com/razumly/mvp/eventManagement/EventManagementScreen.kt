@@ -13,8 +13,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.presentation.composables.PlatformBackButton
-import com.razumly.mvp.core.util.LocalErrorHandler
 import com.razumly.mvp.core.util.LocalLoadingHandler
+import com.razumly.mvp.core.util.LocalPopupHandler
 import com.razumly.mvp.eventSearch.EventList
 import com.razumly.mvp.home.LocalNavBarPadding
 
@@ -28,7 +28,7 @@ fun EventManagementScreen(component: EventManagementComponent) {
     val isLoadingMore by component.isLoadingMore.collectAsState()
     val hasMoreEvents by component.hasMoreEvents.collectAsState()
 
-    val errorHandler = LocalErrorHandler.current
+    val popupHandler = LocalPopupHandler.current
     val loadingHandler = LocalLoadingHandler.current
 
     LaunchedEffect(Unit) {
@@ -38,7 +38,7 @@ fun EventManagementScreen(component: EventManagementComponent) {
     LaunchedEffect(Unit) {
         component.errorState.collect { error ->
             if (error != null) {
-                errorHandler.showError(error.message)
+                popupHandler.showPopup(error)
             }
         }
     }

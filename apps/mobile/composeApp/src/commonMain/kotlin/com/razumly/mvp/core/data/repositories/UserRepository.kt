@@ -2,13 +2,11 @@ package com.razumly.mvp.core.data.repositories
 
 import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.DatabaseService
-import com.razumly.mvp.core.data.dataTypes.BillingAddress
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.dtos.UserDataDTO
 import com.razumly.mvp.core.data.dataTypes.dtos.toUserData
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResponse
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
-import com.razumly.mvp.core.util.DbConstants.ADDRESSES_COLLECTION
 import com.razumly.mvp.core.util.DbConstants.DATABASE_NAME
 import com.razumly.mvp.core.util.DbConstants.USER_CHANNEL
 import com.razumly.mvp.core.util.DbConstants.USER_DATA_COLLECTION
@@ -47,17 +45,12 @@ interface IUserRepository : IMVPRepository {
     ): Result<UserData>
 
     suspend fun updateUser(user: UserData): Result<UserData>
-    suspend fun createOrUpdateBillingAddress(address: BillingAddress): Result<BillingAddress>
-    fun getBillingAddressFlow(): Flow<Result<BillingAddress>>
     suspend fun updateEmail(email: String, password: String): Result<Unit>
     suspend fun updatePassword(password: String): Result<Unit>
     suspend fun updateProfile(
-        firstName: String,
-        lastName: String,
-        email: String,
-        password: String,
-        userName: String
+        firstName: String, lastName: String, email: String, password: String, userName: String
     ): Result<Unit>
+    suspend fun getCurrentAccount(): Result<Unit>
 }
 
 class UserRepository(
@@ -120,30 +113,24 @@ class UserRepository(
         email: String,
         password: String,
         userName: String,
-    ): Result<Unit> {
-        return try {
-            val currentUserData = currentUser.value.getOrThrow()
+    ): Result<Unit> = runCatching {
+        val currentUserData = currentUser.value.getOrThrow()
 
-            if (email.isNotBlank() && password.isNotBlank()) {
-                updateEmail(email, password).getOrThrow()
-            }
-
-            if (password.isNotBlank()) {
-                updatePassword(password).getOrThrow()
-            }
-
-            account.updateName(userName)
-
-            val updatedUser = currentUserData.copy(
-                firstName = firstName,
-                lastName = lastName,
-                userName = userName
-            )
-
-            updateUser(updatedUser).map { }
-        } catch (e: Exception) {
-            Result.failure(e)
+        if (email.isNotBlank() && password.isNotBlank()) {
+            updateEmail(email, password).getOrThrow()
         }
+
+        if (password.isNotBlank()) {
+            updatePassword(password).getOrThrow()
+        }
+
+        account.updateName(userName)
+
+        val updatedUser = currentUserData.copy(
+            firstName = firstName, lastName = lastName, userName = userName
+        )
+
+        updateUser(updatedUser).map { }
     }
 
     override suspend fun login(email: String, password: String): Result<UserData> = runCatching {
@@ -152,13 +139,12 @@ class UserRepository(
         _currentAccount.value = Result.success(account.get())
         val id = currentAccount.value.getOrThrow().id
         currentUserDataSource.saveUserId(id)
+
         Napier.d("User logged in: $id")
         val remoteUserData = database.getDocument(
-            DATABASE_NAME,
-            USER_DATA_COLLECTION,
-            id,
-            nestedType = UserDataDTO::class
+            DATABASE_NAME, USER_DATA_COLLECTION, id, nestedType = UserDataDTO::class
         ).data.copy(id = id).toUserData(id)
+
         Napier.d("User data: $remoteUserData")
         if (_pushToken.value.isNotBlank()) {
             pushNotificationsRepository.addDeviceAsTarget()
@@ -203,10 +189,7 @@ class UserRepository(
 
         val remoteRes = runCatching {
             database.getDocument(
-                DATABASE_NAME,
-                USER_DATA_COLLECTION,
-                sessionId,
-                nestedType = UserDataDTO::class
+                DATABASE_NAME, USER_DATA_COLLECTION, sessionId, nestedType = UserDataDTO::class
             ).data.toUserData(sessionId)
         }
 
@@ -232,18 +215,16 @@ class UserRepository(
     override suspend fun getUsers(userIds: List<String>): Result<List<UserData>> {
         val query = Query.equal("\$id", userIds)
         return getPlayers(
-            query,
-            getLocalData = { databaseService.getUserDataDao.getUserDatasById(userIds) })
+            query, getLocalData = { databaseService.getUserDataDao.getUserDatasById(userIds) })
     }
 
     override fun getUsersFlow(userIds: List<String>): Flow<Result<List<UserData>>> {
-        val localUsersFlow = databaseService.getUserDataDao.getUserDatasByIdFlow(userIds)
-            .map { Result.success(it) }
+        val localUsersFlow =
+            databaseService.getUserDataDao.getUserDatasByIdFlow(userIds).map { Result.success(it) }
 
         scope.launch {
             getUsers(userIds)
         }
-
         return localUsersFlow
     }
 
@@ -251,14 +232,14 @@ class UserRepository(
         query: String, getLocalData: suspend () -> List<UserData>
     ): Result<List<UserData>> = multiResponse(
         getRemoteData = {
-            val docs = database.listDocuments(
-                DATABASE_NAME,
-                USER_DATA_COLLECTION,
-                listOf(query, Query.limit(500)),
-                nestedType = UserDataDTO::class,
-            )
-            docs.documents.map { it.data.toUserData(it.id) }
-        },
+        val docs = database.listDocuments(
+            DATABASE_NAME,
+            USER_DATA_COLLECTION,
+            listOf(query, Query.limit(500)),
+            nestedType = UserDataDTO::class,
+        )
+        docs.documents.map { it.data.toUserData(it.id) }
+    },
         saveData = { usersData ->
             databaseService.getUserDataDao.upsertUsersData(usersData)
         },
@@ -319,35 +300,7 @@ class UserRepository(
         return response
     }
 
-    override suspend fun createOrUpdateBillingAddress(address: BillingAddress): Result<BillingAddress> {
-        return singleResponse(
-            networkCall = {
-                try {
-                    database.updateDocument(
-                        DATABASE_NAME,
-                        ADDRESSES_COLLECTION,
-                        currentUser.value.getOrNull()!!.id,
-                        address,
-                        nestedType = BillingAddress::class
-                    ).data
-                } catch (e: Exception) {
-                    database.createDocument(
-                        DATABASE_NAME,
-                        ADDRESSES_COLLECTION,
-                        currentUser.value.getOrNull()!!.id,
-                        address,
-                        nestedType = BillingAddress::class
-                    ).data
-                }
-            },
-            saveCall = { savedAddress ->
-                currentUserDataSource.saveBillingAddress(savedAddress)
-            },
-            onReturn = { address -> address }
-        )
-    }
-
-    override fun getBillingAddressFlow(): Flow<Result<BillingAddress>> {
-        return currentUserDataSource.getBillingAddress()
+    override suspend fun getCurrentAccount() = runCatching {
+        _currentAccount.value = Result.success(account.get())
     }
 }

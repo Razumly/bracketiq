@@ -21,7 +21,7 @@ actual open class PaymentProcessor : IPaymentProcessor {
         purchaseIntent = intent
     }
 
-    actual override fun presentPaymentSheet() {
+    actual override fun presentPaymentSheet(email: String, name: String) {
         val intent = purchaseIntent ?: return
 
         _nativeViewFactory?.presentStripePaymentSheet(
