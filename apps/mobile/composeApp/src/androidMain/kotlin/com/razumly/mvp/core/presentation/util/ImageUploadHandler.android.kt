@@ -8,21 +8,6 @@ import com.razumly.mvp.MvpApp
 import io.appwrite.models.InputFile
 import io.github.ismoy.imagepickerkmp.GalleryPhotoHandler
 
-actual fun convertPhotoResultToInputFile(photoResult: GalleryPhotoHandler.PhotoResult): InputFile {
-    val context = MvpApp.applicationContext()
-
-    val uri = photoResult.uri.toUri()
-    val bytes = uriToByteArray(context, uri)
-    val fileName = getFileNameFromUri(context, uri)
-    val mimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
-
-    return InputFile.fromBytes(
-        bytes = bytes,
-        filename = fileName,
-        mimeType = mimeType
-    )
-}
-
 private fun uriToByteArray(context: Context, uri: Uri): ByteArray {
     return context.contentResolver.openInputStream(uri)?.use { inputStream ->
         inputStream.readBytes()
@@ -36,4 +21,19 @@ private fun getFileNameFromUri(context: Context, uri: Uri): String {
             cursor.getString(nameIndex)
         } else null
     } ?: "image_${System.currentTimeMillis()}.jpg"
+}
+
+actual fun convertPhotoResultToInputFile(photoResult: GalleryPhotoHandler.PhotoResult): InputFile {
+    val context = MvpApp.applicationContext()
+
+    val uri = photoResult.uri.toUri()
+    val bytes = uriToByteArray(context, uri)
+    val fileName = getFileNameFromUri(context, uri)
+    val mimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
+
+    return InputFile.fromBytes(
+        bytes = bytes,
+        filename = fileName,
+        mimeType = mimeType
+    )
 }

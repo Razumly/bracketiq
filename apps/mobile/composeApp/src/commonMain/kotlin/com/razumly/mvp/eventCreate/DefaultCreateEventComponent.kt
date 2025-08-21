@@ -42,7 +42,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlin.time.ExperimentalTime
 
-interface CreateEventComponent: IPaymentProcessor, ComponentContext {
+interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     val newEventState: StateFlow<EventAbs>
     val currentEventType: StateFlow<EventType>
     val childStack: Value<ChildStack<Config, Child>>
@@ -173,10 +173,16 @@ class DefaultCreateEventComponent(
         scope.launch {
             loadingHandler.showLoading("Creating event...")
             eventRepository.createEvent(newEventState.value).onSuccess {
-                onEventCreated()
                 if (_fieldCount.value > 0) {
-                    fieldRepository.createFields(newEventState.value.id, _fieldCount.value)
+                    fieldRepository.createFields(
+                        tournamentId = newEventState.value.id,
+                        count = _fieldCount.value
+                    ).onFailure { error ->
+                        _errorState.value = ErrorMessage(error.message ?: "")
+                    }
                 }
+                loadingHandler.hideLoading()
+                onEventCreated()
             }.onFailure {
                 _errorState.value = ErrorMessage(it.message ?: "")
             }

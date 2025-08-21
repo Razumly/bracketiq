@@ -10,7 +10,7 @@ import io.appwrite.services.Databases
 import kotlinx.coroutines.flow.Flow
 
 interface IFieldRepository : IMVPRepository {
-    suspend fun createFields(tournamentId: String, count: Int)
+    suspend fun createFields(tournamentId: String, count: Int): Result<Unit>
 
     fun getFieldsInTournamentWithMatchesFlow(tournamentId: String): Flow<List<FieldWithMatches>>
 
@@ -20,8 +20,8 @@ interface IFieldRepository : IMVPRepository {
 class FieldRepository(
     private val database: Databases,
     private val databaseService: DatabaseService
-): IFieldRepository {
-    override suspend fun createFields(tournamentId: String, count: Int) {
+) : IFieldRepository {
+    override suspend fun createFields(tournamentId: String, count: Int) = runCatching {
         val fields = List(count) { Field(tournamentId = tournamentId, fieldNumber = it + 1) }
         fields.forEach { field ->
             database.createDocument(

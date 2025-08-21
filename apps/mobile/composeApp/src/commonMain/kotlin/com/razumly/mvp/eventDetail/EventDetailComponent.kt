@@ -381,9 +381,9 @@ class DefaultEventDetailComponent(
         }
         scope.launch {
             matchRepository.setIgnoreMatch(null)
+            matchRepository.subscribeToMatches()
             eventWithRelations.distinctUntilChanged { old, new -> old == new }.filterNotNull()
                 .collect { event ->
-                    matchRepository.subscribeToMatches()
                     _isUserInEvent.value = checkIsUserInEvent(event.event)
                     _isUserInWaitlist.value = checkIsUserWaitListed(event.event)
                     _isUserFreeAgent.value = checkIsUserFreeAgent(event.event)
