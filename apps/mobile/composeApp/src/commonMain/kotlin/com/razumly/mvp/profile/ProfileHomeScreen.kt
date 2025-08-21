@@ -13,7 +13,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.razumly.mvp.core.presentation.composables.PaymentProcessorButton
+import com.razumly.mvp.core.presentation.composables.StripeButton
 import com.razumly.mvp.core.util.LocalErrorHandler
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.home.LocalNavBarPadding
@@ -69,7 +69,7 @@ fun ProfileHomeScreen(component: ProfileComponent) {
                 Text("Manage Events")
             }
 
-            PaymentProcessorButton(
+            StripeButton(
                 onClick = { component.manageStripeAccountOnboarding() },
                 component,
                 "Manage Stripe Onboarding",

@@ -5,6 +5,7 @@ package com.razumly.mvp.eventDetail
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.backhandler.BackCallback
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
+import com.razumly.mvp.core.data.dataTypes.BillingAddress
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.EventAbsWithRelations
 import com.razumly.mvp.core.data.dataTypes.EventImp
@@ -200,9 +201,8 @@ class DefaultEventDetailComponent(
         }
     }
 
-    override val eventImageUrls = imageRepository
-        .getUserImagesFlow()
-        .stateIn(scope, SharingStarted.Eagerly, emptyList())
+    override val eventImageUrls =
+        imageRepository.getUserImagesFlow().stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     override val selectedEvent: StateFlow<EventAbsWithRelations> =
         eventAbsRepository.getEventWithRelationsFlow(event).map { result ->
@@ -276,6 +276,12 @@ class DefaultEventDetailComponent(
 
     private var pendingPaymentAction: (() -> Unit)? = null
 
+    private val billingAddress = userRepository.getBillingAddressFlow().map {
+        it.getOrElse { BillingAddress.empty() }
+    }.stateIn(
+        scope = scope, started = SharingStarted.Eagerly, initialValue = BillingAddress.empty()
+    )
+
     private val _userTeams = currentUser.flatMapLatest {
         teamRepository.getTeamsWithPlayersFlow(it.id).map { result ->
             result.getOrElse {
@@ -326,6 +332,11 @@ class DefaultEventDetailComponent(
 
     init {
         backHandler.register(backCallback)
+        handleAddressResult = { billingAddress ->
+            scope.launch {
+                userRepository.createOrUpdateBillingAddress(billingAddress)
+            }
+        }
         scope.launch {
             _isEditing.collect { isEditing ->
                 backCallback.isEnabled = isEditing
@@ -466,7 +477,6 @@ class DefaultEventDetailComponent(
 
     override fun joinEvent() {
         scope.launch {
-
             if (selectedEvent.value.event.price == 0.0 || isEventFull.value || selectedEvent.value.event.teamSignup) {
                 loadingHandler.showLoading("Joining Event ...")
                 eventAbsRepository.addCurrentUserToEvent(selectedEvent.value.event).onSuccess {
@@ -476,6 +486,7 @@ class DefaultEventDetailComponent(
                     _errorState.value = ErrorMessage(it.message ?: "")
                 }
             } else {
+                presentAddressElement(billingAddress.value)
                 loadingHandler.showLoading("Creating Purchase Request ...")
                 billingRepository.createPurchaseIntent(selectedEvent.value.event)
                     .onSuccess { purchaseIntent ->
@@ -521,6 +532,7 @@ class DefaultEventDetailComponent(
                     _errorState.value = ErrorMessage(it.message ?: "")
                 }
             } else {
+                presentAddressElement(billingAddress.value)
                 loadingHandler.showLoading("Creating Purchase Request ...")
                 billingRepository.createPurchaseIntent(selectedEvent.value.event, team.team.id)
                     .onSuccess { purchaseIntent ->
@@ -942,9 +954,7 @@ class DefaultEventDetailComponent(
     override fun sendNotification(title: String, message: String) {
         scope.launch {
             notificationsRepository.sendEventNotification(
-                eventWithRelations.value.event.id,
-                title,
-                message
+                eventWithRelations.value.event.id, title, message
             ).onFailure {
                 _errorState.value = ErrorMessage(("Failed to send message: " + it.message))
             }

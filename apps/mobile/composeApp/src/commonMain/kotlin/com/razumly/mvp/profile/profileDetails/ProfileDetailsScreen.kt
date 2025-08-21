@@ -38,8 +38,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
-import com.razumly.mvp.core.data.dataTypes.BillingAddress
 import com.razumly.mvp.core.presentation.composables.PlatformTextField
+import com.razumly.mvp.core.presentation.composables.StripeButton
 import com.razumly.mvp.core.util.LocalErrorHandler
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.emailAddressRegex
@@ -48,8 +48,7 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileDetailsScreen(
-    component: ProfileDetailsComponent,
-    onBack: () -> Unit
+    component: ProfileDetailsComponent, onBack: () -> Unit
 ) {
     val errorHandler = LocalErrorHandler.current
     val loadingHandler = LocalLoadingHandler.current
@@ -96,8 +95,7 @@ fun ProfileDetailsScreen(
     }
     val isBillingValid by remember {
         derivedStateOf {
-            billingLine1.isNotBlank() && billingCity.isNotBlank() &&
-                    billingState.isNotBlank() && billingPostalCode.isNotBlank() && billingCountry.isNotBlank()
+            billingLine1.isNotBlank() && billingCity.isNotBlank() && billingState.isNotBlank() && billingPostalCode.isNotBlank() && billingCountry.isNotBlank()
         }
     }
 
@@ -132,21 +130,14 @@ fun ProfileDetailsScreen(
 
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("Profile Details") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
+            CenterAlignedTopAppBar(title = { Text("Profile Details") }, navigationIcon = {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                 }
-            )
-        }
-    ) { innerPadding ->
+            })
+        }) { innerPadding ->
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(horizontal = 16.dp)
+            modifier = Modifier.fillMaxSize().padding(innerPadding).padding(horizontal = 16.dp)
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
@@ -221,7 +212,10 @@ fun ProfileDetailsScreen(
                 },
                 supportingText = {
                     if (password.isNotBlank() && password.length < 6) {
-                        Text("Password must be at least 6 characters", color = MaterialTheme.colorScheme.error)
+                        Text(
+                            "Password must be at least 6 characters",
+                            color = MaterialTheme.colorScheme.error
+                        )
                     }
                 },
                 isError = password.isNotBlank() && password.length < 6
@@ -252,79 +246,11 @@ fun ProfileDetailsScreen(
                 )
             }
 
-            // Billing Address Section
-            Text(
-                "Billing Address",
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(top = 8.dp)
-            )
-
-            PlatformTextField(
-                value = billingLine1,
-                onValueChange = { billingLine1 = it },
-                label = "Address Line 1",
-                isError = billingLine1.isBlank(),
-                supportingText = if (billingLine1.isBlank()) "Required" else ""
-            )
-
-            PlatformTextField(
-                value = billingLine2,
-                onValueChange = { billingLine2 = it },
-                label = "Address Line 2 (Optional)"
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                PlatformTextField(
-                    value = billingCity,
-                    onValueChange = { billingCity = it },
-                    label = "City",
-                    modifier = Modifier.weight(1f),
-                    isError = billingCity.isBlank(),
-                    supportingText = if (billingCity.isBlank()) "Required" else ""
-                )
-
-                PlatformTextField(
-                    value = billingState,
-                    onValueChange = { billingState = it },
-                    label = "State",
-                    modifier = Modifier.weight(1f),
-                    isError = billingState.isBlank(),
-                    supportingText = if (billingState.isBlank()) "Required" else ""
-                )
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                PlatformTextField(
-                    value = billingPostalCode,
-                    onValueChange = { billingPostalCode = it },
-                    label = "Postal Code",
-                    modifier = Modifier.weight(1f),
-                    isError = billingPostalCode.isBlank(),
-                    supportingText = if (billingPostalCode.isBlank()) "Required" else ""
-                )
-
-                PlatformTextField(
-                    value = billingCountry,
-                    onValueChange = { billingCountry = it },
-                    label = "Country",
-                    modifier = Modifier.weight(1f),
-                    isError = billingCountry.isBlank(),
-                    supportingText = if (billingCountry.isBlank()) "Required" else ""
-                )
-            }
-
             // Save Button
             Button(
                 onClick = {
                     scope.launch {
                         try {
-                            // Update user profile
                             component.updateProfile(
                                 firstName = firstName,
                                 lastName = lastName,
@@ -336,35 +262,27 @@ fun ProfileDetailsScreen(
                                 return@launch
                             }
 
-                            // Update billing address
-                            val billing = BillingAddress(
-                                line1 = billingLine1,
-                                line2 = billingLine2,
-                                city = billingCity,
-                                state = billingState,
-                                postalCode = billingPostalCode,
-                                country = billingCountry,
-                            )
-
-                            component.updateBillingAddress(billing).onFailure { error ->
-                                errorHandler.showError("Failed to update billing address: ${error.message}")
-                                return@launch
-                            }
-
                             onBack()
-
                         } catch (e: Exception) {
                             errorHandler.showError("Failed to update profile: ${e.message}")
                         }
                     }
                 },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 16.dp),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
                 enabled = isFormValid
             ) {
-                Text("Save Changes")
+                Text("Save Profile Changes")
             }
+
+            StripeButton(
+                onClick = {
+                    currentBillingAddress?.let {
+                        component.presentAddressElement(it)
+                    }
+                },
+                paymentProcessor = component,
+                text = "Update Billing Address",
+            )
 
             Spacer(modifier = Modifier.height(32.dp))
         }

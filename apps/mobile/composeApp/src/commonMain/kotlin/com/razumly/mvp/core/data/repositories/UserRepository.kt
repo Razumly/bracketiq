@@ -48,7 +48,7 @@ interface IUserRepository : IMVPRepository {
 
     suspend fun updateUser(user: UserData): Result<UserData>
     suspend fun createOrUpdateBillingAddress(address: BillingAddress): Result<BillingAddress>
-    fun getBillingAddressFlow(): Flow<Result<BillingAddress?>>
+    fun getBillingAddressFlow(): Flow<Result<BillingAddress>>
     suspend fun updateEmail(email: String, password: String): Result<Unit>
     suspend fun updatePassword(password: String): Result<Unit>
     suspend fun updateProfile(
@@ -347,7 +347,7 @@ class UserRepository(
         )
     }
 
-    override fun getBillingAddressFlow(): Flow<Result<BillingAddress?>> {
+    override fun getBillingAddressFlow(): Flow<Result<BillingAddress>> {
         return currentUserDataSource.getBillingAddress()
     }
 }

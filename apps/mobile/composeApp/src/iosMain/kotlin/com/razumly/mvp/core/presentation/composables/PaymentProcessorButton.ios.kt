@@ -10,7 +10,7 @@ import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentProcessor
 
 @Composable
-actual fun PaymentProcessorButton(
+actual fun StripeButton(
     onClick: () -> Unit,
     paymentProcessor: IPaymentProcessor,
     text: String,

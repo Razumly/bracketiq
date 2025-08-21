@@ -61,8 +61,8 @@ import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
 import com.razumly.mvp.core.data.repositories.FeeBreakdown
-import com.razumly.mvp.core.presentation.composables.PaymentProcessorButton
 import com.razumly.mvp.core.presentation.composables.PlatformTextField
+import com.razumly.mvp.core.presentation.composables.StripeButton
 import com.razumly.mvp.core.presentation.composables.TeamCard
 import com.razumly.mvp.core.presentation.util.buttonTransitionSpec
 import com.razumly.mvp.core.util.LocalErrorHandler
@@ -237,7 +237,7 @@ fun EventDetailScreen(
                                                 // Show waitlist options when event is full
                                                 if (teamSignup) {
                                                     if (selectedEvent.event.price > 0) {
-                                                        PaymentProcessorButton(
+                                                        StripeButton(
                                                             onClick = {
                                                                 showTeamSelectionDialog = true
                                                             },
@@ -256,7 +256,7 @@ fun EventDetailScreen(
                                                     }
                                                 } else {
                                                     if (selectedEvent.event.price > 0) {
-                                                        PaymentProcessorButton(
+                                                        StripeButton(
                                                             {
                                                                 component.joinEvent()
                                                             },
@@ -282,7 +282,7 @@ fun EventDetailScreen(
                                                         Text("Join as free agent")
                                                     }
                                                     if (selectedEvent.event.price > 0) {
-                                                        PaymentProcessorButton(
+                                                        StripeButton(
                                                             onClick = {
                                                                 showTeamSelectionDialog = true
                                                             },
@@ -299,7 +299,7 @@ fun EventDetailScreen(
                                                     }
                                                 } else {
                                                     if (selectedEvent.event.price > 0) {
-                                                        PaymentProcessorButton(
+                                                        StripeButton(
                                                             {
                                                                 component.joinEvent()
                                                             },

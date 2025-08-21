@@ -5,6 +5,8 @@ import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.BillingAddress
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.presentation.IPaymentProcessor
+import com.razumly.mvp.core.presentation.PaymentProcessor
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.util.empty
@@ -17,8 +19,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
-interface ProfileDetailsComponent {
+interface ProfileDetailsComponent: IPaymentProcessor {
     val errorState: StateFlow<ErrorMessage?>
     val currentUser: StateFlow<UserData>
     val currentBillingAddress: StateFlow<BillingAddress?>
@@ -41,7 +44,7 @@ interface ProfileDetailsComponent {
 class DefaultProfileDetailsComponent(
     private val componentContext: ComponentContext,
     private val userRepository: IUserRepository,
-) : ProfileDetailsComponent, ComponentContext by componentContext {
+) : ProfileDetailsComponent, PaymentProcessor(), ComponentContext by componentContext {
 
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
     private val _errorState = MutableStateFlow<ErrorMessage?>(null)
@@ -80,6 +83,14 @@ class DefaultProfileDetailsComponent(
 
     override fun setLoadingHandler(loadingHandler: LoadingHandler) {
         this.loadingHandler = loadingHandler
+    }
+
+    init {
+        handleAddressResult = { billingAddress ->
+            scope.launch {
+                updateBillingAddress(billingAddress)
+            }
+        }
     }
 
     override suspend fun updateProfile(

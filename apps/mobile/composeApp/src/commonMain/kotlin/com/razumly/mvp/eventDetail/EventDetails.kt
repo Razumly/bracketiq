@@ -72,7 +72,7 @@ import com.razumly.mvp.core.data.dataTypes.enums.FieldType
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import com.razumly.mvp.core.presentation.composables.MoneyInputField
-import com.razumly.mvp.core.presentation.composables.PaymentProcessorButton
+import com.razumly.mvp.core.presentation.composables.StripeButton
 import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
 import com.razumly.mvp.core.presentation.composables.PlatformDropdown
 import com.razumly.mvp.core.presentation.composables.PlatformTextField
@@ -423,7 +423,7 @@ fun EventDetails(
                     )
                 }, editContent = {
                     if (!hostHasAccount) {
-                        PaymentProcessorButton(
+                        StripeButton(
                             onClick = onHostCreateAccount,
                             paymentProcessor,
                             "Create Stripe Connect Account to Change Price",
