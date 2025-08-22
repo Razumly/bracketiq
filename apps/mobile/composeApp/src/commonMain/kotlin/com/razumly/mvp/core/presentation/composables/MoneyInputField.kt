@@ -17,7 +17,7 @@ fun MoneyInputField(
     readOnly: Boolean = false
 ) {
     PlatformTextField(
-        value = if (value == "0") "" else value,
+        value = value,
         onValueChange = onValueChange,
         modifier = modifier,
         label = label,

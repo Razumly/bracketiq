@@ -640,7 +640,7 @@ fun EventDetails(
                             supportingText = "If there is a prize, enter it here"
                         )
 
-                        NumberInputField(
+                        PlatformTextField(
                             value = fieldCount.toString(),
                             onValueChange = { newValue ->
                                 if (newValue.all { it.isDigit() }) {
@@ -654,6 +654,7 @@ fun EventDetails(
                                 }
                             },
                             label = "Field Count",
+                            keyboardType = "number",
                             isError = !isFieldCountValid,
                             supportingText = if (!isFieldCountValid) stringResource(
                                 Res.string.value_too_low, 0

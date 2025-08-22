@@ -4,6 +4,7 @@ import java.io.ByteArrayOutputStream
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
+    alias(libs.plugins.kotlinCocoapods)
     alias(libs.plugins.androidApplication)
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
@@ -35,6 +36,41 @@ kotlin {
         }
     }
 
+    iosX64()
+    iosArm64()
+    iosSimulatorArm64()
+
+    applyDefaultHierarchyTemplate()
+
+    listOf(iosX64(), iosArm64(), iosSimulatorArm64()).forEach { target ->
+        target.binaries.framework {
+            baseName = "ComposeApp"
+            // your extra linker flags
+            linkerOpts.add("-lsqlite3")
+        }
+    }
+
+    cocoapods {
+        version = mvpVersion
+        summary = "MVP App for pick up Volleyball events"
+        homepage = "https://example.com"
+        ios.deploymentTarget = "15.3"
+        podfile = project.file("../iosApp/Podfile")
+
+        pod("GooglePlaces")
+        pod("IQKeyboardManagerSwift") {
+            extraOpts += listOf("-compiler-option", "-fmodules")
+        }
+        framework {
+            baseName = "ComposeApp"
+            isStatic = true
+            freeCompilerArgs += "-Xbinary=bundleId=com.razumly.mvp"
+            export(libs.decompose.decompose)
+            export(libs.lifecycle)
+            export(libs.kmpnotifier)
+            export(libs.geo)
+        }
+    }
 
 
     sourceSets {
@@ -203,6 +239,9 @@ dependencies {
     debugImplementation(compose.uiTooling)
     add("kspCommonMainMetadata", libs.androidx.room.compiler)
     add("kspAndroid", libs.androidx.room.compiler)
+    add("kspIosX64", libs.androidx.room.compiler)
+    add("kspIosArm64", libs.androidx.room.compiler)
+    add("kspIosSimulatorArm64", libs.androidx.room.compiler)
     implementation(libs.androidx.foundation.layout)
     implementation(libs.androidx.material)
 }
