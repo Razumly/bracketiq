@@ -72,10 +72,10 @@ import com.razumly.mvp.core.data.dataTypes.enums.FieldType
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import com.razumly.mvp.core.presentation.composables.MoneyInputField
-import com.razumly.mvp.core.presentation.composables.StripeButton
 import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
 import com.razumly.mvp.core.presentation.composables.PlatformDropdown
 import com.razumly.mvp.core.presentation.composables.PlatformTextField
+import com.razumly.mvp.core.presentation.composables.StripeButton
 import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
 import com.razumly.mvp.core.presentation.util.getScreenHeight
@@ -872,9 +872,7 @@ fun EventDetails(
         } else {
             currentLocation ?: LatLng(0.0, 0.0)
         },
-        focusedEvent = if (editEvent.location.isNotBlank()) {
-            editEvent
-        } else if (event.location.isNotBlank()) {
+        focusedEvent = if (event.location.isNotBlank()) {
             event
         } else {
             null

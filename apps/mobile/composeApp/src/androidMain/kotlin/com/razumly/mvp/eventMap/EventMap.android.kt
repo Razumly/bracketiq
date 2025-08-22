@@ -72,7 +72,7 @@ actual fun EventMap(
     val defaultDurationMs = 1000
     val initCameraState = focusedLocation.toGoogle()
     val cameraPositionState = rememberCameraPositionState()
-
+    val eventMarkerStates = remember { mutableMapOf<String, MarkerState>() }
     var selectedPOI by remember { mutableStateOf<PointOfInterest?>(null) }
     var isAnimating by remember { mutableStateOf(false) }
     val poiMarkerState = remember { MarkerState() }
@@ -85,9 +85,32 @@ actual fun EventMap(
         }
     }
 
+    LaunchedEffect(cameraPositionState) {
+        snapshotFlow { cameraPositionState.position }.collect { cameraPosition ->
+            cameraPositionState.projection?.visibleRegion?.latLngBounds?.let { bounds ->
+                component.updateCameraBounds(cameraPosition.target, bounds)
+            }
+        }
+    }
+
+    LaunchedEffect(events) {
+        val currentEventIds = events.map { it.id }.toSet()
+        eventMarkerStates.keys.removeAll { it !in currentEventIds }
+        events.forEach { event ->
+            val existingState = eventMarkerStates[event.id]
+            if (existingState == null) {
+                eventMarkerStates[event.id] = MarkerState(position = LatLng(event.lat, event.long))
+            } else {
+                val newPosition = LatLng(event.lat, event.long)
+                if (existingState.position != newPosition) {
+                    existingState.position = newPosition
+                }
+            }
+        }
+    }
+
     val animationProgress by animateFloatAsState(
-        targetValue = if (showMap) 1f else 0f,
-        animationSpec = tween(durationMillis = 1000)
+        targetValue = if (showMap) 1f else 0f, animationSpec = tween(durationMillis = 1000)
     )
 
     BindLocationTrackerEffect(component.locationTracker)
@@ -97,13 +120,6 @@ actual fun EventMap(
             cameraPositionState.move(
                 CameraUpdateFactory.newLatLngZoom(initCameraState, defaultZoom)
             )
-        }
-
-        var currentCameraState by remember { mutableStateOf(cameraPositionState) }
-        LaunchedEffect(cameraPositionState) {
-            snapshotFlow { cameraPositionState }.collect { newTarget ->
-                currentCameraState = newTarget
-            }
         }
 
         Box(
@@ -125,38 +141,31 @@ actual fun EventMap(
                             cameraPositionState.animate(
                                 CameraUpdateFactory.newCameraPosition(
                                     CameraPosition.fromLatLngZoom(poi.latLng, defaultZoom)
-                                ),
-                                durationMs = 500
+                                ), durationMs = 500
                             )
                             delay(300)
                             isAnimating = false
                         }
                     }
-                }
-            ) {
+                }) {
+
                 if (!canClickPOI) {
                     events.forEach { event ->
-                        val markerState = remember(event.id) {
-                            MarkerState(position = LatLng(event.lat, event.long))
-                        }
-
-                        MarkerInfoWindow(
-                            state = markerState,
-                            icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE),
-                            onClick = { marker ->
-                                onEventSelected(event)
-                                false // Show info window
-                            },
-                        ) { marker ->
-                            MapEventCard(
-                                event = event,
-                                modifier = Modifier.wrapContentSize()
-                            )
+                        val markerState = eventMarkerStates[event.id]
+                        markerState?.let {
+                            MarkerInfoWindow(
+                                state = it,
+                                icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE),
+                                onClick = { marker -> false },
+                                onInfoWindowClick = { marker -> onEventSelected(event) }) { marker ->
+                                MapEventCard(
+                                    event = event, modifier = Modifier.wrapContentSize()
+                                )
+                            }
                         }
                     }
                 }
 
-                // Searched places with INFO WINDOWS (Fixed!)
                 searchedPlaces.forEach { place ->
                     val markerState = remember(place.id) {
                         MarkerState(position = place.location!!)
@@ -188,12 +197,11 @@ actual fun EventMap(
                             scope.launch {
                                 onPlaceSelected(component.getPlace(poi.placeId))
                             }
-                            false // Show info window
+                            false
                         },
                     ) { marker ->
                         MapPOICard(
-                            name = poi.name,
-                            modifier = Modifier.wrapContentSize()
+                            name = poi.name, modifier = Modifier.wrapContentSize()
                         )
                     }
                 }
@@ -202,55 +210,43 @@ actual fun EventMap(
                     val focusedMarkerState = remember(event.id) {
                         MarkerState(position = LatLng(event.lat, event.long))
                     }
-
                     MarkerInfoWindow(
                         state = focusedMarkerState,
                         icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED),
-                        onClick = { marker ->
-                            onEventSelected(event)
-                            false
-                        },
+                        onClick = { marker -> false },
                     ) { marker ->
                         MapEventCard(
-                            event = event,
-                            modifier = Modifier.wrapContentSize()
+                            event = event, modifier = Modifier.wrapContentSize()
                         )
                     }
                 }
             }
 
-            // Search bar and other UI components remain the same...
             if (canClickPOI) {
-                currentCameraState.projection?.visibleRegion?.latLngBounds?.let {
-                    MapSearchBar(
-                        Modifier
-                            .padding(horizontal = 16.dp)
-                            .fillMaxWidth(),
-                        component,
-                        currentCameraState.position.target,
-                        it
-                    ) { newPlaces ->
-                        selectedPOI = null // Clear POI selection when searching
-                        searchedPlaces = newPlaces
-                        if (newPlaces.size > 1) {
-                            val bounds = LatLngBounds.builder()
-                            newPlaces.forEach { place ->
-                                bounds.include(place.location!!)
-                            }
-                            scope.launch {
-                                cameraPositionState.animate(
-                                    CameraUpdateFactory.newLatLngBounds(bounds.build(), 100),
-                                    defaultDurationMs
-                                )
-                            }
-                        } else if (newPlaces.isNotEmpty()) {
-                            scope.launch {
-                                val location = newPlaces.first().location
-                                cameraPositionState.animate(
-                                    CameraUpdateFactory.newLatLngZoom(location!!, defaultZoom),
-                                    defaultDurationMs
-                                )
-                            }
+                MapSearchBar(
+                    modifier = Modifier.fillMaxWidth(),
+                    component = component,
+                ) { newPlaces ->
+                    selectedPOI = null // Clear POI selection when searching
+                    searchedPlaces = newPlaces
+                    if (newPlaces.size > 1) {
+                        val bounds = LatLngBounds.builder()
+                        newPlaces.forEach { place ->
+                            bounds.include(place.location!!)
+                        }
+                        scope.launch {
+                            cameraPositionState.animate(
+                                CameraUpdateFactory.newLatLngBounds(bounds.build(), 100),
+                                defaultDurationMs
+                            )
+                        }
+                    } else if (newPlaces.isNotEmpty()) {
+                        scope.launch {
+                            val location = newPlaces.first().location
+                            cameraPositionState.animate(
+                                CameraUpdateFactory.newLatLngZoom(location!!, defaultZoom),
+                                defaultDurationMs
+                            )
                         }
                     }
                 }
@@ -272,12 +268,9 @@ actual fun EventMap(
 @Composable
 fun MapSearchBar(
     modifier: Modifier,
-    mapComponent: MapComponent,
-    viewCenter: LatLng,
-    bounds: LatLngBounds,
+    component: MapComponent,
     onSearchResults: (List<Place>) -> Unit,
 ) {
-    // State for query text, suggestions and active search mode
     var searchInput by remember { mutableStateOf("") }
     var suggestions by remember { mutableStateOf<List<Place>>(emptyList()) }
     var searchActive by remember { mutableStateOf(false) }
@@ -286,18 +279,20 @@ fun MapSearchBar(
     val onActiveChange: (Boolean) -> Unit = { isActive ->
         searchActive = isActive
     }
+
     val colors1 = SearchBarDefaults.colors()
 
     val onSearch: (query: String) -> Unit = { query ->
         coroutineScope.launch {
             val results = try {
-                mapComponent.searchPlaces(query, viewCenter, bounds)
+                component.searchPlaces(query)
             } catch (e: Exception) {
                 Napier.e("Failed to get places: $e")
                 emptyList()
             }
+
             onSearchResults(results)
-            searchInput = "" // Clear search query after search
+            searchInput = ""
             suggestions = emptyList()
             searchActive = false
         }
@@ -310,12 +305,12 @@ fun MapSearchBar(
                 query = searchInput,
                 onQueryChange = { newQuery ->
                     searchInput = newQuery
-                    // Only get suggestions when there is some text
                     if (newQuery.isNotEmpty()) {
                         coroutineScope.launch {
                             suggestions = try {
-                                mapComponent.suggestPlaces(newQuery, viewCenter)
+                                component.suggestPlaces(newQuery)
                             } catch (e: Exception) {
+                                Napier.d("Failed to get suggestions: $e")
                                 emptyList()
                             }
                         }

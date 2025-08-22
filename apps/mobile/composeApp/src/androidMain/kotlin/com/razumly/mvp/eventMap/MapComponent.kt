@@ -30,13 +30,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resumeWithException
 
-
 actual class MapComponent(
     componentContext: ComponentContext,
     private val eventAbsRepository: IEventAbsRepository,
     context: Context,
     val locationTracker: LocationTracker
 ) : ComponentContext by componentContext {
+
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     private val _currentLocation = MutableStateFlow<dev.icerock.moko.geo.LatLng?>(null)
@@ -55,6 +55,10 @@ actual class MapComponent(
 
     private val _showMap = MutableStateFlow(false)
     actual val showMap = _showMap.asStateFlow()
+
+    // Add internal bounds tracking
+    private val _currentViewCenter = MutableStateFlow<LatLng?>(null)
+    private val _currentBounds = MutableStateFlow<LatLngBounds?>(null)
 
     private val placesClient: PlacesClient by lazy {
         if (!Places.isInitialized()) {
@@ -81,8 +85,14 @@ actual class MapComponent(
         }
     }
 
+    // Add method to update camera bounds from the map
+    fun updateCameraBounds(center: LatLng, bounds: LatLngBounds) {
+        _currentViewCenter.value = center
+        _currentBounds.value = bounds
+    }
+
     suspend fun getMVPPlace(place: Place): MVPPlace {
-         return place.toMVPPlace(placesClient)
+        return place.toMVPPlace(placesClient)
     }
 
     fun setRadius(radius: Double) {
@@ -114,12 +124,19 @@ actual class MapComponent(
                         }
                     }
                 }
+                .addOnFailureListener { exception ->
+                    cont.resumeWithException(exception)
+                }
         }
 
-    suspend fun suggestPlaces(query: String, latLng: LatLng): List<Place> =
+    suspend fun suggestPlaces(query: String): List<Place> =
         suspendCancellableCoroutine { cont ->
-            val currentBounds =
-                getBounds(_currentRadiusMeters.value, latLng.latitude, latLng.longitude)
+            val viewCenter = _currentViewCenter.value ?: run {
+                cont.resume(emptyList()) { cause, _, _ ->
+                    Napier.d { "Cancelled autocomplete - no view center: $cause" }
+                }
+                return@suspendCancellableCoroutine
+            }
 
             val request = FindAutocompletePredictionsRequest.builder()
                 .setQuery(query)
@@ -143,19 +160,22 @@ actual class MapComponent(
                 }
         }
 
-    suspend fun searchPlaces(query: String, latLng: LatLng, bounds: LatLngBounds): List<Place> =
+    suspend fun searchPlaces(query: String): List<Place> =
         suspendCancellableCoroutine { cont ->
-            val center = LatLng(latLng.latitude, latLng.longitude)
+            val bounds = _currentBounds.value ?: run {
+                cont.resume(emptyList()) { cause, _, _ ->
+                    Napier.d { "Cancelled search - no bounds: $cause" }
+                }
+                return@suspendCancellableCoroutine
+            }
+
             val fields = listOf(
                 Place.Field.ID,
                 Place.Field.DISPLAY_NAME,
                 Place.Field.LOCATION
             )
 
-            val request = SearchByTextRequest.builder(
-                query,
-                fields
-            )
+            val request = SearchByTextRequest.builder(query, fields)
                 .setLocationBias(RectangularBounds.newInstance(bounds))
                 .build()
 
@@ -166,18 +186,20 @@ actual class MapComponent(
                 }
             }.addOnFailureListener { response ->
                 Napier.e("Failed to search: ${response.message}")
+                cont.resume(emptyList()) { cause, _, _ ->
+                    Napier.d { "Cancelled search after failure: $cause" }
+                }
             }
         }
 
     suspend fun getEvents() {
         _isLoading.value = true
         _error.value = null
-
-
         val currentLocation = _currentLocation.value ?: run {
             _error.value = "Location not available"
             return
         }
+
         val currentBounds = getBounds(
             _currentRadiusMeters.value,
             currentLocation.latitude,
