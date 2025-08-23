@@ -1,7 +1,6 @@
 package com.razumly.mvp.core.data.repositories
 
 import com.razumly.mvp.core.data.DatabaseService
-import com.razumly.mvp.core.data.dataTypes.BillingAddress
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.razumly.mvp.core.data.dataTypes.RefundRequest
@@ -13,7 +12,6 @@ import com.razumly.mvp.core.util.jsonMVP
 import io.appwrite.Query
 import io.appwrite.services.Databases
 import io.appwrite.services.Functions
-import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
@@ -84,7 +82,7 @@ class BillingRepository(
 
     override suspend fun getOnboardingLink(): Result<String> = runCatching {
         val user = userRepository.currentUser.value.getOrThrow()
-        if (user.hasStripeAccount == true) throw Exception("User has no stripe account")
+        if (user.hasStripeAccount != true) throw Exception("User has no stripe account")
 
         val response = jsonMVP.decodeFromString<CreateAccountResponse>(
             functions.createExecution(
