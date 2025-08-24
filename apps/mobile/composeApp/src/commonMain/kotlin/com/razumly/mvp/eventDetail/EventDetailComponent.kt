@@ -960,8 +960,9 @@ class DefaultEventDetailComponent(
 
     override fun sendNotification(title: String, message: String) {
         scope.launch {
+            val isTournament = selectedEvent.value.event is Tournament
             notificationsRepository.sendEventNotification(
-                eventWithRelations.value.event.id, title, message
+                eventWithRelations.value.event.id, title, message, isTournament
             ).onFailure {
                 _errorState.value = ErrorMessage(("Failed to send message: " + it.message))
             }

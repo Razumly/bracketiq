@@ -20,9 +20,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 interface IPushNotificationsRepository {
@@ -55,7 +53,8 @@ interface IPushNotificationsRepository {
     suspend fun sendEventNotification(
         eventId: String,
         title: String,
-        body: String
+        body: String,
+        isTournament: Boolean
     ): Result<Execution>
 
     suspend fun sendMatchNotification(
@@ -102,7 +101,7 @@ class PushNotificationsRepository(
         val managerListener = object : NotifierManager.Listener {
             override fun onNewToken(token: String) {
                 scope.launch {
-                    runCatching{
+                    runCatching {
                         if (_pushTarget.value.isNotBlank()) {
                             account.updatePushTarget(_pushTarget.value, token)
                             userDataSource.savePushToken(token)
@@ -119,7 +118,10 @@ class PushNotificationsRepository(
 
             override fun onNotificationClicked(data: PayloadData) {
                 super.onNotificationClicked(data)
-                Napier.d(tag = "PushNotificationsRepository", message = "Notification clicked: $data")
+                Napier.d(
+                    tag = "PushNotificationsRepository",
+                    message = "Notification clicked: $data"
+                )
             }
 
             override fun onPushNotificationWithPayloadData(
@@ -205,9 +207,20 @@ class PushNotificationsRepository(
             mvpMessagingFunction(messageBody)
         }
 
-    override suspend fun sendEventNotification(eventId: String, title: String, body: String) =
+    override suspend fun sendEventNotification(
+        eventId: String,
+        title: String,
+        body: String,
+        isTournament: Boolean
+    ) =
         runCatching {
-            val messageBody = MessageBody("send", eventId, title = title, body = body)
+            val messageBody = MessageBody(
+                "send",
+                eventId,
+                title = title,
+                body = body,
+                isTournament = isTournament
+            )
             mvpMessagingFunction(messageBody)
         }
 
@@ -274,5 +287,6 @@ data class MessageBody(
     val userIds: List<String> = listOf(),
     val title: String = "",
     val body: String = "",
-    val action: String = ""
+    val action: String = "",
+    val isTournament: Boolean = false,
 )
