@@ -27,7 +27,7 @@ compose.resources {
     generateResClass = always
 }
 
-val mvpVersion = "0.4.4"
+val mvpVersion = "0.4.5"
 val mvpVersionCode = 9
 kotlin {
     androidTarget {
