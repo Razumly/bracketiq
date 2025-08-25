@@ -3,6 +3,8 @@ package com.razumly.mvp.core.data.repositories
 import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
+import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventTeamCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
@@ -17,7 +19,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -42,7 +43,7 @@ class EventRepository(
     private val teamRepository: ITeamRepository,
     private val userRepository: IUserRepository,
     private val notificationsRepository: IPushNotificationsRepository
-): IEventRepository {
+) : IEventRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var lastDocumentId = ""
 
@@ -58,61 +59,58 @@ class EventRepository(
 
     override fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>> =
         callbackFlow {
-        val localFlow = launch {databaseService.getEventImpDao.getEventWithRelationsFlow(eventId)
-            .collect {
-                trySend(Result.success(it))
+            val localJob = launch {
+                databaseService.getEventImpDao.getEventWithRelationsFlow(eventId)
+                    .collect { trySend(Result.success(it)) }
             }
-        }
-        val remoteFlow = launch{
-            getEvent(eventId).onSuccess { result ->
-                val playersDeferred = if (result.event.playerIds.isNotEmpty()) {
-                    async { userRepository.getUsers(result.event.playerIds) }
-                } else { async { Result.success(emptyList()) } }
-                val hostDeferred = async { userRepository.getUsers(listOf(result.event.hostId)) }
-                val teamsDeferred = if (result.event.teamIds.isNotEmpty()) {
-                    async { teamRepository.getTeams(result.event.teamIds) }
-                } else { async { Result.success(emptyList()) } }
 
-                val playersResult = playersDeferred.await()
-                val hostResult = hostDeferred.await()
-                val teamsResult = teamsDeferred.await()
+            val remoteJob = launch {
+                getEvent(eventId).onSuccess { eventWithRelations ->
+                    val event = eventWithRelations.event
+                    val playersResult = if (event.playerIds.isNotEmpty()) {
+                        userRepository.getUsers(event.playerIds)
+                    } else Result.success(emptyList())
+                    val hostResult = userRepository.getUsers(listOf(event.hostId))
+                    val teamsResult = if (event.teamIds.isNotEmpty()) {
+                        teamRepository.getTeams(event.teamIds)
+                    } else Result.success(emptyList())
 
-                listOf(
-                    playersResult, hostResult, teamsResult
-                ).forEach { res ->
-                    res.onFailure { error ->
-                        trySend(Result.failure(error))
+                    listOf(playersResult, hostResult, teamsResult).forEach { result ->
+                        result.onFailure { error -> trySend(Result.failure(error)) }
                     }
+
+                    insertEventCrossReferences(
+                        eventId = eventId,
+                        players = playersResult.getOrThrow(),
+                        host = hostResult.getOrThrow(),
+                        teams = teamsResult.getOrThrow()
+                    )
+                }.onFailure { error ->
+                    trySend(Result.failure(error))
                 }
-                databaseService.getTeamDao.upsertEventTeamCrossRefs(teamsResult.getOrThrow().map {
-                    EventTeamCrossRef(
-                        it.id, eventId
-                    )
-                })
-                databaseService.getUserDataDao.upsertUserEventCrossRefs(playersResult.getOrThrow().map {
-                    EventUserCrossRef(
-                        it.id, eventId
-                    )
-                })
-                databaseService.getUserDataDao.upsertUserEventCrossRefs(hostResult.getOrThrow().map {
-                    EventUserCrossRef(
-                        it.id, eventId
-                    )
-                })
-                databaseService.getTeamDao.upsertTeamPlayerCrossRefs(teamsResult.getOrThrow().map {
-                    it.playerIds.map { playerId ->
-                        TeamPlayerCrossRef(
-                            it.id, playerId
-                        )
-                    }
-                }.flatten())
+            }
+
+            awaitClose {
+                localJob.cancel()
+                remoteJob.cancel()
             }
         }
 
-        awaitClose {
-            localFlow.cancel()
-            remoteFlow.cancel()
-        }
+    private suspend fun insertEventCrossReferences(
+        eventId: String, players: List<UserData>, host: List<UserData>, teams: List<Team>
+    ) {
+        databaseService.getEventImpDao.deleteEventCrossRefs(eventId)
+
+        databaseService.getEventImpDao.upsertEventTeamCrossRefs(
+            teams.map { EventTeamCrossRef(it.id, eventId) })
+        databaseService.getUserDataDao.upsertUserEventCrossRefs(
+            (players).map { EventUserCrossRef(it.id, eventId) })
+        databaseService.getTeamDao.upsertTeamPlayerCrossRefs(
+            teams.flatMap { team ->
+                team.playerIds.map { playerId ->
+                    TeamPlayerCrossRef(team.id, playerId)
+                }
+            })
     }
 
     override suspend fun getEvent(eventId: String): Result<EventWithRelations> =
@@ -169,17 +167,16 @@ class EventRepository(
         }
         val response = multiResponse(
             getRemoteData = {
-                database.listDocuments(
-                    DbConstants.DATABASE_NAME,
-                    DbConstants.EVENT_COLLECTION,
-                    queries = combinedQuery,
-                    EventDTO::class
-                ).documents.map { dtoDoc -> dtoDoc.convert { it.toEvent(dtoDoc.id) }.data }
-            },
+            database.listDocuments(
+                DbConstants.DATABASE_NAME,
+                DbConstants.EVENT_COLLECTION,
+                queries = combinedQuery,
+                EventDTO::class
+            ).documents.map { dtoDoc -> dtoDoc.convert { it.toEvent(dtoDoc.id) }.data }
+        },
             getLocalData = { emptyList() },
             saveData = { databaseService.getEventImpDao.upsertEvents(it) },
-            deleteData = { }
-        )
+            deleteData = { })
 
         if (response.isSuccess) {
             lastDocumentId = response.getOrNull()?.lastOrNull()?.id ?: ""
@@ -193,8 +190,8 @@ class EventRepository(
     }
 
     override fun getEventsFlow(query: String): Flow<Result<List<EventImp>>> {
-        val localFlow = databaseService.getEventImpDao.getAllCachedEvents()
-            .map { Result.success(it) }
+        val localFlow =
+            databaseService.getEventImpDao.getAllCachedEvents().map { Result.success(it) }
         return localFlow
     }
 

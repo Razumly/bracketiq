@@ -358,24 +358,16 @@ class DefaultEventDetailComponent(
                         }
 
                         PaymentResult.Completed -> {
-                            val teams =
-                                if (event.teamSignup) event.teamIds + _usersTeam.value?.team?.id else emptyList()
-                            val players =
-                                event.playerIds + if (event.teamSignup) _usersTeam.value?.team?.playerIds.orEmpty() else listOf(
-                                    currentUser.value.id
-                                )
-                            val update = when (selectedEvent.value.event) {
-                                is Tournament -> (selectedEvent.value.event as Tournament).copy(
-                                    teamIds = teams.filterNotNull(), playerIds = players
-                                )
 
-                                is EventImp -> (selectedEvent.value.event as EventImp).copy(
-                                    teamIds = teams.filterNotNull(), playerIds = players
-                                )
+                            loadingHandler.showLoading("Reloading Event")
+                            val userJoinedSuccessfully = waitForUserInEventWithTimeout()
+                            if (!userJoinedSuccessfully) {
+                                _errorState.value =
+                                    ErrorMessage("Failed to confirm event join. Please reload event.")
                             }
-                            eventAbsRepository.updateLocalEvent(update)
                         }
                     }
+                    loadingHandler.hideLoading()
                 }
             }
         }
@@ -412,30 +404,6 @@ class DefaultEventDetailComponent(
         }
         scope.launch {
             _divisionMatches.collect { generateRounds() }
-        }
-        scope.launch {
-            paymentResult.collect { result ->
-                when (result) {
-                    PaymentResult.Canceled -> {
-                        _errorState.value = ErrorMessage("Payment Canceled")
-                    }
-                    is PaymentResult.Failed -> {
-                        _errorState.value = ErrorMessage(result.error)
-                    }
-                    PaymentResult.Completed -> {
-                        _errorState.value = null
-
-                        loadingHandler.showLoading("Reloading Event")
-                        val userJoinedSuccessfully = waitForUserInEventWithTimeout()
-                        if (!userJoinedSuccessfully) {
-                            loadingHandler.hideLoading()
-                            _errorState.value =
-                                ErrorMessage("Failed to confirm event join. Please reload event.")
-                        }
-                    }
-                    null -> {}
-                }
-            }
         }
     }
 
@@ -561,7 +529,6 @@ class DefaultEventDetailComponent(
         } ?: run {
             showPaymentSheet(intent)
         }
-        loadingHandler.showLoading("Reloading Event")
     }
 
     private suspend fun showPaymentSheet(intent: PurchaseIntent) {

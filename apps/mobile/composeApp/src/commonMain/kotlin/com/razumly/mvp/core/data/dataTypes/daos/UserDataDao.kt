@@ -44,9 +44,6 @@ interface UserDataDao {
     @Query("DELETE FROM user_tournament_cross_ref WHERE userId IN (:userIds)")
     suspend fun deleteTournamentCrossRefById(userIds: List<String>)
 
-    @Query("DELETE FROM user_event_cross_ref WHERE userId IN (:userIds)")
-    suspend fun deleteEventCrossRefById(userIds: List<String>)
-
     @Query("DELETE FROM team_user_cross_ref WHERE userId IN (:userIds)")
     suspend fun deleteTeamCrossRefById(userIds: List<String>)
 

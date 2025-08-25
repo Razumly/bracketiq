@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface TournamentDao {
+
     @Upsert
     suspend fun upsertTournament(tournament: Tournament)
 
@@ -48,15 +49,18 @@ interface TournamentDao {
 
     @Transaction
     suspend fun upsertTournamentWithRelations(tournament: Tournament) {
-        deleteTournamentUserCrossRefs(tournament.id)
-        deleteTournamentMatchCrossRefs(tournament.id)
-        deleteTournamentTeamCrossRefs(tournament.id)
+        deleteTournamentCrossRefs(tournament.id)
         upsertTournament(tournament)
     }
 
     @Transaction
     suspend fun deleteTournamentWithCrossRefs(tournamentId: String) {
         deleteTournamentById(tournamentId)
+        deleteTournamentCrossRefs(tournamentId)
+    }
+
+    @Transaction
+    suspend fun deleteTournamentCrossRefs(tournamentId: String) {
         deleteTournamentUserCrossRefs(tournamentId)
         deleteTournamentMatchCrossRefs(tournamentId)
         deleteTournamentTeamCrossRefs(tournamentId)

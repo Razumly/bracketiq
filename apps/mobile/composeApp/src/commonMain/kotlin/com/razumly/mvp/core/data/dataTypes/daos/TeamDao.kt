@@ -9,7 +9,6 @@ import androidx.room.Upsert
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
-import com.razumly.mvp.core.data.dataTypes.crossRef.EventTeamCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.MatchTeamCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPendingPlayerCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
@@ -46,6 +45,9 @@ interface TeamDao {
     @Query("DELETE FROM Team WHERE id IN (:ids)")
     suspend fun deleteTeamsByIds(ids: List<String>)
 
+    @Query("SELECT * FROM team_user_cross_ref WHERE teamId == :teamId")
+    suspend fun getTeamPlayerCrossRefsByTeamId(teamId: String): List<TeamPlayerCrossRef>
+
     @Delete
     suspend fun deleteTeam(team: Team)
 
@@ -65,13 +67,13 @@ interface TeamDao {
     suspend fun upsertMatchTeamCrossRefs(crossRefs: List<MatchTeamCrossRef>)
 
     @Upsert
-    suspend fun upsertEventTeamCrossRefs(crossRefs: List<EventTeamCrossRef>)
-
-    @Upsert
     suspend fun upsertTournamentTeamCrossRefs(crossRefs: List<TournamentTeamCrossRef>)
 
     @Delete
     suspend fun deleteTeamPlayerCrossRef(crossRef: TeamPlayerCrossRef)
+
+    @Delete
+    suspend fun deleteTeamPlayerCrossRefs(crossRefs: List<TeamPlayerCrossRef>)
 
     @Delete
     suspend fun deleteTeamPendingPlayerCrossRef(crossRef: TeamPendingPlayerCrossRef)
@@ -81,9 +83,6 @@ interface TeamDao {
 
     @Query("DELETE FROM team_pending_player_cross_ref WHERE teamId == :teamId")
     suspend fun deleteTeamPendingPlayerCrossRefsByTeamId(teamId: String)
-
-    @Query("DELETE FROM event_team_cross_ref WHERE teamId == :teamId")
-    suspend fun deleteEventTeamCrossRefsByTeamId(teamId: String)
 
     @Query("DELETE FROM tournament_team_cross_ref WHERE teamId == :teamId")
     suspend fun deleteTournamentTeamCrossRefsByTeamId(teamId: String)

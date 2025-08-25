@@ -69,7 +69,6 @@ class TournamentRepository(
 
     override fun getTournamentWithRelationsFlow(tournamentId: String): Flow<Result<TournamentWithRelations>> =
         callbackFlow {
-            // Emit local data
             val localJob = launch {
                 databaseService.getTournamentDao.getTournamentWithRelationsFlow(tournamentId)
                     .collect { tournament ->
@@ -77,19 +76,21 @@ class TournamentRepository(
                     }
             }
 
-            // Fetch remote data and emit failure if needed
             val remoteJob = launch {
-                val result = getTournament(tournamentId)
-                result.onSuccess {
+                getTournament(tournamentId).onSuccess { result ->
                     val fieldsDeferred =
                         async { fieldRepository.getFieldsInTournament(tournamentId) }
-                    val playersDeferred = if (result.getOrNull()?.playerIds?.isNotEmpty() == true) {
-                        async { userRepository.getUsers(result.getOrNull()?.playerIds ?: listOf()) }
-                    } else { async { Result.success(emptyList()) } }
-                    val hostDeferred = async { userRepository.getUsers(listOf(it.hostId)) }
-                    val teamsDeferred = if (result.getOrNull()?.teamIds?.isNotEmpty() == true) {
-                        async { teamRepository.getTeams(result.getOrNull()?.teamIds ?: listOf()) }
-                    } else { async { Result.success(emptyList()) } }
+                    val playersDeferred = if (result.playerIds.isNotEmpty()) {
+                        async { userRepository.getUsers(result.playerIds) }
+                    } else {
+                        async { Result.success(emptyList()) }
+                    }
+                    val hostDeferred = async { userRepository.getUsers(listOf(result.hostId)) }
+                    val teamsDeferred = if (result.teamIds.isNotEmpty()) {
+                        async { teamRepository.getTeams(result.teamIds) }
+                    } else {
+                        async { Result.success(emptyList()) }
+                    }
                     val matchesDeferred =
                         async { matchRepository.getMatchesOfTournament(tournamentId) }
 
@@ -107,7 +108,7 @@ class TournamentRepository(
                         }
                     }
 
-                    insertCrossReferences(
+                    insertTournamentCrossReferences(
                         players = playersResult.getOrThrow(),
                         host = hostResult.getOrThrow(),
                         teams = teamsResult.getOrThrow(),
@@ -125,49 +126,38 @@ class TournamentRepository(
             }
         }
 
-    private suspend fun insertCrossReferences(
+    private suspend fun insertTournamentCrossReferences(
+        tournamentId: String,
         players: List<UserData>,
         host: List<UserData>,
         teams: List<Team>,
-        matches: List<MatchMVP>,
-        tournamentId: String
+        matches: List<MatchMVP>
     ) {
-        databaseService.getTeamDao.upsertTournamentTeamCrossRefs(teams.map {
-            TournamentTeamCrossRef(
-                tournamentId, it.id
-            )
-        })
-        databaseService.getUserDataDao.upsertUserTournamentCrossRefs(players.map {
-            TournamentUserCrossRef(
-                it.id, tournamentId
-            )
-        })
-        databaseService.getUserDataDao.upsertUserTournamentCrossRefs(host.map {
-            TournamentUserCrossRef(
-                it.id, tournamentId
-            )
-        })
-        databaseService.getMatchDao.upsertTournamentMatchCrossRefs(matches.map {
-            TournamentMatchCrossRef(
-                tournamentId, it.id
-            )
-        })
+        // Clean up old cross-references first
+        databaseService.getTournamentDao.deleteTournamentCrossRefs(tournamentId)
+
+        // Insert new cross-references
+        databaseService.getTeamDao.upsertTournamentTeamCrossRefs(
+            teams.map { TournamentTeamCrossRef(tournamentId, it.id) })
+        databaseService.getUserDataDao.upsertUserTournamentCrossRefs(
+            (players).map { TournamentUserCrossRef(it.id, tournamentId) })
+        databaseService.getMatchDao.upsertTournamentMatchCrossRefs(
+            matches.map { TournamentMatchCrossRef(tournamentId, it.id) })
         databaseService.getTeamDao.upsertMatchTeamCrossRefs(
-            matches.map { match ->
-                listOfNotNull(match.team1?.let { MatchTeamCrossRef(it, match.id) },
+            matches.flatMap { match ->
+                listOfNotNull(
+                    match.team1?.let { MatchTeamCrossRef(it, match.id) },
                     match.team2?.let { MatchTeamCrossRef(it, match.id) })
-            }.flatten()
-        )
-        databaseService.getTeamDao.upsertTeamPlayerCrossRefs(teams.map {
-            it.playerIds.map { playerId ->
-                TeamPlayerCrossRef(
-                    it.id, playerId
-                )
-            }
-        }.flatten())
-        matches.map { match ->
+            })
+        databaseService.getTeamDao.upsertTeamPlayerCrossRefs(
+            teams.flatMap { team ->
+                team.playerIds.map { playerId ->
+                    TeamPlayerCrossRef(team.id, playerId)
+                }
+            })
+        matches.mapNotNull { match ->
             match.field?.let { FieldMatchCrossRef(it, match.id) }
-        }.let { databaseService.getMatchDao.upsertFieldMatchCrossRefs(it.filterNotNull()) }
+        }.let { databaseService.getMatchDao.upsertFieldMatchCrossRefs(it) }
     }
 
     override fun getTournamentFlow(tournamentId: String): Flow<Result<Tournament>> =
@@ -180,7 +170,8 @@ class TournamentRepository(
         } else {
             listOf(query)
         }
-        val response = multiResponse(getRemoteData = {
+        val response = multiResponse(
+            getRemoteData = {
             database.listDocuments(
                 DbConstants.DATABASE_NAME,
                 DbConstants.TOURNAMENT_COLLECTION,
