@@ -1,9 +1,6 @@
 package com.razumly.mvp.userAuth
 
-import androidx.collection.mutableObjectListOf
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,8 +17,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.DisposableEffectResult
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -35,13 +30,11 @@ import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.LoginState
 import com.razumly.mvp.core.presentation.composables.EmailSignInButton
 import com.razumly.mvp.core.presentation.composables.GoogleSignInButton
-import com.razumly.mvp.core.presentation.composables.PasswordField
 import com.razumly.mvp.core.presentation.composables.PlatformTextField
 import com.razumly.mvp.core.presentation.composables.rememberPlatformFocusManager
-import com.razumly.mvp.core.presentation.localAllFocusManagers
 
 @Composable
-fun AuthScreenBase(component: DefaultAuthComponent, onOauth2: () -> Unit?) {
+fun AuthScreenBase(component: AuthComponent, onOauth2: () -> Unit?) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }

@@ -37,7 +37,10 @@ suspend fun UserRepository.oauth2Login(activity: ComponentActivity): Result<Unit
                 eventInvites = listOf(),
                 tournamentInvites = listOf(),
                 hasStripeAccount = false,
-                uploadedImages = listOf()
+                uploadedImages = listOf(),
+                friendRequestIds = listOf(),
+                friendRequestSentIds = listOf(),
+                followingIds = listOf()
             )
             database.createDocument(
                 databaseId = DbConstants.DATABASE_NAME,

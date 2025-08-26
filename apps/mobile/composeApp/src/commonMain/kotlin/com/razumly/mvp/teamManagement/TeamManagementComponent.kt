@@ -8,6 +8,7 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.IEventAbsRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.presentation.INavigationHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -47,15 +48,16 @@ interface TeamManagementComponent {
 @OptIn(ExperimentalCoroutinesApi::class)
 class DefaultTeamManagementComponent(
     componentContext: ComponentContext,
+    eventAbsRepository: IEventAbsRepository,
     private val teamRepository: ITeamRepository,
     private val userRepository: IUserRepository,
-    private val eventAbsRepository: IEventAbsRepository,
     private val freeAgents: List<String>,
     override val selectedEvent: EventAbs?,
-    override val onBack: () -> Unit
+    private val navigationHandler: INavigationHandler
 ) : ComponentContext by componentContext, TeamManagementComponent {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
+    override val onBack = navigationHandler::navigateBack
     private val _errorState = MutableStateFlow<String?>(null)
 
     override val currentUser = userRepository.currentUser.value.getOrThrow()

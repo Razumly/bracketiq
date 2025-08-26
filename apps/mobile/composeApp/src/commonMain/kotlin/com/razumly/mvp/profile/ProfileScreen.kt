@@ -23,7 +23,6 @@ fun ProfileScreen(component: ProfileComponent) {
             is ProfileComponent.Child.ProfileDetails -> {
                 ProfileDetailsScreen(
                     component = instance.component,
-                    onBack = component::onBackClicked
                 )
             }
         }

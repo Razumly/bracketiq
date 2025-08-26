@@ -48,6 +48,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.composables.SearchBox
 import com.razumly.mvp.core.presentation.composables.SearchOverlay
 import com.razumly.mvp.core.presentation.util.isScrollingUp
@@ -56,7 +57,6 @@ import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
 import com.razumly.mvp.eventMap.EventMap
 import com.razumly.mvp.eventMap.MapComponent
-import com.razumly.mvp.home.LocalNavBarPadding
 import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
@@ -68,7 +68,7 @@ import dev.icerock.moko.geo.compose.BindLocationTrackerEffect
 @OptIn(ExperimentalHazeMaterialsApi::class)
 @Composable
 fun EventSearchScreen(
-    component: DefaultEventSearchComponent,
+    component: EventSearchComponent,
     mapComponent: MapComponent,
 ) {
     val events by component.events.collectAsState()

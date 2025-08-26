@@ -51,6 +51,12 @@ interface IUserRepository : IMVPRepository {
         firstName: String, lastName: String, email: String, password: String, userName: String
     ): Result<Unit>
     suspend fun getCurrentAccount(): Result<Unit>
+    suspend fun sendFriendRequest(user: UserData): Result<Unit>
+    suspend fun acceptFriendRequest(user: UserData): Result<Unit>
+    suspend fun declineFriendRequest(userId: String): Result<Unit>
+    suspend fun followUser(userId: String): Result<Unit>
+    suspend fun unfollowUser(userId: String): Result<Unit>
+    suspend fun removeFriend(userId: String): Result<Unit>
 }
 
 class UserRepository(
@@ -302,5 +308,39 @@ class UserRepository(
 
     override suspend fun getCurrentAccount() = runCatching {
         _currentAccount.value = Result.success(account.get())
+    }
+
+    override suspend fun sendFriendRequest(user: UserData): Result<Unit> = runCatching {
+        updateUser(user.copy(friendRequestIds = user.friendRequestIds + currentUser.value.getOrThrow().id))
+        val currentUserVal = currentUser.value.getOrThrow()
+        updateUser(currentUserVal.copy(friendRequestSentIds = currentUserVal.friendRequestSentIds + user.id))
+    }
+
+    override suspend fun acceptFriendRequest(user: UserData): Result<Unit> = runCatching {
+        val currentUserVal = currentUser.value.getOrThrow()
+        updateUser(currentUserVal.copy(friendIds = currentUserVal.friendIds + user.id))
+        updateUser(user.copy(friendIds = user.friendIds + currentUserVal.id))
+    }
+
+    override suspend fun declineFriendRequest(userId: String): Result<Unit> = runCatching {
+        val currentUserVal = currentUser.value.getOrThrow()
+        updateUser(currentUserVal.copy(friendRequestIds = currentUserVal.friendRequestIds - userId))
+        updateUser(currentUserVal.copy(friendRequestSentIds = currentUserVal.friendRequestSentIds - userId))
+    }
+
+    override suspend fun followUser(userId: String): Result<Unit> = runCatching {
+        val currentUserVal = currentUser.value.getOrThrow()
+        updateUser(currentUserVal.copy(followingIds = currentUserVal.followingIds + userId))
+    }
+
+    override suspend fun unfollowUser(userId: String): Result<Unit> = runCatching  {
+        val currentUserVal = currentUser.value.getOrThrow()
+        updateUser(currentUserVal.copy(followingIds = currentUserVal.followingIds - userId))
+    }
+
+    override suspend fun removeFriend(userId: String): Result<Unit> = runCatching  {
+        val currentUserVal = currentUser.value.getOrThrow()
+        updateUser(currentUserVal.copy(friendIds = currentUserVal.friendIds - userId))
+        updateUser(currentUserVal.copy(friendRequestSentIds = currentUserVal.friendRequestSentIds - userId))
     }
 }

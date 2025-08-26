@@ -15,6 +15,7 @@ import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.util.calcDistance
 import com.razumly.mvp.core.util.getBounds
 import com.razumly.mvp.eventSearch.util.EventFilter
+import com.razumly.mvp.core.presentation.INavigationHandler
 import dev.icerock.moko.geo.LatLng
 import dev.icerock.moko.geo.LocationTracker
 import io.github.aakira.napier.Napier
@@ -37,7 +38,6 @@ import kotlin.time.ExperimentalTime
 
 interface EventSearchComponent {
     val locationTracker: LocationTracker
-    val onEventSelected: (event: EventAbs) -> Unit
     val currentRadius: StateFlow<Double>
     val errorState: StateFlow<ErrorMessage?>
     val isLoading: StateFlow<Boolean>
@@ -68,7 +68,7 @@ class DefaultEventSearchComponent(
     eventId: String?,
     tournamentId: String?,
     override val locationTracker: LocationTracker,
-    override val onEventSelected: (event: EventAbs) -> Unit,
+    private val navigationHandler: INavigationHandler
 ) : ComponentContext by componentContext, EventSearchComponent {
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
 
@@ -141,7 +141,7 @@ class DefaultEventSearchComponent(
         if (eventId != null) {
             scope.launch {
                 eventRepository.getEvent(eventId).onSuccess {
-                    onEventSelected(it.event)
+                    navigationHandler.navigateToEvent(it.event)
                 }.onFailure { e ->
                     _errorState.value = ErrorMessage("Failed to fetch event: ${e.message}")
                 }
@@ -149,7 +149,7 @@ class DefaultEventSearchComponent(
         } else if (tournamentId != null) {
             scope.launch {
                 tournamentRepository.getTournament(tournamentId).onSuccess {
-                    onEventSelected(it)
+                    navigationHandler.navigateToEvent(it)
                 }.onFailure { e ->
                     _errorState.value = ErrorMessage("Failed to fetch tournament: ${e.message}")
                 }
@@ -211,7 +211,7 @@ class DefaultEventSearchComponent(
     }
 
     override fun viewEvent(event: EventAbs) {
-        onEventSelected(event)
+        navigationHandler.navigateToEvent(event)
     }
 
     override fun suggestEvents(searchQuery: String) {

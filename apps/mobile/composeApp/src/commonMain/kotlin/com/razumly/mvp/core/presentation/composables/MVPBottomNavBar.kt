@@ -23,25 +23,25 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
-import com.razumly.mvp.home.HomeComponent
+import com.razumly.mvp.core.presentation.AppConfig
 
 data class NavigationItem(
-    val page: HomeComponent.Config,
+    val page: AppConfig,
     val icon: String, // Use string identifiers instead of ImageVector
     val titleResId: String // Use string instead of resource ID
 )
 
 @Composable
 fun MVPBottomNavBar(
-    selectedPage: HomeComponent.Config,
-    onPageSelected: (HomeComponent.Config) -> Unit,
+    selectedPage: AppConfig,
+    onPageSelected: (AppConfig) -> Unit,
     content: @Composable (PaddingValues) -> Unit
 ) {
     val items = listOf(
-        NavigationItem(HomeComponent.Config.Search(),"search","Search"),
-        NavigationItem(HomeComponent.Config.ChatList,"messages", "Messages"),
-        NavigationItem(HomeComponent.Config.Create, "add", "Create"),
-        NavigationItem(HomeComponent.Config.Profile, "person", "Profile")
+        NavigationItem(AppConfig.Search(),"search","Search"),
+        NavigationItem(AppConfig.ChatList,"messages", "Messages"),
+        NavigationItem(AppConfig.Create, "add", "Create"),
+        NavigationItem(AppConfig.ProfileHome, "person", "Profile")
     )
 
     var navBarHeight by remember { mutableStateOf(0.dp) }

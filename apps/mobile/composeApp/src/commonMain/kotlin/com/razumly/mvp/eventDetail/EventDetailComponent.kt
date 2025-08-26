@@ -5,6 +5,7 @@ package com.razumly.mvp.eventDetail
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.backhandler.BackCallback
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
+import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.EventAbsWithRelations
 import com.razumly.mvp.core.data.dataTypes.EventImp
@@ -36,6 +37,7 @@ import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.util.empty
 import com.razumly.mvp.eventDetail.data.IMatchRepository
+import com.razumly.mvp.core.presentation.INavigationHandler
 import io.appwrite.models.User
 import io.github.ismoy.imagepickerkmp.GalleryPhotoHandler.PhotoResult
 import kotlinx.coroutines.Dispatchers
@@ -92,6 +94,8 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val showMatchEditDialog: StateFlow<MatchEditDialogState?>
     val eventImageUrls: StateFlow<List<String>>
 
+
+    fun onNavigateToChat(chatGroup: ChatGroupWithRelations)
     fun matchSelected(selectedMatch: MatchWithRelations)
     fun showFeeBreakdown(feeBreakdown: FeeBreakdown, onConfirm: () -> Unit, onCancel: () -> Unit)
     fun onHostCreateAccount()
@@ -166,15 +170,14 @@ class DefaultEventDetailComponent(
     userRepository: IUserRepository,
     fieldRepository: IFieldRepository,
     event: EventAbs,
-    onBack: () -> Unit,
     private val notificationsRepository: IPushNotificationsRepository,
     private val billingRepository: IBillingRepository,
     private val eventAbsRepository: IEventAbsRepository,
     private val matchRepository: IMatchRepository,
     private val teamRepository: ITeamRepository,
     private val imageRepository: IImagesRepository,
-    private val onMatchSelected: (MatchWithRelations, Tournament) -> Unit,
-    private val onNavigateToTeamSettings: (freeAgents: List<String>, event: EventAbs?) -> Unit
+    private val navigationHandler: INavigationHandler
+
 ) : EventDetailComponent, PaymentProcessor(), ComponentContext by componentContext {
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
     override val currentUser = userRepository.currentUser.map { it.getOrThrow() }
@@ -206,7 +209,7 @@ class DefaultEventDetailComponent(
         } else if (showDetails.value) {
             _showDetails.value = false
         } else {
-            onBack()
+            navigationHandler.navigateBack()
         }
     }
 
@@ -407,9 +410,13 @@ class DefaultEventDetailComponent(
         }
     }
 
+    override fun onNavigateToChat(chatGroup: ChatGroupWithRelations) {
+        navigationHandler.navigateToChat(chatGroup)
+    }
+
     override fun matchSelected(selectedMatch: MatchWithRelations) {
         when (selectedEvent.value.event) {
-            is Tournament -> onMatchSelected(
+            is Tournament -> navigationHandler.navigateToMatch(
                 selectedMatch, selectedEvent.value.event as Tournament
             )
 
@@ -620,7 +627,7 @@ class DefaultEventDetailComponent(
     }
 
     override fun createNewTeam() {
-        onNavigateToTeamSettings(
+        navigationHandler.navigateToTeams(
             selectedEvent.value.event.freeAgents, selectedEvent.value.event
         )
     }

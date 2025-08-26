@@ -9,26 +9,21 @@ import com.arkivanov.decompose.router.stack.pop
 import com.arkivanov.decompose.router.stack.push
 import com.arkivanov.decompose.value.Value
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
-import com.razumly.mvp.core.data.dataTypes.BillingAddress
-import com.razumly.mvp.core.data.dataTypes.EventAbs
-import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentProcessor
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
+import com.razumly.mvp.core.presentation.AppConfig
+import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.profile.profileDetails.ProfileDetailsComponent
-import io.appwrite.services.Account
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.serialization.Serializable
 import org.koin.core.parameter.parametersOf
 import org.koin.mp.KoinPlatform.getKoin
 
@@ -53,28 +48,16 @@ interface ProfileComponent : IPaymentProcessor {
         data class ProfileHome(val component: ProfileComponent) : Child()
         data class ProfileDetails(val component: ProfileDetailsComponent) : Child()
     }
-
-    @Serializable
-    sealed class Config {
-        @Serializable
-        data object ProfileHome : Config()
-
-        @Serializable
-        data object ProfileDetails : Config()
-    }
 }
 
 class DefaultProfileComponent(
     componentContext: ComponentContext,
     private val userRepository: IUserRepository,
-    private val onNavigateToLogin: () -> Unit,
-    private val onNavigateToEvents: () -> Unit,
-    private val onNavigateToTeamSettings: (freeAgents: List<String>, event: EventAbs?) -> Unit,
-    private val onNavigateToRefundManager: () -> Unit,
     private val billingRepository: IBillingRepository,
+    private val navigationHandler: INavigationHandler
 ) : ProfileComponent, PaymentProcessor(), ComponentContext by componentContext {
 
-    private val navigation = StackNavigation<ProfileComponent.Config>()
+    private val navigation = StackNavigation<AppConfig>()
     private val koin = getKoin()
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
 
@@ -85,8 +68,8 @@ class DefaultProfileComponent(
 
     override val childStack = childStack(
         source = navigation,
-        initialConfiguration = ProfileComponent.Config.ProfileHome,
-        serializer = ProfileComponent.Config.serializer(),
+        initialConfiguration = AppConfig.ProfileHome,
+        serializer = AppConfig.serializer(),
         handleBackButton = true,
         childFactory = ::createChild
     )
@@ -100,7 +83,7 @@ class DefaultProfileComponent(
 
     @OptIn(DelicateDecomposeApi::class)
     override fun navigateToProfileDetails() {
-        navigation.push(ProfileComponent.Config.ProfileDetails)
+        navigation.push(AppConfig.ProfileDetails)
     }
 
     override fun setLoadingHandler(handler: LoadingHandler) {
@@ -112,20 +95,20 @@ class DefaultProfileComponent(
             userRepository.logout().onFailure {
                 _errorState.value = ErrorMessage(it.message ?: "")
             }
-            onNavigateToLogin()
+            navigationHandler.navigateToLogin()
         }
     }
 
     override fun manageTeams() {
-        onNavigateToTeamSettings(listOf(), null)
+
     }
 
     override fun manageEvents() {
-        onNavigateToEvents()
+        navigationHandler.navigateToLogin()
     }
 
     override fun manageRefunds() {
-        onNavigateToRefundManager()
+        navigationHandler.navigateToRefunds()
     }
 
     override fun clearCache() {
@@ -159,17 +142,20 @@ class DefaultProfileComponent(
 
 
     private fun createChild(
-        config: ProfileComponent.Config, componentContext: ComponentContext
+        config: AppConfig, componentContext: ComponentContext
     ): ProfileComponent.Child = when (config) {
-        is ProfileComponent.Config.ProfileHome -> ProfileComponent.Child.ProfileHome(
-            this@DefaultProfileComponent // Return self for home
+        is AppConfig.ProfileHome -> ProfileComponent.Child.ProfileHome(
+            this@DefaultProfileComponent
         )
 
-        is ProfileComponent.Config.ProfileDetails -> ProfileComponent.Child.ProfileDetails(
+        is AppConfig.ProfileDetails -> ProfileComponent.Child.ProfileDetails(
             koin.get<ProfileDetailsComponent> {
                 parametersOf(
                     componentContext
                 )
             })
+        else -> ProfileComponent.Child.ProfileHome(
+            this@DefaultProfileComponent
+        )
     }
 }

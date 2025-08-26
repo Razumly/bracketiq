@@ -45,7 +45,7 @@ import com.razumly.mvp.core.util.emailAddressRegex
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileDetailsScreen(
-    component: ProfileDetailsComponent, onBack: () -> Unit
+    component: ProfileDetailsComponent
 ) {
     val popupHandler = LocalPopupHandler.current
     val loadingHandler = LocalLoadingHandler.current
@@ -115,7 +115,7 @@ fun ProfileDetailsScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(title = { Text("Profile Details") }, navigationIcon = {
-                IconButton(onClick = onBack) {
+                IconButton(onClick = component::onBack) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                 }
             })

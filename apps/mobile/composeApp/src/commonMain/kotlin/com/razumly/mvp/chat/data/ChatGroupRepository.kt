@@ -11,6 +11,7 @@ import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleRes
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.util.DbConstants
+import io.appwrite.ID
 import io.appwrite.Query
 import io.appwrite.models.RealtimeSubscription
 import io.appwrite.services.Databases
@@ -33,6 +34,7 @@ interface IChatGroupRepository : IMVPRepository {
     suspend fun updateChatGroup(newChatGroup: ChatGroup): Result<ChatGroup>
     suspend fun deleteUserFromChatGroup(chatGroup: ChatGroup, userId: String): Result<Unit>
     suspend fun addUserToChatGroup(chatGroup: ChatGroup, userId: String): Result<Unit>
+    suspend fun findOrCreateDirectMessage(otherUserId: String): Result<ChatGroupWithRelations>
 }
 
 class ChatGroupRepository(
@@ -201,4 +203,37 @@ class ChatGroupRepository(
         return updateChatGroup(newChatGroup).map {}
     }
 
+    override suspend fun findOrCreateDirectMessage(otherUserId: String): Result<ChatGroupWithRelations> =
+        runCatching {
+            val currentUserId = userRepository.currentUser.value.getOrThrow().id
+
+            // First, check for existing DM chat
+            val existingChats = databaseService.getChatGroupDao.getChatGroupsByUserId(currentUserId)
+            val existingDM = existingChats.find { chatGroup ->
+                chatGroup.userIds.size == 2 &&
+                        chatGroup.userIds.contains(otherUserId) &&
+                        chatGroup.userIds.contains(currentUserId)
+            }
+
+            if (existingDM != null) {
+                // Return existing chat with relations
+                return@runCatching databaseService.getChatGroupDao
+                    .getChatGroupWithRelations(existingDM.id)
+            }
+
+            // Create new DM chat
+            val otherUser = userRepository.getUsers(listOf(otherUserId)).getOrThrow().first()
+            val currentUser = userRepository.currentUser.value.getOrThrow()
+
+            val newChatGroup = ChatGroup(
+                id = ID.unique(),
+                name = "${currentUser.firstName} & ${otherUser.firstName}",
+                userIds = listOf(currentUserId, otherUserId),
+                hostId = currentUserId
+            )
+
+            createChatGroup(newChatGroup).getOrThrow()
+
+            databaseService.getChatGroupDao.getChatGroupWithRelations(newChatGroup.id)
+        }
 }

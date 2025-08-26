@@ -31,13 +31,13 @@ import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.ktx.DynamicScheme
+import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.util.backAnimation
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
 import com.razumly.mvp.eventCreate.steps.Preview
 import com.razumly.mvp.eventDetail.EventDetails
 import com.razumly.mvp.eventMap.MapComponent
-import com.razumly.mvp.home.LocalNavBarPadding
 import mvp.composeapp.generated.resources.Res
 import mvp.composeapp.generated.resources.create_tournament
 import mvp.composeapp.generated.resources.next

@@ -63,6 +63,9 @@ interface ChatGroupDao {
     @Query("SELECT * FROM ChatGroup WHERE userIds LIKE '%' || :userId || '%'")
     suspend fun getChatGroupsByUserId(userId: String): List<ChatGroup>
 
+    @Query("SELECT * FROM ChatGroup WHERE userIds LIKE '%' || :userId || '%'")
+    suspend fun getChatGroupWithRelations(userId: String): ChatGroupWithRelations
+
     @Transaction
     @Query("SELECT * FROM ChatGroup WHERE id = :id")
     fun getChatGroupFlowById(id: String): Flow<ChatGroupWithRelations>

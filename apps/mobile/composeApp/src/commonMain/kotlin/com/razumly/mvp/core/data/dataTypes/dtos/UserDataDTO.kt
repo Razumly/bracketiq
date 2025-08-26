@@ -10,6 +10,9 @@ data class UserDataDTO(
     val lastName: String,
     val teamIds: List<String>,
     val friendIds: List<String>,
+    val friendRequestIds: List<String>,
+    val friendRequestSentIds: List<String>,
+    val followingIds: List<String>,
     val userName: String,
     val teamInvites: List<String>,
     val eventInvites: List<String>,
@@ -23,17 +26,20 @@ data class UserDataDTO(
             firstName: String, lastName: String, userName: String, userId: String
         ): UserDataDTO {
             return UserDataDTO(
-                firstName,
-                lastName,
-                listOf(),
-                listOf(),
-                userName,
-                listOf(),
-                listOf(),
-                listOf(),
-                false,
-                listOf(),
-                userId
+                firstName = firstName,
+                lastName = lastName,
+                teamIds = listOf(),
+                friendIds = listOf(),
+                friendRequestIds = listOf(),
+                friendRequestSentIds = listOf(),
+                followingIds = listOf(),
+                userName = userName,
+                teamInvites = listOf(),
+                eventInvites = listOf(),
+                tournamentInvites = listOf(),
+                hasStripeAccount = false,
+                uploadedImages = listOf(),
+                id = userId,
             )
         }
     }
@@ -41,16 +47,19 @@ data class UserDataDTO(
 
 fun UserDataDTO.toUserData(id: String): UserData {
     return UserData(
-        firstName,
-        lastName,
-        teamIds,
-        friendIds,
-        userName,
-        teamInvites,
-        eventInvites,
-        tournamentInvites,
-        hasStripeAccount,
-        uploadedImages,
-        id
+        firstName = firstName,
+        lastName = lastName,
+        teamIds = teamIds,
+        friendIds = friendIds,
+        friendRequestIds = friendRequestIds,
+        friendRequestSentIds = friendRequestSentIds,
+        followingIds = followingIds,
+        userName = userName,
+        teamInvites = teamInvites,
+        eventInvites = eventInvites,
+        tournamentInvites = tournamentInvites,
+        hasStripeAccount = hasStripeAccount,
+        uploadedImages = uploadedImages,
+        id = id
     )
 }

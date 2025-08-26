@@ -13,6 +13,9 @@ data class UserData(
     val lastName: String,
     val teamIds: List<String>,
     val friendIds: List<String>,
+    val friendRequestIds: List<String>,
+    val friendRequestSentIds: List<String>,
+    val followingIds: List<String>,
     val userName: String,
     val teamInvites: List<String>,
     val eventInvites: List<String>,
@@ -34,6 +37,9 @@ data class UserData(
                 tournamentInvites = emptyList(),
                 hasStripeAccount = false,
                 uploadedImages = emptyList(),
+                friendRequestIds = emptyList(),
+                friendRequestSentIds = emptyList(),
+                followingIds = emptyList(),
                 id = ""
             )
         }
@@ -44,17 +50,20 @@ data class UserData(
 
     fun toUserDataDTO(): UserDataDTO {
         return UserDataDTO(
-            firstName,
-            lastName,
-            teamIds,
-            friendIds,
-            userName,
-            teamInvites,
-            eventInvites,
-            tournamentInvites,
-            hasStripeAccount,
-            uploadedImages,
-            id
+            firstName = firstName,
+            lastName = lastName,
+            teamIds = teamIds,
+            friendIds = friendIds,
+            friendRequestIds = friendRequestIds,
+            friendRequestSentIds = friendRequestSentIds,
+            followingIds = followingIds,
+            userName = userName,
+            teamInvites = teamInvites,
+            eventInvites = eventInvites,
+            tournamentInvites = tournamentInvites,
+            hasStripeAccount = hasStripeAccount,
+            uploadedImages = uploadedImages,
+            id = id
         )
     }
 }

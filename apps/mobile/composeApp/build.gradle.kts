@@ -22,13 +22,12 @@ composeCompiler {
     includeSourceInformation = true
 }
 
-
 compose.resources {
     generateResClass = always
 }
 
-val mvpVersion = "0.4.5"
-val mvpVersionCode = 9
+val mvpVersion = "0.4.6"
+val mvpVersionCode = 11
 kotlin {
     androidTarget {
         compilerOptions {
@@ -142,9 +141,21 @@ kotlin {
                 implementation(libs.kotlinx.coroutines.android)
                 implementation(libs.androidx.navigation.common.ktx)
                 implementation(libs.androidx.activity.ktx)
-                implementation(libs.google.auth.library.oauth2.http)
-                implementation(libs.google.http.client.gson)
-                implementation(libs.google.api.services.oauth2)
+                implementation("com.google.auth:google-auth-library-oauth2-http:1.37.1") {
+                    exclude(group = "org.apache.httpcomponents", module = "httpclient")
+                    exclude(group = "org.apache.httpcomponents", module = "httpcore")
+                    exclude(module = "commons-logging")
+                }
+                implementation("com.google.http-client:google-http-client-gson:2.0.0") {
+                    exclude(group = "org.apache.httpcomponents", module = "httpclient")
+                    exclude(group = "org.apache.httpcomponents", module = "httpcore")
+                    exclude(module = "commons-logging")
+                }
+                implementation("com.google.apis:google-api-services-oauth2:v2-rev20200213-2.0.0") {
+                    exclude(group = "org.apache.httpcomponents", module = "httpclient")
+                    exclude(group = "org.apache.httpcomponents", module = "httpcore")
+                    exclude(module = "commons-logging")
+                }
                 implementation(libs.firebase.messaging)
                 implementation(libs.stripe.android)
                 implementation(libs.financial.connections)
@@ -194,8 +205,12 @@ android {
         versionName = mvpVersion
     }
     buildTypes {
-        getByName("release") {
-            isMinifyEnabled = false
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles (
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+            )
         }
 
     }

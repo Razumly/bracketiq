@@ -3,6 +3,7 @@ package com.razumly.mvp.userAuth
 import com.arkivanov.decompose.ComponentContext
 import com.razumly.mvp.core.data.dataTypes.LoginState
 import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.presentation.INavigationHandler
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
@@ -22,13 +23,9 @@ interface AuthComponent {
     val isSignup: StateFlow<Boolean>
     val passwordError: StateFlow<String>
 
-    @Throws(Throwable::class)
     fun onLogin(email: String, password: String)
-    @Throws(Throwable::class)
     fun onLogout()
-    @Throws(Throwable::class)
     fun toggleIsSignup()
-    @Throws(Throwable::class)
     fun onSignup(
         email: String,
         password: String,
@@ -42,7 +39,7 @@ interface AuthComponent {
 class DefaultAuthComponent(
     internal val userRepository: IUserRepository,
     internal val componentContext: ComponentContext,
-    private val onNavigateToHome: () -> Unit
+    private val navigationHandler: INavigationHandler
 ) : ComponentContext by componentContext, AuthComponent {
 
     internal val scope = CoroutineScope(
@@ -56,8 +53,6 @@ class DefaultAuthComponent(
     internal val _loginState = MutableStateFlow<LoginState>(LoginState.Initial)
     override val loginState: StateFlow<LoginState> = _loginState.asStateFlow()
 
-    internal val _currentUser = userRepository.currentUser
-
     private val _isSignup = MutableStateFlow(false)
     override val isSignup: StateFlow<Boolean> = _isSignup.asStateFlow()
 
@@ -65,31 +60,29 @@ class DefaultAuthComponent(
     override val passwordError = _passwordError.asStateFlow()
 
     init {
-        scope.launch {
-            _loginState.collect {
-                if (it == LoginState.Success) {
-                    onNavigateToHome()
-                }
-            }
-        }
-        _currentUser
+        // Don't automatically navigate - RootComponent handles this now
+        userRepository.currentUser
             .filter { it.isSuccess }
             .take(1)
-            .onEach { _loginState.value = LoginState.Success }
+            .onEach {
+                _loginState.value = LoginState.Success
+                // RootComponent will handle navigation based on user state
+            }
             .launchIn(scope)
     }
 
     override fun onLogin(email: String, password: String) {
         scope.launch {
             _loginState.value = LoginState.Loading
-
             userRepository.login(email, password).onFailure {
                 _loginState.value = LoginState.Error(it.message.toString())
             }.onSuccess {
-                if (_currentUser.value.getOrThrow().id.isBlank()) {
+                val currentUser = userRepository.currentUser.value.getOrNull()
+                if (currentUser?.id.isNullOrBlank()) {
                     _loginState.value = LoginState.Error("Invalid email or password")
                 } else {
                     _loginState.value = LoginState.Success
+                    // Navigation will be handled by RootComponent automatically
                 }
             }
         }
@@ -100,6 +93,7 @@ class DefaultAuthComponent(
             userRepository.logout()
                 .onSuccess {
                     _loginState.value = LoginState.Initial
+                    navigationHandler.navigateToLogin()
                 }.onFailure {
                     _loginState.value = LoginState.Error("Failed to logout")
                 }
@@ -111,16 +105,13 @@ class DefaultAuthComponent(
     }
 
     override fun onSignup(
-        email: String,
-        password: String,
-        confirmPassword: String,
-        firstName: String,
-        lastName: String,
-        userName: String
+        email: String, password: String, confirmPassword: String,
+        firstName: String, lastName: String, userName: String
     ) {
         if (password != confirmPassword) {
             return
         }
+
         scope.launch {
             userRepository.createNewUser(email, password, firstName, lastName, userName)
                 .onSuccess {

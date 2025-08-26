@@ -7,8 +7,8 @@ import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.presentation.INavigationHandler
 import io.appwrite.ID
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,9 +38,9 @@ interface ChatListComponent {
 
 class DefaultChatListComponent(
     componentContext: ComponentContext,
-    private val onNavigateToChat: (ChatGroupWithRelations) -> Unit,
     private val chatGroupRepository: IChatGroupRepository,
     private val userRepository: IUserRepository,
+    private val navigationHandler: INavigationHandler,
 ) : ChatListComponent,
     ComponentContext by componentContext {
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
@@ -87,7 +87,7 @@ class DefaultChatListComponent(
     }
 
     override fun onChatSelected(chat: ChatGroupWithRelations) {
-        onNavigateToChat(chat)
+        navigationHandler.navigateToChat(chat)
     }
 
     override fun updateNewChatField(update: ChatGroup.() -> ChatGroup) {

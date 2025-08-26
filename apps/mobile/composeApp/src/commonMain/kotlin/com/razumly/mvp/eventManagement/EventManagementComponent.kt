@@ -6,16 +6,14 @@ import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.repositories.IEventAbsRepository
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
-import com.razumly.mvp.core.util.getBounds
+import com.razumly.mvp.core.presentation.INavigationHandler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -34,11 +32,13 @@ interface EventManagementComponent {
 
 class DefaultEventManagementComponent(
     componentContext: ComponentContext,
-    override val onEventSelected: (event: EventAbs) -> Unit,
     private val eventAbsRepository: IEventAbsRepository,
-    override val onBack: () -> Unit
+    navigationHandler: INavigationHandler
 ) : ComponentContext by componentContext, EventManagementComponent {
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
+
+    override val onEventSelected = navigationHandler::navigateToEvent
+    override val onBack = navigationHandler::navigateBack
 
     override val events: StateFlow<List<EventAbs>> = eventAbsRepository.getUsersEventsFlow().map { result ->
         result.getOrElse {

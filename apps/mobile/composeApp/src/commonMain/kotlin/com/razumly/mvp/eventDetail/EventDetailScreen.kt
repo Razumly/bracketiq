@@ -61,6 +61,7 @@ import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
 import com.razumly.mvp.core.data.repositories.FeeBreakdown
+import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.composables.PlatformTextField
 import com.razumly.mvp.core.presentation.composables.StripeButton
 import com.razumly.mvp.core.presentation.composables.TeamCard
@@ -75,7 +76,6 @@ import com.razumly.mvp.eventDetail.composables.SendNotificationDialog
 import com.razumly.mvp.eventDetail.composables.TeamSelectionDialog
 import com.razumly.mvp.eventDetail.composables.TournamentBracketView
 import com.razumly.mvp.eventMap.MapComponent
-import com.razumly.mvp.home.LocalNavBarPadding
 import kotlin.math.round
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.hours
@@ -476,14 +476,14 @@ fun EventDetailScreen(
                                     } else {
                                         ParticipantsView(showFab = {
                                             showFab = it
-                                        })
+                                        }, onNavigateToChat = component::onNavigateToChat)
                                     }
                                 }
 
                                 is EventWithRelations -> {
                                     ParticipantsView(showFab = {
                                         showFab = it
-                                    })
+                                    }, onNavigateToChat = component::onNavigateToChat)
                                 }
                             }
                             androidx.compose.animation.AnimatedVisibility(
