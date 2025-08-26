@@ -51,8 +51,8 @@ fun PlayerCardWithActions(
     Box {
         PlayerCard(
             player = player,
-            modifier = modifier.clickable {
-                if (!isCurrentUser) showPopup = true
+            modifier = modifier.clickable(enabled = !isCurrentUser) {
+                showPopup = true
             }
         )
 

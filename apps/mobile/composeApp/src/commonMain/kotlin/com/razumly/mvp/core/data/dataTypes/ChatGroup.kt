@@ -16,4 +16,8 @@ data class ChatGroup (
     val name: String,
     val userIds: List<String>,
     val hostId: String,
-): MVPDocument
+): MVPDocument {
+    companion object {
+        fun empty() = ChatGroup(id = "", name = "", userIds = listOf(), hostId = "")
+    }
+}

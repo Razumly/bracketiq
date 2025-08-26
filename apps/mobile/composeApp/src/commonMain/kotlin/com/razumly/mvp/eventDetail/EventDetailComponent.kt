@@ -5,7 +5,6 @@ package com.razumly.mvp.eventDetail
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.backhandler.BackCallback
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
-import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.EventAbsWithRelations
 import com.razumly.mvp.core.data.dataTypes.EventImp
@@ -95,7 +94,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val eventImageUrls: StateFlow<List<String>>
 
 
-    fun onNavigateToChat(chatGroup: ChatGroupWithRelations)
+    fun onNavigateToChat(user: UserData)
     fun matchSelected(selectedMatch: MatchWithRelations)
     fun showFeeBreakdown(feeBreakdown: FeeBreakdown, onConfirm: () -> Unit, onCancel: () -> Unit)
     fun onHostCreateAccount()
@@ -410,8 +409,8 @@ class DefaultEventDetailComponent(
         }
     }
 
-    override fun onNavigateToChat(chatGroup: ChatGroupWithRelations) {
-        navigationHandler.navigateToChat(chatGroup)
+    override fun onNavigateToChat(user: UserData) {
+        navigationHandler.navigateToChat(user = user)
     }
 
     override fun matchSelected(selectedMatch: MatchWithRelations) {

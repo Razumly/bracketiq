@@ -3,6 +3,7 @@ package com.razumly.mvp.chat.data
 import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
+import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.crossRef.ChatUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.dtos.MessageMVPDTO
 import com.razumly.mvp.core.data.repositories.IMVPRepository
@@ -23,18 +24,21 @@ import kotlinx.coroutines.IO
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 interface IChatGroupRepository : IMVPRepository {
     val chatGroupsFlow: Flow<Result<List<ChatGroupWithRelations>>>
 
-    fun getChatGroupFlow(chatGroupId: String): Flow<Result<ChatGroupWithRelations>>
+    fun getChatGroupFlow(
+        user: UserData?, chatGroup: ChatGroupWithRelations?
+    ): Flow<Result<ChatGroupWithRelations>>
+
     suspend fun createChatGroup(newChatGroup: ChatGroup): Result<Unit>
     suspend fun updateChatGroup(newChatGroup: ChatGroup): Result<ChatGroup>
     suspend fun deleteUserFromChatGroup(chatGroup: ChatGroup, userId: String): Result<Unit>
     suspend fun addUserToChatGroup(chatGroup: ChatGroup, userId: String): Result<Unit>
-    suspend fun findOrCreateDirectMessage(otherUserId: String): Result<ChatGroupWithRelations>
 }
 
 class ChatGroupRepository(
@@ -86,15 +90,16 @@ class ChatGroupRepository(
             }
     }
 
-    override fun getChatGroupFlow(chatGroupId: String): Flow<Result<ChatGroupWithRelations>> {
+    override fun getChatGroupFlow(
+        user: UserData?, chatGroup: ChatGroupWithRelations?
+    ): Flow<Result<ChatGroupWithRelations>> {
         return chatGroupsFlow.map { result ->
             result.fold(onSuccess = { list ->
-                val chat = list.find { it.chatGroup.id == chatGroupId }
-                if (chat != null) {
-                    Result.success(chat)
-                } else {
-                    Result.failure(Exception("Chat group not found for ID: $chatGroupId"))
-                }
+                user?.let { findOrCreateDirectMessage(it.id) }
+                    ?: list.find { it.chatGroup.id == chatGroup?.chatGroup?.id }
+                        ?.let { foundChatGroup ->
+                            Result.success(foundChatGroup)
+                        } ?: Result.failure(Exception("Chat group not found"))
             }, onFailure = { error ->
                 Result.failure(error)
             })
@@ -103,8 +108,8 @@ class ChatGroupRepository(
 
     private fun groupsFlow(): Flow<Result<List<ChatGroupWithRelations>>> {
         val userId = userRepository.currentUser.value.getOrThrow().id
-        val localFlow =
-            databaseService.getChatGroupDao.getChatGroupsFlowByUserId(userId).map { Result.success(it) }
+        val localFlow = databaseService.getChatGroupDao.getChatGroupsFlowByUserId(userId)
+            .map { Result.success(it) }
 
         _scope.launch {
             multiResponse(getRemoteData = {
@@ -154,9 +159,7 @@ class ChatGroupRepository(
             }.onFailure {
                 Napier.e("Failed to create chat group topic", it)
                 databases.deleteDocument(
-                    DbConstants.DATABASE_NAME,
-                    DbConstants.CHAT_GROUP_COLLECTION,
-                    chatGroup.id
+                    DbConstants.DATABASE_NAME, DbConstants.CHAT_GROUP_COLLECTION, chatGroup.id
                 )
                 throw it
             }
@@ -186,9 +189,7 @@ class ChatGroupRepository(
             )
         )
         pushNotificationsRepository.sendUserNotification(
-            userId,
-            "You left the chat",
-            chatGroup.name
+            userId, "You left the chat", chatGroup.name
         )
         return updateChatGroup(newChatGroup).map {}
     }
@@ -203,22 +204,22 @@ class ChatGroupRepository(
         return updateChatGroup(newChatGroup).map {}
     }
 
-    override suspend fun findOrCreateDirectMessage(otherUserId: String): Result<ChatGroupWithRelations> =
+    private suspend fun findOrCreateDirectMessage(otherUserId: String): Result<ChatGroupWithRelations> =
         runCatching {
             val currentUserId = userRepository.currentUser.value.getOrThrow().id
 
-            // First, check for existing DM chat
-            val existingChats = databaseService.getChatGroupDao.getChatGroupsByUserId(currentUserId)
+            val existingChats = chatGroupsFlow.first().getOrThrow()
             val existingDM = existingChats.find { chatGroup ->
-                chatGroup.userIds.size == 2 &&
-                        chatGroup.userIds.contains(otherUserId) &&
-                        chatGroup.userIds.contains(currentUserId)
+                chatGroup.chatGroup.userIds.size == 2 && chatGroup.chatGroup.userIds.contains(
+                    otherUserId
+                ) && chatGroup.chatGroup.userIds.contains(
+                    currentUserId
+                )
             }
 
             if (existingDM != null) {
-                // Return existing chat with relations
-                return@runCatching databaseService.getChatGroupDao
-                    .getChatGroupWithRelations(existingDM.id)
+                return@runCatching existingChats.find { it.chatGroup.id == existingDM.chatGroup.id }
+                    ?: throw Exception("Chat group not found")
             }
 
             // Create new DM chat

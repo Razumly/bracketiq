@@ -20,7 +20,6 @@ interface PlayerInteractionComponent {
     fun sendFriendRequest(user: UserData)
     fun followUser(user: UserData)
     fun unfollowUser(user: UserData)
-    fun createDirectMessage(user: UserData, onChatCreated: (ChatGroupWithRelations) -> Unit)
 }
 
 class DefaultPlayerInteractionComponent(
@@ -66,19 +65,6 @@ class DefaultPlayerInteractionComponent(
                 _errorState.value = ErrorMessage(it.message ?: "")
             }
             _loadingHandler.hideLoading()
-        }
-    }
-
-    override fun createDirectMessage(user: UserData, onChatCreated: (ChatGroupWithRelations) -> Unit) {
-        scope.launch {
-            _loadingHandler.showLoading("Creating Direct Message ...")
-            chatRepository.findOrCreateDirectMessage(user.id).onSuccess { chat ->
-                _loadingHandler.hideLoading()
-                onChatCreated(chat)
-            }.onFailure {
-                _loadingHandler.hideLoading()
-                _errorState.value = ErrorMessage(it.message ?: "")
-            }
         }
     }
 }

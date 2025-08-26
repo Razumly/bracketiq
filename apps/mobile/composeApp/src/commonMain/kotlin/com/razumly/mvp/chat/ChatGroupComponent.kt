@@ -25,7 +25,7 @@ import kotlin.time.ExperimentalTime
 interface ChatGroupComponent {
     val currentUser: UserData
     val messageInput: StateFlow<String>
-    val chatGroup: StateFlow<ChatGroupWithRelations>
+    val chatGroup: StateFlow<ChatGroupWithRelations?>
     val errorState: StateFlow<String?>
 
     fun onMessageInputChange(newText: String)
@@ -36,10 +36,11 @@ interface ChatGroupComponent {
 @OptIn(ExperimentalTime::class)
 class DefaultChatGroupComponent(
     componentContext: ComponentContext,
-    private val chatGroupInit: ChatGroupWithRelations,
     userRepository: IUserRepository,
-    private val messagesRepository: IMessageRepository,
     chatGroupRepository: IChatGroupRepository,
+    messageUser: UserData?,
+    chatGroup: ChatGroupWithRelations?,
+    private val messagesRepository: IMessageRepository,
     private val pushNotificationsRepository: IPushNotificationsRepository
 ) : ChatGroupComponent, ComponentContext by componentContext {
 
@@ -48,13 +49,14 @@ class DefaultChatGroupComponent(
     private val _errorState = MutableStateFlow<String?>(null)
     override val errorState = _errorState.asStateFlow()
 
-    override val chatGroup = chatGroupRepository.getChatGroupFlow(chatGroupInit.chatGroup.id).map { result ->
-        val chatGroup = result.getOrElse {
-            _errorState.value = it.message
-            chatGroupInit
-        }
-        chatGroup.copy(messages = chatGroup.messages.sortedBy { it.sentTime })
-    }.stateIn(scope, SharingStarted.Eagerly, chatGroupInit)
+    override val chatGroup =
+        chatGroupRepository.getChatGroupFlow(messageUser, chatGroup).map { result ->
+            val chatGroup = result.getOrElse {
+                _errorState.value = it.message
+                null
+            }
+            chatGroup?.copy(messages = chatGroup.messages.sortedBy { it.sentTime })
+        }.stateIn(scope, SharingStarted.Eagerly, null)
 
     private val _messageInput = MutableStateFlow("")
     override val messageInput: StateFlow<String> = _messageInput
@@ -69,12 +71,13 @@ class DefaultChatGroupComponent(
         val text = _messageInput.value.trim()
         _messageInput.value = ""
         if (text.isNotBlank()) {
+            chatGroup.value ?: return
             val message = MessageMVP(
                 id = ID.unique(),
                 userId = currentUser.id,
                 body = text,
                 attachmentUrls = listOf(),
-                chatId = chatGroup.value.chatGroup.id,
+                chatId = chatGroup.value!!.chatGroup.id,
                 readByIds = listOf(currentUser.id),
                 sentTime = Clock.System.now()
             )
@@ -84,9 +87,7 @@ class DefaultChatGroupComponent(
                     _errorState.value = it.message
                 }
                 pushNotificationsRepository.sendChatGroupNotification(
-                    chatGroup.value.chatGroup.id,
-                    "New message from ${currentUser.fullName}",
-                    text
+                    chatGroup.value!!.chatGroup.id, "New message from ${currentUser.fullName}", text
                 ).onFailure {
                     _errorState.value = it.message
                 }

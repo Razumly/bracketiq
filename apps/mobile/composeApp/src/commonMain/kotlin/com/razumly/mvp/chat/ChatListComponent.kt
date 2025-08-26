@@ -87,7 +87,7 @@ class DefaultChatListComponent(
     }
 
     override fun onChatSelected(chat: ChatGroupWithRelations) {
-        navigationHandler.navigateToChat(chat)
+        navigationHandler.navigateToChat(chat = chat)
     }
 
     override fun updateNewChatField(update: ChatGroup.() -> ChatGroup) {

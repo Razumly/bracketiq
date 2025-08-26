@@ -29,6 +29,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.MessageMVP
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
@@ -45,12 +46,11 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
     val input by component.messageInput.collectAsState()
     val chatGroupWithRelations by component.chatGroup.collectAsState()
     val currentUserId = component.currentUser.id
-    val chatGroup = chatGroupWithRelations.chatGroup
-    val messages = chatGroupWithRelations.messages
-    val users = chatGroupWithRelations.users
+    val chatGroup = chatGroupWithRelations?.chatGroup ?: ChatGroup.empty()
+    val messages = chatGroupWithRelations?.messages ?: listOf()
+    val users = chatGroupWithRelations?.users ?: listOf()
     val listState = rememberLazyListState()
 
-    // Auto-scroll to bottom when new messages arrive
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.size - 1)
@@ -61,15 +61,13 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
         topBar = {
             TopAppBar(title = { Text(chatGroup.name) })
         },
-        contentWindowInsets = WindowInsets(0) // CRITICAL: Disable automatic insets
+        contentWindowInsets = WindowInsets(0)
     ) { paddingValues ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-            // REMOVED: .imePadding() - this was causing the double offset
         ) {
-            // Messages list - takes up remaining space
             LazyColumn(
                 state = listState,
                 modifier = Modifier

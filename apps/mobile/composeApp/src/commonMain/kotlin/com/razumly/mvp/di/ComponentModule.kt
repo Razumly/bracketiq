@@ -9,7 +9,10 @@ import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Tournament
+import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.presentation.DefaultPlayerInteractionComponent
 import com.razumly.mvp.core.presentation.INavigationHandler
+import com.razumly.mvp.core.presentation.PlayerInteractionComponent
 import com.razumly.mvp.core.presentation.RootComponent
 import com.razumly.mvp.core.presentation.RootComponent.DeepLinkNav
 import com.razumly.mvp.eventCreate.CreateEventComponent
@@ -115,13 +118,14 @@ val componentModule = module {
         )
     }
 
-    factory<ChatGroupComponent> { (componentContext: ComponentContext, chatGroup: ChatGroupWithRelations) ->
+    factory<ChatGroupComponent> { (componentContext: ComponentContext, user: UserData?, chat: ChatGroupWithRelations?) ->
         DefaultChatGroupComponent(
             componentContext = componentContext,
+            messageUser = user,
+            chatGroup = chat,
             userRepository = get(),
             messagesRepository = get(),
             pushNotificationsRepository = get(),
-            chatGroupInit = chatGroup,
             chatGroupRepository = get(),
         )
     }
@@ -167,6 +171,14 @@ val componentModule = module {
         DefaultProfileDetailsComponent(
             componentContext = params.get(),
             userRepository = get()
+        )
+    }
+
+    factory<PlayerInteractionComponent> { params ->
+        DefaultPlayerInteractionComponent(
+            componentContext = params.get(),
+            userRepository = get(),
+            chatRepository = get()
         )
     }
 }
