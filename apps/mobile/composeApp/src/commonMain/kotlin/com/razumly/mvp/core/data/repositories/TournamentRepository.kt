@@ -19,6 +19,7 @@ import com.razumly.mvp.core.util.DbConstants
 import com.razumly.mvp.core.util.convert
 import com.razumly.mvp.eventDetail.data.IMatchRepository
 import io.appwrite.Query
+import io.appwrite.extensions.json
 import io.appwrite.services.Databases
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -30,6 +31,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.serialization.Contextual
 
 interface ITournamentRepository : IMVPRepository {
     fun getTournamentWithRelationsFlow(tournamentId: String): Flow<Result<TournamentWithRelations>>
@@ -187,8 +189,19 @@ class TournamentRepository(
     }
 
     override fun getTournamentsFlow(query: String): Flow<Result<List<Tournament>>> {
-        val localFlow = databaseService.getTournamentDao.getAllCachedTournamentsFlow()
-            .map { Result.success(it) }
+        val queryMap = json.decodeFromString<Map<String, @Contextual Any>>(query)
+        val filterMap = if (queryMap.containsValue("equal")) {
+            { event: Tournament ->
+                (queryMap["values"] as List<*>).first() == event.hostId
+            }
+        } else {
+            { event: Tournament -> true }
+        }
+        val localFlow = databaseService.getTournamentDao.getAllCachedTournamentsFlow().map {
+                Result.success(it.filter { tournament ->
+                    filterMap(tournament)
+                })
+            }
         return localFlow
     }
 

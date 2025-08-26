@@ -21,7 +21,6 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlin.time.ExperimentalTime
 
@@ -179,6 +178,7 @@ class EventAbsRepository(
             is EventImp -> {
                 eventRepository.deleteEvent(event.id)
             }
+
             is Tournament -> {
                 tournamentRepository.deleteTournament(event.id)
             }
@@ -186,11 +186,22 @@ class EventAbsRepository(
     }
 
     override fun getUsersEventsFlow(): Flow<Result<List<EventAbs>>> {
-        return eventRepository.getEventsFlow(
+        val eventsFlow = eventRepository.getEventsFlow(
             Query.equal(
                 "hostId", userRepository.currentUser.value.getOrThrow().id
             )
         )
+        val tournamentsFlow = tournamentRepository.getTournamentsFlow(
+            Query.equal(
+                "hostId", userRepository.currentUser.value.getOrThrow().id
+            )
+        )
+
+        return combine(eventsFlow, tournamentsFlow) { events, tournaments ->
+            runCatching {
+                events.getOrDefault(emptyList()) + tournaments.getOrDefault(emptyList())
+            }
+        }
     }
 
     override suspend fun getUsersEvents(): Result<Pair<List<EventAbs>, Boolean>> {
@@ -239,29 +250,31 @@ class EventAbsRepository(
         }
     }
 
-    private suspend fun removePlayerFromEvent(event: EventAbs, player: UserData): Result<Unit> = runCatching {
-        val response = functions.createExecution(
-            DbConstants.EVENT_MANAGER_FUNCTION, Json.encodeToString(
-                EditEventRequest(
-                    eventId = event.id,
-                    userId = player.id,
-                    isTournament = (event.eventType.name == "TOURNAMENT"),
-                    command = "removeParticipant"
+    private suspend fun removePlayerFromEvent(event: EventAbs, player: UserData): Result<Unit> =
+        runCatching {
+            val response = functions.createExecution(
+                DbConstants.EVENT_MANAGER_FUNCTION, Json.encodeToString(
+                    EditEventRequest(
+                        eventId = event.id,
+                        userId = player.id,
+                        isTournament = (event.eventType.name == "TOURNAMENT"),
+                        command = "removeParticipant"
+                    )
                 )
             )
-        )
 
-        if (response.responseBody.isNotBlank()) {
-            val editEventResponse = Json.decodeFromString<EditEventResponse>(response.responseBody)
-            return if (editEventResponse.error.isNullOrBlank()) {
-                Result.success(Unit)
+            if (response.responseBody.isNotBlank()) {
+                val editEventResponse =
+                    Json.decodeFromString<EditEventResponse>(response.responseBody)
+                return if (editEventResponse.error.isNullOrBlank()) {
+                    Result.success(Unit)
+                } else {
+                    Result.failure(Exception(editEventResponse.error))
+                }
             } else {
-                Result.failure(Exception(editEventResponse.error))
+                return Result.failure(Exception("Failed to remove player from event"))
             }
-        } else {
-            return Result.failure(Exception("Failed to remove player from event"))
         }
-    }
 
     override suspend fun removeCurrentUserFromEvent(event: EventAbs): Result<Unit> {
         val currentUser = userRepository.currentUser.value.getOrThrow()

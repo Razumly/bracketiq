@@ -14,6 +14,7 @@ import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleRes
 import com.razumly.mvp.core.util.DbConstants
 import com.razumly.mvp.core.util.convert
 import io.appwrite.Query
+import io.appwrite.extensions.json
 import io.appwrite.services.Databases
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -24,6 +25,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.serialization.Contextual
 
 interface IEventRepository : IMVPRepository {
     fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>>
@@ -190,8 +192,20 @@ class EventRepository(
     }
 
     override fun getEventsFlow(query: String): Flow<Result<List<EventImp>>> {
-        val localFlow =
-            databaseService.getEventImpDao.getAllCachedEvents().map { Result.success(it) }
+        val queryMap = json.decodeFromString<Map<String, @Contextual Any>>(query)
+        val filterMap = if (queryMap.containsValue("equal")) {
+            { event: EventImp ->
+                (queryMap["values"] as List<*>).first() == event.hostId
+            }
+        } else {
+            { event: EventImp -> true }
+        }
+
+        val localFlow = databaseService.getEventImpDao.getAllCachedEvents().map {
+            Result.success(it.filter { event ->
+                filterMap(event)
+            })
+        }
         return localFlow
     }
 
