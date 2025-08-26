@@ -170,7 +170,8 @@ val componentModule = module {
     factory<ProfileDetailsComponent> { params ->
         DefaultProfileDetailsComponent(
             componentContext = params.get(),
-            userRepository = get()
+            userRepository = get(),
+            onNavigateBack = params.get()
         )
     }
 

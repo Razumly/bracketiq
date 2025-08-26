@@ -26,7 +26,7 @@ interface ProfileDetailsComponent : IPaymentProcessor {
     val currentUser: StateFlow<UserData>
     val currentAccount: StateFlow<User<Map<String, Any>>>
 
-    fun onBack()
+    fun onBackClicked()
     fun setLoadingHandler(loadingHandler: LoadingHandler)
 
     fun updateProfile(
@@ -41,8 +41,8 @@ interface ProfileDetailsComponent : IPaymentProcessor {
 class DefaultProfileDetailsComponent(
     private val componentContext: ComponentContext,
     private val userRepository: IUserRepository,
+    private val onNavigateBack: () -> Unit
 ) : ProfileDetailsComponent, PaymentProcessor(), ComponentContext by componentContext {
-
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
     private val _errorState = MutableStateFlow<ErrorMessage?>(null)
     override val errorState = _errorState.asStateFlow()
@@ -71,8 +71,8 @@ class DefaultProfileDetailsComponent(
 
     private lateinit var loadingHandler: LoadingHandler
 
-    override fun onBack() {
-        onBack()
+    override fun onBackClicked() {
+        onNavigateBack()
     }
 
     override fun setLoadingHandler(loadingHandler: LoadingHandler) {

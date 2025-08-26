@@ -115,7 +115,7 @@ fun ProfileDetailsScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(title = { Text("Profile Details") }, navigationIcon = {
-                IconButton(onClick = component::onBack) {
+                IconButton(onClick = component::onBackClicked) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                 }
             })

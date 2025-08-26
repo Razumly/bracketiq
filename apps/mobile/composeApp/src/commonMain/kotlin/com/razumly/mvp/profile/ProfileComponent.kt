@@ -11,12 +11,12 @@ import com.arkivanov.decompose.value.Value
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.presentation.AppConfig
+import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentProcessor
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
-import com.razumly.mvp.core.presentation.AppConfig
-import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.profile.profileDetails.ProfileDetailsComponent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -100,11 +100,11 @@ class DefaultProfileComponent(
     }
 
     override fun manageTeams() {
-
+        navigationHandler.navigateToTeams()
     }
 
     override fun manageEvents() {
-        navigationHandler.navigateToLogin()
+        navigationHandler.navigateToEvents()
     }
 
     override fun manageRefunds() {
@@ -151,7 +151,7 @@ class DefaultProfileComponent(
         is AppConfig.ProfileDetails -> ProfileComponent.Child.ProfileDetails(
             koin.get<ProfileDetailsComponent> {
                 parametersOf(
-                    componentContext
+                    componentContext, ::onBackClicked
                 )
             })
         else -> ProfileComponent.Child.ProfileHome(
