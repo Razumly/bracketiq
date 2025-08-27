@@ -26,6 +26,7 @@ import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
+import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentResult
@@ -36,7 +37,6 @@ import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.util.empty
 import com.razumly.mvp.eventDetail.data.IMatchRepository
-import com.razumly.mvp.core.presentation.INavigationHandler
 import io.appwrite.models.User
 import io.github.ismoy.imagepickerkmp.GalleryPhotoHandler.PhotoResult
 import kotlinx.coroutines.Dispatchers
@@ -175,7 +175,7 @@ class DefaultEventDetailComponent(
     private val matchRepository: IMatchRepository,
     private val teamRepository: ITeamRepository,
     private val imageRepository: IImagesRepository,
-    private val navigationHandler: INavigationHandler
+    private val navigationHandler: INavigationHandler,
 
 ) : EventDetailComponent, PaymentProcessor(), ComponentContext by componentContext {
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())

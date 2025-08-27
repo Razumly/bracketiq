@@ -5,7 +5,6 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
@@ -17,7 +16,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -51,6 +49,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -221,7 +220,15 @@ fun EventDetails(
 
     CompositionLocalProvider(localImageScheme provides imageScheme) {
         Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
-            // LazyColumn fills entire space
+            val scrollOffset = lazyListState.firstVisibleItemScrollOffset
+
+            BackgroundImage(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height((getScreenHeight() * 0.6f).dp)
+                    .graphicsLayer(translationY = -scrollOffset.toFloat()),
+                imageUrl = if (!editView) event.imageUrl else editEvent.imageUrl,
+            )
             LazyColumn(
                 state = lazyListState,
                 modifier = Modifier.fillMaxSize(),
@@ -230,19 +237,17 @@ fun EventDetails(
                 ),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Image as first item - will scroll with content
+
                 item {
-                    BackgroundImage(
-                        modifier = Modifier.fillMaxWidth().height((getScreenHeight() * 0.5f).dp),
-                        imageUrl = if (!editView) event.imageUrl else editEvent.imageUrl,
-                    ) {
+                    Box(modifier = Modifier.height((getScreenHeight() * 0.5f).dp)) {
                         if (editView) {
                             Button(
                                 onClick = { showImageSelector = true },
                                 modifier = Modifier.align(Alignment.Center).size(120.dp),
                                 shape = RoundedCornerShape(16.dp),
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color.Black, contentColor = Color.White
+                                    containerColor = Color.Black,
+                                    contentColor = Color.White
                                 ),
                                 contentPadding = PaddingValues(16.dp),
                                 elevation = ButtonDefaults.buttonElevation(defaultElevation = 8.dp)
@@ -267,7 +272,6 @@ fun EventDetails(
                         }
                     }
                 }
-
                 // First content card - overlapping the image
                 item {
                     Card(
@@ -1017,18 +1021,17 @@ fun ColumnScope.CardSection(
 
 @Composable
 fun BackgroundImage(
-    modifier: Modifier, imageUrl: String, content: @Composable BoxScope.() -> Unit
+    modifier: Modifier, imageUrl: String
 ) {
-    Box(modifier) { // Use the passed modifier directly
+    Box(modifier) {
         if (imageUrl.isNotBlank()) {
             AsyncImage(
                 model = imageUrl,
                 contentDescription = "Event Image",
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.wrapContentSize(Alignment.Center, unbounded = true)
+                modifier = Modifier.fillMaxSize()
             )
         }
-        content()
     }
 }
 
