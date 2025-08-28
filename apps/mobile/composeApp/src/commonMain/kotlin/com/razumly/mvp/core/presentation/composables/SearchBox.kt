@@ -43,11 +43,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -180,6 +178,7 @@ private fun FilterDropdown(
     var showStartPicker by remember { mutableStateOf(false) }
     var showEndPicker by remember { mutableStateOf(false) }
     AnimatedVisibility(
+        modifier = Modifier.padding(bottom = 8.dp),
         visible = visible,
         enter = expandVertically(animationSpec = tween(300)) + fadeIn(),
         exit = shrinkVertically(animationSpec = tween(300)) + fadeOut()

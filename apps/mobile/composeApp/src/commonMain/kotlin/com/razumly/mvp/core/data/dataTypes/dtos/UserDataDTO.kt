@@ -19,6 +19,7 @@ data class UserDataDTO(
     val tournamentInvites: List<String>,
     val hasStripeAccount: Boolean?,
     val uploadedImages: List<String>,
+    val profileImage: String? = null,
     @Transient val id: String = "",
 ) {
     companion object {
@@ -39,13 +40,14 @@ data class UserDataDTO(
                 tournamentInvites = listOf(),
                 hasStripeAccount = false,
                 uploadedImages = listOf(),
+                profileImage = null,
                 id = userId,
             )
         }
     }
 }
 
-fun UserDataDTO.toUserData(id: String): UserData {
+suspend fun UserDataDTO.toUserData(id: String): UserData {
     return UserData(
         firstName = firstName,
         lastName = lastName,
@@ -60,6 +62,7 @@ fun UserDataDTO.toUserData(id: String): UserData {
         tournamentInvites = tournamentInvites,
         hasStripeAccount = hasStripeAccount,
         uploadedImages = uploadedImages,
+        profileImage = profileImage,
         id = id
     )
 }

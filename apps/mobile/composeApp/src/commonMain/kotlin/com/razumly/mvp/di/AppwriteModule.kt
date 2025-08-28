@@ -1,6 +1,7 @@
 package com.razumly.mvp.di
 
 import io.appwrite.services.Account
+import io.appwrite.services.Avatars
 import io.appwrite.services.Databases
 import io.appwrite.services.Functions
 import io.appwrite.services.Messaging
@@ -29,5 +30,9 @@ val appwriteModule = module {
     }
     single {
         Storage(get())
+    }
+
+    single {
+        Avatars(get())
     }
 }

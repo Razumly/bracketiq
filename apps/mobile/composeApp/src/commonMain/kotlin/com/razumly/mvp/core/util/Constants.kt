@@ -28,3 +28,7 @@ object DbConstants {
     const val MESSAGES_CHANNEL = "databases.$DATABASE_NAME.collections.$MESSAGES_COLLECTION.documents"
     const val USER_CHANNEL = "databases.$DATABASE_NAME.collections.$USER_DATA_COLLECTION.documents"
 }
+
+object UIConstants {
+    const val PROFILE_PICTURE_HEIGHT = 56
+}

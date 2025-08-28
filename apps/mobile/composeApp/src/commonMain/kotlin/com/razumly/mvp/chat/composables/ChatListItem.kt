@@ -10,13 +10,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.razumly.mvp.core.data.dataTypes.ChatGroup
+import com.razumly.mvp.core.data.dataTypes.MessageMVP
 
 @Composable
-fun ChatListItem(modifier: Modifier = Modifier, chatGroup: ChatGroup) {
+fun ChatListItem(modifier: Modifier = Modifier, chatName: String, lastMessage: MessageMVP?) {
     Row(modifier) {
         Card(Modifier.fillMaxWidth().padding(8.dp)) {
-            Text(chatGroup.name,
+            Text(chatName,
                 modifier = Modifier.padding(8.dp),
                 overflow = TextOverflow.Ellipsis,
                 maxLines = 1,

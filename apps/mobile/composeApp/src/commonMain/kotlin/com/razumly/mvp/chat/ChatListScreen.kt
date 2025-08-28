@@ -49,6 +49,7 @@ fun ChatListScreen(component: ChatListComponent) {
     val chatList by component.chatGroups.collectAsState()
     var showNewChatDialog by remember { mutableStateOf(false) }
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
+    val currentUser = component.currentUser
 
     Scaffold(
         topBar = {
@@ -76,7 +77,8 @@ fun ChatListScreen(component: ChatListComponent) {
             items(chatList) {
                 ChatListItem(
                     modifier = Modifier.clickable { component.onChatSelected(it) },
-                    chatGroup = it.chatGroup
+                    chatName = it.users.first { user -> user.id != currentUser.id }.fullName,
+                    lastMessage = it.messages.lastOrNull()
                 )
             }
         }

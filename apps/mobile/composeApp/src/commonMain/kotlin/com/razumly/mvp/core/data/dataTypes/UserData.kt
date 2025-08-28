@@ -1,10 +1,13 @@
 package com.razumly.mvp.core.data.dataTypes
 
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.room.Entity
+import androidx.room.Ignore
 import androidx.room.PrimaryKey
 import com.razumly.mvp.core.data.dataTypes.dtos.UserDataDTO
 import com.razumly.mvp.core.presentation.util.toTitleCase
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 
 @Entity
 @Serializable
@@ -22,6 +25,7 @@ data class UserData(
     val tournamentInvites: List<String>,
     val hasStripeAccount: Boolean?,
     val uploadedImages: List<String>,
+    val profileImage: String? = null,
     @PrimaryKey override val id: String,
 ) : MVPDocument {
     companion object {
@@ -40,6 +44,7 @@ data class UserData(
                 friendRequestIds = emptyList(),
                 friendRequestSentIds = emptyList(),
                 followingIds = emptyList(),
+                profileImage = null,
                 id = ""
             )
         }
@@ -63,6 +68,7 @@ data class UserData(
             tournamentInvites = tournamentInvites,
             hasStripeAccount = hasStripeAccount,
             uploadedImages = uploadedImages,
+            profileImage = profileImage,
             id = id
         )
     }
