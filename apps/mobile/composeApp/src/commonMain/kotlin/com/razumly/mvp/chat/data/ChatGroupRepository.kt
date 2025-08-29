@@ -22,8 +22,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -35,7 +37,7 @@ interface IChatGroupRepository : IMVPRepository {
         user: UserData?, chatGroup: ChatGroupWithRelations?
     ): Flow<Result<ChatGroupWithRelations>>
 
-    suspend fun createChatGroup(newChatGroup: ChatGroup): Result<Unit>
+    suspend fun createChatGroup(newChatGroup: ChatGroupWithRelations): Result<Unit>
     suspend fun updateChatGroup(newChatGroup: ChatGroup): Result<ChatGroup>
     suspend fun deleteUserFromChatGroup(chatGroup: ChatGroup, userId: String): Result<Unit>
     suspend fun addUserToChatGroup(chatGroup: ChatGroup, userId: String): Result<Unit>
@@ -106,27 +108,40 @@ class ChatGroupRepository(
         }
     }
 
-    private fun groupsFlow(): Flow<Result<List<ChatGroupWithRelations>>> {
+    private fun groupsFlow(): Flow<Result<List<ChatGroupWithRelations>>> = callbackFlow {
         val userId = userRepository.currentUser.value.getOrThrow().id
-        val localFlow = databaseService.getChatGroupDao.getChatGroupsFlowByUserId(userId)
-            .map { Result.success(it) }
-
-        _scope.launch {
+        val localJob = launch {
+            databaseService.getChatGroupDao.getChatGroupsFlowByUserId(userId)
+                .collect { trySend(Result.success(it)) }
+        }
+        val remoteJob = launch {
             multiResponse(getRemoteData = {
                 databases.listDocuments(
                     DbConstants.DATABASE_NAME,
                     DbConstants.CHAT_GROUP_COLLECTION,
                     nestedType = ChatGroup::class,
                     queries = listOf(Query.contains("userIds", userId))
-                ).documents.map { it.data.copy(id = it.id) }
+                ).documents.map {
+                    it.data.copy(id = it.id)
+                }
             }, getLocalData = {
                 databaseService.getChatGroupDao.getChatGroupsByUserId(userId)
             }, saveData = {
                 _subscriptionList.value = it
 
-                userRepository.getUsers(it.map { chatGroup -> chatGroup.userIds }.flatten())
-                    .getOrThrow()
-                it.map { chatGroup -> chatGroup.id }.forEach { chatGroupId ->
+                val users =
+                    userRepository.getUsers(it.map { chatGroup -> chatGroup.userIds }.flatten())
+                        .getOrThrow()
+                it.map { chatGroup ->
+                    chatGroup.setDisplayName(users.filter { user ->
+                        user.id != userRepository.currentUser.value.getOrThrow().id && chatGroup.userIds.contains(user.id)
+                    }.joinToString(", ") { user -> user.fullName }).setImageUrl(
+                        users.first { user ->
+                            user.id != userRepository.currentUser.value.getOrThrow().id
+                        }.imageUrl
+                    )
+                    chatGroup.id
+                }.forEach { chatGroupId ->
                     messageRepository.getMessagesInChatGroup(chatGroupId).onFailure { e ->
                         Napier.e("Failed to get messages for chat group $chatGroupId", e)
                     }
@@ -134,23 +149,33 @@ class ChatGroupRepository(
                 databaseService.getChatGroupDao.upsertChatGroupsWithRelations(it)
             }, deleteData = {
                 databaseService.getChatGroupDao.deleteChatGroupsByIds(it)
-            })
+            }).onFailure { trySend(Result.failure(it)) }
         }
 
-        return localFlow
+        awaitClose {
+            localJob.cancel()
+            remoteJob.cancel()
+        }
     }
 
-    override suspend fun createChatGroup(newChatGroup: ChatGroup): Result<Unit> =
+    override suspend fun createChatGroup(newChatGroup: ChatGroupWithRelations): Result<Unit> =
         singleResponse(networkCall = {
             databases.createDocument(
                 DbConstants.DATABASE_NAME,
                 DbConstants.CHAT_GROUP_COLLECTION,
-                newChatGroup.id,
+                newChatGroup.chatGroup.id,
                 newChatGroup,
                 nestedType = ChatGroup::class
-            ).data.copy(id = newChatGroup.id)
+            ).data.copy(id = newChatGroup.chatGroup.id)
         }, saveCall = { chatGroup ->
             databaseService.getChatGroupDao.upsertChatGroupWithRelations(chatGroup)
+            chatGroup.setDisplayName(newChatGroup.users.filter { user ->
+                user.id != userRepository.currentUser.value.getOrThrow().id && chatGroup.userIds.contains(user.id)
+            }.joinToString(", ") { user -> user.fullName }).setImageUrl(
+                newChatGroup.users.first {
+                    it.id != userRepository.currentUser.value.getOrThrow().id
+                }.imageUrl
+            )
             pushNotificationsRepository.createChatGroupTopic(chatGroup).onSuccess {
                 chatGroup.userIds.forEach { userId ->
                     pushNotificationsRepository.subscribeUserToChatGroup(userId, chatGroup.id)
@@ -226,15 +251,17 @@ class ChatGroupRepository(
             val otherUser = userRepository.getUsers(listOf(otherUserId)).getOrThrow().first()
             val currentUser = userRepository.currentUser.value.getOrThrow()
 
-            val newChatGroup = ChatGroup(
-                id = ID.unique(),
-                name = "${currentUser.firstName} & ${otherUser.firstName}",
-                userIds = listOf(currentUserId, otherUserId),
-                hostId = currentUserId
+            val newChatGroup = ChatGroupWithRelations(
+                chatGroup = ChatGroup(
+                    id = ID.unique(),
+                    name = "${currentUser.firstName} & ${otherUser.firstName}",
+                    userIds = listOf(currentUserId, otherUserId),
+                    hostId = currentUserId,
+                ), users = listOf(currentUser, otherUser), messages = listOf()
             )
 
             createChatGroup(newChatGroup).getOrThrow()
 
-            databaseService.getChatGroupDao.getChatGroupWithRelations(newChatGroup.id)
+            databaseService.getChatGroupDao.getChatGroupWithRelations(newChatGroup.chatGroup.id)
         }
 }

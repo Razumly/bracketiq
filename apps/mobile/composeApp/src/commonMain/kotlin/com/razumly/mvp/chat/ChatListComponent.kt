@@ -96,7 +96,7 @@ class DefaultChatListComponent(
 
     override fun onChatCreated() {
         scope.launch {
-            chatGroupRepository.createChatGroup(newChat.value.chatGroup).onFailure {
+            chatGroupRepository.createChatGroup(newChat.value).onFailure {
                 _errorState.value = it.message
             }
             _newChat.value =

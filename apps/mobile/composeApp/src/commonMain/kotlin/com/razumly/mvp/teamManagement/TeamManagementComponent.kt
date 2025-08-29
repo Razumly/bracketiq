@@ -130,7 +130,7 @@ class DefaultTeamManagementComponent(
 
     override fun selectTeam(team: TeamWithPlayers?) {
         _selectedTeam.value = team ?: TeamWithPlayers(
-            Team(currentUser.id), listOf(currentUser), listOf()
+            Team(currentUser.id), currentUser,listOf(currentUser), listOf()
         )
     }
 

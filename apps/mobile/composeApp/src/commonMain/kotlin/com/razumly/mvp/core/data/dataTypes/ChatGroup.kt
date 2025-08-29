@@ -9,15 +9,27 @@ import kotlin.time.ExperimentalTime
 @Serializable
 @Entity
 @OptIn(ExperimentalTime::class)
-data class ChatGroup (
-    @Transient
-    @PrimaryKey
-    override val id: String = "",
+data class ChatGroup(
+    @Transient @PrimaryKey override val id: String = "",
     val name: String,
     val userIds: List<String>,
     val hostId: String,
-): MVPDocument {
+) : MVPDocument, DisplayableEntity {
+    override var imageUrl: String? = null
+    override var displayName: String = ""
+    fun setDisplayName(name: String): ChatGroup {
+        displayName = name
+        return this
+    }
+
+    fun setImageUrl(url: String?): ChatGroup {
+        imageUrl = url
+        return this
+    }
+
     companion object {
-        fun empty() = ChatGroup(id = "", name = "", userIds = listOf(), hostId = "")
+        fun empty() = ChatGroup(
+            id = "", name = "", userIds = listOf(), hostId = ""
+        )
     }
 }

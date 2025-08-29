@@ -21,10 +21,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.snapshotFlow
-import androidx.compose.ui.Modifier
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
-import kotlin.time.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.LocalTime
@@ -32,10 +30,13 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.format.MonthNames
 import kotlinx.datetime.format.Padding
 import kotlinx.datetime.format.char
+import kotlinx.datetime.minus
 import kotlinx.datetime.toLocalDateTime
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
+import kotlin.time.Instant
 
 fun instantToDateTimeString(instant: Instant): String {
     return instant.toLocalDateTime(timeZone = TimeZone.currentSystemDefault()).toString()
@@ -46,6 +47,33 @@ expect fun getScreenWidth(): Int
 
 @Composable
 expect fun getScreenHeight(): Int
+
+// Add this to util.kt
+@OptIn(ExperimentalTime::class)
+fun formatMessageTime(sentTime: Instant): String {
+    val now = Clock.System.now()
+    val timeZone = TimeZone.currentSystemDefault()
+
+    val sentDate = sentTime.toLocalDateTime(timeZone).date
+    val currentDate = now.toLocalDateTime(timeZone).date
+
+    return when (sentDate) {
+        currentDate -> {
+            // Message sent today - show time (e.g., "2:30 PM")
+            val localTime = sentTime.toLocalDateTime(timeZone).time
+            timeFormat.format(localTime)
+        }
+        currentDate.minus(1, kotlinx.datetime.DateTimeUnit.DAY) -> {
+            // Message sent yesterday
+            "Yesterday"
+        }
+        else -> {
+            // Message sent before yesterday - show date (e.g., "27 Aug")
+            dateFormat.format(sentDate)
+        }
+    }
+}
+
 
 val timeFormat = LocalTime.Format {
     amPmHour(Padding.NONE)

@@ -9,20 +9,23 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class TeamWithPlayers(
-    @Embedded val team: Team, @Relation(
+    @Embedded val team: Team,
+
+    @Relation(
+        parentColumn = "captainId", entityColumn = "id"
+    ) val captain: UserData,
+
+    @Relation(
         parentColumn = "id", entityColumn = "id", associateBy = Junction(
             value = TeamPlayerCrossRef::class, parentColumn = "teamId", entityColumn = "userId"
         )
     ) val players: List<UserData>,
 
     @Relation(
-        parentColumn = "id",
-        entityColumn = "id",
-        associateBy = Junction(
+        parentColumn = "id", entityColumn = "id", associateBy = Junction(
             value = TeamPendingPlayerCrossRef::class,
             parentColumn = "teamId",
             entityColumn = "userId"
         )
-    )
-    val pendingPlayers: List<UserData>
+    ) val pendingPlayers: List<UserData>
 )

@@ -1,13 +1,10 @@
 package com.razumly.mvp.core.data.dataTypes
 
-import androidx.compose.ui.graphics.ImageBitmap
 import androidx.room.Entity
-import androidx.room.Ignore
 import androidx.room.PrimaryKey
 import com.razumly.mvp.core.data.dataTypes.dtos.UserDataDTO
 import com.razumly.mvp.core.presentation.util.toTitleCase
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.Transient
 
 @Entity
 @Serializable
@@ -27,7 +24,10 @@ data class UserData(
     val uploadedImages: List<String>,
     val profileImage: String? = null,
     @PrimaryKey override val id: String,
-) : MVPDocument {
+) : MVPDocument, DisplayableEntity {
+    override val displayName: String get() = fullName
+    override val imageUrl: String? get() = profileImage
+
     companion object {
         operator fun invoke(): UserData {
             return UserData(

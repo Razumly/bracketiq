@@ -19,8 +19,11 @@ data class Team(
     val playerIds: List<String> = emptyList(),
     val pending: List<String> = emptyList(),
     val teamSize: Int,
+    val profileImage: String? = null,
     @PrimaryKey override val id: String
-) : MVPDocument {
+) : MVPDocument, DisplayableEntity {
+    override val displayName: String get() = name ?: "Team ${playerIds.size}"
+    override val imageUrl: String? get() = profileImage
 
     companion object {
         operator fun invoke(captainId: String): Team {

@@ -54,12 +54,12 @@ fun ChatListScreen(component: ChatListComponent) {
     Scaffold(
         topBar = {
             TopAppBar(
-                { Text("Chats") },
-                scrollBehavior = scrollBehavior
+                { Text("Chats") }, scrollBehavior = scrollBehavior
             )
         },
         modifier = Modifier.padding(LocalNavBarPadding.current)
-            .nestedScroll(scrollBehavior.nestedScrollConnection), floatingActionButton = {
+            .nestedScroll(scrollBehavior.nestedScrollConnection),
+        floatingActionButton = {
             IconButton(
                 onClick = { showNewChatDialog = true },
             ) {
@@ -67,7 +67,8 @@ fun ChatListScreen(component: ChatListComponent) {
                     Icon(Icons.Default.Add, contentDescription = "Create Chat")
                 }
             }
-        }, floatingActionButtonPosition = FabPosition.End
+        },
+        floatingActionButtonPosition = FabPosition.End
     ) { padding ->
         LazyColumn(
             modifier = Modifier.padding(padding).padding(16.dp).fillMaxSize(),
@@ -77,8 +78,7 @@ fun ChatListScreen(component: ChatListComponent) {
             items(chatList) {
                 ChatListItem(
                     modifier = Modifier.clickable { component.onChatSelected(it) },
-                    chatName = it.users.first { user -> user.id != currentUser.id }.fullName,
-                    lastMessage = it.messages.lastOrNull()
+                    chatGroup = it
                 )
             }
         }
