@@ -5,7 +5,7 @@ import androidx.room.Delete
 import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Upsert
-import com.razumly.mvp.core.data.dataTypes.EventImp
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventTeamCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
@@ -15,22 +15,22 @@ import kotlinx.coroutines.flow.Flow
 interface EventImpDao {
 
     @Upsert
-    suspend fun upsertEvent(game: EventImp)
+    suspend fun upsertEvent(game: Event)
 
     @Upsert
-    suspend fun upsertEvents(games: List<EventImp>)
+    suspend fun upsertEvents(games: List<Event>)
 
     @Delete
-    suspend fun deleteEvent(game: EventImp)
+    suspend fun deleteEvent(game: Event)
 
-    @Query("DELETE FROM EventImp WHERE id IN (:ids)")
+    @Query("DELETE FROM Event WHERE id IN (:ids)")
     suspend fun deleteEventsById(ids: List<String>)
 
-    @Query("DELETE FROM EventImp")
+    @Query("DELETE FROM Event")
     suspend fun deleteAllEvents()
 
-    @Query("SELECT * FROM EventImp")
-    fun getAllCachedEvents(): Flow<List<EventImp>>
+    @Query("SELECT * FROM Event")
+    fun getAllCachedEvents(): Flow<List<Event>>
 
     @Query("SELECT * FROM event_team_cross_ref WHERE eventId == :eventId")
     suspend fun getEventTeamCrossRefsByEventId(eventId: String): List<EventTeamCrossRef>
@@ -47,22 +47,22 @@ interface EventImpDao {
     @Delete
     suspend fun deleteEventUserCrossRefs(crossRefs: List<EventUserCrossRef>)
 
-    @Query("DELETE FROM EventImp WHERE id = :id")
+    @Query("DELETE FROM Event WHERE id = :id")
     suspend fun deleteEventById(id: String)
 
-    @Query("SELECT * FROM EventImp WHERE id = :id")
-    suspend fun getEventById(id: String): EventImp?
+    @Query("SELECT * FROM Event WHERE id = :id")
+    suspend fun getEventById(id: String): Event?
 
     @Transaction
-    @Query("SELECT * FROM EventImp WHERE id = :id")
+    @Query("SELECT * FROM Event WHERE id = :id")
     suspend fun getEventWithRelationsById(id: String): EventWithRelations
 
     @Transaction
-    @Query("SELECT * FROM EventImp WHERE id = :id")
+    @Query("SELECT * FROM Event WHERE id = :id")
     fun getEventWithRelationsFlow(id: String): Flow<EventWithRelations>
 
     @Transaction
-    suspend fun upsertEventWithRelations(event: EventImp) {
+    suspend fun upsertEventWithRelations(event: Event) {
         deleteEventCrossRefs(event.id)
         upsertEvent(event)
     }

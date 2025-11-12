@@ -39,7 +39,7 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import com.razumly.mvp.core.data.dataTypes.EventAbs
-import com.razumly.mvp.core.data.dataTypes.Tournament
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.moneyFormat
 import com.razumly.mvp.core.presentation.util.toTitleCase
@@ -169,7 +169,7 @@ fun EventCard(
             StylizedText("${event.fieldType} ${event.eventType}".toTitleCase(), patterns)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 StylizedText("Divisions: ${event.divisions.joinToString(", ")}", patterns)
-                if (event is Tournament) {
+                if (event is Event) {
                     Text(
                         text = "Prize: " + event.prize,
                         style = MaterialTheme.typography.bodyMedium,

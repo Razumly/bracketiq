@@ -3,7 +3,7 @@ package com.razumly.mvp.core.data.dataTypes.crossRef
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
-import com.razumly.mvp.core.data.dataTypes.EventImp
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.UserData
 
 @Entity(
@@ -17,7 +17,7 @@ import com.razumly.mvp.core.data.dataTypes.UserData
             onDelete = ForeignKey.CASCADE
         ),
         ForeignKey(
-            entity = EventImp::class,
+            entity = Event::class,
             parentColumns = ["id"],
             childColumns = ["eventId"],
             onDelete = ForeignKey.CASCADE

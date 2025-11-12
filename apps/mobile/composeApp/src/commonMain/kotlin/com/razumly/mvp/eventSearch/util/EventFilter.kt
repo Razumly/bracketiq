@@ -1,7 +1,7 @@
 package com.razumly.mvp.eventSearch.util
 
 import com.razumly.mvp.core.data.dataTypes.EventAbs
-import com.razumly.mvp.core.data.dataTypes.Tournament
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.enums.FieldType
 import kotlin.time.Clock
@@ -18,7 +18,7 @@ data class EventFilter (
     fun filter(event: EventAbs): Boolean {
         if (eventType != null) {
             when (event) {
-                is Tournament -> {
+                is Event -> {
                     if (eventType != EventType.TOURNAMENT) return false
                 }
                 else -> {

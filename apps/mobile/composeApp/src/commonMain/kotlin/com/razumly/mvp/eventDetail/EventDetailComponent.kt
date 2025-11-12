@@ -7,13 +7,12 @@ import com.arkivanov.essenty.backhandler.BackCallback
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.EventAbsWithRelations
-import com.razumly.mvp.core.data.dataTypes.EventImp
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
-import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.Division
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
@@ -109,8 +108,8 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun viewEvent()
     fun leaveEvent()
     fun requestRefund(reason: String)
-    fun editEventField(update: EventImp.() -> EventImp)
-    fun editTournamentField(update: Tournament.() -> Tournament)
+    fun editEventField(update: Event.() -> Event)
+    fun editTournamentField(update: Event.() -> Event)
     fun updateEvent()
     fun deleteEvent()
     fun shareEvent()
@@ -415,8 +414,8 @@ class DefaultEventDetailComponent(
 
     override fun matchSelected(selectedMatch: MatchWithRelations) {
         when (selectedEvent.value.event) {
-            is Tournament -> navigationHandler.navigateToMatch(
-                selectedMatch, selectedEvent.value.event as Tournament
+            is Event -> navigationHandler.navigateToMatch(
+                selectedMatch, selectedEvent.value.event as Event
             )
 
             else -> Unit
@@ -599,20 +598,20 @@ class DefaultEventDetailComponent(
         _isEditing.value = !_isEditing.value
     }
 
-    override fun editEventField(update: EventImp.() -> EventImp) {
+    override fun editEventField(update: Event.() -> Event) {
         when (_editedEvent.value) {
-            is EventImp -> _editedEvent.value = (_editedEvent.value as EventImp).update()
-            is Tournament -> {
-                var event = (_editedEvent.value as Tournament).toEvent()
+            is Event -> _editedEvent.value = (_editedEvent.value as Event).update()
+            is Event -> {
+                var event = (_editedEvent.value as Event).toEvent()
                 event = event.update()
-                _editedEvent.value = Tournament().updateTournamentFromEvent(event)
+                _editedEvent.value = Event().updateTournamentFromEvent(event)
             }
         }
     }
 
-    override fun editTournamentField(update: Tournament.() -> Tournament) {
-        if (_editedEvent.value is Tournament) {
-            _editedEvent.value = (_editedEvent.value as Tournament).update()
+    override fun editTournamentField(update: Event.() -> Event) {
+        if (_editedEvent.value is Event) {
+            _editedEvent.value = (_editedEvent.value as Event).update()
         }
     }
 
@@ -641,8 +640,8 @@ class DefaultEventDetailComponent(
 
     override fun onTypeSelected(type: EventType) {
         _editedEvent.value = when (type) {
-            EventType.TOURNAMENT -> Tournament().updateTournamentFromEvent(_editedEvent.value as EventImp)
-            EventType.EVENT -> (_editedEvent.value as Tournament).toEvent()
+            EventType.TOURNAMENT -> Event().updateTournamentFromEvent(_editedEvent.value as Event)
+            EventType.EVENT -> (_editedEvent.value as Event).toEvent()
         }
     }
 
@@ -655,7 +654,6 @@ class DefaultEventDetailComponent(
         val rounds = mutableListOf<List<MatchWithRelations?>>()
         val visited = mutableSetOf<String>()
 
-        // Find matches with no previous matches (first round)
         val finalRound = _divisionMatches.value.values.filter {
             it.winnerNextMatch == null && it.loserNextMatch == null
         }
@@ -933,9 +931,9 @@ class DefaultEventDetailComponent(
 
     override fun sendNotification(title: String, message: String) {
         scope.launch {
-            val isTournament = selectedEvent.value.event is Tournament
+            val isEvent = selectedEvent.value.event is Event
             notificationsRepository.sendEventNotification(
-                eventWithRelations.value.event.id, title, message, isTournament
+                eventWithRelations.value.event.id, title, message, isEvent
             ).onFailure {
                 _errorState.value = ErrorMessage(("Failed to send message: " + it.message))
             }

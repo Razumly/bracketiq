@@ -1,11 +1,10 @@
 package com.razumly.mvp.core.data.repositories
 
 import com.razumly.mvp.core.data.DatabaseService
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventAbs
-import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.razumly.mvp.core.data.dataTypes.RefundRequest
 import com.razumly.mvp.core.data.dataTypes.RefundRequestWithRelations
-import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.dtos.RefundRequestDTO
 import com.razumly.mvp.core.util.DbConstants
 import com.razumly.mvp.core.util.jsonMVP
@@ -46,15 +45,15 @@ class BillingRepository(
         event: EventAbs, teamId: String?
     ): Result<PurchaseIntent> = runCatching {
         val user = userRepository.currentUser.value.getOrThrow()
-        val isTournament = when (event) {
-            is Tournament -> true
+        val isEvent = when (event) {
+            is Event -> true
             else -> false
         }
         val response = jsonMVP.decodeFromString<PurchaseIntent>(
             functions.createExecution(
                 functionId = DbConstants.BILLING_FUNCTION,
                 body = jsonMVP.encodeToString(
-                    CreatePurchaseIntent(user.id, event.id, teamId, isTournament)
+                    CreatePurchaseIntent(user.id, event.id, teamId, isEvent)
                 ),
                 async = false,
             ).responseBody
@@ -103,7 +102,7 @@ class BillingRepository(
                         userId = userRepository.currentUser.value.getOrThrow().id,
                         reason = reason,
                         isTournament = when (event) {
-                            is Tournament -> true
+                            is Event -> true
                             else -> false
                         }
                     )
@@ -120,13 +119,13 @@ class BillingRepository(
         }
 
     override suspend fun deleteAndRefundEvent(event: EventAbs): Result<Unit> = runCatching {
-        val isTournament = when (event) {
-            is Tournament -> true
+        val isEvent = when (event) {
+            is Event -> true
             else -> false
         }
         val response = functions.createExecution(
             DbConstants.BILLING_FUNCTION,
-            jsonMVP.encodeToString(RefundFullEvent(eventId = event.id, isTournament = isTournament))
+            jsonMVP.encodeToString(RefundFullEvent(eventId = event.id, isTournament = isEvent))
         )
 
         val refundResponse = jsonMVP.decodeFromString<RefundResponse>(response.responseBody)
@@ -137,8 +136,8 @@ class BillingRepository(
             throw Exception(refundResponse.message)
         }
         when (event) {
-            is Tournament -> tournamentRepository.deleteTournament(event.id)
-            is EventImp -> eventRepository.deleteEvent(event.id)
+            is Event -> tournamentRepository.deleteTournament(event.id)
+            is Event -> eventRepository.deleteEvent(event.id)
         }
     }
 

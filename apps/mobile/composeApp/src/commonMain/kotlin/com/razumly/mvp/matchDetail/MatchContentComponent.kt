@@ -7,7 +7,7 @@ import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
-import com.razumly.mvp.core.data.dataTypes.Tournament
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.ITournamentRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
@@ -34,7 +34,7 @@ import kotlin.time.ExperimentalTime
 
 interface MatchContentComponent {
     val matchWithTeams: StateFlow<MatchWithTeams>
-    val tournament: StateFlow<Tournament?>
+    val event: StateFlow<Event?>
     val matchFinished: StateFlow<Boolean>
     val refCheckedIn: StateFlow<Boolean>
     val currentSet: StateFlow<Int>
@@ -83,7 +83,7 @@ fun MatchWithRelations.toMatchWithTeams(
 class DefaultMatchContentComponent(
     componentContext: ComponentContext,
     selectedMatch: MatchWithRelations,
-    selectedTournament: Tournament?,
+    selectedEvent: Event?,
     tournamentRepository: ITournamentRepository,
     private val matchRepository: IMatchRepository,
     userRepository: IUserRepository,
@@ -95,14 +95,14 @@ class DefaultMatchContentComponent(
     private val _errorState = MutableStateFlow<String?>(null)
     override val errorState = _errorState.asStateFlow()
 
-    override val tournament =
+    override val event =
         tournamentRepository.getTournamentFlow(selectedMatch.match.tournamentId)
             .distinctUntilChanged().map { tournament ->
                 tournament.getOrElse {
                     _errorState.value = it.message
-                    selectedTournament
+                    selectedEvent
                 }
-            }.stateIn(scope, SharingStarted.Eagerly, selectedTournament)
+            }.stateIn(scope, SharingStarted.Eagerly, selectedEvent)
 
     private val _optimisticMatch = MutableStateFlow<MatchWithTeams?>(null)
 
@@ -171,7 +171,7 @@ class DefaultMatchContentComponent(
                 _errorState.value = it.message
                 emptyList()
             }.find { team ->
-                tournament.value?.id != null && tournament.value!!.teamIds.contains(team.team.id)
+                event.value?.id != null && event.value!!.teamIds.contains(team.team.id)
             }
         }.stateIn(scope, SharingStarted.Eagerly, null)
 
@@ -181,7 +181,7 @@ class DefaultMatchContentComponent(
 
     init {
         scope.launch {
-            tournament.collect { tournament ->
+            event.collect { tournament ->
                 tournament?.let { t ->
                     maxSets = if (matchWithTeams.value.match.losersBracket) {
                         t.loserSetCount
@@ -372,9 +372,9 @@ class DefaultMatchContentComponent(
         val followerScore = if (isTeam1Leader) team2Score else team1Score
 
         val pointsToVictory = if (match.losersBracket) {
-            tournament.value?.loserBracketPointsToVictory?.get(currentSet.value)
+            event.value?.loserBracketPointsToVictory?.get(currentSet.value)
         } else {
-            tournament.value?.winnerBracketPointsToVictory?.get(currentSet.value)
+            event.value?.winnerBracketPointsToVictory?.get(currentSet.value)
         }
 
         val winBy2 = leaderScore - followerScore >= 2 && leaderScore >= pointsToVictory!!

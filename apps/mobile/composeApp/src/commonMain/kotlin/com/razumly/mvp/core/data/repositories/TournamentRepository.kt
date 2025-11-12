@@ -3,7 +3,7 @@ package com.razumly.mvp.core.data.repositories
 import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.Team
-import com.razumly.mvp.core.data.dataTypes.Tournament
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.crossRef.FieldMatchCrossRef
@@ -35,15 +35,15 @@ import kotlinx.serialization.Contextual
 
 interface ITournamentRepository : IMVPRepository {
     fun getTournamentWithRelationsFlow(tournamentId: String): Flow<Result<TournamentWithRelations>>
-    fun getTournamentFlow(tournamentId: String): Flow<Result<Tournament>>
-    fun getTournamentsFlow(query: String): Flow<Result<List<Tournament>>>
+    fun getTournamentFlow(tournamentId: String): Flow<Result<Event>>
+    fun getTournamentsFlow(query: String): Flow<Result<List<Event>>>
     fun resetCursor()
     suspend fun getTournamentWithRelations(tournamentId: String): Result<TournamentWithRelations>
-    suspend fun getTournament(tournamentId: String): Result<Tournament>
-    suspend fun getTournaments(query: String): Result<List<Tournament>>
-    suspend fun createTournament(newTournament: Tournament): Result<Tournament>
-    suspend fun updateTournament(newTournament: Tournament): Result<Tournament>
-    suspend fun updateLocalTournament(newTournament: Tournament): Result<Tournament>
+    suspend fun getTournament(tournamentId: String): Result<Event>
+    suspend fun getTournaments(query: String): Result<List<Event>>
+    suspend fun createTournament(newEvent: Event): Result<Event>
+    suspend fun updateTournament(newEvent: Event): Result<Event>
+    suspend fun updateLocalTournament(newEvent: Event): Result<Event>
     suspend fun deleteTournament(tournamentId: String): Result<Unit>
 }
 
@@ -162,11 +162,11 @@ class TournamentRepository(
         }.let { databaseService.getMatchDao.upsertFieldMatchCrossRefs(it) }
     }
 
-    override fun getTournamentFlow(tournamentId: String): Flow<Result<Tournament>> =
+    override fun getTournamentFlow(tournamentId: String): Flow<Result<Event>> =
         databaseService.getTournamentDao.getTournamentFlowById(tournamentId)
             .map { Result.success(it) }
 
-    override suspend fun getTournaments(query: String): Result<List<Tournament>> {
+    override suspend fun getTournaments(query: String): Result<List<Event>> {
         val combinedQuery = if (lastDocumentId.isNotEmpty()) {
             listOf(query, Query.cursorAfter(lastDocumentId))
         } else {
@@ -188,14 +188,14 @@ class TournamentRepository(
         return response
     }
 
-    override fun getTournamentsFlow(query: String): Flow<Result<List<Tournament>>> {
+    override fun getTournamentsFlow(query: String): Flow<Result<List<Event>>> {
         val queryMap = json.decodeFromString<Map<String, @Contextual Any>>(query)
         val filterMap = if (queryMap.containsValue("equal")) {
-            { event: Tournament ->
+            { event: Event ->
                 (queryMap["values"] as List<*>).first() == event.hostId
             }
         } else {
-            { event: Tournament -> true }
+            { event: Event -> true }
         }
         val localFlow = databaseService.getTournamentDao.getAllCachedTournamentsFlow().map {
                 Result.success(it.filter { tournament ->
@@ -205,7 +205,7 @@ class TournamentRepository(
         return localFlow
     }
 
-    override suspend fun getTournament(tournamentId: String): Result<Tournament> =
+    override suspend fun getTournament(tournamentId: String): Result<Event> =
         singleResponse(networkCall = {
             database.getDocument(
                 DbConstants.DATABASE_NAME,
@@ -235,41 +235,41 @@ class TournamentRepository(
             databaseService.getTournamentDao.getTournamentWithRelations(tournamentId)
         })
 
-    override suspend fun createTournament(newTournament: Tournament): Result<Tournament> =
+    override suspend fun createTournament(newEvent: Event): Result<Event> =
         singleResponse(networkCall = {
-            notificationsRepository.createTournamentTopic(newTournament)
+            notificationsRepository.createTournamentTopic(newEvent)
             database.createDocument(
                 DbConstants.DATABASE_NAME,
                 DbConstants.TOURNAMENT_COLLECTION,
-                newTournament.id,
-                newTournament.toTournamentDTO(),
+                newEvent.id,
+                newEvent.toTournamentDTO(),
                 nestedType = TournamentDTO::class
-            ).data.toTournament(newTournament.id)
+            ).data.toTournament(newEvent.id)
         }, saveCall = { tournament ->
             databaseService.getTournamentDao.upsertTournament(tournament)
         }, onReturn = { tournament ->
             tournament
         })
 
-    override suspend fun updateTournament(newTournament: Tournament): Result<Tournament> =
+    override suspend fun updateTournament(newEvent: Event): Result<Event> =
         singleResponse(networkCall = {
             database.updateDocument(
                 DbConstants.DATABASE_NAME,
                 DbConstants.TOURNAMENT_COLLECTION,
-                newTournament.id,
-                newTournament.toTournamentDTO(),
+                newEvent.id,
+                newEvent.toTournamentDTO(),
                 nestedType = TournamentDTO::class
-            ).data.toTournament(newTournament.id)
+            ).data.toTournament(newEvent.id)
         }, saveCall = { tournament ->
             databaseService.getTournamentDao.upsertTournament(tournament)
         }, onReturn = { tournament ->
             tournament
         })
 
-    override suspend fun updateLocalTournament(newTournament: Tournament): Result<Tournament> =
+    override suspend fun updateLocalTournament(newEvent: Event): Result<Event> =
         runCatching {
-            databaseService.getTournamentDao.upsertTournament(newTournament)
-            newTournament
+            databaseService.getTournamentDao.upsertTournament(newEvent)
+            newEvent
         }
 
     override suspend fun deleteTournament(tournamentId: String): Result<Unit> = kotlin.runCatching {

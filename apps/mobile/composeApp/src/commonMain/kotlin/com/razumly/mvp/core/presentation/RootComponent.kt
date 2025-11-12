@@ -14,7 +14,7 @@ import com.razumly.mvp.chat.ChatListComponent
 import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
-import com.razumly.mvp.core.data.dataTypes.Tournament
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.eventCreate.CreateEventComponent
@@ -162,8 +162,8 @@ class RootComponent(
         }
     }
 
-    override fun navigateToMatch(match: MatchWithRelations, tournament: Tournament) {
-        navigation.pushNew(AppConfig.MatchDetail(match, tournament))
+    override fun navigateToMatch(match: MatchWithRelations, event: Event) {
+        navigation.pushNew(AppConfig.MatchDetail(match, event))
     }
 
     override fun navigateToTeams(freeAgents: List<String>, event: EventAbs?) {
@@ -224,7 +224,7 @@ class RootComponent(
         )
 
         is AppConfig.MatchDetail -> Child.MatchContent(
-            _koin.get { parametersOf(componentContext, config.match, config.tournament) }
+            _koin.get { parametersOf(componentContext, config.match, config.event) }
         )
 
         AppConfig.ChatList -> Child.ChatList(

@@ -4,14 +4,14 @@ import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import com.razumly.mvp.core.data.dataTypes.Team
-import com.razumly.mvp.core.data.dataTypes.Tournament
+import com.razumly.mvp.core.data.dataTypes.Event
 
 @Entity(
     tableName = "tournament_team_cross_ref",
     primaryKeys = ["tournamentId", "teamId"],
     foreignKeys = [
         ForeignKey(
-            entity = Tournament::class,
+            entity = Event::class,
             parentColumns = ["id"],
             childColumns = ["tournamentId"],
             onDelete = ForeignKey.CASCADE

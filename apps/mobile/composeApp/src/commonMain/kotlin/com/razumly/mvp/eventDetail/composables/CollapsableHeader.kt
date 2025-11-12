@@ -12,10 +12,8 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -23,7 +21,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.razumly.mvp.core.data.dataTypes.EventImp
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
 import com.razumly.mvp.eventDetail.EventDetailComponent
@@ -39,7 +37,7 @@ fun CollapsableHeader(
     val isBracketView by component.isBracketView.collectAsState()
     val actualEvent by component.selectedEvent.collectAsState()
 
-    val selectedEvent = actualEvent ?: EventWithRelations(EventImp(), null)
+    val selectedEvent = actualEvent ?: EventWithRelations(Event(), null)
     val singleDivision = selectedEvent.event.singleDivision
 
     Column(Modifier.fillMaxWidth()) {

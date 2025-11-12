@@ -1,6 +1,6 @@
 package com.razumly.mvp.core.data.dataTypes.dtos
 
-import com.razumly.mvp.core.data.dataTypes.EventImp
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.enums.Division
 import com.razumly.mvp.core.data.dataTypes.enums.FieldType
 import kotlinx.serialization.Serializable
@@ -40,8 +40,8 @@ data class EventDTO(
     val seedColor: Int,
     val isTaxed: Boolean,
 ) {
-    fun toEvent(id: String): EventImp {
-        return EventImp(
+    fun toEvent(id: String): Event {
+        return Event(
             id = id,
             location = location,
             name = name,

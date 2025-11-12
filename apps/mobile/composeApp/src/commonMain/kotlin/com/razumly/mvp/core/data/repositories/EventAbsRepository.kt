@@ -3,12 +3,11 @@
 package com.razumly.mvp.core.data.repositories
 
 import com.razumly.mvp.core.data.dataTypes.Bounds
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.EventAbsWithRelations
-import com.razumly.mvp.core.data.dataTypes.EventImp
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
-import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.util.DbConstants
@@ -61,16 +60,16 @@ class EventAbsRepository(
 
     override suspend fun getEvent(event: EventAbs): Result<EventAbsWithRelations> {
         val eventWithRelations = when (event) {
-            is EventImp -> eventRepository.getEvent(event.id)
-            is Tournament -> tournamentRepository.getTournamentWithRelations(event.id)
+            is Event -> eventRepository.getEvent(event.id)
+            is Event -> tournamentRepository.getTournamentWithRelations(event.id)
         }
         return eventWithRelations
     }
 
     override fun getEventWithRelationsFlow(event: EventAbs): Flow<Result<EventAbsWithRelations>> {
         val eventWithRelations = when (event) {
-            is EventImp -> eventRepository.getEventWithRelationsFlow(event.id)
-            is Tournament -> tournamentRepository.getTournamentWithRelationsFlow(event.id)
+            is Event -> eventRepository.getEventWithRelationsFlow(event.id)
+            is Event -> tournamentRepository.getTournamentWithRelationsFlow(event.id)
         }
         return eventWithRelations
     }
@@ -147,18 +146,18 @@ class EventAbsRepository(
 
     override suspend fun createEvent(event: EventAbs): Result<Unit> {
         return when (event.eventType) {
-            EventType.TOURNAMENT -> tournamentRepository.createTournament(event as Tournament)
-            EventType.EVENT -> eventRepository.createEvent(event as EventImp)
+            EventType.TOURNAMENT -> tournamentRepository.createTournament(event as Event)
+            EventType.EVENT -> eventRepository.createEvent(event as Event)
         }.map {}
     }
 
     override suspend fun updateEvent(event: EventAbs): Result<Unit> {
         return when (event) {
-            is EventImp -> {
+            is Event -> {
                 eventRepository.updateEvent(event)
             }
 
-            is Tournament -> {
+            is Event -> {
                 tournamentRepository.updateTournament(event)
             }
         }.map {}
@@ -175,11 +174,11 @@ class EventAbsRepository(
             )
         )
         when (event) {
-            is EventImp -> {
+            is Event -> {
                 eventRepository.deleteEvent(event.id)
             }
 
-            is Tournament -> {
+            is Event -> {
                 tournamentRepository.deleteTournament(event.id)
             }
         }.map {}
@@ -336,11 +335,11 @@ class EventAbsRepository(
     }
 
     override suspend fun updateLocalEvent(event: EventAbs): Result<Unit> = when (event) {
-        is EventImp -> {
+        is Event -> {
             eventRepository.updateLocalEvent(event)
         }
 
-        is Tournament -> {
+        is Event -> {
             tournamentRepository.updateLocalTournament(event)
         }
     }.map {}

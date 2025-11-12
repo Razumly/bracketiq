@@ -1,6 +1,6 @@
 package com.razumly.mvp.core.data.dataTypes.dtos
 
-import com.razumly.mvp.core.data.dataTypes.Tournament
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.enums.Division
 import com.razumly.mvp.core.data.dataTypes.enums.FieldType
 import kotlinx.serialization.Serializable
@@ -48,8 +48,8 @@ data class TournamentDTO(
     val seedColor: Int,
     val isTaxed: Boolean,
 ) {
-    fun toTournament(id: String): Tournament {
-        return Tournament(
+    fun toTournament(id: String): Event {
+        return Event(
             id = id,
             name = name,
             description = description,

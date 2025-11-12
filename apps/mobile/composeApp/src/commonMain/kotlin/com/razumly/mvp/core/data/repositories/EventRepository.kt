@@ -1,7 +1,7 @@
 package com.razumly.mvp.core.data.repositories
 
 import com.razumly.mvp.core.data.DatabaseService
-import com.razumly.mvp.core.data.dataTypes.EventImp
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.UserData
@@ -31,11 +31,11 @@ interface IEventRepository : IMVPRepository {
     fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>>
     fun resetCursor()
     suspend fun getEvent(eventId: String): Result<EventWithRelations>
-    suspend fun createEvent(newEvent: EventImp): Result<EventImp>
-    suspend fun updateEvent(newEvent: EventImp): Result<EventImp>
-    suspend fun updateLocalEvent(newEvent: EventImp): Result<EventImp>
-    suspend fun getEvents(query: String): Result<List<EventImp>>
-    fun getEventsFlow(query: String): Flow<Result<List<EventImp>>>
+    suspend fun createEvent(newEvent: Event): Result<Event>
+    suspend fun updateEvent(newEvent: Event): Result<Event>
+    suspend fun updateLocalEvent(newEvent: Event): Result<Event>
+    suspend fun getEvents(query: String): Result<List<Event>>
+    fun getEventsFlow(query: String): Flow<Result<List<Event>>>
     suspend fun deleteEvent(eventId: String): Result<Unit>
 }
 
@@ -130,7 +130,7 @@ class EventRepository(
             databaseService.getEventImpDao.getEventWithRelationsById(eventId)
         })
 
-    override suspend fun createEvent(newEvent: EventImp): Result<EventImp> =
+    override suspend fun createEvent(newEvent: Event): Result<Event> =
         singleResponse(networkCall = {
             notificationsRepository.createEventTopic(newEvent)
             database.createDocument(
@@ -146,7 +146,7 @@ class EventRepository(
             event
         })
 
-    override suspend fun updateEvent(newEvent: EventImp): Result<EventImp> =
+    override suspend fun updateEvent(newEvent: Event): Result<Event> =
         singleResponse(networkCall = {
             database.updateDocument(
                 DbConstants.DATABASE_NAME,
@@ -161,7 +161,7 @@ class EventRepository(
             event
         })
 
-    override suspend fun getEvents(query: String): Result<List<EventImp>> {
+    override suspend fun getEvents(query: String): Result<List<Event>> {
         val combinedQuery = if (lastDocumentId.isNotEmpty()) {
             listOf(query, Query.cursorAfter(lastDocumentId))
         } else {
@@ -186,19 +186,19 @@ class EventRepository(
         return response
     }
 
-    override suspend fun updateLocalEvent(newEvent: EventImp): Result<EventImp> {
+    override suspend fun updateLocalEvent(newEvent: Event): Result<Event> {
         databaseService.getEventImpDao.upsertEvent(newEvent)
         return Result.success(newEvent)
     }
 
-    override fun getEventsFlow(query: String): Flow<Result<List<EventImp>>> {
+    override fun getEventsFlow(query: String): Flow<Result<List<Event>>> {
         val queryMap = json.decodeFromString<Map<String, @Contextual Any>>(query)
         val filterMap = if (queryMap.containsValue("equal")) {
-            { event: EventImp ->
+            { event: Event ->
                 (queryMap["values"] as List<*>).first() == event.hostId
             }
         } else {
-            { event: EventImp -> true }
+            { event: Event -> true }
         }
 
         val localFlow = databaseService.getEventImpDao.getAllCachedEvents().map {

@@ -6,13 +6,12 @@ import androidx.room.Database
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
-import com.razumly.mvp.core.data.dataTypes.EventImp
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MessageMVP
 import com.razumly.mvp.core.data.dataTypes.RefundRequest
 import com.razumly.mvp.core.data.dataTypes.Team
-import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.crossRef.ChatUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventTeamCrossRef
@@ -37,11 +36,11 @@ import com.razumly.mvp.core.data.util.Converters
 
 @Database(
     entities = [
-        Tournament::class,
+        Event::class,
         UserData::class,
         MatchMVP::class,
         Field::class,
-        EventImp::class,
+        Event::class,
         Team::class,
         ChatGroup::class,
         MessageMVP::class,

@@ -1,10 +1,9 @@
 package com.razumly.mvp.core.presentation
 
-import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
-import com.razumly.mvp.core.data.dataTypes.Tournament
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.UserData
 import kotlinx.serialization.Serializable
 
@@ -21,7 +20,7 @@ sealed class AppConfig {
     @Serializable
     data class MatchDetail(
         val match: MatchWithRelations,
-        val tournament: Tournament,
+        val event: Event,
     ) : AppConfig()
 
     @Serializable

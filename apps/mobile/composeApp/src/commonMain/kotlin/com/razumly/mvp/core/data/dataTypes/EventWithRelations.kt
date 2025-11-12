@@ -7,7 +7,7 @@ import com.razumly.mvp.core.data.dataTypes.crossRef.EventTeamCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
 
 class EventWithRelations(
-    @Embedded override val event: EventImp,
+    @Embedded override val event: Event,
 
     @Relation(
         parentColumn = "hostId",

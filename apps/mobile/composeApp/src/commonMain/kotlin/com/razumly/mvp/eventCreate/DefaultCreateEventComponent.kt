@@ -11,10 +11,9 @@ import com.arkivanov.decompose.router.stack.pushNew
 import com.arkivanov.decompose.value.Value
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.EventAbs
-import com.razumly.mvp.core.data.dataTypes.EventImp
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
-import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.IBillingRepository
@@ -54,8 +53,8 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     val eventImageUrls: StateFlow<List<String>>
 
     fun onBackClicked()
-    fun updateEventField(update: EventImp.() -> EventImp)
-    fun updateTournamentField(update: Tournament.() -> Tournament)
+    fun updateEventField(update: Event.() -> Event)
+    fun updateTournamentField(update: Event.() -> Event)
     fun setLoadingHandler(loadingHandler: LoadingHandler)
     fun createEvent()
     fun nextStep()
@@ -98,13 +97,13 @@ class DefaultCreateEventComponent(
     private val navigation = StackNavigation<Config>()
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
 
-    private val _newEventState: MutableStateFlow<EventAbs> = MutableStateFlow(EventImp())
+    private val _newEventState: MutableStateFlow<EventAbs> = MutableStateFlow(Event())
     override val newEventState = _newEventState.asStateFlow()
 
     override val defaultEvent =
         MutableStateFlow(
             EventWithRelations(
-                EventImp(),
+                Event(),
                 userRepository.currentUser.value.getOrThrow()
             )
         )
@@ -198,13 +197,13 @@ class DefaultCreateEventComponent(
         }
     }
 
-    override fun updateEventField(update: EventImp.() -> EventImp) {
+    override fun updateEventField(update: Event.() -> Event) {
         scope.launch {
             when (_newEventState.value) {
-                is EventImp -> _newEventState.value = (_newEventState.value as EventImp).update()
-                is Tournament -> _newEventState.value =
-                    (_newEventState.value as Tournament).updateTournamentFromEvent(
-                        (_newEventState.value as Tournament).toEvent().update()
+                is Event -> _newEventState.value = (_newEventState.value as Event).update()
+                is Event -> _newEventState.value =
+                    (_newEventState.value as Event).updateTournamentFromEvent(
+                        (_newEventState.value as Event).toEvent().update()
                     )
             }
         }
@@ -228,10 +227,10 @@ class DefaultCreateEventComponent(
         }
     }
 
-    override fun updateTournamentField(update: Tournament.() -> Tournament) {
+    override fun updateTournamentField(update: Event.() -> Event) {
         scope.launch {
-            if (_newEventState.value is Tournament) {
-                _newEventState.value = (_newEventState.value as Tournament).update()
+            if (_newEventState.value is Event) {
+                _newEventState.value = (_newEventState.value as Event).update()
             }
         }
     }
@@ -239,11 +238,11 @@ class DefaultCreateEventComponent(
     override fun onTypeSelected(type: EventType) {
         _newEventState.value = when (type) {
             EventType.TOURNAMENT -> {
-                Tournament().updateTournamentFromEvent(_newEventState.value as EventImp)
+                Event().updateTournamentFromEvent(_newEventState.value as Event)
             }
 
             EventType.EVENT -> {
-                (_newEventState.value as Tournament).toEvent()
+                (_newEventState.value as Event).toEvent()
             }
         }
     }

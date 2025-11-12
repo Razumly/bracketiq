@@ -9,8 +9,8 @@ sealed interface EventAbsWithRelations {
     companion object {
         fun getEmptyEvent(event: EventAbs): EventAbsWithRelations =
             when (event) {
-                is EventImp -> EventWithRelations(event, UserData())
-                is Tournament -> TournamentWithRelations(event, UserData())
+                is Event -> EventWithRelations(event, UserData())
+                is Event -> TournamentWithRelations(event, UserData())
             }
     }
 }

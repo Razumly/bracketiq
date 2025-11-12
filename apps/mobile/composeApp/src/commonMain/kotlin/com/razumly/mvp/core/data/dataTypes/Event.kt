@@ -19,7 +19,7 @@ import kotlin.time.Instant
 @Entity
 @Serializable
 @OptIn(ExperimentalTime::class)
-data class Tournament (
+data class Event (
     val doubleElimination: Boolean,
     val winnerSetCount: Int,
     val loserSetCount: Int,
@@ -59,8 +59,8 @@ data class Tournament (
     override val teamSizeLimit: Int,
 ) : EventAbs {
     companion object {
-        operator fun invoke(): Tournament {
-            return Tournament(
+        operator fun invoke(): Event {
+            return Event(
                 doubleElimination = false,
                 winnerSetCount = 1,
                 loserSetCount = 0,
@@ -99,7 +99,7 @@ data class Tournament (
         }
     }
 
-    fun updateTournamentFromEvent(event: EventImp): Tournament {
+    fun updateTournamentFromEvent(event: Event): Event {
         return this.copy(
             name = event.name,
             description = event.description,
@@ -128,8 +128,8 @@ data class Tournament (
             isTaxed = event.isTaxed
         )
     }
-    fun toEvent(): EventImp {
-        return EventImp(
+    fun toEvent(): Event {
+        return Event(
             id = id,
             location = location,
             name = name,

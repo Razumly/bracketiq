@@ -5,7 +5,7 @@ import androidx.room.Delete
 import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Upsert
-import com.razumly.mvp.core.data.dataTypes.Tournament
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
 import kotlinx.coroutines.flow.Flow
 
@@ -13,44 +13,44 @@ import kotlinx.coroutines.flow.Flow
 interface TournamentDao {
 
     @Upsert
-    suspend fun upsertTournament(tournament: Tournament)
+    suspend fun upsertTournament(event: Event)
 
     @Upsert
-    suspend fun upsertTournaments(tournaments: List<Tournament>)
+    suspend fun upsertTournaments(events: List<Event>)
 
     @Delete
-    suspend fun deleteTournament(tournament: Tournament)
+    suspend fun deleteTournament(event: Event)
 
-    @Query("DELETE FROM Tournament")
+    @Query("DELETE FROM Event")
     suspend fun deleteAllTournaments()
 
-    @Query("DELETE FROM Tournament WHERE id = :id")
+    @Query("DELETE FROM Event WHERE id = :id")
     suspend fun deleteTournamentById(id: String)
 
-    @Query("DELETE FROM Tournament WHERE id IN (:ids)")
+    @Query("DELETE FROM Event WHERE id IN (:ids)")
     suspend fun deleteTournamentsById(ids: List<String>)
 
-    @Query("SELECT * FROM Tournament WHERE id = :id")
-    fun getTournamentFlowById(id: String): Flow<Tournament>
+    @Query("SELECT * FROM Event WHERE id = :id")
+    fun getTournamentFlowById(id: String): Flow<Event>
 
-    @Query("SELECT * FROM Tournament WHERE id = :id")
-    suspend fun getTournamentById(id: String): Tournament
+    @Query("SELECT * FROM Event WHERE id = :id")
+    suspend fun getTournamentById(id: String): Event
 
-    @Query("SELECT * FROM Tournament")
-    fun getAllCachedTournamentsFlow(): Flow<List<Tournament>>
+    @Query("SELECT * FROM Event")
+    fun getAllCachedTournamentsFlow(): Flow<List<Event>>
 
     @Transaction
-    @Query("SELECT * FROM Tournament WHERE id = :id")
+    @Query("SELECT * FROM Event WHERE id = :id")
     fun getTournamentWithRelationsFlow(id: String): Flow<TournamentWithRelations>
 
     @Transaction
-    @Query("SELECT * FROM Tournament WHERE id = :id")
+    @Query("SELECT * FROM Event WHERE id = :id")
     suspend fun getTournamentWithRelations(id: String): TournamentWithRelations
 
     @Transaction
-    suspend fun upsertTournamentWithRelations(tournament: Tournament) {
-        deleteTournamentCrossRefs(tournament.id)
-        upsertTournament(tournament)
+    suspend fun upsertTournamentWithRelations(event: Event) {
+        deleteTournamentCrossRefs(event.id)
+        upsertTournament(event)
     }
 
     @Transaction

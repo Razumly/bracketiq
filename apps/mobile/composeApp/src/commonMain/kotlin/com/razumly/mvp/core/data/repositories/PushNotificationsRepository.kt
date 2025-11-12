@@ -4,9 +4,8 @@ import com.mmk.kmpnotifier.notification.NotifierManager
 import com.mmk.kmpnotifier.notification.PayloadData
 import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
-import com.razumly.mvp.core.data.dataTypes.EventImp
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Team
-import com.razumly.mvp.core.data.dataTypes.Tournament
 import io.appwrite.ID
 import io.appwrite.models.Execution
 import io.appwrite.services.Account
@@ -69,8 +68,8 @@ interface IPushNotificationsRepository {
 
     suspend fun createTeamTopic(team: Team): Result<Execution>
     suspend fun deleteTopic(id: String): Result<Execution>
-    suspend fun createEventTopic(event: EventImp): Result<Execution>
-    suspend fun createTournamentTopic(tournament: Tournament): Result<Execution>
+    suspend fun createEventTopic(event: Event): Result<Execution>
+    suspend fun createTournamentTopic(event: Event): Result<Execution>
     suspend fun createChatGroupTopic(chatGroup: ChatGroup): Result<Execution>
 
     suspend fun addDeviceAsTarget(): Result<Unit>
@@ -247,14 +246,14 @@ class PushNotificationsRepository(
         mvpMessagingFunction(messageBody)
     }
 
-    override suspend fun createEventTopic(event: EventImp) = runCatching {
+    override suspend fun createEventTopic(event: Event) = runCatching {
         val messageBody = MessageBody("create", event.id, "event-${event.id}", listOf(event.hostId))
         mvpMessagingFunction(messageBody)
     }
 
-    override suspend fun createTournamentTopic(tournament: Tournament) = runCatching {
+    override suspend fun createTournamentTopic(event: Event) = runCatching {
         val messageBody = MessageBody(
-            "create", tournament.id, "tournament-${tournament.id}", listOf(tournament.hostId)
+            "create", event.id, "tournament-${event.id}", listOf(event.hostId)
         )
         mvpMessagingFunction(messageBody)
     }

@@ -63,9 +63,8 @@ import com.kmpalette.rememberDominantColorState
 import com.materialkolor.scheme.DynamicScheme
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.EventAbsWithRelations
-import com.razumly.mvp.core.data.dataTypes.EventImp
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
-import com.razumly.mvp.core.data.dataTypes.Tournament
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.enums.FieldType
 import com.razumly.mvp.core.presentation.IPaymentProcessor
@@ -133,8 +132,8 @@ fun EventDetails(
     isNewEvent: Boolean,
     onHostCreateAccount: () -> Unit,
     onPlaceSelected: (MVPPlace?) -> Unit,
-    onEditEvent: (EventImp.() -> EventImp) -> Unit,
-    onEditTournament: (Tournament.() -> Tournament) -> Unit,
+    onEditEvent: (Event.() -> Event) -> Unit,
+    onEditTournament: (Event.() -> Event) -> Unit,
     onAddCurrentUser: (Boolean) -> Unit,
     onEventTypeSelected: (EventType) -> Unit,
     onSelectFieldCount: (Int) -> Unit,
@@ -184,7 +183,7 @@ fun EventDetails(
             editEvent.location.isNotBlank() && editEvent.lat != 0.0 && editEvent.long != 0.0
         isSkillLevelValid = editEvent.divisions.isNotEmpty()
 
-        if (editEvent is Tournament) {
+        if (editEvent is Event) {
             isWinnerSetCountValid = editEvent.winnerSetCount in 1..5
             isWinnerPointsValid = editEvent.winnerBracketPointsToVictory.all { it > 0 }
             isFieldCountValid = fieldCount > 0
@@ -544,7 +543,7 @@ fun EventDetails(
                         style = MaterialTheme.typography.bodyMedium,
                         color = Color(localImageScheme.current.onSurface)
                     )
-                    if (event is Tournament) {
+                    if (event is Event) {
                         Text(
                             if (event.doubleElimination) "Double Elimination" else "Single Elimination",
                             style = MaterialTheme.typography.bodyMedium,
@@ -601,7 +600,7 @@ fun EventDetails(
                         modifier = Modifier.fillMaxWidth(.5f)
                     )
 
-                    if (event is EventImp) {
+                    if (event is Event) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.padding(top = 8.dp)
@@ -630,7 +629,7 @@ fun EventDetails(
                     }
 
                     // Tournament-specific fields
-                    if (editEvent is Tournament) {
+                    if (editEvent is Event) {
                         PlatformTextField(
                             value = editEvent.prize,
                             onValueChange = {
