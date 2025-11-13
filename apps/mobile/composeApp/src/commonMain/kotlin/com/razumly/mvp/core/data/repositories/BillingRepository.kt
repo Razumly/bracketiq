@@ -1,11 +1,11 @@
 package com.razumly.mvp.core.data.repositories
 
 import com.razumly.mvp.core.data.DatabaseService
-import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.RefundRequest
 import com.razumly.mvp.core.data.dataTypes.RefundRequestWithRelations
 import com.razumly.mvp.core.data.dataTypes.dtos.RefundRequestDTO
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.util.DbConstants
 import com.razumly.mvp.core.util.jsonMVP
 import io.appwrite.Query
@@ -37,7 +37,6 @@ class BillingRepository(
     private val userRepository: IUserRepository,
     private val functions: Functions,
     private val eventRepository: IEventRepository,
-    private val tournamentRepository: ITournamentRepository,
     private val databases: Databases,
     private val databaseService: DatabaseService
 ) : IBillingRepository {
@@ -45,15 +44,12 @@ class BillingRepository(
         event: EventAbs, teamId: String?
     ): Result<PurchaseIntent> = runCatching {
         val user = userRepository.currentUser.value.getOrThrow()
-        val isEvent = when (event) {
-            is Event -> true
-            else -> false
-        }
+        val isTournament = event.eventType == EventType.TOURNAMENT
         val response = jsonMVP.decodeFromString<PurchaseIntent>(
             functions.createExecution(
                 functionId = DbConstants.BILLING_FUNCTION,
                 body = jsonMVP.encodeToString(
-                    CreatePurchaseIntent(user.id, event.id, teamId, isEvent)
+                    CreatePurchaseIntent(user.id, event.id, teamId, isTournament)
                 ),
                 async = false,
             ).responseBody
@@ -101,10 +97,7 @@ class BillingRepository(
                         eventId = event.id,
                         userId = userRepository.currentUser.value.getOrThrow().id,
                         reason = reason,
-                        isTournament = when (event) {
-                            is Event -> true
-                            else -> false
-                        }
+                        isTournament = event.eventType == EventType.TOURNAMENT
                     )
                 )
             )
@@ -119,13 +112,15 @@ class BillingRepository(
         }
 
     override suspend fun deleteAndRefundEvent(event: EventAbs): Result<Unit> = runCatching {
-        val isEvent = when (event) {
-            is Event -> true
-            else -> false
-        }
+        val isTournament = event.eventType == EventType.TOURNAMENT
         val response = functions.createExecution(
             DbConstants.BILLING_FUNCTION,
-            jsonMVP.encodeToString(RefundFullEvent(eventId = event.id, isTournament = isEvent))
+            jsonMVP.encodeToString(
+                RefundFullEvent(
+                    eventId = event.id,
+                    isTournament = isTournament
+                )
+            )
         )
 
         val refundResponse = jsonMVP.decodeFromString<RefundResponse>(response.responseBody)
@@ -135,10 +130,7 @@ class BillingRepository(
         if (refundResponse.success == false) {
             throw Exception(refundResponse.message)
         }
-        when (event) {
-            is Event -> tournamentRepository.deleteTournament(event.id)
-            is Event -> eventRepository.deleteEvent(event.id)
-        }
+        eventRepository.deleteEvent(event.id).getOrThrow()
     }
 
     override suspend fun getRefundsWithRelations(): Result<List<RefundRequestWithRelations>> =
@@ -160,12 +152,7 @@ class BillingRepository(
                 userRepository.getUsers(listOf(refund.userId)).onSuccess { _ ->
                 }
 
-                if (refund.isTournament) {
-                    tournamentRepository.getTournament(refund.eventId).onSuccess { _ ->
-                    }
-                } else {
-                    eventRepository.getEvent(refund.eventId).onSuccess { _ ->
-                    }
+                eventRepository.getEvent(refund.eventId).onSuccess { _ ->
                 }
             }
 

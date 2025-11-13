@@ -13,11 +13,6 @@ data object HomeRoute : Route
 data object LoginRoute : Route
 
 @Serializable
-data class TournamentDetailRoute(
-    val tournamentId: String,
-) : Route
-
-@Serializable
 data object EventListRoute : Route
 
 @Serializable

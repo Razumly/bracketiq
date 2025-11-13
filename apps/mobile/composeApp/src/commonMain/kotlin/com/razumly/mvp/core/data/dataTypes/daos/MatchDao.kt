@@ -9,7 +9,6 @@ import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.crossRef.FieldMatchCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.MatchTeamCrossRef
-import com.razumly.mvp.core.data.dataTypes.crossRef.TournamentMatchCrossRef
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -22,9 +21,6 @@ interface MatchDao {
 
     @Upsert
     suspend fun upsertMatchTeamCrossRefs(crossRefs: List<MatchTeamCrossRef>)
-
-    @Upsert
-    suspend fun upsertTournamentMatchCrossRefs(crossRefs: List<TournamentMatchCrossRef>)
 
     @Upsert
     suspend fun upsertFieldMatchCrossRefs(crossRefs: List<FieldMatchCrossRef>)

@@ -19,7 +19,7 @@ fun Int.ceilDiv(other: Int): Int {
 }
 
 fun <T, R> Document<T>.convert(converter: (T) -> R): Document<R> {
-    return Document(id, collectionId, databaseId, createdAt, updatedAt, permissions, converter(data))
+    return Document(id, sequence, collectionId, databaseId, createdAt, updatedAt, permissions, converter(data))
 }
 
 val emailAddressRegex = Regex(

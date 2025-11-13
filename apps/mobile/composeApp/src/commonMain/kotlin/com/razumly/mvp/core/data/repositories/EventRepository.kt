@@ -9,6 +9,7 @@ import com.razumly.mvp.core.data.dataTypes.crossRef.EventTeamCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
 import com.razumly.mvp.core.data.dataTypes.dtos.EventDTO
+import com.razumly.mvp.core.data.dataTypes.toEventDTO
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResponse
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
 import com.razumly.mvp.core.util.DbConstants
@@ -173,7 +174,7 @@ class EventRepository(
                 DbConstants.DATABASE_NAME,
                 DbConstants.EVENT_COLLECTION,
                 queries = combinedQuery,
-                EventDTO::class
+                nestedType = EventDTO::class
             ).documents.map { dtoDoc -> dtoDoc.convert { it.toEvent(dtoDoc.id) }.data }
         },
             getLocalData = { emptyList() },

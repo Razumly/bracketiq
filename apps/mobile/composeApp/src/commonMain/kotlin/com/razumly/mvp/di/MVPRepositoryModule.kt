@@ -15,12 +15,10 @@ import com.razumly.mvp.core.data.repositories.IFieldRepository
 import com.razumly.mvp.core.data.repositories.IImagesRepository
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
-import com.razumly.mvp.core.data.repositories.ITournamentRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.ImagesRepository
 import com.razumly.mvp.core.data.repositories.PushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.TeamRepository
-import com.razumly.mvp.core.data.repositories.TournamentRepository
 import com.razumly.mvp.core.data.repositories.UserRepository
 import com.razumly.mvp.eventDetail.data.IMatchRepository
 import com.razumly.mvp.eventDetail.data.MatchRepository
@@ -29,7 +27,7 @@ import org.koin.dsl.module
 
 val MVPRepositoryModule = module {
     single {
-        EventAbsRepository(get(), get(), get(), get(), get())
+        EventAbsRepository(get(), get(), get(), get())
     } bind IEventAbsRepository::class
     single {
         EventRepository(get(), get(), get(), get(), get())
@@ -40,9 +38,6 @@ val MVPRepositoryModule = module {
     single {
         TeamRepository(get(), get(), get(), get())
     } bind ITeamRepository::class
-    single {
-        TournamentRepository(get(), get(), get(), get(), get(), get(), get())
-    } bind ITournamentRepository::class
     single {
         UserRepository(get(), get(), get(), get(), get(), get())
     } bind IUserRepository::class
@@ -60,7 +55,7 @@ val MVPRepositoryModule = module {
     } bind IChatGroupRepository::class
     single {
         BillingRepository(
-            get(), get(), get(), get(), get(), get()
+            get(), get(), get(), get(), get()
         )
     } bind IBillingRepository::class
     single {

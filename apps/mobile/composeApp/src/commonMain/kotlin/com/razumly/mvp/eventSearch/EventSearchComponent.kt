@@ -9,7 +9,6 @@ import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.repositories.IEventAbsRepository
 import com.razumly.mvp.core.data.repositories.IEventRepository
-import com.razumly.mvp.core.data.repositories.ITournamentRepository
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.util.calcDistance
@@ -64,9 +63,7 @@ class DefaultEventSearchComponent(
     componentContext: ComponentContext,
     private val eventAbsRepository: IEventAbsRepository,
     private val eventRepository: IEventRepository,
-    private val tournamentRepository: ITournamentRepository,
     eventId: String?,
-    tournamentId: String?,
     override val locationTracker: LocationTracker,
     private val navigationHandler: INavigationHandler
 ) : ComponentContext by componentContext, EventSearchComponent {
@@ -144,14 +141,6 @@ class DefaultEventSearchComponent(
                     navigationHandler.navigateToEvent(it.event)
                 }.onFailure { e ->
                     _errorState.value = ErrorMessage("Failed to fetch event: ${e.message}")
-                }
-            }
-        } else if (tournamentId != null) {
-            scope.launch {
-                tournamentRepository.getTournament(tournamentId).onSuccess {
-                    navigationHandler.navigateToEvent(it)
-                }.onFailure { e ->
-                    _errorState.value = ErrorMessage("Failed to fetch tournament: ${e.message}")
                 }
             }
         }

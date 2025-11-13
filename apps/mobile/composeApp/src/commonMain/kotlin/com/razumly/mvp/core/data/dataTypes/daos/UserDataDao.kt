@@ -8,7 +8,6 @@ import androidx.room.Upsert
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
-import com.razumly.mvp.core.data.dataTypes.crossRef.TournamentUserCrossRef
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.flow.Flow
 
@@ -24,12 +23,6 @@ interface UserDataDao {
     suspend fun deleteUsersById(ids: List<String>)
 
     @Upsert
-    suspend fun upsertUserTournamentCrossRef(crossRef: TournamentUserCrossRef)
-
-    @Upsert
-    suspend fun upsertUserTournamentCrossRefs(crossRefs: List<TournamentUserCrossRef>)
-
-    @Upsert
     suspend fun upsertUserEventCrossRef(crossRef: EventUserCrossRef)
 
     @Upsert
@@ -40,9 +33,6 @@ interface UserDataDao {
 
     @Delete
     suspend fun deleteUserData(userData: UserData)
-
-    @Query("DELETE FROM user_tournament_cross_ref WHERE userId IN (:userIds)")
-    suspend fun deleteTournamentCrossRefById(userIds: List<String>)
 
     @Query("DELETE FROM team_user_cross_ref WHERE userId IN (:userIds)")
     suspend fun deleteTeamCrossRefById(userIds: List<String>)

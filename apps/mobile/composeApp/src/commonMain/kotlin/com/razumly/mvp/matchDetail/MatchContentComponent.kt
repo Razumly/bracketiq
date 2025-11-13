@@ -8,8 +8,8 @@ import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
-import com.razumly.mvp.core.data.repositories.ITournamentRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.eventDetail.data.IMatchRepository
 import kotlinx.coroutines.CoroutineScope
@@ -84,7 +84,7 @@ class DefaultMatchContentComponent(
     componentContext: ComponentContext,
     selectedMatch: MatchWithRelations,
     selectedEvent: Event?,
-    tournamentRepository: ITournamentRepository,
+    eventRepository: IEventRepository,
     private val matchRepository: IMatchRepository,
     userRepository: IUserRepository,
     private val teamRepository: ITeamRepository,
@@ -96,9 +96,10 @@ class DefaultMatchContentComponent(
     override val errorState = _errorState.asStateFlow()
 
     override val event =
-        tournamentRepository.getTournamentFlow(selectedMatch.match.tournamentId)
-            .distinctUntilChanged().map { tournament ->
-                tournament.getOrElse {
+        eventRepository.getEventWithRelationsFlow(selectedMatch.match.tournamentId)
+            .distinctUntilChanged()
+            .map { eventResult ->
+                eventResult.map { it.event as Event }.getOrElse {
                     _errorState.value = it.message
                     selectedEvent
                 }

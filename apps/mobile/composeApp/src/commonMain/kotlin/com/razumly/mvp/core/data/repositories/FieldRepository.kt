@@ -44,7 +44,7 @@ class FieldRepository(
                 val docs = database.listDocuments(
                     DbConstants.DATABASE_NAME,
                     DbConstants.FIELDS_COLLECTION,
-                    listOf(Query.contains(DbConstants.TOURNAMENT_ATTRIBUTE, tournamentId)),
+                    listOf(Query.contains(DbConstants.EVENT_ID_ATTRIBUTE, tournamentId)),
                     nestedType = Field::class,
                 )
                 docs.documents.map { it.data.copy(id = it.id) }

@@ -37,7 +37,7 @@ import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.util.empty
 import com.razumly.mvp.eventDetail.data.IMatchRepository
 import io.appwrite.models.User
-import io.github.ismoy.imagepickerkmp.GalleryPhotoHandler.PhotoResult
+import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
@@ -131,7 +131,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun showMatchEditDialog(match: MatchWithRelations)
     fun dismissMatchEditDialog()
     fun updateMatchFromDialog(updatedMatch: MatchWithRelations)
-    fun onUploadSelected(photo: PhotoResult)
+    fun onUploadSelected(photo: GalleryPhotoResult)
     fun deleteImage(url: String)
     fun sendNotification(title: String, message: String)
 }
@@ -413,13 +413,10 @@ class DefaultEventDetailComponent(
     }
 
     override fun matchSelected(selectedMatch: MatchWithRelations) {
-        when (selectedEvent.value.event) {
-            is Event -> navigationHandler.navigateToMatch(
-                selectedMatch, selectedEvent.value.event as Event
-            )
-
-            else -> Unit
-        }
+        navigationHandler.navigateToMatch(
+            selectedMatch,
+            selectedEvent.value.event as Event
+        )
     }
 
     override fun selectDivision(division: Division) {
@@ -456,7 +453,7 @@ class DefaultEventDetailComponent(
         generateRounds()
     }
 
-    override fun onUploadSelected(photo: PhotoResult) {
+    override fun onUploadSelected(photo: GalleryPhotoResult) {
         scope.launch {
             imageRepository.uploadImage(convertPhotoResultToInputFile(photo))
         }
@@ -599,13 +596,8 @@ class DefaultEventDetailComponent(
     }
 
     override fun editEventField(update: Event.() -> Event) {
-        when (_editedEvent.value) {
-            is Event -> _editedEvent.value = (_editedEvent.value as Event).update()
-            is Event -> {
-                var event = (_editedEvent.value as Event).toEvent()
-                event = event.update()
-                _editedEvent.value = Event().updateTournamentFromEvent(event)
-            }
+        if (_editedEvent.value is Event) {
+            _editedEvent.value = (_editedEvent.value as Event).update()
         }
     }
 

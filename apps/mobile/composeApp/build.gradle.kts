@@ -213,7 +213,7 @@ mockmp {
 android {
     namespace = "com.razumly.mvp"
     compileSdk = libs.versions.android.compileSdk.get().toInt()
-
+    buildFeatures.buildConfig = true
     packaging {
         resources.pickFirsts.add("META-INF/*")
         resources.pickFirsts.add("mozilla/*")

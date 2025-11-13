@@ -1,14 +1,14 @@
 package com.razumly.mvp.core.presentation
 
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
-import com.materialkolor.DynamicMaterialExpressiveTheme
+import com.materialkolor.DynamicMaterialTheme
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.rememberDynamicMaterialThemeState
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MVPTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
@@ -21,7 +21,7 @@ fun MVPTheme(
         style = PaletteStyle.Neutral,
 
     )
-    DynamicMaterialExpressiveTheme(
+    DynamicMaterialTheme(
         state = themeState,
         animate = true,
         content = content,

@@ -100,7 +100,6 @@ class RootComponent(
         val deepLinkNavVal = deepLinkNav.value
         val targetConfig = when (deepLinkNavVal) {
             is DeepLinkNav.Event -> AppConfig.Search(eventId = deepLinkNavVal.eventId)
-            is DeepLinkNav.Tournament -> AppConfig.Search(tournamentId = deepLinkNavVal.tournamentId)
             is DeepLinkNav.Refresh -> AppConfig.ProfileHome
             is DeepLinkNav.Return -> AppConfig.ProfileHome
             else -> AppConfig.Search()
@@ -213,7 +212,7 @@ class RootComponent(
 
         is AppConfig.Search -> Child.Search(
             _koin.get {
-                parametersOf(componentContext, config.eventId, config.tournamentId, this@RootComponent)
+                parametersOf(componentContext, config.eventId, this@RootComponent)
             },
             _koin.get { parametersOf(componentContext) }
         )
@@ -278,7 +277,6 @@ class RootComponent(
 
     sealed class DeepLinkNav {
         data class Event(val eventId: String) : DeepLinkNav()
-        data class Tournament(val tournamentId: String) : DeepLinkNav()
         data object Refresh : DeepLinkNav()
         data object Return : DeepLinkNav()
     }

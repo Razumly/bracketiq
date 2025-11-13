@@ -10,8 +10,8 @@ import com.arkivanov.decompose.router.stack.pop
 import com.arkivanov.decompose.router.stack.pushNew
 import com.arkivanov.decompose.value.Value
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
-import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.UserData
@@ -28,7 +28,7 @@ import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.eventCreate.CreateEventComponent.Child
 import com.razumly.mvp.eventCreate.CreateEventComponent.Config
-import io.github.ismoy.imagepickerkmp.GalleryPhotoHandler.PhotoResult
+import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -67,7 +67,7 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     fun addUserToEvent(add: Boolean)
     fun selectFieldCount(count: Int)
     fun createAccount()
-    fun onUploadSelected(photo: PhotoResult)
+    fun onUploadSelected(photo: GalleryPhotoResult)
     fun deleteImage(url: String)
 
     sealed class Child {
@@ -199,17 +199,13 @@ class DefaultCreateEventComponent(
 
     override fun updateEventField(update: Event.() -> Event) {
         scope.launch {
-            when (_newEventState.value) {
-                is Event -> _newEventState.value = (_newEventState.value as Event).update()
-                is Event -> _newEventState.value =
-                    (_newEventState.value as Event).updateTournamentFromEvent(
-                        (_newEventState.value as Event).toEvent().update()
-                    )
+            if (_newEventState.value is Event) {
+                _newEventState.value = (_newEventState.value as Event).update()
             }
         }
     }
 
-    override fun onUploadSelected(photo: PhotoResult) {
+    override fun onUploadSelected(photo: GalleryPhotoResult) {
         scope.launch {
             loadingHandler.showLoading("Uploading image...")
             imageRepository.uploadImage(convertPhotoResultToInputFile(photo))

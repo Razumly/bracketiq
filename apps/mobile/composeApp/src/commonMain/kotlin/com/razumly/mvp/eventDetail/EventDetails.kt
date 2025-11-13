@@ -61,9 +61,9 @@ import coil3.compose.AsyncImage
 import com.kmpalette.loader.rememberNetworkLoader
 import com.kmpalette.rememberDominantColorState
 import com.materialkolor.scheme.DynamicScheme
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.EventAbsWithRelations
-import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.enums.FieldType
@@ -97,8 +97,9 @@ import com.razumly.mvp.eventMap.MapComponent
 import dev.chrisbanes.haze.ExperimentalHazeApi
 import dev.icerock.moko.geo.LatLng
 import io.github.aakira.napier.Napier
-import io.github.ismoy.imagepickerkmp.GalleryPhotoHandler
-import io.github.ismoy.imagepickerkmp.GalleryPickerLauncher
+import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
+import io.github.ismoy.imagepickerkmp.domain.models.MimeType
+import io.github.ismoy.imagepickerkmp.presentation.ui.components.GalleryPickerLauncher
 import io.ktor.http.Url
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.format
@@ -137,7 +138,7 @@ fun EventDetails(
     onAddCurrentUser: (Boolean) -> Unit,
     onEventTypeSelected: (EventType) -> Unit,
     onSelectFieldCount: (Int) -> Unit,
-    onUploadSelected: (GalleryPhotoHandler.PhotoResult) -> Unit,
+    onUploadSelected: (GalleryPhotoResult) -> Unit,
     onDeleteImage: (String) -> Unit,
     joinButton: @Composable (isValid: Boolean) -> Unit
 ) {
@@ -897,7 +898,8 @@ fun EventDetails(
             showUploadImagePicker = false
         }, onDismiss = {
             showUploadImagePicker = false
-        }, allowMultiple = false, mimeTypes = listOf("image/jpeg", "image/png", "image/webp")
+        }, allowMultiple = false, mimeTypes = listOf(MimeType.IMAGE_JPEG, MimeType.IMAGE_PNG,
+                MimeType.IMAGE_WEBP)
         )
     }
 

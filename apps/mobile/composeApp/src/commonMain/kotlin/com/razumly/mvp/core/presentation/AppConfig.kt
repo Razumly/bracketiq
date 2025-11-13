@@ -42,7 +42,7 @@ sealed class AppConfig {
     data object ProfileDetails : AppConfig()
 
     @Serializable
-    data class Search(val eventId: String? = null, val tournamentId: String? = null) : AppConfig()
+    data class Search(val eventId: String? = null) : AppConfig()
 
     @Serializable
     data class Teams(val freeAgents: List<String>, val event: EventAbs?) : AppConfig()

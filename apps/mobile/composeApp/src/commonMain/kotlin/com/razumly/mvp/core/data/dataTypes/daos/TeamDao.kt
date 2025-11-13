@@ -12,7 +12,6 @@ import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
 import com.razumly.mvp.core.data.dataTypes.crossRef.MatchTeamCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPendingPlayerCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
-import com.razumly.mvp.core.data.dataTypes.crossRef.TournamentTeamCrossRef
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.flow.Flow
 
@@ -66,9 +65,6 @@ interface TeamDao {
     @Upsert
     suspend fun upsertMatchTeamCrossRefs(crossRefs: List<MatchTeamCrossRef>)
 
-    @Upsert
-    suspend fun upsertTournamentTeamCrossRefs(crossRefs: List<TournamentTeamCrossRef>)
-
     @Delete
     suspend fun deleteTeamPlayerCrossRef(crossRef: TeamPlayerCrossRef)
 
@@ -84,8 +80,6 @@ interface TeamDao {
     @Query("DELETE FROM team_pending_player_cross_ref WHERE teamId == :teamId")
     suspend fun deleteTeamPendingPlayerCrossRefsByTeamId(teamId: String)
 
-    @Query("DELETE FROM tournament_team_cross_ref WHERE teamId == :teamId")
-    suspend fun deleteTournamentTeamCrossRefsByTeamId(teamId: String)
 
     @RewriteQueriesToDropUnusedColumns
     @Transaction

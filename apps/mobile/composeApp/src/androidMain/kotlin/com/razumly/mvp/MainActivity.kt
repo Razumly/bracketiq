@@ -89,13 +89,6 @@ class MainActivity : ComponentActivity() {
                 DeepLinkNav.Event(effectiveSegments[1])
             }
 
-            effectiveSegments.size >= 2 && effectiveSegments[0] == "tournament" -> {
-                Napier.d(
-                    tag = "DeepLink", message = "Navigating to Tournament: ${effectiveSegments[1]}"
-                )
-                DeepLinkNav.Tournament(effectiveSegments[1])
-            }
-
             effectiveSegments.size >= 2 && effectiveSegments[0] == "host" && effectiveSegments[1] == "onboarding" -> {
                 val isRefresh = getQueryParameter("refresh")?.toBoolean() == true
                 val isReturn = getQueryParameter("success")?.toBoolean() == true

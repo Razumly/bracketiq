@@ -61,7 +61,7 @@ val componentModule = module {
             componentContext = componentContext,
             selectedMatch = selectedMatch,
             selectedEvent = selectedEvent,
-            tournamentRepository = get(),
+            eventRepository = get(),
             matchRepository = get(),
             userRepository = get(),
             teamRepository = get(),
@@ -96,15 +96,13 @@ val componentModule = module {
         )
     }
 
-    factory<EventSearchComponent> { (componentContext: ComponentContext, eventId: String?, tournamentId: String?, navHandler: INavigationHandler) ->
+    factory<EventSearchComponent> { (componentContext: ComponentContext, eventId: String?, navHandler: INavigationHandler) ->
         DefaultEventSearchComponent(
             componentContext = componentContext,
             locationTracker = get(),
             eventAbsRepository = get(),
             eventRepository = get(),
-            tournamentRepository = get(),
             eventId = eventId,
-            tournamentId = tournamentId,
             navigationHandler = navHandler
         )
     }

@@ -6,7 +6,7 @@ import android.provider.OpenableColumns
 import androidx.core.net.toUri
 import com.razumly.mvp.MvpApp
 import io.appwrite.models.InputFile
-import io.github.ismoy.imagepickerkmp.GalleryPhotoHandler
+import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
 
 private fun uriToByteArray(context: Context, uri: Uri): ByteArray {
     return context.contentResolver.openInputStream(uri)?.use { inputStream ->
@@ -23,7 +23,7 @@ private fun getFileNameFromUri(context: Context, uri: Uri): String {
     } ?: "image_${System.currentTimeMillis()}.jpg"
 }
 
-actual fun convertPhotoResultToInputFile(photoResult: GalleryPhotoHandler.PhotoResult): InputFile {
+actual fun convertPhotoResultToInputFile(photoResult: GalleryPhotoResult): InputFile {
     val context = MvpApp.applicationContext()
 
     val uri = photoResult.uri.toUri()

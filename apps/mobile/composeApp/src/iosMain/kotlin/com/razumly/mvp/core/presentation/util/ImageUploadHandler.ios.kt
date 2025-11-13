@@ -2,7 +2,7 @@
 package com.razumly.mvp.core.presentation.util
 
 import io.appwrite.models.InputFile
-import io.github.ismoy.imagepickerkmp.GalleryPhotoHandler
+import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.usePinned
@@ -12,7 +12,7 @@ import platform.Foundation.dataWithContentsOfURL
 import platform.Foundation.getBytes
 import kotlin.time.Clock
 
-actual fun convertPhotoResultToInputFile(photoResult: GalleryPhotoHandler.PhotoResult): InputFile {
+actual fun convertPhotoResultToInputFile(photoResult: GalleryPhotoResult): InputFile {
     val fileName = photoResult.fileName ?: "image_${Clock.System.now().toEpochMilliseconds()}.jpg"
     val mimeType = when {
         fileName.endsWith(".png", ignoreCase = true) -> "image/png"

@@ -59,7 +59,7 @@ import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.ktx.DynamicScheme
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
-import com.razumly.mvp.core.data.dataTypes.TournamentWithRelations
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.FeeBreakdown
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.composables.PlatformTextField
@@ -115,6 +115,7 @@ fun EventDetailScreen(
     val isCaptain by component.isUserCaptain.collectAsState()
     val isDark = isSystemInDarkTheme()
     val isEditingMatches by component.isEditingMatches.collectAsState()
+    val isTournamentEvent = selectedEvent.event.eventType == EventType.TOURNAMENT
 
     var showTeamSelectionDialog by remember { mutableStateOf(false) }
     var showFab by remember { mutableStateOf(false) }
@@ -449,7 +450,7 @@ fun EventDetailScreen(
                 ) {
                     Column(Modifier.padding(innerPadding).padding(top = 32.dp)) {
                         CollapsableHeader(component)
-                        if (isHost && selectedEvent is TournamentWithRelations) {
+                        if (isHost && isTournamentEvent) {
                             MatchEditControls(
                                 isEditing = isEditingMatches,
                                 onStartEdit = component::startEditingMatches,
@@ -458,33 +459,24 @@ fun EventDetailScreen(
                             )
                         }
                         Box(Modifier.fillMaxSize()) {
-                            when (selectedEvent) {
-                                is TournamentWithRelations -> {
-                                    if (isBracketView) {
-                                        TournamentBracketView(
-                                            showFab = { showFab = it },
-                                            onMatchClick = { match ->
-                                                if (!isEditingMatches) {
-                                                    component.matchSelected(match)
-                                                }
-                                            },
-                                            isEditingMatches = isEditingMatches,
-                                            editableMatches = editableMatches,
-                                            onEditMatch = { match ->
-                                                component.showMatchEditDialog(match)
-                                            })
-                                    } else {
-                                        ParticipantsView(showFab = {
-                                            showFab = it
-                                        }, onNavigateToChat = component::onNavigateToChat)
-                                    }
-                                }
-
-                                is EventWithRelations -> {
-                                    ParticipantsView(showFab = {
-                                        showFab = it
-                                    }, onNavigateToChat = component::onNavigateToChat)
-                                }
+                            if (isTournamentEvent && isBracketView) {
+                                TournamentBracketView(
+                                    showFab = { showFab = it },
+                                    onMatchClick = { match ->
+                                        if (!isEditingMatches) {
+                                            component.matchSelected(match)
+                                        }
+                                    },
+                                    isEditingMatches = isEditingMatches,
+                                    editableMatches = editableMatches,
+                                    onEditMatch = { match ->
+                                        component.showMatchEditDialog(match)
+                                    })
+                            } else {
+                                ParticipantsView(
+                                    showFab = { showFab = it },
+                                    onNavigateToChat = component::onNavigateToChat
+                                )
                             }
                             androidx.compose.animation.AnimatedVisibility(
                                 visible = showFab,

@@ -35,7 +35,6 @@ suspend fun UserRepository.oauth2Login(activity: ComponentActivity): Result<Unit
                 friendIds = listOf(),
                 teamInvites = listOf(),
                 eventInvites = listOf(),
-                tournamentInvites = listOf(),
                 hasStripeAccount = false,
                 uploadedImages = listOf(),
                 friendRequestIds = listOf(),

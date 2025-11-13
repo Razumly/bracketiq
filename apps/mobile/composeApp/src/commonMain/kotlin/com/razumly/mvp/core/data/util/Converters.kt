@@ -2,6 +2,7 @@ package com.razumly.mvp.core.data.util
 
 import androidx.room.TypeConverter
 import com.razumly.mvp.core.data.dataTypes.enums.Division
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlin.time.ExperimentalTime
@@ -54,4 +55,10 @@ class Converters {
         if (data.isNullOrEmpty()) return emptyList()
         return data.split(",").map { Division.valueOf(it) }
     }
+
+    @TypeConverter
+    fun fromEventType(eventType: EventType): String = eventType.name
+
+    @TypeConverter
+    fun toEventType(value: String): EventType = EventType.valueOf(value)
 }

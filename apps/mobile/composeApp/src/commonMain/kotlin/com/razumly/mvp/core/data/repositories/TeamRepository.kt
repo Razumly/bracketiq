@@ -56,7 +56,7 @@ class TeamRepository(
                 queries = listOf(
                     Query.equal("\$id", ids), Query.limit(200)
                 ),
-                TeamDTO::class,
+                nestedType = TeamDTO::class,
             ).documents.map { dtoDoc -> dtoDoc.convert { it.toTeam(dtoDoc.id) }.data }
         }, getLocalData = { databaseService.getTeamDao.getTeams(ids) }, saveData = { teams ->
             databaseService.getTeamDao.upsertTeams(teams)
@@ -262,7 +262,7 @@ class TeamRepository(
                 DbConstants.DATABASE_NAME,
                 DbConstants.VOLLEYBALL_TEAMS_COLLECTION,
                 queries = listOf(query),
-                TeamDTO::class,
+                nestedType = TeamDTO::class,
             ).documents.map { dtoDoc ->
                 dtoDoc.convert { it.toTeam(dtoDoc.id) }.data
             }

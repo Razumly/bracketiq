@@ -106,7 +106,7 @@ class MatchRepository(
                         DbConstants.DATABASE_NAME,
                         DbConstants.MATCHES_COLLECTION,
                         queries = listOf(
-                            Query.equal(DbConstants.TOURNAMENT_ATTRIBUTE, tournamentId),
+                            Query.equal(DbConstants.EVENT_ID_ATTRIBUTE, tournamentId),
                             Query.limit(200)
                         ),
                         nestedType = MatchDTO::class
@@ -154,7 +154,7 @@ class MatchRepository(
         multiResponse(getRemoteData = {
             database.listDocuments(
                 DbConstants.DATABASE_NAME, DbConstants.MATCHES_COLLECTION, queries = listOf(
-                    Query.equal(DbConstants.TOURNAMENT_ATTRIBUTE, tournamentId), Query.limit(200)
+                    Query.equal(DbConstants.EVENT_ID_ATTRIBUTE, tournamentId), Query.limit(200)
                 ), nestedType = MatchDTO::class
             ).documents.map { dtoDoc ->
                 dtoDoc.convert { it.toMatch(dtoDoc.id) }.data
