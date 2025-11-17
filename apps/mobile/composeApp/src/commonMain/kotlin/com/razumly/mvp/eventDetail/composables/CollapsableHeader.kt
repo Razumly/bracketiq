@@ -22,7 +22,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.Event
-import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.eventDetail.EventDetailComponent
 import com.razumly.mvp.icons.MVPIcons
@@ -37,8 +36,8 @@ fun CollapsableHeader(
     val isBracketView by component.isBracketView.collectAsState()
     val actualEvent by component.selectedEvent.collectAsState()
 
-    val selectedEvent = actualEvent ?: EventWithRelations(Event(), null)
-    val isTournament = selectedEvent.event.eventType == EventType.TOURNAMENT
+    val selectedEvent = actualEvent
+    val isTournament = selectedEvent.eventType == EventType.TOURNAMENT
 
     Column(Modifier.fillMaxWidth()) {
         if (isTournament) {

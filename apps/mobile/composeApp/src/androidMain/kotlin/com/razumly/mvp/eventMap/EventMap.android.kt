@@ -26,8 +26,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.google.android.gms.maps.CameraUpdateFactory
+import com.google.android.gms.maps.MapsInitializer
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
@@ -40,7 +42,7 @@ import com.google.maps.android.compose.MapUiSettings
 import com.google.maps.android.compose.MarkerInfoWindow
 import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.rememberCameraPositionState
-import com.razumly.mvp.core.data.dataTypes.EventAbs
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.presentation.util.CircularRevealShape
 import com.razumly.mvp.core.util.toGoogle
@@ -55,12 +57,12 @@ import java.util.Collections.emptyList
 @Composable
 actual fun EventMap(
     component: MapComponent,
-    onEventSelected: (event: EventAbs) -> Unit,
+    onEventSelected: (event: Event) -> Unit,
     onPlaceSelected: (place: MVPPlace) -> Unit,
     canClickPOI: Boolean,
     modifier: Modifier,
     focusedLocation: dev.icerock.moko.geo.LatLng,
-    focusedEvent: EventAbs?,
+    focusedEvent: Event?,
     revealCenter: Offset,
     onBackPressed: (() -> Unit)?
 ) {
@@ -76,6 +78,11 @@ actual fun EventMap(
     var selectedPOI by remember { mutableStateOf<PointOfInterest?>(null) }
     var isAnimating by remember { mutableStateOf(false) }
     val poiMarkerState = remember { MarkerState() }
+    val localContext = LocalContext.current
+
+    LaunchedEffect(localContext) {
+        MapsInitializer.initialize(localContext)
+    }
 
     LaunchedEffect(selectedPOI) {
         selectedPOI?.let { poi ->
@@ -99,9 +106,9 @@ actual fun EventMap(
         events.forEach { event ->
             val existingState = eventMarkerStates[event.id]
             if (existingState == null) {
-                eventMarkerStates[event.id] = MarkerState(position = LatLng(event.lat, event.long))
+                eventMarkerStates[event.id] = MarkerState(position = LatLng(event.latitude, event.longitude))
             } else {
-                val newPosition = LatLng(event.lat, event.long)
+                val newPosition = LatLng(event.latitude, event.longitude)
                 if (existingState.position != newPosition) {
                     existingState.position = newPosition
                 }
@@ -208,7 +215,7 @@ actual fun EventMap(
 
                 focusedEvent?.let { event ->
                     val focusedMarkerState = remember(event.id) {
-                        MarkerState(position = LatLng(event.lat, event.long))
+                        MarkerState(position = LatLng(event.latitude, event.longitude))
                     }
                     MarkerInfoWindow(
                         state = focusedMarkerState,

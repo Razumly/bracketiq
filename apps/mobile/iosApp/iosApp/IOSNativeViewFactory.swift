@@ -17,11 +17,11 @@ class IOSNativeViewFactory: NativeViewFactory {
     
     func createNativeMapView(
         component: MapComponent,
-        onEventSelected: @escaping (any EventAbs) -> Void,
+        onEventSelected: @escaping (Event) -> Void,
         onPlaceSelected: @escaping (MVPPlace) -> Void,
         canClickPOI: Bool,
         focusedLocation: LatLng?,
-        focusedEvent: (any EventAbs)?,
+        focusedEvent: (Event)?,
         revealCenterX: Double,
         revealCenterY: Double
     ) -> UIViewController {
@@ -48,11 +48,11 @@ class IOSNativeViewFactory: NativeViewFactory {
     func updateNativeMapView(
             viewController: UIViewController,
             component: MapComponent,
-            onEventSelected: @escaping (any EventAbs) -> Void,
+            onEventSelected: @escaping (Event) -> Void,
             onPlaceSelected: @escaping (MVPPlace) -> Void,
             canClickPOI: Bool,
             focusedLocation: LatLng?,
-            focusedEvent: (any EventAbs)?,
+            focusedEvent: (Event)?,
             revealCenterX: Double,
             revealCenterY: Double
         ) {

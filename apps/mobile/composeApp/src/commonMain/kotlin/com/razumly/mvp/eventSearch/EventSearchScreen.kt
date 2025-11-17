@@ -97,7 +97,6 @@ fun EventSearchScreen(
     var overlayStartOffset by remember { mutableStateOf(0.dp)}
     var overlayWidth by remember { mutableStateOf(0.dp)}
 
-
     LaunchedEffect(searchBoxSize, searchBoxPosition) {
         overlayTopOffset = with(density) {
             searchBoxPosition.y.toDp() + searchBoxSize.height.toDp() + 4.dp
@@ -226,7 +225,7 @@ fun EventSearchScreen(
                     onPlaceSelected = {},
                     canClickPOI = false,
                     focusedLocation = selectedEvent?.let {
-                        LatLng(it.lat, it.long)
+                        LatLng(it.latitude, it.longitude)
                     } ?: currentLocation ?: LatLng(0.0,0.0),
                     focusedEvent = null,
                     revealCenter = revealCenter,

@@ -5,11 +5,9 @@ import com.razumly.mvp.chat.data.IChatGroupRepository
 import com.razumly.mvp.chat.data.IMessageRepository
 import com.razumly.mvp.chat.data.MessageRepository
 import com.razumly.mvp.core.data.repositories.BillingRepository
-import com.razumly.mvp.core.data.repositories.EventAbsRepository
 import com.razumly.mvp.core.data.repositories.EventRepository
 import com.razumly.mvp.core.data.repositories.FieldRepository
 import com.razumly.mvp.core.data.repositories.IBillingRepository
-import com.razumly.mvp.core.data.repositories.IEventAbsRepository
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
 import com.razumly.mvp.core.data.repositories.IImagesRepository
@@ -27,10 +25,7 @@ import org.koin.dsl.module
 
 val MVPRepositoryModule = module {
     single {
-        EventAbsRepository(get(), get(), get(), get())
-    } bind IEventAbsRepository::class
-    single {
-        EventRepository(get(), get(), get(), get(), get())
+        EventRepository(get(), get(), get(), get(), get(), get())
     } bind IEventRepository::class
     single {
         FieldRepository(get(), get())

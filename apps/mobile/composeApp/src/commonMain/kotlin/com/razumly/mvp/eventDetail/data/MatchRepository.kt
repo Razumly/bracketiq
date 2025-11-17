@@ -13,7 +13,7 @@ import com.razumly.mvp.core.util.DbConstants.MATCHES_CHANNEL
 import com.razumly.mvp.core.util.convert
 import io.appwrite.Query
 import io.appwrite.models.RealtimeSubscription
-import io.appwrite.services.Databases
+import io.appwrite.services.TablesDB
 import io.appwrite.services.Functions
 import io.appwrite.services.Realtime
 import kotlinx.coroutines.CoroutineScope
@@ -51,7 +51,7 @@ interface IMatchRepository : IMVPRepository {
 
 @OptIn(ExperimentalTime::class)
 class MatchRepository(
-    private val database: Databases,
+    private val tablesDb: TablesDB,
     private val databaseService: DatabaseService,
     private val realtime: Realtime,
     private val functions: Functions,
@@ -62,10 +62,10 @@ class MatchRepository(
 
     override suspend fun getMatch(matchId: String): Result<MatchMVP> =
         singleResponse(networkCall = {
-            database.getDocument(
+            tablesDb.getRow<MatchDTO>(
                 databaseId = DbConstants.DATABASE_NAME,
-                collectionId = DbConstants.MATCHES_COLLECTION,
-                documentId = matchId,
+                tableId = DbConstants.MATCHES_TABLE,
+                rowId = matchId,
                 nestedType = MatchDTO::class
             ).data.toMatch(matchId)
         }, saveCall = { match ->
@@ -82,10 +82,10 @@ class MatchRepository(
     }
 
     override suspend fun updateMatch(match: MatchMVP): Result<Unit> = singleResponse(networkCall = {
-        database.updateDocument(
+        tablesDb.updateRow<MatchDTO>(
             databaseId = DbConstants.DATABASE_NAME,
-            collectionId = DbConstants.MATCHES_COLLECTION,
-            documentId = match.id,
+            tableId = DbConstants.MATCHES_TABLE,
+            rowId = match.id,
             data = match.toMatchDTO(),
             nestedType = MatchDTO::class
         ).data.toMatch(match.id)
@@ -102,16 +102,16 @@ class MatchRepository(
 
             val remoteJob = launch {
                 multiResponse(getRemoteData = {
-                    database.listDocuments(
-                        DbConstants.DATABASE_NAME,
-                        DbConstants.MATCHES_COLLECTION,
+                    tablesDb.listRows<MatchDTO>(
+                        databaseId = DbConstants.DATABASE_NAME,
+                        tableId = DbConstants.MATCHES_TABLE,
                         queries = listOf(
                             Query.equal(DbConstants.EVENT_ID_ATTRIBUTE, tournamentId),
                             Query.limit(200)
                         ),
                         nestedType = MatchDTO::class
-                    ).documents.map { dtoDoc ->
-                        dtoDoc.convert { it.toMatch(dtoDoc.id) }.data
+                    ).rows.map { dtoRow ->
+                        dtoRow.convert { it.toMatch(dtoRow.id) }.data
                     }
                 },
                     getLocalData = {
@@ -152,12 +152,15 @@ class MatchRepository(
 
     override suspend fun getMatchesOfTournament(tournamentId: String): Result<List<MatchMVP>> =
         multiResponse(getRemoteData = {
-            database.listDocuments(
-                DbConstants.DATABASE_NAME, DbConstants.MATCHES_COLLECTION, queries = listOf(
+            tablesDb.listRows<MatchDTO>(
+                databaseId = DbConstants.DATABASE_NAME,
+                tableId = DbConstants.MATCHES_TABLE,
+                queries = listOf(
                     Query.equal(DbConstants.EVENT_ID_ATTRIBUTE, tournamentId), Query.limit(200)
-                ), nestedType = MatchDTO::class
-            ).documents.map { dtoDoc ->
-                dtoDoc.convert { it.toMatch(dtoDoc.id) }.data
+                ),
+                nestedType = MatchDTO::class
+            ).rows.map { dtoRow ->
+                dtoRow.convert { it.toMatch(dtoRow.id) }.data
             }
         }, getLocalData = {
             databaseService.getMatchDao.getMatchesOfTournament(tournamentId)

@@ -9,13 +9,13 @@ import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResp
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
 import com.razumly.mvp.core.util.DbConstants.DATABASE_NAME
 import com.razumly.mvp.core.util.DbConstants.USER_CHANNEL
-import com.razumly.mvp.core.util.DbConstants.USER_DATA_COLLECTION
+import com.razumly.mvp.core.util.DbConstants.USER_DATA_TABLE
 import io.appwrite.ID
 import io.appwrite.Query
 import io.appwrite.models.RealtimeSubscription
 import io.appwrite.models.User
 import io.appwrite.services.Account
-import io.appwrite.services.Databases
+import io.appwrite.services.TablesDB
 import io.appwrite.services.Realtime
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CoroutineScope
@@ -62,7 +62,7 @@ interface IUserRepository : IMVPRepository {
 class UserRepository(
     internal val databaseService: DatabaseService,
     internal val account: Account,
-    internal val database: Databases,
+    internal val tablesDb: TablesDB,
     private val currentUserDataSource: CurrentUserDataSource,
     private val pushNotificationsRepository: IPushNotificationsRepository,
     realtime: Realtime
@@ -147,8 +147,11 @@ class UserRepository(
         currentUserDataSource.saveUserId(id)
 
         Napier.d("User logged in: $id")
-        val remoteUserData = database.getDocument(
-            DATABASE_NAME, USER_DATA_COLLECTION, id, nestedType = UserDataDTO::class
+        val remoteUserData = tablesDb.getRow<UserDataDTO>(
+            databaseId = DATABASE_NAME,
+            tableId = USER_DATA_TABLE,
+            rowId = id,
+            nestedType = UserDataDTO::class
         ).data.copy(id = id).toUserData(id)
 
         Napier.d("User data: $remoteUserData")
@@ -194,8 +197,11 @@ class UserRepository(
         }
 
         val remoteRes = runCatching {
-            database.getDocument(
-                DATABASE_NAME, USER_DATA_COLLECTION, sessionId, nestedType = UserDataDTO::class
+            tablesDb.getRow<UserDataDTO>(
+                databaseId = DATABASE_NAME,
+                tableId = USER_DATA_TABLE,
+                rowId = sessionId,
+                nestedType = UserDataDTO::class
             ).data.toUserData(sessionId)
         }
 
@@ -238,13 +244,13 @@ class UserRepository(
         query: String, getLocalData: suspend () -> List<UserData>
     ): Result<List<UserData>> = multiResponse(
         getRemoteData = {
-        val docs = database.listDocuments(
-            DATABASE_NAME,
-            USER_DATA_COLLECTION,
-            listOf(query, Query.limit(500)),
-            nestedType = UserDataDTO::class,
+        val docs = tablesDb.listRows<UserDataDTO>(
+            databaseId = DATABASE_NAME,
+            tableId = USER_DATA_TABLE,
+            queries = listOf(query, Query.limit(500)),
+            nestedType = UserDataDTO::class
         )
-        docs.documents.map { it.data.toUserData(it.id) }
+        docs.rows.map { it.data.toUserData(it.id) }
     },
         saveData = { usersData ->
             databaseService.getUserDataDao.upsertUsersData(usersData)
@@ -271,12 +277,12 @@ class UserRepository(
             account.create(
                 userId = userId, email = email, password = password, name = userName
             )
-            val doc = database.createDocument(
+            val doc = tablesDb.createRow<UserDataDTO>(
                 databaseId = DATABASE_NAME,
-                collectionId = USER_DATA_COLLECTION,
-                documentId = userId,
-                nestedType = UserDataDTO::class,
+                tableId = USER_DATA_TABLE,
+                rowId = userId,
                 data = UserDataDTO(firstName, lastName, userName, userId),
+                nestedType = UserDataDTO::class
             )
             doc.data.toUserData(doc.id)
         }
@@ -287,11 +293,11 @@ class UserRepository(
             if (user.id == currentUser.value.getOrNull()?.id) {
                 account.updateName(user.userName)
             }
-            database.updateDocument(
-                DATABASE_NAME,
-                USER_DATA_COLLECTION,
-                user.id,
-                user.toUserDataDTO(),
+            tablesDb.updateRow<UserDataDTO>(
+                databaseId = DATABASE_NAME,
+                tableId = USER_DATA_TABLE,
+                rowId = user.id,
+                data = user.toUserDataDTO(),
                 nestedType = UserDataDTO::class
             ).data.toUserData(user.id)
         }, saveCall = { newData ->

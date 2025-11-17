@@ -2,7 +2,7 @@ package com.razumly.mvp.di
 
 import io.appwrite.services.Account
 import io.appwrite.services.Avatars
-import io.appwrite.services.Databases
+import io.appwrite.services.TablesDB
 import io.appwrite.services.Functions
 import io.appwrite.services.Messaging
 import io.appwrite.services.Realtime
@@ -17,7 +17,7 @@ val appwriteModule = module {
         Account(get())
     }
     single {
-        Databases(get())
+        TablesDB(get())
     }
     single {
         Realtime(get())

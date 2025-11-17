@@ -9,7 +9,6 @@ suspend fun Place.toMVPPlace(placesClient: PlacesClient): MVPPlace = coroutineSc
     MVPPlace(
         name = this@toMVPPlace.displayName ?: "",
         id = this@toMVPPlace.id ?: "",
-        lat = this@toMVPPlace.location?.latitude ?: 0.0,
-        long = this@toMVPPlace.location?.longitude ?: 0.0,
+        coordinates = listOf(this@toMVPPlace.location?.longitude ?: 0.0, this@toMVPPlace.location?.latitude ?: 0.0),
     )
 }

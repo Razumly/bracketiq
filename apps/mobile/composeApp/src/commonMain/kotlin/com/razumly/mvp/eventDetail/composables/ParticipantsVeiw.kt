@@ -41,7 +41,7 @@ fun ParticipantsView(
 ) {
     val component = LocalTournamentComponent.current
     val divisionTeams by component.divisionTeams.collectAsState()
-    val selectedEvent by component.selectedEvent.collectAsState()
+    val selectedEvent by component.eventWithRelations.collectAsState()
     val currentUser by component.currentUser.collectAsState()
     val participants = selectedEvent.players
     val teamSignup = selectedEvent.event.teamSignup

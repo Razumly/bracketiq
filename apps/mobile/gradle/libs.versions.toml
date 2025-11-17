@@ -47,7 +47,7 @@ playServicesMaps = "19.2.0"
 robolectric = "4.15.1"
 room = "2.8.3"
 runtimeSaveable = "1.9.3"
-sdkForKmp = "0.3.1"
+sdkForKmp = "0.3.4"
 secrets = "2.0.1"
 sqlite = "2.6.1"
 stripeAndroid = "22.1.0"
@@ -55,8 +55,6 @@ turbine = "1.2.1"
 vectorize = "1.1.0"
 animationAndroid = "1.9.4"
 browser = "1.8.0"
-
-
 
 [libraries]
 androidx-core = { module = "androidx.test:core", version.ref = "core" }

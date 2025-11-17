@@ -37,6 +37,7 @@ import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
 import com.razumly.mvp.eventCreate.steps.Preview
 import com.razumly.mvp.eventDetail.EventDetails
+import com.razumly.mvp.eventDetail.toEventWithFullRelations
 import com.razumly.mvp.eventMap.MapComponent
 import mvp.composeapp.generated.resources.Res
 import mvp.composeapp.generated.resources.create_tournament
@@ -146,7 +147,7 @@ fun CreateEventScreen(
                         paymentProcessor = component,
                         mapComponent = mapComponent,
                         hostHasAccount = currentUser?.hasStripeAccount ?: false,
-                        eventWithRelations = defaultEvent,
+                        eventWithRelations = defaultEvent.toEventWithFullRelations(listOf(), listOf()),
                         editEvent = newEventState,
                         navPadding = LocalNavBarPadding.current,
                         editView = isEditing,

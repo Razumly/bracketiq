@@ -41,10 +41,10 @@ suspend fun UserRepository.oauth2Login(activity: ComponentActivity): Result<Unit
                 friendRequestSentIds = listOf(),
                 followingIds = listOf()
             )
-            database.createDocument(
+            tablesDb.createRow<UserDataDTO>(
                 databaseId = DbConstants.DATABASE_NAME,
-                collectionId = DbConstants.USER_DATA_COLLECTION,
-                documentId = id,
+                tableId = DbConstants.USER_DATA_TABLE,
+                rowId = id,
                 data = newUserData,
                 nestedType = UserDataDTO::class
             )

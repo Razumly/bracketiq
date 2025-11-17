@@ -12,15 +12,15 @@ import GoogleMaps
 
 struct EventMap: View {
     var component: MapComponent
-    var onEventSelected: (EventAbs) -> Void
+    var onEventSelected: (Event) -> Void
     var onPlaceSelected: (MVPPlace) -> Void
     var canClickPOI: Bool
-    var focusedEvent: EventAbs?
+    var focusedEvent: Event?
     var focusedLocation: LatLng?
     var revealCenter: CGPoint
     
     @State private var currentLocation: LatLng? = nil
-    @State private var events: [EventAbs] = []
+    @State private var events: [Event] = []
     @State private var suggestions: [MVPPlace] = []
     @State private var searchText: String = ""
     @State private var places: [MVPPlace] = []
@@ -29,11 +29,11 @@ struct EventMap: View {
     
     init(
         component: MapComponent,
-        onEventSelected: @escaping (EventAbs) -> Void,
+        onEventSelected: @escaping (Event) -> Void,
         onPlaceSelected: @escaping (MVPPlace) -> Void,
         canClickPOI: Bool,
         focusedLocation: LatLng?,
-        focusedEvent: EventAbs?,
+        focusedEvent: Event?,
         revealCenter: CGPoint
     ) {
         self.component = component
@@ -50,7 +50,7 @@ struct EventMap: View {
             component.currentLocation,
             component.events,
             component.isMapVisible
-        ) { (loc: LatLng?, ev: [EventAbs], reveal: KotlinBoolean) in
+        ) { (loc: LatLng?, ev: [Event], reveal: KotlinBoolean) in
             ZStack(alignment: .top) {
                 GoogleMapView(
                     component: component,
@@ -151,11 +151,11 @@ struct EventMap: View {
 
 struct GoogleMapView: UIViewRepresentable {
     let component: MapComponent
-    let events: [EventAbs]
+    let events: [Event]
     let canClickPOI: Bool
     let focusedLocation: LatLng?
-    let focusedEvent: EventAbs?
-    let onEventSelected: (EventAbs) -> Void
+    let focusedEvent: Event?
+    let onEventSelected: (Event) -> Void
     let onPlaceSelected: (MVPPlace) -> Void
     let places: [MVPPlace]
     let revealCenter: CGPoint
@@ -250,14 +250,14 @@ struct GoogleMapView: UIViewRepresentable {
 
 class Coordinator: NSObject, GMSMapViewDelegate {
     let parent: GoogleMapView
-    let onEventSelected: (EventAbs) -> Void
+    let onEventSelected: (Event) -> Void
     let onPlaceSelected: (MVPPlace) -> Void
     
     var placeMarkers: [GMSMarker] = []
     var currentPOIMarker: GMSMarker?
     
     init(parent: GoogleMapView,
-         onEventSelected: @escaping (EventAbs) -> Void,
+         onEventSelected: @escaping (Event) -> Void,
          onPlaceSelected: @escaping (MVPPlace) -> Void) {
         self.parent = parent
         self.onEventSelected = onEventSelected
@@ -345,7 +345,7 @@ class Coordinator: NSObject, GMSMapViewDelegate {
     
     // MARK: - Custom Info Window Creation
     
-    private func createEventInfoWindow(for event: EventAbs) -> UIView {
+    private func createEventInfoWindow(for event: Event) -> UIView {
         let containerView = UIView(frame: CGRect(x: 0, y: 0, width: 240, height: 160))
         containerView.backgroundColor = UIColor.systemBackground
         containerView.layer.cornerRadius = 12
@@ -445,7 +445,7 @@ class Coordinator: NSObject, GMSMapViewDelegate {
 // MARK: - Marker Data Types
 
 struct EventMarkerData {
-    let event: EventAbs
+    let event: Event
 }
 
 struct PlaceMarkerData {

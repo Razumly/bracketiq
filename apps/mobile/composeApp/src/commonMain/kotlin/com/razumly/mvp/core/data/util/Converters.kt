@@ -1,8 +1,9 @@
 package com.razumly.mvp.core.data.util
 
 import androidx.room.TypeConverter
-import com.razumly.mvp.core.data.dataTypes.enums.Division
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.util.normalizeDivisionLabels
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlin.time.ExperimentalTime
@@ -32,6 +33,13 @@ class Converters {
         return Json.decodeFromString(value)
     }
 
+    // List<Double> converter
+    @TypeConverter
+    fun fromDoubleList(value: List<Double>): String = Json.encodeToString(value)
+
+    @TypeConverter
+    fun toDoubleList(value: String): List<Double> = Json.decodeFromString(value)
+
     // Instant converter
     @TypeConverter
     @OptIn(ExperimentalTime::class)
@@ -46,19 +54,28 @@ class Converters {
     }
 
     @TypeConverter
-    fun fromDivisionsList(divisions: List<Division>?): String {
-        return divisions?.joinToString(separator = ",") { it.name } ?: ""
-    }
-
-    @TypeConverter
-    fun toDivisionsList(data: String?): List<Division> {
-        if (data.isNullOrEmpty()) return emptyList()
-        return data.split(",").map { Division.valueOf(it) }
-    }
-
-    @TypeConverter
     fun fromEventType(eventType: EventType): String = eventType.name
 
     @TypeConverter
     fun toEventType(value: String): EventType = EventType.valueOf(value)
+}
+
+class DivisionConverters {
+    @TypeConverter
+    fun fromDivisionsList(divisions: List<String>?): String {
+        return divisions?.normalizeDivisionLabels()?.joinToString(separator = ",") ?: ""
+    }
+
+    @TypeConverter
+    fun toDivisionsList(data: String?): List<String> {
+        if (data.isNullOrEmpty()) return emptyList()
+        val trimmed = data.trim()
+        val rawValues = if (trimmed.startsWith("[")) {
+            runCatching { Json.decodeFromString<List<String>>(trimmed) }
+                .getOrDefault(emptyList())
+        } else {
+            trimmed.split(",")
+        }
+        return rawValues.normalizeDivisionLabels()
+    }
 }

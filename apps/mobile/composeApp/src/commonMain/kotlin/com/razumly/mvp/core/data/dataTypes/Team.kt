@@ -3,7 +3,8 @@ package com.razumly.mvp.core.data.dataTypes
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import com.razumly.mvp.core.data.dataTypes.dtos.TeamDTO
-import com.razumly.mvp.core.data.dataTypes.enums.Division
+import com.razumly.mvp.core.data.util.DEFAULT_DIVISION
+import com.razumly.mvp.core.data.util.normalizeDivisionLabel
 import io.appwrite.ID
 import kotlinx.serialization.Serializable
 
@@ -11,7 +12,7 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class Team(
     val seed: Int,
-    val division: Division,
+    val division: String,
     val wins: Int,
     val losses: Int,
     val name: String?,
@@ -29,7 +30,7 @@ data class Team(
         operator fun invoke(captainId: String): Team {
             return Team(
                 seed = 0,
-                division = Division.NOVICE,
+                division = DEFAULT_DIVISION,
                 wins = 0,
                 losses = 0,
                 name = null,
@@ -45,7 +46,7 @@ data class Team(
         return TeamDTO(
             name = name,
             seed = seed,
-            division = division.name,
+            division = division.normalizeDivisionLabel(),
             wins = wins,
             losses = losses,
             playerIds = playerIds,

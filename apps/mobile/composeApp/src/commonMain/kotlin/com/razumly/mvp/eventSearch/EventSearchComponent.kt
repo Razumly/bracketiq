@@ -6,15 +6,14 @@ import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.backhandler.BackCallback
 import com.arkivanov.essenty.instancekeeper.InstanceKeeper
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
-import com.razumly.mvp.core.data.dataTypes.EventAbs
-import com.razumly.mvp.core.data.repositories.IEventAbsRepository
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.repositories.IEventRepository
+import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.util.calcDistance
 import com.razumly.mvp.core.util.getBounds
 import com.razumly.mvp.eventSearch.util.EventFilter
-import com.razumly.mvp.core.presentation.INavigationHandler
 import dev.icerock.moko.geo.LatLng
 import dev.icerock.moko.geo.LocationTracker
 import io.github.aakira.napier.Napier
@@ -40,28 +39,27 @@ interface EventSearchComponent {
     val currentRadius: StateFlow<Double>
     val errorState: StateFlow<ErrorMessage?>
     val isLoading: StateFlow<Boolean>
-    val suggestedEvents: StateFlow<List<EventAbs>>
+    val suggestedEvents: StateFlow<List<Event>>
     val currentLocation: StateFlow<LatLng?>
     val isLoadingMore: StateFlow<Boolean>
     val hasMoreEvents: StateFlow<Boolean>
     val filter: StateFlow<EventFilter>
 
-    val events: StateFlow<List<EventAbs>>
-    val selectedEvent: StateFlow<EventAbs?>
+    val events: StateFlow<List<Event>>
+    val selectedEvent: StateFlow<Event?>
     val showMapCard: StateFlow<Boolean>
 
     fun setLoadingHandler(handler: LoadingHandler)
     fun loadMoreEvents()
     fun selectRadius(radius: Double)
-    fun onMapClick(event: EventAbs? = null)
-    fun viewEvent(event: EventAbs)
+    fun onMapClick(event: Event? = null)
+    fun viewEvent(event: Event)
     fun suggestEvents(searchQuery: String)
     fun updateFilter(update: EventFilter.() -> EventFilter)
 }
 
 class DefaultEventSearchComponent(
     componentContext: ComponentContext,
-    private val eventAbsRepository: IEventAbsRepository,
     private val eventRepository: IEventRepository,
     eventId: String?,
     override val locationTracker: LocationTracker,
@@ -84,8 +82,8 @@ class DefaultEventSearchComponent(
     private val _currentLocation = MutableStateFlow<LatLng?>(null)
     override val currentLocation = _currentLocation.asStateFlow()
 
-    private val _suggestedEvents = MutableStateFlow<List<EventAbs>>(emptyList())
-    override val suggestedEvents: StateFlow<List<EventAbs>> = _suggestedEvents.asStateFlow()
+    private val _suggestedEvents = MutableStateFlow<List<Event>>(emptyList())
+    override val suggestedEvents: StateFlow<List<Event>> = _suggestedEvents.asStateFlow()
 
     private val _isLoadingMore = MutableStateFlow(false)
     override val isLoadingMore: StateFlow<Boolean> = _isLoadingMore.asStateFlow()
@@ -110,7 +108,7 @@ class DefaultEventSearchComponent(
     ) { location, radius, eventFilter ->
         getBounds(radius, location.latitude, location.longitude) to eventFilter
     }.debounce(200L).flatMapLatest { (bounds, eventFilter) ->
-        eventAbsRepository.getEventsInBoundsFlow(bounds).map { result ->
+        eventRepository.getEventsInBoundsFlow(bounds).map { result ->
             result.getOrElse {
                 _errorState.value = ErrorMessage("Failed to fetch events: ${it.message}")
                 Napier.e("Failed to fetch events: ${it.message}")
@@ -121,8 +119,8 @@ class DefaultEventSearchComponent(
         }
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
-    private val _selectedEvent = MutableStateFlow<EventAbs?>(null)
-    override val selectedEvent: StateFlow<EventAbs?> = _selectedEvent.asStateFlow()
+    private val _selectedEvent = MutableStateFlow<Event?>(null)
+    override val selectedEvent: StateFlow<Event?> = _selectedEvent.asStateFlow()
 
     private val _showMapCard = MutableStateFlow(false)
     override val showMapCard: StateFlow<Boolean> = _showMapCard.asStateFlow()
@@ -133,12 +131,12 @@ class DefaultEventSearchComponent(
 
     init {
         backHandler.register(backCallback)
-        eventAbsRepository.resetCursor()
+        eventRepository.resetCursor()
 
         if (eventId != null) {
             scope.launch {
                 eventRepository.getEvent(eventId).onSuccess {
-                    navigationHandler.navigateToEvent(it.event)
+                    navigationHandler.navigateToEvent(it)
                 }.onFailure { e ->
                     _errorState.value = ErrorMessage("Failed to fetch event: ${e.message}")
                 }
@@ -194,19 +192,19 @@ class DefaultEventSearchComponent(
         _currentRadius.value = radius
     }
 
-    override fun onMapClick(event: EventAbs?) {
+    override fun onMapClick(event: Event?) {
         _selectedEvent.value = event
         _showMapCard.value = !_showMapCard.value
     }
 
-    override fun viewEvent(event: EventAbs) {
+    override fun viewEvent(event: Event) {
         navigationHandler.navigateToEvent(event)
     }
 
     override fun suggestEvents(searchQuery: String) {
         scope.launch {
             if (_currentLocation.value == null) return@launch
-            eventAbsRepository.searchEvents(searchQuery, _currentLocation.value!!)
+            eventRepository.searchEvents(searchQuery, _currentLocation.value!!)
                 .onSuccess {
                     _suggestedEvents.value = it.first
                     _isLoading.value = false
@@ -227,7 +225,7 @@ class DefaultEventSearchComponent(
             val currentBounds =
                 getBounds(radius, currentLocation.latitude, currentLocation.longitude)
 
-            eventAbsRepository.getEventsInBounds(currentBounds)
+            eventRepository.getEventsInBounds(currentBounds)
                 .onSuccess { (_, hasMore) ->
                     _hasMoreEvents.value = hasMore
                 }

@@ -25,20 +25,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.dp
-import com.razumly.mvp.core.data.dataTypes.EventAbs
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.presentation.composables.EventCard
 
 @Composable
 fun EventList(
-    events: List<EventAbs>,
+    events: List<Event>,
     firstElementPadding: PaddingValues,
     lastElementPadding: PaddingValues,
     lazyListState: LazyListState = rememberLazyListState(),
     isLoadingMore: Boolean = false,
     hasMoreEvents: Boolean = true,
     onLoadMore: () -> Unit,
-    onMapClick: (Offset, EventAbs) -> Unit,
-    onEventClick: (EventAbs) -> Unit
+    onMapClick: (Offset, Event) -> Unit,
+    onEventClick: (Event) -> Unit
 ) {
     LazyColumn(
         state = lazyListState,

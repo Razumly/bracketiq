@@ -43,11 +43,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.razumly.mvp.core.data.dataTypes.EventAbs
+import com.razumly.mvp.core.data.dataTypes.Event
 
 @Composable
 fun MapEventCard(
-    event: EventAbs,
+    event: Event,
     modifier: Modifier = Modifier
 ) {
     // Always use info window style - no triangle pointer needed
@@ -166,7 +166,7 @@ fun MaterialMarker(
 }
 
 @Composable
-private fun EventCardContent(event: EventAbs) {
+private fun EventCardContent(event: Event) {
     Column(
         modifier = Modifier.padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)

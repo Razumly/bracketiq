@@ -172,14 +172,14 @@ private fun RefundRequestItem(
             }
 
             // Event details
-            if (refundWithRelations.eventAbs != null) {
+            if (refundWithRelations.event != null) {
                 Text(
                     "Event:",
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Medium
                 )
                 EventCard(
-                    event = refundWithRelations.eventAbs!!,
+                    event = refundWithRelations.event!!,
                     onMapClick = { }
                 )
             }

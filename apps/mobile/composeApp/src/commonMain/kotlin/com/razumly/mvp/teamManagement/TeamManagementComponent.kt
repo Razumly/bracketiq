@@ -1,14 +1,15 @@
 package com.razumly.mvp.teamManagement
 
 import com.arkivanov.decompose.ComponentContext
-import com.razumly.mvp.core.data.dataTypes.EventAbs
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
-import com.razumly.mvp.core.data.repositories.IEventAbsRepository
+import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.presentation.INavigationHandler
+import io.appwrite.Query
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -25,7 +26,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 interface TeamManagementComponent {
-    val selectedEvent: EventAbs?
+    val selectedEvent: Event?
     val currentUser: UserData
     val friends: StateFlow<List<UserData>>
     val currentTeams: StateFlow<List<TeamWithPlayers>>
@@ -48,11 +49,11 @@ interface TeamManagementComponent {
 @OptIn(ExperimentalCoroutinesApi::class)
 class DefaultTeamManagementComponent(
     componentContext: ComponentContext,
-    eventAbsRepository: IEventAbsRepository,
+    private val eventRepository: IEventRepository,
     private val teamRepository: ITeamRepository,
     private val userRepository: IUserRepository,
     private val freeAgents: List<String>,
-    override val selectedEvent: EventAbs?,
+    override val selectedEvent: Event?,
     private val navigationHandler: INavigationHandler
 ) : ComponentContext by componentContext, TeamManagementComponent {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -104,11 +105,17 @@ class DefaultTeamManagementComponent(
         }
         .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
-    override val enableDeleteTeam = combine(selectedTeam, eventAbsRepository.getUsersEventsFlow()) { team, events ->
-        if (events.getOrNull()?.any { it.teamIds.contains(team?.team?.id)} == true)
-            false
-        else
-            team != null
+    private val hostEventsFlow =
+        eventRepository.getEventsFlow(Query.equal("hostId", currentUser.id))
+
+    override val enableDeleteTeam = combine(selectedTeam, hostEventsFlow) { team, eventsResult ->
+        val hostEvents = eventsResult.getOrElse {
+            _errorState.value = it.message
+            emptyList()
+        }
+        val teamAssigned =
+            team?.team?.id?.let { teamId -> hostEvents.any { it.teamIds.contains(teamId) } } == true
+        team != null && !teamAssigned
     }.stateIn(scope, SharingStarted.Eagerly, false)
 
     init {

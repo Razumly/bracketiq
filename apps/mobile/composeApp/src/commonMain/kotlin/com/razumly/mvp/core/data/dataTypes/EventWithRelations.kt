@@ -6,14 +6,14 @@ import androidx.room.Relation
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventTeamCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
 
-class EventWithRelations(
-    @Embedded override val event: Event,
+data class EventWithRelations(
+    @Embedded val event: Event,
 
     @Relation(
         parentColumn = "hostId",
         entityColumn = "id",
     )
-    override val host: UserData?,
+    val host: UserData?,
 
     @Relation(
         parentColumn = "id",
@@ -24,7 +24,7 @@ class EventWithRelations(
             entityColumn = "userId"
         )
     )
-    override val players: List<UserData> = listOf(),
+    val players: List<UserData> = listOf(),
 
     @Relation(
         parentColumn = "id",
@@ -35,5 +35,5 @@ class EventWithRelations(
             entityColumn = "teamId"
         )
     )
-    override val teams: List<Team> = listOf(),
-) : EventAbsWithRelations
+    val teams: List<Team> = listOf(),
+)

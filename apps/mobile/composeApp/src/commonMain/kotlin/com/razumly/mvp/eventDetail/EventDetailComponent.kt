@@ -5,20 +5,23 @@ package com.razumly.mvp.eventDetail
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.backhandler.BackCallback
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
-import com.razumly.mvp.core.data.dataTypes.EventAbs
-import com.razumly.mvp.core.data.dataTypes.EventAbsWithRelations
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
+import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfig
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
+import com.razumly.mvp.core.data.dataTypes.Organization
+import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
+import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
-import com.razumly.mvp.core.data.dataTypes.enums.Division
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.util.normalizeDivisionLabel
 import com.razumly.mvp.core.data.repositories.FeeBreakdown
 import com.razumly.mvp.core.data.repositories.IBillingRepository
-import com.razumly.mvp.core.data.repositories.IEventAbsRepository
+import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
 import com.razumly.mvp.core.data.repositories.IImagesRepository
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
@@ -61,10 +64,10 @@ import kotlin.time.Duration.Companion.seconds
 import kotlin.time.ExperimentalTime
 
 interface EventDetailComponent : ComponentContext, IPaymentProcessor {
-    val selectedEvent: StateFlow<EventAbsWithRelations>
+    val selectedEvent: StateFlow<Event>
     val divisionMatches: StateFlow<Map<String, MatchWithRelations>>
     val divisionTeams: StateFlow<Map<String, TeamWithPlayers>>
-    val selectedDivision: StateFlow<Division?>
+    val selectedDivision: StateFlow<String?>
     val divisionFields: StateFlow<List<FieldWithMatches>>
     val rounds: StateFlow<List<List<MatchWithRelations?>>>
     val losersBracket: StateFlow<Boolean>
@@ -78,7 +81,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val isUserInEvent: StateFlow<Boolean>
     val isBracketView: StateFlow<Boolean>
     val isEventFull: StateFlow<Boolean>
-    val editedEvent: StateFlow<EventAbs>
+    val editedEvent: StateFlow<Event>
     val backCallback: BackCallback
     val showFeeBreakdown: StateFlow<Boolean>
     val currentFeeBreakdown: StateFlow<FeeBreakdown?>
@@ -97,7 +100,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun matchSelected(selectedMatch: MatchWithRelations)
     fun showFeeBreakdown(feeBreakdown: FeeBreakdown, onConfirm: () -> Unit, onCancel: () -> Unit)
     fun onHostCreateAccount()
-    fun selectDivision(division: Division)
+    fun selectDivision(division: String)
     fun setLoadingHandler(loadingHandler: LoadingHandler)
     fun toggleBracketView()
     fun toggleLosersBracket()
@@ -117,8 +120,8 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun selectPlace(place: MVPPlace?)
     fun onTypeSelected(type: EventType)
     fun selectFieldCount(count: Int)
-    fun checkIsUserWaitListed(event: EventAbs): Boolean
-    fun checkIsUserFreeAgent(event: EventAbs): Boolean
+    fun checkIsUserWaitListed(event: Event): Boolean
+    fun checkIsUserFreeAgent(event: Event): Boolean
     fun dismissFeeBreakdown()
     fun confirmFeeBreakdown()
     fun startEditingMatches()
@@ -150,16 +153,29 @@ enum class TeamPosition { TEAM1, TEAM2, REF }
 
 @Serializable
 data class EventWithFullRelations(
-    val event: EventAbs,
+    val event: Event,
     val players: List<UserData>,
     val matches: List<MatchWithRelations>,
-    val teams: List<TeamWithPlayers>
+    val teams: List<TeamWithPlayers>,
+    val timeSlots: List<TimeSlot> = emptyList(),
+    val organization: Organization? = null,
+    val sport: Sport? = null,
+    val leagueScoringConfig: LeagueScoringConfig? = null,
+    val host: UserData? = null
 )
 
-fun EventAbsWithRelations.toEventWithFullRelations(
+fun EventWithRelations.toEventWithFullRelations(
     matches: List<MatchWithRelations>, teams: List<TeamWithPlayers>
 ): EventWithFullRelations = EventWithFullRelations(
-    event = this.event, players = this.players, matches = matches, teams = teams
+    event = event,
+    players = players,
+    matches = matches,
+    teams = teams,
+    timeSlots = emptyList(),
+    organization = null,
+    sport = null,
+    leagueScoringConfig = null,
+    host = host
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -167,10 +183,10 @@ class DefaultEventDetailComponent(
     componentContext: ComponentContext,
     userRepository: IUserRepository,
     fieldRepository: IFieldRepository,
-    event: EventAbs,
+    event: Event,
     private val notificationsRepository: IPushNotificationsRepository,
     private val billingRepository: IBillingRepository,
-    private val eventAbsRepository: IEventAbsRepository,
+    private val eventRepository: IEventRepository,
     private val matchRepository: IMatchRepository,
     private val teamRepository: ITeamRepository,
     private val imageRepository: IImagesRepository,
@@ -214,33 +230,40 @@ class DefaultEventDetailComponent(
     override val eventImageUrls =
         imageRepository.getUserImagesFlow().stateIn(scope, SharingStarted.Eagerly, emptyList())
 
-    override val selectedEvent: StateFlow<EventAbsWithRelations> =
-        eventAbsRepository.getEventWithRelationsFlow(event).map { result ->
+    private val eventRelations: StateFlow<EventWithRelations> =
+        eventRepository.getEventWithRelationsFlow(event.id).map { result ->
             result.getOrElse {
                 _errorState.value = ErrorMessage(it.message ?: "")
-                EventAbsWithRelations.getEmptyEvent(event)
+                EventWithRelations(event, null)
             }
-        }.stateIn(scope, SharingStarted.Eagerly, EventAbsWithRelations.getEmptyEvent(event))
+        }.stateIn(
+            scope,
+            SharingStarted.Eagerly,
+            EventWithRelations(event, null)
+        )
 
-    override val isHost = selectedEvent.map { it.event.hostId == currentUser.value.id }
+    override val selectedEvent: StateFlow<Event> =
+        eventRelations.map { it.event }.stateIn(scope, SharingStarted.Eagerly, event)
+
+    override val isHost = selectedEvent.map { it.hostId == currentUser.value.id }
         .stateIn(scope, SharingStarted.Eagerly, false)
 
-    override val eventWithRelations = selectedEvent.flatMapLatest { eventWithPlayers ->
+    override val eventWithRelations = eventRelations.flatMapLatest { relations ->
         combine(
-            matchRepository.getMatchesOfTournamentFlow(eventWithPlayers.event.id).map { result ->
+            matchRepository.getMatchesOfTournamentFlow(relations.event.id).map { result ->
                 result.getOrElse {
                     _errorState.value =
                         ErrorMessage("Error loading matches: ${it.message}"); emptyList()
                 }
             }, teamRepository.getTeamsFlow(
-                eventWithPlayers.event.teamIds
+                relations.event.teamIds
             ).map { result ->
                 result.getOrElse {
                     _errorState.value =
                         ErrorMessage("Failed to load teams: ${it.message}"); emptyList()
                 }
             }) { matches, teams ->
-            eventWithPlayers.toEventWithFullRelations(matches, teams)
+            relations.toEventWithFullRelations(matches, teams)
         }
     }.stateIn(
         scope, SharingStarted.Eagerly, EventWithFullRelations(
@@ -250,10 +273,15 @@ class DefaultEventDetailComponent(
 
     override val divisionFields =
         fieldRepository.getFieldsInTournamentWithMatchesFlow(event.id).map { fields ->
+            val activeDivision = _selectedDivision.value
             fields.filter {
-                if (!selectedEvent.value.event.singleDivision) it.field.divisions.contains(
-                    selectedDivision.value?.name
-                ) else true
+                if (!selectedEvent.value.singleDivision && !activeDivision.isNullOrEmpty()) {
+                    it.field.divisions.any { division ->
+                        division.normalizeDivisionLabel() == activeDivision
+                    }
+                } else {
+                    true
+                }
             }
         }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
@@ -263,7 +291,7 @@ class DefaultEventDetailComponent(
     private val _divisionTeams = MutableStateFlow<Map<String, TeamWithPlayers>>(emptyMap())
     override val divisionTeams = _divisionTeams.asStateFlow()
 
-    private val _selectedDivision = MutableStateFlow<Division?>(null)
+    private val _selectedDivision = MutableStateFlow<String?>(null)
     override val selectedDivision = _selectedDivision.asStateFlow()
 
     private val _isBracketView = MutableStateFlow(false)
@@ -300,8 +328,8 @@ class DefaultEventDetailComponent(
         flowOf(teams.filter { it.team.teamSize == event.teamSizeLimit && it.team.captainId == currentUser.value.id })
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
-    override val isEventFull = selectedEvent.map { eventWithRelations ->
-        checkEventIsFull(eventWithRelations.event)
+    override val isEventFull = selectedEvent.map { event ->
+        checkEventIsFull(event)
     }.stateIn(scope, SharingStarted.Eagerly, checkEventIsFull(event))
 
     private val _isUserInEvent: MutableStateFlow<Boolean> =
@@ -415,15 +443,19 @@ class DefaultEventDetailComponent(
     override fun matchSelected(selectedMatch: MatchWithRelations) {
         navigationHandler.navigateToMatch(
             selectedMatch,
-            selectedEvent.value.event as Event
+            selectedEvent.value
         )
     }
 
-    override fun selectDivision(division: Division) {
-        _selectedDivision.value = division
+    override fun selectDivision(division: String) {
+        val normalizedDivision = division.normalizeDivisionLabel()
+        _selectedDivision.value = normalizedDivision.ifEmpty { null }
         _divisionTeams.value = eventWithRelations.value.teams.associateBy { it.team.id }
-        _divisionMatches.value = if (!selectedEvent.value.event.singleDivision) {
-            eventWithRelations.value.matches.filter { it.match.division == division }
+        val divisionFilter = _selectedDivision.value
+        _divisionMatches.value = if (!selectedEvent.value.singleDivision && !divisionFilter.isNullOrEmpty()) {
+            eventWithRelations.value.matches.filter {
+                it.match.division.normalizeDivisionLabel() == divisionFilter
+            }
                 .associateBy { it.match.id }
         } else {
             eventWithRelations.value.matches.associateBy { it.match.id }
@@ -469,17 +501,17 @@ class DefaultEventDetailComponent(
 
     override fun joinEvent() {
         scope.launch {
-            if (selectedEvent.value.event.price == 0.0 || isEventFull.value || selectedEvent.value.event.teamSignup) {
+            if (selectedEvent.value.price == 0.0 || isEventFull.value || selectedEvent.value.teamSignup) {
                 loadingHandler.showLoading("Joining Event ...")
-                eventAbsRepository.addCurrentUserToEvent(selectedEvent.value.event).onSuccess {
+                eventRepository.addCurrentUserToEvent(selectedEvent.value).onSuccess {
                     loadingHandler.showLoading("Reloading Event")
-                    eventAbsRepository.getEvent(selectedEvent.value.event)
+                    eventRepository.getEvent(selectedEvent.value.id)
                 }.onFailure {
                     _errorState.value = ErrorMessage(it.message ?: "")
                 }
             } else {
                 loadingHandler.showLoading("Creating Purchase Request ...")
-                billingRepository.createPurchaseIntent(selectedEvent.value.event)
+                billingRepository.createPurchaseIntent(selectedEvent.value)
                     .onSuccess { purchaseIntent ->
                         purchaseIntent?.let {
                             processPurchaseIntent(it)
@@ -496,17 +528,17 @@ class DefaultEventDetailComponent(
         scope.launch {
             _usersTeam.value = team
 
-            if (selectedEvent.value.event.price == 0.0 || isEventFull.value) {
+            if (selectedEvent.value.price == 0.0 || isEventFull.value) {
                 loadingHandler.showLoading("Joining Event ...")
-                eventAbsRepository.addTeamToEvent(selectedEvent.value.event, team.team).onSuccess {
+                eventRepository.addTeamToEvent(selectedEvent.value, team.team).onSuccess {
                     loadingHandler.showLoading("Reloading Event")
-                    eventAbsRepository.getEvent(selectedEvent.value.event)
+                    eventRepository.getEvent(selectedEvent.value.id)
                 }.onFailure {
                     _errorState.value = ErrorMessage(it.message ?: "")
                 }
             } else {
                 loadingHandler.showLoading("Creating Purchase Request ...")
-                billingRepository.createPurchaseIntent(selectedEvent.value.event, team.team.id)
+                billingRepository.createPurchaseIntent(selectedEvent.value, team.team.id)
                     .onSuccess { purchaseIntent ->
                         purchaseIntent?.let {
                             processPurchaseIntent(it)
@@ -547,13 +579,13 @@ class DefaultEventDetailComponent(
                 return@launch
             }
             loadingHandler.showLoading("Requesting Refund ...")
-            billingRepository.leaveAndRefundEvent(selectedEvent.value.event, reason).onFailure {
+            billingRepository.leaveAndRefundEvent(selectedEvent.value, reason).onFailure {
                 _errorState.value = ErrorMessage(it.message ?: "")
             }.onSuccess {
-                eventAbsRepository.getEvent(selectedEvent.value.event)
+                eventRepository.getEvent(selectedEvent.value.id)
             }
             loadingHandler.showLoading("Reloading Event")
-            eventAbsRepository.getEvent(selectedEvent.value.event)
+            eventRepository.getEvent(selectedEvent.value.id)
             loadingHandler.hideLoading()
         }
     }
@@ -564,19 +596,19 @@ class DefaultEventDetailComponent(
                 return@launch
             }
             val result =
-                if (!selectedEvent.value.event.teamSignup || checkIsUserFreeAgent(selectedEvent.value.event)) {
+                if (!selectedEvent.value.teamSignup || checkIsUserFreeAgent(selectedEvent.value)) {
                     loadingHandler.showLoading("Leaving Event ...")
-                    eventAbsRepository.removeCurrentUserFromEvent(selectedEvent.value.event)
+                    eventRepository.removeCurrentUserFromEvent(selectedEvent.value)
                         .onFailure { _errorState.value = ErrorMessage(it.message ?: "") }
                 } else {
                     loadingHandler.showLoading("Team Leaving Event ...")
-                    eventAbsRepository.removeTeamFromEvent(
-                        selectedEvent.value.event, _usersTeam.value!!
+                    eventRepository.removeTeamFromEvent(
+                        selectedEvent.value, _usersTeam.value!!
                     ).onFailure { _errorState.value = ErrorMessage(it.message ?: "") }
                 }
             result.onSuccess {
                 loadingHandler.showLoading("Reloading Event")
-                eventAbsRepository.getEvent(selectedEvent.value.event)
+                eventRepository.getEvent(selectedEvent.value.id)
             }
             loadingHandler.hideLoading()
         }
@@ -591,7 +623,7 @@ class DefaultEventDetailComponent(
     }
 
     override fun toggleEdit() {
-        _editedEvent.value = selectedEvent.value.event
+        _editedEvent.value = selectedEvent.value
         _isEditing.value = !_isEditing.value
     }
 
@@ -609,7 +641,7 @@ class DefaultEventDetailComponent(
 
     override fun updateEvent() {
         scope.launch {
-            eventAbsRepository.updateEvent(_editedEvent.value).onFailure {
+            eventRepository.updateEvent(_editedEvent.value).onFailure {
                 _errorState.value = ErrorMessage(it.message ?: "")
             }
             toggleEdit()
@@ -618,23 +650,20 @@ class DefaultEventDetailComponent(
 
     override fun createNewTeam() {
         navigationHandler.navigateToTeams(
-            selectedEvent.value.event.freeAgents, selectedEvent.value.event
+            selectedEvent.value.freeAgents, selectedEvent.value
         )
     }
 
     override fun selectPlace(place: MVPPlace?) {
         editEventField {
             copy(
-                lat = place?.lat ?: 0.0, long = place?.long ?: 0.0, location = place?.name ?: ""
+                coordinates = place?.coordinates ?: listOf(0.0, 0.0), location = place?.name ?: ""
             )
         }
     }
 
     override fun onTypeSelected(type: EventType) {
-        _editedEvent.value = when (type) {
-            EventType.TOURNAMENT -> Event().updateTournamentFromEvent(_editedEvent.value as Event)
-            EventType.EVENT -> (_editedEvent.value as Event).toEvent()
-        }
+        editEventField { copy(eventType = type) }
     }
 
     private fun generateRounds() {
@@ -711,7 +740,7 @@ class DefaultEventDetailComponent(
         }
     }
 
-    override fun checkIsUserWaitListed(event: EventAbs): Boolean {
+    override fun checkIsUserWaitListed(event: Event): Boolean {
         return event.waitList.any { participant ->
             (currentUser.value.id + currentUser.value.teamIds).contains(
                 participant
@@ -721,15 +750,15 @@ class DefaultEventDetailComponent(
 
     override fun deleteEvent() {
         scope.launch {
-            if (selectedEvent.value.event.price == 0.0) {
+            if (selectedEvent.value.price == 0.0) {
                 loadingHandler.showLoading("Deleting Event ...")
-                eventAbsRepository.deleteEvent(selectedEvent.value.event).onFailure {
+                eventRepository.deleteEvent(selectedEvent.value.id).onFailure {
                     _errorState.value = ErrorMessage(it.message ?: "")
                 }
                 backCallback.onBack()
             } else {
                 loadingHandler.showLoading("Deleting Event and Refunding ...")
-                billingRepository.deleteAndRefundEvent(selectedEvent.value.event).onFailure {
+                billingRepository.deleteAndRefundEvent(selectedEvent.value).onFailure {
                     _errorState.value = ErrorMessage(it.message ?: "")
                 }
                 backCallback.onBack()
@@ -741,11 +770,11 @@ class DefaultEventDetailComponent(
     override fun shareEvent() {
         val shareService = shareServiceProvider.getShareService()
         shareService.share(
-            selectedEvent.value.event.name, createEventUrl(selectedEvent.value.event)
+            selectedEvent.value.name, createEventUrl(selectedEvent.value)
         )
     }
 
-    override fun checkIsUserFreeAgent(event: EventAbs): Boolean {
+    override fun checkIsUserFreeAgent(event: Event): Boolean {
         return event.freeAgents.any { participant ->
             (currentUser.value.id + currentUser.value.teamIds).contains(
                 participant
@@ -753,7 +782,7 @@ class DefaultEventDetailComponent(
         }
     }
 
-    private fun checkIsUserParticipant(event: EventAbs): Boolean {
+    private fun checkIsUserParticipant(event: Event): Boolean {
         return event.playerIds.contains(currentUser.value.id)
     }
 
@@ -761,13 +790,13 @@ class DefaultEventDetailComponent(
         return _usersTeam.value?.team?.captainId == currentUser.value.id
     }
 
-    private fun checkIsUserInEvent(event: EventAbs): Boolean {
+    private fun checkIsUserInEvent(event: Event): Boolean {
         return checkIsUserParticipant(event) || checkIsUserFreeAgent(event) || checkIsUserWaitListed(
             event
         )
     }
 
-    private fun checkEventIsFull(event: EventAbs): Boolean {
+    private fun checkEventIsFull(event: Event): Boolean {
         return if (event.teamSignup) {
             event.maxParticipants <= event.teamIds.size
         } else {
@@ -923,7 +952,7 @@ class DefaultEventDetailComponent(
 
     override fun sendNotification(title: String, message: String) {
         scope.launch {
-            val isEvent = selectedEvent.value.event is Event
+            val isEvent = selectedEvent.value is Event
             notificationsRepository.sendEventNotification(
                 eventWithRelations.value.event.id, title, message, isEvent
             ).onFailure {
@@ -959,7 +988,7 @@ class DefaultEventDetailComponent(
             }
 
             try {
-                eventAbsRepository.getEvent(selectedEvent.value.event)
+                eventRepository.getEvent(selectedEvent.value.id)
                 delay(checkIntervalS)
             } catch (e: Exception) {
                 delay(checkIntervalS * 2)

@@ -21,7 +21,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.snapshotFlow
-import com.razumly.mvp.core.data.dataTypes.EventAbs
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
@@ -141,21 +141,6 @@ fun String.toTitleCase(): String {
         }
 }
 
-fun String.toDivisionCase(): String {
-    return this
-        .lowercase()
-        .split(" ")
-        .joinToString(" ") { word ->
-            if (word.length > 3) {
-                word.replaceFirstChar { char ->
-                    char.uppercase()
-                }
-            } else {
-                word.uppercase()
-            }
-        }
-}
-
 fun Double.moneyFormat(): String {
     val rounded = (this * 100).roundToInt()
     val whole = rounded / 100
@@ -224,6 +209,6 @@ fun AnimatedContentTransitionScope<Boolean>.buttonTransitionSpec() =
         )
     }.using(SizeTransform(clip = false))
 
-fun createEventUrl(event: EventAbs): String {
+fun createEventUrl(event: Event): String {
     return "https://www.razumly.com/mvp/${if (event.eventType == EventType.TOURNAMENT) "tournament/" else "event/"}${event.id}"
 }

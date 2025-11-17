@@ -15,12 +15,12 @@ import com.razumly.mvp.core.data.dataTypes.daos.UserDataDao
 import com.razumly.mvp.core.data.dataTypes.dtos.UserDataDTO
 import com.razumly.mvp.core.util.DbConstants
 import io.appwrite.ID
-import io.appwrite.models.Document
-import io.appwrite.models.DocumentList
+import io.appwrite.models.Row
+import io.appwrite.models.RowList
 import io.appwrite.models.Session
 import io.appwrite.models.User
 import io.appwrite.services.Account
-import io.appwrite.services.Databases
+import io.appwrite.services.TablesDB
 import io.appwrite.services.Functions
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.TestScope
@@ -42,8 +42,8 @@ import kotlin.test.Test
 @UsesFakes(
     Session::class,
     User::class,
-    Document::class,
-    DocumentList::class,
+    Row::class,
+    RowList::class,
     UserDataDTO::class
 )
 class UserRepositoryTest : BaseTest(), KoinTest {
@@ -55,7 +55,7 @@ class UserRepositoryTest : BaseTest(), KoinTest {
     private val userDataSource: CurrentUserDataSource by inject()
     private val userRepository: UserRepository by inject()
     private val userDao: UserDataDao by inject()
-    private val database: Databases by inject()
+    private val tablesDb: TablesDB by inject()
     private val account: Account by inject()
 
     @BeforeTest
@@ -63,7 +63,7 @@ class UserRepositoryTest : BaseTest(), KoinTest {
         loadKoinModules(
             module {
                 single<Account> { Account(get()) }
-                single<Databases> { Databases(get()) }
+                single<TablesDB> { TablesDB(get()) }
                 single<CurrentUserDataSource> { userDataSource }
                 single<IPushNotificationsRepository> { pushNotificationsRepository }
                 single<Functions> { Functions(get()) }
@@ -84,7 +84,7 @@ class UserRepositoryTest : BaseTest(), KoinTest {
 
         val mockSession = fake<Session>()
         val mockUser = fake<User<Map<String, Any>>>()
-        val mockDocument = fake<Document<UserDataDTO>>()
+        val mockDocument = fake<Row<UserDataDTO>>()
 
         every { mockUser.id } returns userId
         every { mockDocument.data } returns UserDataDTO("John", "Doe", "johndoe", userId)
@@ -92,12 +92,15 @@ class UserRepositoryTest : BaseTest(), KoinTest {
         everySuspending { account.createEmailPasswordSession(email, password) } returns mockSession
         everySuspending { account.get() } returns mockUser
         everySuspending {
-            database.getDocument(
+            tablesDb.getRow<UserDataDTO>(
                 DbConstants.DATABASE_NAME,
-                DbConstants.USER_DATA_COLLECTION,
+                DbConstants.USER_DATA_TABLE,
                 userId,
                 isAny(),
-                UserDataDTO::class
+                isAny(),
+                isAny(),
+                isAny(),
+                isAny()
             )
         } returns mockDocument
         everySuspending { userDataSource.saveUserId(userId) } returns Unit
@@ -136,17 +139,18 @@ class UserRepositoryTest : BaseTest(), KoinTest {
             id = "user123", firstName = "Updated", lastName = "User", userName = "updated"
         )
         val updatedDto = UserDataDTO("Updated", "User", "updated", "user123")
-        val mockDocument = fake<Document<UserDataDTO>>()
+        val mockDocument = fake<Row<UserDataDTO>>()
 
         every { mockDocument.data } returns updatedDto
         everySuspending {
-            database.updateDocument(
+            tablesDb.updateRow<UserDataDTO>(
                 DbConstants.DATABASE_NAME,
-                DbConstants.USER_DATA_COLLECTION,
+                DbConstants.USER_DATA_TABLE,
                 userData.id,
                 isAny(),
                 isAny(),
-                UserDataDTO::class
+                isAny(),
+                isAny()
             )
         } returns mockDocument
         everySuspending { userDao.upsertUserWithRelations(isAny()) } returns Unit
@@ -156,13 +160,14 @@ class UserRepositoryTest : BaseTest(), KoinTest {
         assertThat(result).isSuccess()
 
         verifyWithSuspend {
-            database.updateDocument(
+            tablesDb.updateRow<UserDataDTO>(
                 DbConstants.DATABASE_NAME,
-                DbConstants.USER_DATA_COLLECTION,
+                DbConstants.USER_DATA_TABLE,
                 userData.id,
                 isAny(),
                 isAny(),
-                UserDataDTO::class
+                isAny(),
+                isAny()
             )
             userDao.upsertUserWithRelations(userData)
         }
@@ -192,19 +197,19 @@ class UserRepositoryTest : BaseTest(), KoinTest {
         val userData2 = UserData().copy(id = "user2", firstName = "Jane")
         val localUsers = listOf(userData1)
 
-        val mockDocument1 = fake<Document<UserDataDTO>>()
-        val mockDocument2 = fake<Document<UserDataDTO>>()
-        val mockDocuments = fake<DocumentList<UserDataDTO>>()
+        val mockDocument1 = fake<Row<UserDataDTO>>()
+        val mockDocument2 = fake<Row<UserDataDTO>>()
+        val mockDocuments = fake<RowList<UserDataDTO>>()
 
         every { mockDocument1.id } returns "user1"
         every { mockDocument1.data } returns UserDataDTO("John", "Doe", "john", "user1")
         every { mockDocument2.id } returns "user2"
         every { mockDocument2.data } returns UserDataDTO("Jane", "Smith", "jane", "user2")
-        every { mockDocuments.documents } returns listOf(mockDocument1, mockDocument2)
+        every { mockDocuments.rows } returns listOf(mockDocument1, mockDocument2)
 
         everySuspending { userDao.getUsersInTournament(tournamentId) } returns localUsers
         everySuspending {
-            database.listDocuments(isAny(), isAny(), isAny(), UserDataDTO::class)
+            tablesDb.listRows<UserDataDTO>(isAny(), isAny(), isAny(), isAny(), isAny(), isAny(), isAny())
         } returns mockDocuments
         everySuspending { userDao.upsertUsersData(isAny()) } returns Unit
         everySuspending { userDao.upsertUserTournamentCrossRefs(isAny()) } returns Unit
@@ -233,17 +238,17 @@ class UserRepositoryTest : BaseTest(), KoinTest {
         val tournamentId = "tournament123"
         val localUsers = listOf(UserData().copy(id = "user1", firstName = "John"))
 
-        val mockDocument = fake<Document<UserDataDTO>>()
-        val mockDocuments = fake<DocumentList<UserDataDTO>>()
+        val mockDocument = fake<Row<UserDataDTO>>()
+        val mockDocuments = fake<RowList<UserDataDTO>>()
 
         every { mockDocument.id } returns "user1"
         every { mockDocument.data } returns UserDataDTO("John", "Doe", "john", "user1")
-        every { mockDocuments.documents } returns listOf(mockDocument)
+        every { mockDocuments.rows } returns listOf(mockDocument)
 
         every { userDao.getUsersInTournamentFlow(tournamentId) } returns flowOf(localUsers)
         everySuspending { userDao.getUsersInTournament(tournamentId) } returns localUsers
         everySuspending {
-            database.listDocuments(isAny(), isAny(), isAny(), UserDataDTO::class)
+            tablesDb.listRows<UserDataDTO>(isAny(), isAny(), isAny(), isAny(), isAny(), isAny(), isAny())
         } returns mockDocuments
         everySuspending { userDao.upsertUsersData(isAny()) } returns Unit
         everySuspending { userDao.upsertUserTournamentCrossRefs(isAny()) } returns Unit
@@ -259,22 +264,22 @@ class UserRepositoryTest : BaseTest(), KoinTest {
             awaitComplete()
         }
 
-        verifyWithSuspend { database.listDocuments(isAny(), isAny(), isAny(), UserDataDTO::class) }
+        verifyWithSuspend { tablesDb.listRows<UserDataDTO>(isAny(), isAny(), isAny(), isAny(), isAny(), isAny(), isAny()) }
     }
 
     @Test
     fun `searchPlayers should return remote results without caching`() = testScope.runTest {
         val searchTerm = "john"
 
-        val mockDocument = fake<Document<UserDataDTO>>()
-        val mockDocuments = fake<DocumentList<UserDataDTO>>()
+        val mockDocument = fake<Row<UserDataDTO>>()
+        val mockDocuments = fake<RowList<UserDataDTO>>()
 
         every { mockDocument.id } returns "user1"
         every { mockDocument.data } returns UserDataDTO("John", "Doe", "john", "user1")
-        every { mockDocuments.documents } returns listOf(mockDocument)
+        every { mockDocuments.rows } returns listOf(mockDocument)
 
         everySuspending {
-            database.listDocuments(isAny(), isAny(), isAny(), UserDataDTO::class)
+            tablesDb.listRows<UserDataDTO>(isAny(), isAny(), isAny(), isAny(), isAny(), isAny(), isAny())
         } returns mockDocuments
         everySuspending { userDao.upsertUsersData(isAny()) } returns Unit
         everySuspending { userDao.deleteUsersById(isAny()) } returns Unit
@@ -287,7 +292,7 @@ class UserRepositoryTest : BaseTest(), KoinTest {
 
         // Simplified verification without complex match
         verifyWithSuspend {
-            database.listDocuments(isAny(), isAny(), isAny(), UserDataDTO::class)
+            tablesDb.listRows<UserDataDTO>(isAny(), isAny(), isAny(), isAny(), isAny(), isAny(), isAny())
         }
     }
 
@@ -300,7 +305,7 @@ class UserRepositoryTest : BaseTest(), KoinTest {
         val userName = "newuser"
         val userId = "newUserId"
 
-        val mockDocument = fake<Document<UserDataDTO>>()
+        val mockDocument = fake<Row<UserDataDTO>>()
         val mockAccount = fake<User<Map<String, Any>>>()
 
         every { mockDocument.id } returns userId
@@ -308,7 +313,7 @@ class UserRepositoryTest : BaseTest(), KoinTest {
         every { ID.unique() } returns userId
         everySuspending { account.create(userId, email, password, userName) } returns mockAccount
         everySuspending {
-            database.createDocument(isAny(), isAny(), isAny(), isAny(), isAny(), UserDataDTO::class)
+            tablesDb.createRow<UserDataDTO>(isAny(), isAny(), isAny(), isAny(), isAny(), isAny(), isAny())
         } returns mockDocument
 
         val result = userRepository.createNewUser(email, password, firstName, lastName, userName)
@@ -321,7 +326,7 @@ class UserRepositoryTest : BaseTest(), KoinTest {
 
         verifyWithSuspend {
             account.create(userId, email, password, userName)
-            database.createDocument(isAny(), isAny(), isAny(), isAny(), isAny(), UserDataDTO::class)
+            tablesDb.createRow<UserDataDTO>(isAny(), isAny(), isAny(), isAny(), isAny(), isAny(), isAny())
         }
     }
 
@@ -331,7 +336,7 @@ class UserRepositoryTest : BaseTest(), KoinTest {
         val networkException = Exception("Network error")
 
         everySuspending {
-            database.updateDocument(isAny(), isAny(), isAny(), isAny(), isAny(), UserDataDTO::class)
+            tablesDb.updateRow<UserDataDTO>(isAny(), isAny(), isAny(), isAny(), isAny(), isAny(), isAny())
         } runs { throw networkException }
 
         val result = userRepository.updateUser(userData)

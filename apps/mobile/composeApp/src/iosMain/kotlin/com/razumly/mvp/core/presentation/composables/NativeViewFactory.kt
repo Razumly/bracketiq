@@ -2,7 +2,7 @@
 
 package com.razumly.mvp.core.presentation.composables
 
-import com.razumly.mvp.core.data.dataTypes.EventAbs
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.presentation.PaymentResult
 import com.razumly.mvp.eventMap.MapComponent
@@ -14,11 +14,11 @@ import kotlin.time.ExperimentalTime
 interface NativeViewFactory {
     fun createNativeMapView(
         component: MapComponent,
-        onEventSelected: (event: EventAbs) -> Unit,
+        onEventSelected: (event: Event) -> Unit,
         onPlaceSelected: (place: MVPPlace) -> Unit,
         canClickPOI: Boolean,
         focusedLocation: LatLng?,
-        focusedEvent: EventAbs?,
+        focusedEvent: Event?,
         revealCenterX: Double,
         revealCenterY: Double
     ): UIViewController
@@ -26,11 +26,11 @@ interface NativeViewFactory {
     fun updateNativeMapView(
         viewController: UIViewController,
         component: MapComponent,
-        onEventSelected: (event: EventAbs) -> Unit,
+        onEventSelected: (event: Event) -> Unit,
         onPlaceSelected: (place: MVPPlace) -> Unit,
         canClickPOI: Boolean,
         focusedLocation: LatLng?,
-        focusedEvent: EventAbs?,
+        focusedEvent: Event?,
         revealCenterX: Double,
         revealCenterY: Double
     )

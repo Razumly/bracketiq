@@ -12,9 +12,8 @@ import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.chat.ChatGroupComponent
 import com.razumly.mvp.chat.ChatListComponent
 import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
-import com.razumly.mvp.core.data.dataTypes.EventAbs
-import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.eventCreate.CreateEventComponent
@@ -165,7 +164,7 @@ class RootComponent(
         navigation.pushNew(AppConfig.MatchDetail(match, event))
     }
 
-    override fun navigateToTeams(freeAgents: List<String>, event: EventAbs?) {
+    override fun navigateToTeams(freeAgents: List<String>, event: Event?) {
         navigation.pushNew(AppConfig.Teams(freeAgents, event))
     }
 
@@ -173,7 +172,7 @@ class RootComponent(
         navigation.pushNew(AppConfig.Chat(user, chat))
     }
 
-    override fun navigateToEvent(event: EventAbs) {
+    override fun navigateToEvent(event: Event) {
         navigation.pushNew(AppConfig.EventDetail(event))
     }
 

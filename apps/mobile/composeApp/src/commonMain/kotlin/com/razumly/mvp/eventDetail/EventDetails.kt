@@ -62,8 +62,7 @@ import com.kmpalette.loader.rememberNetworkLoader
 import com.kmpalette.rememberDominantColorState
 import com.materialkolor.scheme.DynamicScheme
 import com.razumly.mvp.core.data.dataTypes.Event
-import com.razumly.mvp.core.data.dataTypes.EventAbs
-import com.razumly.mvp.core.data.dataTypes.EventAbsWithRelations
+import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.enums.FieldType
@@ -74,12 +73,12 @@ import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
 import com.razumly.mvp.core.presentation.composables.PlatformDropdown
 import com.razumly.mvp.core.presentation.composables.PlatformTextField
 import com.razumly.mvp.core.presentation.composables.StripeButton
+import com.razumly.mvp.core.data.util.normalizeDivisionLabels
 import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
 import com.razumly.mvp.core.presentation.util.getScreenHeight
 import com.razumly.mvp.core.presentation.util.moneyFormat
 import com.razumly.mvp.core.presentation.util.teamSizeFormat
-import com.razumly.mvp.core.presentation.util.toDivisionCase
 import com.razumly.mvp.core.presentation.util.toTitleCase
 import com.razumly.mvp.core.presentation.util.transitionSpec
 import com.razumly.mvp.eventDetail.composables.CancellationRefundOptions
@@ -126,8 +125,8 @@ fun EventDetails(
     hostHasAccount: Boolean,
     imageScheme: DynamicScheme,
     imageUrls: List<String>,
-    eventWithRelations: EventAbsWithRelations,
-    editEvent: EventAbs,
+    eventWithRelations: EventWithFullRelations,
+    editEvent: Event,
     editView: Boolean,
     navPadding: PaddingValues = PaddingValues(),
     isNewEvent: Boolean,
@@ -169,7 +168,7 @@ fun EventDetails(
     val lazyListState = rememberLazyListState()
 
     var fieldCount by remember { mutableStateOf(0) }
-    var selectedDivisions by remember { mutableStateOf(editEvent.divisions) }
+    var selectedDivisions by remember { mutableStateOf(editEvent.divisions.normalizeDivisionLabels()) }
     var addSelfToEvent by remember { mutableStateOf(false) }
 
     val roundedCornerSize = 32.dp
@@ -184,7 +183,7 @@ fun EventDetails(
             editEvent.location.isNotBlank() && editEvent.lat != 0.0 && editEvent.long != 0.0
         isSkillLevelValid = editEvent.divisions.isNotEmpty()
 
-        if (editEvent is Event) {
+        if (editEvent.eventType == EventType.TOURNAMENT) {
             isWinnerSetCountValid = editEvent.winnerSetCount in 1..5
             isWinnerPointsValid = editEvent.winnerBracketPointsToVictory.all { it > 0 }
             isFieldCountValid = fieldCount > 0
@@ -512,7 +511,7 @@ fun EventDetails(
                 animatedCardSection(isEditMode = editView, animationDelay = 350, viewContent = {
                     CardSection(
                         "Divisions",
-                        event.divisions.joinToString().toDivisionCase(),
+                        event.divisions.normalizeDivisionLabels().joinToString(", "),
                     )
                 }, editContent = {
                     MultiSelectDropdownField(
@@ -522,7 +521,7 @@ fun EventDetails(
                         errorMessage = stringResource(Res.string.select_a_value),
                         modifier = Modifier.fillMaxWidth(.5f)
                     ) { newSelection ->
-                        selectedDivisions = newSelection
+                        selectedDivisions = newSelection.normalizeDivisionLabels()
                         onEditEvent { copy(divisions = selectedDivisions) }
                     }
                 })
@@ -544,7 +543,7 @@ fun EventDetails(
                         style = MaterialTheme.typography.bodyMedium,
                         color = Color(localImageScheme.current.onSurface)
                     )
-                    if (event is Event) {
+                    if (event.eventType == EventType.TOURNAMENT) {
                         Text(
                             if (event.doubleElimination) "Double Elimination" else "Single Elimination",
                             style = MaterialTheme.typography.bodyMedium,
@@ -601,7 +600,7 @@ fun EventDetails(
                         modifier = Modifier.fillMaxWidth(.5f)
                     )
 
-                    if (event is Event) {
+                    if (event.eventType == EventType.TOURNAMENT) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.padding(top = 8.dp)
@@ -630,7 +629,7 @@ fun EventDetails(
                     }
 
                     // Tournament-specific fields
-                    if (editEvent is Event) {
+                    if (editEvent.eventType == EventType.TOURNAMENT) {
                         PlatformTextField(
                             value = editEvent.prize,
                             onValueChange = {
@@ -865,7 +864,7 @@ fun EventDetails(
         onPlaceSelected = { place ->
             if (editView) {
                 onPlaceSelected(place)
-                previousSelection = LatLng(place.lat, place.long)
+                previousSelection = LatLng(place.coordinates[1], place.coordinates[0])
             }
         },
         canClickPOI = editView,

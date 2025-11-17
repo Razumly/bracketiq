@@ -1,7 +1,7 @@
 package com.razumly.mvp.core.data.repositories
 
 import com.razumly.mvp.core.data.DatabaseService
-import com.razumly.mvp.core.data.dataTypes.EventAbs
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.RefundRequest
 import com.razumly.mvp.core.data.dataTypes.RefundRequestWithRelations
 import com.razumly.mvp.core.data.dataTypes.dtos.RefundRequestDTO
@@ -9,7 +9,7 @@ import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.util.DbConstants
 import com.razumly.mvp.core.util.jsonMVP
 import io.appwrite.Query
-import io.appwrite.services.Databases
+import io.appwrite.services.TablesDB
 import io.appwrite.services.Functions
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
@@ -19,13 +19,13 @@ import kotlin.time.Instant
 
 interface IBillingRepository : IMVPRepository {
     suspend fun createPurchaseIntent(
-        event: EventAbs, teamId: String? = null
+        event: Event, teamId: String? = null
     ): Result<PurchaseIntent?>
 
     suspend fun createAccount(): Result<String>
     suspend fun getOnboardingLink(): Result<String>
-    suspend fun leaveAndRefundEvent(event: EventAbs, reason: String): Result<Unit>
-    suspend fun deleteAndRefundEvent(event: EventAbs): Result<Unit>
+    suspend fun leaveAndRefundEvent(event: Event, reason: String): Result<Unit>
+    suspend fun deleteAndRefundEvent(event: Event): Result<Unit>
 
     suspend fun getRefundsWithRelations(): Result<List<RefundRequestWithRelations>>
     suspend fun getRefunds(): Result<List<RefundRequest>>
@@ -37,11 +37,11 @@ class BillingRepository(
     private val userRepository: IUserRepository,
     private val functions: Functions,
     private val eventRepository: IEventRepository,
-    private val databases: Databases,
+    private val tablesDb: TablesDB,
     private val databaseService: DatabaseService
 ) : IBillingRepository {
     override suspend fun createPurchaseIntent(
-        event: EventAbs, teamId: String?
+        event: Event, teamId: String?
     ): Result<PurchaseIntent> = runCatching {
         val user = userRepository.currentUser.value.getOrThrow()
         val isTournament = event.eventType == EventType.TOURNAMENT
@@ -89,7 +89,7 @@ class BillingRepository(
         response.onboardingUrl
     }
 
-    override suspend fun leaveAndRefundEvent(event: EventAbs, reason: String): Result<Unit> =
+    override suspend fun leaveAndRefundEvent(event: Event, reason: String): Result<Unit> =
         runCatching {
             val response = functions.createExecution(
                 DbConstants.BILLING_FUNCTION, jsonMVP.encodeToString(
@@ -111,7 +111,7 @@ class BillingRepository(
             }
         }
 
-    override suspend fun deleteAndRefundEvent(event: EventAbs): Result<Unit> = runCatching {
+    override suspend fun deleteAndRefundEvent(event: Event): Result<Unit> = runCatching {
         val isTournament = event.eventType == EventType.TOURNAMENT
         val response = functions.createExecution(
             DbConstants.BILLING_FUNCTION,
@@ -137,14 +137,14 @@ class BillingRepository(
         runCatching {
             val currentUserId = userRepository.currentUser.value.getOrThrow().id
 
-            val serverRefunds = databases.listDocuments(
+            val serverRefunds = tablesDb.listRows<RefundRequestDTO>(
                 databaseId = DbConstants.DATABASE_NAME,
-                collectionId = DbConstants.REFUNDS_COLLECTION,
+                tableId = DbConstants.REFUNDS_TABLE,
                 queries = listOf(
                     Query.contains("hostId", currentUserId)
                 ),
                 nestedType = RefundRequestDTO::class
-            ).documents.map { it.data.toRefundRequest(it.id) }
+            ).rows.map { it.data.toRefundRequest(it.id) }
 
             databaseService.getRefundRequestDao.upsertRefundRequests(serverRefunds)
 
@@ -162,14 +162,14 @@ class BillingRepository(
     override suspend fun getRefunds(): Result<List<RefundRequest>> = runCatching {
         val currentUserId = userRepository.currentUser.value.getOrThrow().id
 
-        val serverRefunds = databases.listDocuments(
+        val serverRefunds = tablesDb.listRows<RefundRequestDTO>(
             databaseId = DbConstants.DATABASE_NAME,
-            collectionId = DbConstants.REFUNDS_COLLECTION,
+            tableId = DbConstants.REFUNDS_TABLE,
             queries = listOf(
                 Query.contains("hostId", currentUserId)
             ),
             nestedType = RefundRequestDTO::class
-        ).documents.map { it.data.toRefundRequest(it.id) }
+        ).rows.map { it.data.toRefundRequest(it.id) }
 
         databaseService.getRefundRequestDao.upsertRefundRequests(serverRefunds)
 
@@ -201,10 +201,10 @@ class BillingRepository(
     }
 
     override suspend fun rejectRefund(refundId: String): Result<Unit> = runCatching {
-        databases.deleteDocument(
+        tablesDb.deleteRow(
             databaseId = DbConstants.DATABASE_NAME,
-            collectionId = DbConstants.REFUNDS_COLLECTION,
-            documentId = refundId
+            tableId = DbConstants.REFUNDS_TABLE,
+            rowId = refundId
         )
 
         databaseService.getRefundRequestDao.deleteRefundRequest(refundId)

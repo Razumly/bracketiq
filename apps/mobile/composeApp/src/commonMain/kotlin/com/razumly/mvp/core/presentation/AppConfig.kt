@@ -1,9 +1,8 @@
 package com.razumly.mvp.core.presentation
 
 import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
-import com.razumly.mvp.core.data.dataTypes.EventAbs
-import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.UserData
 import kotlinx.serialization.Serializable
 
@@ -14,7 +13,7 @@ sealed class AppConfig {
 
     @Serializable
     data class EventDetail(
-        val event: EventAbs,
+        val event: Event,
     ) : AppConfig()
 
     @Serializable
@@ -45,7 +44,7 @@ sealed class AppConfig {
     data class Search(val eventId: String? = null) : AppConfig()
 
     @Serializable
-    data class Teams(val freeAgents: List<String>, val event: EventAbs?) : AppConfig()
+    data class Teams(val freeAgents: List<String>, val event: Event?) : AppConfig()
 
     @Serializable
     data object Events : AppConfig()

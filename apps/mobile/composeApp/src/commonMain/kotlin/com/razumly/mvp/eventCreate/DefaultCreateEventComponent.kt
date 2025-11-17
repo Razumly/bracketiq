@@ -11,13 +11,12 @@ import com.arkivanov.decompose.router.stack.pushNew
 import com.arkivanov.decompose.value.Value
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.Event
-import com.razumly.mvp.core.data.dataTypes.EventAbs
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.IBillingRepository
-import com.razumly.mvp.core.data.repositories.IEventAbsRepository
+import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
 import com.razumly.mvp.core.data.repositories.IImagesRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
@@ -42,7 +41,7 @@ import kotlinx.serialization.Serializable
 import kotlin.time.ExperimentalTime
 
 interface CreateEventComponent : IPaymentProcessor, ComponentContext {
-    val newEventState: StateFlow<EventAbs>
+    val newEventState: StateFlow<Event>
     val currentEventType: StateFlow<EventType>
     val childStack: Value<ChildStack<Config, Child>>
     val canProceed: StateFlow<Boolean>
@@ -88,7 +87,7 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
 class DefaultCreateEventComponent(
     componentContext: ComponentContext,
     private val userRepository: IUserRepository,
-    private val eventRepository: IEventAbsRepository,
+    private val eventRepository: IEventRepository,
     private val fieldRepository: IFieldRepository,
     private val billingRepository: IBillingRepository,
     private val imageRepository: IImagesRepository,
@@ -97,7 +96,7 @@ class DefaultCreateEventComponent(
     private val navigation = StackNavigation<Config>()
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
 
-    private val _newEventState: MutableStateFlow<EventAbs> = MutableStateFlow(Event())
+    private val _newEventState: MutableStateFlow<Event> = MutableStateFlow(Event())
     override val newEventState = _newEventState.asStateFlow()
 
     override val defaultEvent =
@@ -232,23 +231,15 @@ class DefaultCreateEventComponent(
     }
 
     override fun onTypeSelected(type: EventType) {
-        _newEventState.value = when (type) {
-            EventType.TOURNAMENT -> {
-                Event().updateTournamentFromEvent(_newEventState.value as Event)
-            }
-
-            EventType.EVENT -> {
-                (_newEventState.value as Event).toEvent()
-            }
-        }
+        _currentEventType.value = type
+        updateEventField { copy(eventType = type) }
     }
 
     override fun selectPlace(place: MVPPlace?) {
         _selectedPlace.value = place
         updateEventField {
             copy(
-                lat = place?.lat ?: 0.0,
-                long = place?.long ?: 0.0,
+                coordinates = place?.coordinates ?: listOf(0.0, 0.0),
                 location = place?.name ?: ""
             )
         }
@@ -267,9 +258,9 @@ class DefaultCreateEventComponent(
     override fun addUserToEvent(add: Boolean) {
         _addUserToEvent.value = add
         if (add) {
-            updateEventField { copy(playerIds = listOf(currentUser.value?.id!!)) }
+            updateEventField { copy(userIds = listOf(currentUser.value?.id!!)) }
         } else {
-            updateEventField { copy(playerIds = listOf()) }
+            updateEventField { copy(userIds = listOf()) }
         }
     }
 

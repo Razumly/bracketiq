@@ -17,7 +17,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.UIKitViewController
 import com.razumly.mvp.LocalNativeViewFactory
-import com.razumly.mvp.core.data.dataTypes.EventAbs
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.presentation.localAllFocusManagers
 import dev.icerock.moko.geo.LatLng
@@ -25,12 +25,12 @@ import dev.icerock.moko.geo.LatLng
 @Composable
 actual fun EventMap(
     component: MapComponent,
-    onEventSelected: (event: EventAbs) -> Unit,
+    onEventSelected: (event: Event) -> Unit,
     onPlaceSelected: (place: MVPPlace) -> Unit,
     canClickPOI: Boolean,
     modifier: Modifier,
     focusedLocation: LatLng,
-    focusedEvent: EventAbs?,
+    focusedEvent: Event?,
     revealCenter: Offset,
     onBackPressed: (() -> Unit)?
 ) {

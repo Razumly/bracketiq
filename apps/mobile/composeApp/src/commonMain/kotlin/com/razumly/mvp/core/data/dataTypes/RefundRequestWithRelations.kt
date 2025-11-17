@@ -18,14 +18,5 @@ data class RefundRequestWithRelations(
         parentColumn = "eventId",
         entityColumn = "id"
     )
-    val event: Event?,
-
-    @Relation(
-        parentColumn = "eventId",
-        entityColumn = "id"
-    )
-    val tournament: Event?
-) {
-    val eventAbs: EventAbs?
-        get() = event ?: tournament
-}
+    val event: Event?
+)

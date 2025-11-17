@@ -6,9 +6,8 @@ import com.razumly.mvp.chat.ChatListComponent
 import com.razumly.mvp.chat.DefaultChatGroupComponent
 import com.razumly.mvp.chat.DefaultChatListComponent
 import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
-import com.razumly.mvp.core.data.dataTypes.EventAbs
-import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.presentation.DefaultPlayerInteractionComponent
 import com.razumly.mvp.core.presentation.INavigationHandler
@@ -68,11 +67,11 @@ val componentModule = module {
         )
     }
 
-    factory<EventDetailComponent> { (componentContext: ComponentContext, event: EventAbs, navHandler: INavigationHandler) ->
+    factory<EventDetailComponent> { (componentContext: ComponentContext, event: Event, navHandler: INavigationHandler) ->
         DefaultEventDetailComponent(
             componentContext = componentContext,
             event = event,
-            eventAbsRepository = get(),
+            eventRepository = get(),
             userRepository = get(),
             matchRepository = get(),
             teamRepository = get(),
@@ -100,7 +99,6 @@ val componentModule = module {
         DefaultEventSearchComponent(
             componentContext = componentContext,
             locationTracker = get(),
-            eventAbsRepository = get(),
             eventRepository = get(),
             eventId = eventId,
             navigationHandler = navHandler
@@ -137,14 +135,14 @@ val componentModule = module {
         )
     }
 
-    factory<TeamManagementComponent> { (componentContext: ComponentContext, freeAgents: List<String>, selectedEvent: EventAbs?, navHandler: INavigationHandler) ->
+    factory<TeamManagementComponent> { (componentContext: ComponentContext, freeAgents: List<String>, selectedEvent: Event?, navHandler: INavigationHandler) ->
         DefaultTeamManagementComponent(
             componentContext = componentContext,
             teamRepository = get(),
             userRepository = get(),
             freeAgents = freeAgents,
             selectedEvent = selectedEvent,
-            eventAbsRepository = get(),
+            eventRepository = get(),
             navigationHandler = navHandler,
         )
     }
@@ -160,8 +158,9 @@ val componentModule = module {
     factory<EventManagementComponent> { (componentContext: ComponentContext, navHandler: INavigationHandler) ->
         DefaultEventManagementComponent(
             componentContext = componentContext,
-            eventAbsRepository = get(),
-            navigationHandler = navHandler
+            eventRepository = get(),
+            navigationHandler = navHandler,
+            userRepository = get(),
         )
     }
 

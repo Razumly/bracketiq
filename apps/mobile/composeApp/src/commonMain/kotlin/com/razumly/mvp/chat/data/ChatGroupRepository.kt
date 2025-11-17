@@ -15,7 +15,7 @@ import com.razumly.mvp.core.util.DbConstants
 import io.appwrite.ID
 import io.appwrite.Query
 import io.appwrite.models.RealtimeSubscription
-import io.appwrite.services.Databases
+import io.appwrite.services.TablesDB
 import io.appwrite.services.Realtime
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CoroutineScope
@@ -44,7 +44,7 @@ interface IChatGroupRepository : IMVPRepository {
 }
 
 class ChatGroupRepository(
-    private val databases: Databases,
+    private val tablesDb: TablesDB,
     private val databaseService: DatabaseService,
     private val userRepository: IUserRepository,
     private val messageRepository: IMessageRepository,
@@ -116,12 +116,12 @@ class ChatGroupRepository(
         }
         val remoteJob = launch {
             multiResponse(getRemoteData = {
-                databases.listDocuments(
+                tablesDb.listRows<ChatGroup>(
                     DbConstants.DATABASE_NAME,
-                    DbConstants.CHAT_GROUP_COLLECTION,
-                    nestedType = ChatGroup::class,
-                    queries = listOf(Query.contains("userIds", userId))
-                ).documents.map {
+                    DbConstants.CHAT_GROUP_TABLE,
+                    queries = listOf(Query.contains("userIds", userId)),
+                    nestedType = ChatGroup::class
+                ).rows.map {
                     it.data.copy(id = it.id)
                 }
             }, getLocalData = {
@@ -160,11 +160,11 @@ class ChatGroupRepository(
 
     override suspend fun createChatGroup(newChatGroup: ChatGroupWithRelations): Result<Unit> =
         singleResponse(networkCall = {
-            databases.createDocument(
-                DbConstants.DATABASE_NAME,
-                DbConstants.CHAT_GROUP_COLLECTION,
-                newChatGroup.chatGroup.id,
-                newChatGroup,
+            tablesDb.createRow<ChatGroup>(
+                databaseId = DbConstants.DATABASE_NAME,
+                tableId = DbConstants.CHAT_GROUP_TABLE,
+                rowId = newChatGroup.chatGroup.id,
+                data = newChatGroup.chatGroup,
                 nestedType = ChatGroup::class
             ).data.copy(id = newChatGroup.chatGroup.id)
         }, saveCall = { chatGroup ->
@@ -183,8 +183,10 @@ class ChatGroupRepository(
                 }
             }.onFailure {
                 Napier.e("Failed to create chat group topic", it)
-                databases.deleteDocument(
-                    DbConstants.DATABASE_NAME, DbConstants.CHAT_GROUP_COLLECTION, chatGroup.id
+                tablesDb.deleteRow(
+                    databaseId = DbConstants.DATABASE_NAME,
+                    tableId = DbConstants.CHAT_GROUP_TABLE,
+                    rowId = chatGroup.id
                 )
                 throw it
             }
@@ -193,11 +195,11 @@ class ChatGroupRepository(
 
     override suspend fun updateChatGroup(newChatGroup: ChatGroup): Result<ChatGroup> =
         singleResponse(networkCall = {
-            databases.updateDocument(
-                DbConstants.DATABASE_NAME,
-                DbConstants.CHAT_GROUP_COLLECTION,
-                newChatGroup.id,
-                newChatGroup,
+            tablesDb.updateRow<ChatGroup>(
+                databaseId = DbConstants.DATABASE_NAME,
+                tableId = DbConstants.CHAT_GROUP_TABLE,
+                rowId = newChatGroup.id,
+                data = newChatGroup,
                 nestedType = ChatGroup::class
             ).data
         }, saveCall = { chatGroup ->

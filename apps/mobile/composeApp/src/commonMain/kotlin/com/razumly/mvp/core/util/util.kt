@@ -3,7 +3,7 @@ package com.razumly.mvp.core.util
 import com.razumly.mvp.core.data.dataTypes.Bounds
 import dev.icerock.moko.geo.LatLng
 import dev.icerock.moko.geo.LocationTracker
-import io.appwrite.models.Document
+import io.appwrite.models.Row
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.Json
@@ -18,8 +18,8 @@ fun Int.ceilDiv(other: Int): Int {
     return this.floorDiv(other) + this.rem(other).sign.absoluteValue
 }
 
-fun <T, R> Document<T>.convert(converter: (T) -> R): Document<R> {
-    return Document(id, sequence, collectionId, databaseId, createdAt, updatedAt, permissions, converter(data))
+fun <T, R> Row<T>.convert(converter: (T) -> R): Row<R> {
+    return Row(id, sequence, tableId, databaseId, createdAt, updatedAt, permissions, converter(data))
 }
 
 val emailAddressRegex = Regex(
@@ -42,7 +42,8 @@ fun getBounds(radius: Double, latitude: Double, longitude: Double): Bounds {
         south = latitude - deltaLatitude,
         west = longitude - deltaLongitude,
         east = longitude + deltaLongitude,
-        center = LatLng(latitude, longitude)
+        center = LatLng(latitude, longitude),
+        radiusMiles = radius
     )
 }
 

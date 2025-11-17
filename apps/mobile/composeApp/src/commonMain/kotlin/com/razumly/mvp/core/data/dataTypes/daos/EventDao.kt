@@ -12,7 +12,7 @@ import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
 import kotlinx.coroutines.flow.Flow
 
 @Dao
-interface EventImpDao {
+interface EventDao {
 
     @Upsert
     suspend fun upsertEvent(game: Event)

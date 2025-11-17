@@ -14,7 +14,7 @@ import com.razumly.mvp.core.util.DbConstants
 import com.razumly.mvp.core.util.convert
 import io.appwrite.ID
 import io.appwrite.Query
-import io.appwrite.services.Databases
+import io.appwrite.services.TablesDB
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
@@ -38,7 +38,7 @@ interface ITeamRepository : IMVPRepository {
 }
 
 class TeamRepository(
-    private val database: Databases,
+    private val tablesDb: TablesDB,
     private val databaseService: DatabaseService,
     private val userRepository: IUserRepository,
     private val pushNotificationRepository: PushNotificationsRepository
@@ -50,14 +50,14 @@ class TeamRepository(
 
     override suspend fun getTeams(ids: List<String>): Result<List<Team>> =
         multiResponse(getRemoteData = {
-            database.listDocuments(
-                DbConstants.DATABASE_NAME,
-                DbConstants.VOLLEYBALL_TEAMS_COLLECTION,
+            tablesDb.listRows<TeamDTO>(
+                databaseId = DbConstants.DATABASE_NAME,
+                tableId = DbConstants.VOLLEYBALL_TEAMS_TABLE,
                 queries = listOf(
                     Query.equal("\$id", ids), Query.limit(200)
                 ),
-                nestedType = TeamDTO::class,
-            ).documents.map { dtoDoc -> dtoDoc.convert { it.toTeam(dtoDoc.id) }.data }
+                nestedType = TeamDTO::class
+            ).rows.map { dtoRow -> dtoRow.convert { it.toTeam(dtoRow.id) }.data }
         }, getLocalData = { databaseService.getTeamDao.getTeams(ids) }, saveData = { teams ->
             databaseService.getTeamDao.upsertTeams(teams)
         }, deleteData = { teamIds ->
@@ -149,12 +149,12 @@ class TeamRepository(
         val currentUser = userRepository.currentUser.value.getOrThrow()
 
         return singleResponse(networkCall = {
-            val remoteTeam = database.createDocument(
+            val remoteTeam = tablesDb.createRow<TeamDTO>(
                 databaseId = DbConstants.DATABASE_NAME,
-                collectionId = DbConstants.VOLLEYBALL_TEAMS_COLLECTION,
-                documentId = id,
+                tableId = DbConstants.VOLLEYBALL_TEAMS_TABLE,
+                rowId = id,
                 data = newTeam.toTeamDTO(),
-                nestedType = TeamDTO::class,
+                nestedType = TeamDTO::class
             ).data.toTeam(id)
             remoteTeam
         }, saveCall = { remoteTeam ->
@@ -175,10 +175,10 @@ class TeamRepository(
     }
 
     override suspend fun updateTeam(newTeam: Team): Result<Team> = singleResponse(networkCall = {
-        database.updateDocument(
+        tablesDb.updateRow<TeamDTO>(
             databaseId = DbConstants.DATABASE_NAME,
-            collectionId = DbConstants.VOLLEYBALL_TEAMS_COLLECTION,
-            documentId = newTeam.id,
+            tableId = DbConstants.VOLLEYBALL_TEAMS_TABLE,
+            rowId = newTeam.id,
             data = newTeam.toTeamDTO(),
             nestedType = TeamDTO::class
         ).data.toTeam(newTeam.id)
@@ -207,10 +207,10 @@ class TeamRepository(
     })
 
     override suspend fun deleteTeam(team: TeamWithPlayers): Result<Unit> = runCatching {
-        database.deleteDocument(
+        tablesDb.deleteRow(
             databaseId = DbConstants.DATABASE_NAME,
-            collectionId = DbConstants.VOLLEYBALL_TEAMS_COLLECTION,
-            documentId = team.team.id
+            tableId = DbConstants.VOLLEYBALL_TEAMS_TABLE,
+            rowId = team.team.id
         )
         team.players.forEach { player ->
             userRepository.updateUser(
@@ -258,13 +258,13 @@ class TeamRepository(
         query: String, getLocalData: suspend () -> List<Team>
     ): Result<List<Team>> {
         return multiResponse(getRemoteData = {
-            val teams = database.listDocuments(
-                DbConstants.DATABASE_NAME,
-                DbConstants.VOLLEYBALL_TEAMS_COLLECTION,
+            val teams = tablesDb.listRows<TeamDTO>(
+                databaseId = DbConstants.DATABASE_NAME,
+                tableId = DbConstants.VOLLEYBALL_TEAMS_TABLE,
                 queries = listOf(query),
-                nestedType = TeamDTO::class,
-            ).documents.map { dtoDoc ->
-                dtoDoc.convert { it.toTeam(dtoDoc.id) }.data
+                nestedType = TeamDTO::class
+            ).rows.map { dtoRow ->
+                dtoRow.convert { it.toTeam(dtoRow.id) }.data
             }
             teams.forEach { team ->
                 userRepository.getUsers(team.playerIds)
@@ -282,11 +282,11 @@ class TeamRepository(
     override suspend fun getTeamWithPlayers(teamId: String): Result<TeamWithPlayers> =
         singleResponse(
             networkCall = {
-                database.getDocument(
-                    DbConstants.DATABASE_NAME,
-                    DbConstants.VOLLEYBALL_TEAMS_COLLECTION,
-                    teamId,
-                    nestedType = TeamDTO::class,
+                tablesDb.getRow<TeamDTO>(
+                    databaseId = DbConstants.DATABASE_NAME,
+                    tableId = DbConstants.VOLLEYBALL_TEAMS_TABLE,
+                    rowId = teamId,
+                    nestedType = TeamDTO::class
                 ).data.toTeam(teamId)
             },
             saveCall = { team -> databaseService.getTeamDao.upsertTeam(team) },

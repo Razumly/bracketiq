@@ -57,7 +57,6 @@ import androidx.compose.ui.unit.dp
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.ktx.DynamicScheme
-import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.FeeBreakdown
@@ -91,7 +90,7 @@ fun EventDetailScreen(
 ) {
     val popupHandler = LocalPopupHandler.current
     val loadingHandler = LocalLoadingHandler.current
-    val selectedEvent by component.selectedEvent.collectAsState()
+    val selectedEvent by component.eventWithRelations.collectAsState()
     val currentUser by component.currentUser.collectAsState()
     val validTeams by component.validTeams.collectAsState()
     val showDetails by component.showDetails.collectAsState()

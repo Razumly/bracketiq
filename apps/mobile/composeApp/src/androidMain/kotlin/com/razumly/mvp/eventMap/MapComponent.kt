@@ -13,9 +13,9 @@ import com.google.android.libraries.places.api.net.FindAutocompletePredictionsRe
 import com.google.android.libraries.places.api.net.PlacesClient
 import com.google.android.libraries.places.api.net.SearchByTextRequest
 import com.razumly.mvp.BuildConfig
-import com.razumly.mvp.core.data.dataTypes.EventAbs
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
-import com.razumly.mvp.core.data.repositories.IEventAbsRepository
+import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.util.getBounds
 import com.razumly.mvp.core.util.getCurrentLocation
 import dev.icerock.moko.geo.LocationTracker
@@ -32,7 +32,7 @@ import kotlin.coroutines.resumeWithException
 
 actual class MapComponent(
     componentContext: ComponentContext,
-    private val eventAbsRepository: IEventAbsRepository,
+    private val eventRepository: IEventRepository,
     context: Context,
     val locationTracker: LocationTracker
 ) : ComponentContext by componentContext {
@@ -42,8 +42,8 @@ actual class MapComponent(
     private val _currentLocation = MutableStateFlow<dev.icerock.moko.geo.LatLng?>(null)
     actual val currentLocation = _currentLocation.asStateFlow()
 
-    private val _events = MutableStateFlow<List<EventAbs>>(emptyList())
-    val events: StateFlow<List<EventAbs>> = _events.asStateFlow()
+    private val _events = MutableStateFlow<List<Event>>(emptyList())
+    val events: StateFlow<List<Event>> = _events.asStateFlow()
 
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
@@ -99,7 +99,7 @@ actual class MapComponent(
         _currentRadiusMeters.value = radius
     }
 
-    actual fun setEvents(events: List<EventAbs>) {
+    actual fun setEvents(events: List<Event>) {
         _events.value = events
     }
 
@@ -206,7 +206,7 @@ actual class MapComponent(
             currentLocation.longitude
         )
 
-        eventAbsRepository.getEventsInBounds(currentBounds).onSuccess {
+        eventRepository.getEventsInBounds(currentBounds).onSuccess {
             _events.value = it.first
         }.onFailure {
             _error.value = "Failed to fetch events: ${it.message}"

@@ -4,7 +4,6 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
-import com.razumly.mvp.core.data.dataTypes.EventAbs
 import okio.Path.Companion.toPath
 
 fun createDataStore(producePath : () -> String): DataStore<Preferences> {

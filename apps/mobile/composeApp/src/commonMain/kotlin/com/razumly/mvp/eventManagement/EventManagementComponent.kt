@@ -2,11 +2,13 @@ package com.razumly.mvp.eventManagement
 
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
-import com.razumly.mvp.core.data.dataTypes.EventAbs
-import com.razumly.mvp.core.data.repositories.IEventAbsRepository
+import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.repositories.IEventRepository
+import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.presentation.INavigationHandler
+import io.appwrite.Query
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,8 +20,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 interface EventManagementComponent {
-    val events: StateFlow<List<EventAbs>>
-    val onEventSelected: (event: EventAbs) -> Unit
+    val events: StateFlow<List<Event>>
+    val onEventSelected: (event: Event) -> Unit
     val isLoadingMore: StateFlow<Boolean>
     val hasMoreEvents: StateFlow<Boolean>
     val onBack: () -> Unit
@@ -32,20 +34,23 @@ interface EventManagementComponent {
 
 class DefaultEventManagementComponent(
     componentContext: ComponentContext,
-    private val eventAbsRepository: IEventAbsRepository,
+    private val eventRepository: IEventRepository,
+    userRepository: IUserRepository,
     navigationHandler: INavigationHandler
 ) : ComponentContext by componentContext, EventManagementComponent {
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
+    private val currentUserId = userRepository.currentUser.value.getOrThrow().id
 
     override val onEventSelected = navigationHandler::navigateToEvent
     override val onBack = navigationHandler::navigateBack
 
-    override val events: StateFlow<List<EventAbs>> = eventAbsRepository.getUsersEventsFlow().map { result ->
-        result.getOrElse {
-            _errorState.value = ErrorMessage("Failed to load events: ${it.message}")
-            emptyList()
-        }
-    }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+    override val events: StateFlow<List<Event>> =
+        eventRepository.getEventsByHostFlow(currentUserId).map { result ->
+            result.getOrElse {
+                _errorState.value = ErrorMessage("Failed to load events: ${it.message}")
+                emptyList()
+            }
+        }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     private val _isLoadingMore = MutableStateFlow(false)
     override val isLoadingMore: StateFlow<Boolean> = _isLoadingMore.asStateFlow()
@@ -66,15 +71,7 @@ class DefaultEventManagementComponent(
     }
 
     init {
-        scope.launch {
-            _isLoadingMore.value = true
-            eventAbsRepository.getUsersEvents().onSuccess {
-                _hasMoreEvents.value = it.second
-            }.onFailure {
-                _errorState.value = ErrorMessage("Failed to load more events: ${it.message}")
-            }
-            _isLoadingMore.value = false
-        }
+        _hasMoreEvents.value = false
     }
 
     override fun loadMoreEvents() {
@@ -83,10 +80,7 @@ class DefaultEventManagementComponent(
         scope.launch {
             _isLoadingMore.value = true
 
-            eventAbsRepository.getUsersEvents()
-                .onSuccess { (_, hasMore) ->
-                    _hasMoreEvents.value = hasMore
-                }
+            eventRepository.getEvents(Query.equal("hostId", currentUserId))
                 .onFailure { e ->
                     _errorState.value = ErrorMessage("Failed to load more events: ${e.message}")
                 }

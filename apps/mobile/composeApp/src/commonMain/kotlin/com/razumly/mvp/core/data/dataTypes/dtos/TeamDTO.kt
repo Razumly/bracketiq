@@ -1,7 +1,7 @@
 package com.razumly.mvp.core.data.dataTypes.dtos
 
 import com.razumly.mvp.core.data.dataTypes.Team
-import com.razumly.mvp.core.data.dataTypes.enums.Division
+import com.razumly.mvp.core.data.util.normalizeDivisionLabel
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 
@@ -24,7 +24,7 @@ fun TeamDTO.toTeam(id: String): Team {
     return Team(
         name = name,
         seed = seed,
-        division = Division.valueOf(division),
+        division = division.normalizeDivisionLabel(),
         wins = wins,
         losses = losses,
         playerIds = playerIds,

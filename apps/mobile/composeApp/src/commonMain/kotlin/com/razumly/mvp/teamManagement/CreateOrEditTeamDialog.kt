@@ -34,7 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
-import com.razumly.mvp.core.data.dataTypes.EventAbs
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
@@ -55,7 +55,7 @@ fun CreateOrEditTeamDialog(
     onDelete: (TeamWithPlayers) -> Unit,
     onDismiss: () -> Unit,
     deleteEnabled: Boolean,
-    selectedEvent: EventAbs?,
+    selectedEvent: Event?,
     isCaptain: Boolean,
     currentUser: UserData,
     isNewTeam: Boolean
