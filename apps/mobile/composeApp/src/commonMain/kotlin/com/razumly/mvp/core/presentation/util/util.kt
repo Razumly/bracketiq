@@ -23,6 +23,8 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.snapshotFlow
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.util.DbConstants
+import com.razumly.mvp.core.util.projectId
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.LocalTime
@@ -212,3 +214,9 @@ fun AnimatedContentTransitionScope<Boolean>.buttonTransitionSpec() =
 fun createEventUrl(event: Event): String {
     return "https://www.razumly.com/mvp/${if (event.eventType == EventType.TOURNAMENT) "tournament/" else "event/"}${event.id}"
 }
+fun getImageUrl(fileId: String, width: Int? = null, height: Int? = null): String =
+    buildString {
+        append("${DbConstants.APPWRITE_ENDPOINT}/storage/buckets/${DbConstants.BUCKET_ID}/files/$fileId/view?project=$projectId")
+        width?.let { append("&width=$it") }
+        height?.let { append("&height=$it") }
+    }

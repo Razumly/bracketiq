@@ -18,7 +18,6 @@ import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
-import com.razumly.mvp.core.data.util.normalizeDivisionLabel
 import com.razumly.mvp.core.data.repositories.FeeBreakdown
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IEventRepository
@@ -28,6 +27,7 @@ import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
+import com.razumly.mvp.core.data.util.normalizeDivisionLabel
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentProcessor
@@ -93,7 +93,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val editableRounds: StateFlow<List<List<MatchWithRelations?>>>
     val showTeamSelectionDialog: StateFlow<TeamSelectionDialogState?>
     val showMatchEditDialog: StateFlow<MatchEditDialogState?>
-    val eventImageUrls: StateFlow<List<String>>
+    val eventImageIds: StateFlow<List<String>>
 
 
     fun onNavigateToChat(user: UserData)
@@ -135,7 +135,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun dismissMatchEditDialog()
     fun updateMatchFromDialog(updatedMatch: MatchWithRelations)
     fun onUploadSelected(photo: GalleryPhotoResult)
-    fun deleteImage(url: String)
+    fun deleteImage(imageId: String)
     fun sendNotification(title: String, message: String)
 }
 
@@ -227,8 +227,8 @@ class DefaultEventDetailComponent(
         }
     }
 
-    override val eventImageUrls =
-        imageRepository.getUserImagesFlow().stateIn(scope, SharingStarted.Eagerly, emptyList())
+    override val eventImageIds =
+        imageRepository.getUserImageIdsFlow().stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     private val eventRelations: StateFlow<EventWithRelations> =
         eventRepository.getEventWithRelationsFlow(event.id).map { result ->
@@ -491,10 +491,10 @@ class DefaultEventDetailComponent(
         }
     }
 
-    override fun deleteImage(url: String) {
+    override fun deleteImage(imageId: String) {
         scope.launch {
             loadingHandler.showLoading("Deleting Image ...")
-            imageRepository.deleteImage(url)
+            imageRepository.deleteImage(imageId)
             loadingHandler.hideLoading()
         }
     }

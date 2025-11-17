@@ -62,10 +62,10 @@ import com.kmpalette.loader.rememberNetworkLoader
 import com.kmpalette.rememberDominantColorState
 import com.materialkolor.scheme.DynamicScheme
 import com.razumly.mvp.core.data.dataTypes.Event
-import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.enums.FieldType
+import com.razumly.mvp.core.data.util.normalizeDivisionLabels
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import com.razumly.mvp.core.presentation.composables.MoneyInputField
@@ -73,9 +73,9 @@ import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
 import com.razumly.mvp.core.presentation.composables.PlatformDropdown
 import com.razumly.mvp.core.presentation.composables.PlatformTextField
 import com.razumly.mvp.core.presentation.composables.StripeButton
-import com.razumly.mvp.core.data.util.normalizeDivisionLabels
 import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
+import com.razumly.mvp.core.presentation.util.getImageUrl
 import com.razumly.mvp.core.presentation.util.getScreenHeight
 import com.razumly.mvp.core.presentation.util.moneyFormat
 import com.razumly.mvp.core.presentation.util.teamSizeFormat
@@ -124,7 +124,7 @@ fun EventDetails(
     mapComponent: MapComponent,
     hostHasAccount: Boolean,
     imageScheme: DynamicScheme,
-    imageUrls: List<String>,
+    imageIds: List<String>,
     eventWithRelations: EventWithFullRelations,
     editEvent: Event,
     editView: Boolean,
@@ -163,7 +163,7 @@ fun EventDetails(
     var isLocationValid by remember { mutableStateOf(editEvent.location.isNotBlank() && editEvent.lat != 0.0 && editEvent.long != 0.0) }
     var isFieldCountValid by remember { mutableStateOf(true) }
     var isSkillLevelValid by remember { mutableStateOf(true) }
-    var isColorLoaded by remember { mutableStateOf(editEvent.imageUrl.isNotBlank()) }
+    var isColorLoaded by remember { mutableStateOf(editEvent.imageId.isNotBlank()) }
 
     val lazyListState = rememberLazyListState()
 
@@ -226,7 +226,7 @@ fun EventDetails(
                     .fillMaxWidth()
                     .height((getScreenHeight() * 0.6f).dp)
                     .graphicsLayer(translationY = -scrollOffset.toFloat()),
-                imageUrl = if (!editView) event.imageUrl else editEvent.imageUrl,
+                imageUrl = if (!editView) getImageUrl(event.imageId) else getImageUrl(editEvent.imageId),
             )
             LazyColumn(
                 state = lazyListState,
@@ -903,17 +903,17 @@ fun EventDetails(
     }
 
     var showImageDelete by remember { mutableStateOf(false) }
-    var deleteImageURL by remember { mutableStateOf("") }
+    var deleteImage by remember { mutableStateOf("") }
 
     val loader = rememberNetworkLoader()
     val dominantColorState = rememberDominantColorState(loader)
 
-    LaunchedEffect(editEvent.imageUrl) {
-        if (editEvent.imageUrl.startsWith("https") == true) {
+    LaunchedEffect(editEvent.imageId) {
+        if (editEvent.imageId.isNotBlank()) {
             isColorLoaded = false
-            loader.load(Url(editEvent.imageUrl))
-            dominantColorState.updateFrom(Url(editEvent.imageUrl))
-            onEditEvent { copy(imageUrl = editEvent.imageUrl) }
+            loader.load(Url(getImageUrl(editEvent.imageId)))
+            dominantColorState.updateFrom(Url(getImageUrl(editEvent.imageId)))
+            onEditEvent { copy(imageId = editEvent.imageId) }
             isColorLoaded = true
         }
     }
@@ -925,15 +925,15 @@ fun EventDetails(
             Card {
                 SelectEventImage(
                     onSelectedImage = { onEditEvent(it) },
-                    imageUrls = imageUrls,
+                    imageIds = imageIds,
                     onUploadSelected = { showUploadImagePicker = true },
                     onDeleteImage = {
                         showImageDelete = true
-                        deleteImageURL = it
+                        deleteImage = it
                     },
                     onConfirm = { showImageSelector = false },
                     onCancel = {
-                        onEditEvent { copy(imageUrl = "") }
+                        onEditEvent { copy(imageId = "") }
                         showImageSelector = false
                     })
             }
@@ -946,8 +946,8 @@ fun EventDetails(
                     text = { Text("Are you sure you want to delete this image?") },
                     confirmButton = {
                         TextButton(onClick = {
-                            onDeleteImage(deleteImageURL)
-                            onEditEvent { copy(imageUrl = "") }
+                            onDeleteImage(deleteImage)
+                            onEditEvent { copy(imageId = "") }
                             showImageDelete = false
                         }) {
                             Text("Delete")

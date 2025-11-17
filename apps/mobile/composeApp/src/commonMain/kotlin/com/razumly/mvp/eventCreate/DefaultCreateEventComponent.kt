@@ -125,7 +125,7 @@ class DefaultCreateEventComponent(
         .stateIn(scope, SharingStarted.Eagerly, null)
 
     override val eventImageUrls = imageRepository
-        .getUserImagesFlow()
+        .getUserImageIdsFlow()
         .stateIn(scope, SharingStarted.Eagerly, emptyList())
     private val _fieldCount = MutableStateFlow(0)
 

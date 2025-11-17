@@ -41,6 +41,7 @@ import coil3.compose.AsyncImagePainter
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.util.normalizeDivisionLabels
 import com.razumly.mvp.core.presentation.util.dateFormat
+import com.razumly.mvp.core.presentation.util.getImageUrl
 import com.razumly.mvp.core.presentation.util.moneyFormat
 import com.razumly.mvp.core.presentation.util.toTitleCase
 import com.razumly.mvp.eventSearch.composables.StylizedText
@@ -88,7 +89,7 @@ fun EventCard(
 
 
     Box(Modifier.fillMaxSize()) {
-        AsyncImage(model = event.imageUrl,
+        AsyncImage(model = getImageUrl(event.imageId),
             contentDescription = "Event Image",
             modifier = Modifier.matchParentSize().hazeSource(hazeState, key = event.id),
             contentScale = ContentScale.Crop,

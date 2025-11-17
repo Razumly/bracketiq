@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImagePainter
 import coil3.compose.rememberAsyncImagePainter
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.presentation.util.getImageUrl
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import kotlin.time.ExperimentalTime
 
@@ -52,7 +53,7 @@ fun SelectEventImage(
     modifier: Modifier = Modifier,
     onSelectedImage: (Event.() -> Event) -> Unit,
     onDeleteImage: (String) -> Unit,
-    imageUrls: List<String>,
+    imageIds: List<String>,
     onUploadSelected: () -> Unit,
     onConfirm: () -> Unit,
     onCancel: () -> Unit
@@ -91,13 +92,13 @@ fun SelectEventImage(
             contentPadding = PaddingValues(4.dp)
         ) {
             // Display existing images
-            items(imageUrls) { url ->
+            items(imageIds) { id ->
                 SelectableImageItem(
-                    imageUrl = url, isSelected = selected == url, onSelect = {
-                        selected = url
+                    imageId = id, isSelected = selected == id, onSelect = {
+                        selected = id
                         onSelectedImage {
                             copy(
-                                imageUrl = url
+                                imageId = id
                             )
                         }
                     })
@@ -145,9 +146,9 @@ fun SelectEventImage(
 
 @Composable
 private fun SelectableImageItem(
-    imageUrl: String, isSelected: Boolean, onSelect: () -> Unit
+    imageId: String, isSelected: Boolean, onSelect: () -> Unit
 ) {
-    val painter = rememberAsyncImagePainter(model = imageUrl)
+    val painter = rememberAsyncImagePainter(model = getImageUrl(imageId))
     val painterState = painter.state
 
     Box(modifier = Modifier.padding(4.dp).aspectRatio(1f).clip(CardDefaults.shape).let { base ->

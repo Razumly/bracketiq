@@ -25,6 +25,7 @@ object DbConstants {
     const val EVENT_MANAGER_FUNCTION = "eventManager"
     const val BILLING_FUNCTION = "mvpBilling"
     const val ERROR_TAG = "Database"
+    const val BUCKET_ID = "mvpImages"
     const val MATCHES_CHANNEL = "databases.$DATABASE_NAME.tables.$MATCHES_TABLE.rows"
     const val CHAT_GROUPS_CHANNEL = "databases.$DATABASE_NAME.tables.$CHAT_GROUP_TABLE.rows"
     const val MESSAGES_CHANNEL = "databases.$DATABASE_NAME.tables.$MESSAGES_TABLE.rows"

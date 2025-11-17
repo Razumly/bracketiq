@@ -41,7 +41,6 @@ data class Event(
     @Contextual val end: Instant = Instant.DISTANT_PAST,
     val price: Double = 0.0,
     val rating: Double? = null,
-    val imageUrl: String = "",
     val imageId: String = "",
     val coordinates: List<Double> = listOf(0.0, 0.0),
     val hostId: String = "",
@@ -86,7 +85,6 @@ data class Event(
     val freeAgents: List<String> get() = freeAgentIds
     val waitList: List<String> get() = waitListIds
     val playerIds: List<String> get() = userIds
-
 }
 
 fun Event.toEventDTO(): EventDTO =
@@ -109,7 +107,6 @@ fun Event.toEventDTO(): EventDTO =
         end = end.toString(),
         price = price,
         rating = rating,
-        imageUrl = imageUrl,
         imageId = imageId,
         hostId = hostId,
         coordinates = coordinates,

@@ -101,7 +101,7 @@ fun EventDetailScreen(
     val editableMatches by component.editableMatches.collectAsState()
     val showTeamDialog by component.showTeamSelectionDialog.collectAsState()
     val showMatchEditDialog by component.showMatchEditDialog.collectAsState()
-    val eventImageUrls by component.eventImageUrls.collectAsState()
+    val eventImageIds by component.eventImageIds.collectAsState()
 
     val isBracketView by component.isBracketView.collectAsState()
     var isRefundAutomatic by remember { mutableStateOf(false) }
@@ -183,7 +183,7 @@ fun EventDetailScreen(
                             isNewEvent = false,
                             onAddCurrentUser = {},
                             imageScheme = imageScheme,
-                            imageUrls = eventImageUrls,
+                            imageIds = eventImageIds,
                             onHostCreateAccount = component::onHostCreateAccount,
                             onPlaceSelected = component::selectPlace,
                             onEditEvent = component::editEventField,

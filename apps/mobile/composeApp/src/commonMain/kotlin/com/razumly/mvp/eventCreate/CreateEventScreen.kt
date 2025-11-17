@@ -154,7 +154,7 @@ fun CreateEventScreen(
                         isNewEvent = true,
                         onAddCurrentUser = {},
                         imageScheme = imageScheme,
-                        imageUrls = eventImageUrls,
+                        imageIds = eventImageUrls,
                         onHostCreateAccount = component::createAccount,
                         onPlaceSelected = component::selectPlace,
                         onEditEvent = component::updateEventField,

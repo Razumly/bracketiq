@@ -1,7 +1,7 @@
 package com.razumly.mvp.core.data.repositories
 
-import com.razumly.mvp.core.util.DbConstants
-import com.razumly.mvp.core.util.projectId
+import com.razumly.mvp.core.presentation.util.getImageUrl
+import com.razumly.mvp.core.util.DbConstants.BUCKET_ID
 import io.appwrite.ID
 import io.appwrite.models.InputFile
 import io.appwrite.services.Storage
@@ -10,48 +10,32 @@ import kotlinx.coroutines.flow.map
 
 interface IImagesRepository {
     suspend fun uploadImage(inputFile: InputFile): Result<String>
-    suspend fun getUserImages(): Result<List<String>>
-    fun getUserImagesFlow(): Flow<List<String>>
+    fun getUserImageIdsFlow(): Flow<List<String>>
     suspend fun addImageToUser(imageUrl: String): Result<Unit>
-    suspend fun deleteImage(url: String): Result<Unit>
+    suspend fun deleteImage(imageId: String): Result<Unit>
 }
 
 class ImagesRepository(
     private val storage: Storage, private val userRepository: IUserRepository
 ) : IImagesRepository {
-
-    companion object {
-        private const val BUCKET_ID = "courtImages" // Create this bucket in Appwrite Console
-    }
-
     override suspend fun uploadImage(
         inputFile: InputFile
     ): Result<String> = runCatching {
         val fileId = ID.unique()
 
-        val file = storage.createFile(
+        storage.createFile(
             bucketId = BUCKET_ID,
             fileId = fileId,
             file = inputFile,
             permissions = listOf("read(\"any\")")
         )
 
-        // Generate the public URL for the uploaded file
-        val imageUrl =
-            "${DbConstants.APPWRITE_ENDPOINT}/storage/buckets/$BUCKET_ID/files/${file.id}/view?project=${projectId}"
-
-        addImageToUser(imageUrl).getOrThrow()
-
-        imageUrl
+        addImageToUser(fileId).getOrThrow()
+        getImageUrl(fileId)
     }
 
-    override suspend fun getUserImages(): Result<List<String>> = runCatching {
-        val user = userRepository.currentUser.value.getOrThrow()
-        user.uploadedImages
-    }
-
-    override fun getUserImagesFlow(): Flow<List<String>> {
-        return userRepository.currentUser.map { it.getOrThrow().uploadedImages }
+    override fun getUserImageIdsFlow(): Flow<List<String>> {
+        return userRepository.currentUser.map { user -> user.getOrThrow().uploadedImages}
     }
 
     override suspend fun addImageToUser(imageUrl: String): Result<Unit> = runCatching {
@@ -63,11 +47,9 @@ class ImagesRepository(
         userRepository.updateUser(updatedUser).getOrThrow()
     }
 
-    override suspend fun deleteImage(url: String): Result<Unit> = runCatching {
-        val regex = Regex("files/(.*)/")
-        val fileId = regex.find(url)?.groupValues?.first() ?: throw IllegalArgumentException("Invalid URL format")
+    override suspend fun deleteImage(imageId: String): Result<Unit> = runCatching {
         val user = userRepository.currentUser.value.getOrThrow()
-        userRepository.updateUser(user.copy(uploadedImages = user.uploadedImages.filter { it != url }))
-        storage.deleteFile(BUCKET_ID, fileId)
+        userRepository.updateUser(user.copy(uploadedImages = user.uploadedImages.filter { it != imageId }))
+        storage.deleteFile(BUCKET_ID, imageId)
     }
 }
