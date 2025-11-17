@@ -454,11 +454,23 @@ class DefaultEventDetailComponent(
         val divisionFilter = _selectedDivision.value
         _divisionMatches.value = if (!selectedEvent.value.singleDivision && !divisionFilter.isNullOrEmpty()) {
             eventWithRelations.value.matches.filter {
-                it.match.division.normalizeDivisionLabel() == divisionFilter
+                it.match.division.normalizeDivisionLabel() == divisionFilter && !(
+                    it.previousRightMatch == null &&
+                    it.previousLeftMatch == null &&
+                    it.winnerNextMatch == null &&
+                    it.loserNextMatch == null
+                )
             }
                 .associateBy { it.match.id }
         } else {
-            eventWithRelations.value.matches.associateBy { it.match.id }
+            eventWithRelations.value.matches.filter {
+                !(
+                    it.previousRightMatch == null &&
+                    it.previousLeftMatch == null &&
+                    it.winnerNextMatch == null &&
+                    it.loserNextMatch == null
+                )
+            }.associateBy { it.match.id }
         }
     }
 
@@ -628,15 +640,11 @@ class DefaultEventDetailComponent(
     }
 
     override fun editEventField(update: Event.() -> Event) {
-        if (_editedEvent.value is Event) {
-            _editedEvent.value = (_editedEvent.value as Event).update()
-        }
+        _editedEvent.value = _editedEvent.value.update()
     }
 
     override fun editTournamentField(update: Event.() -> Event) {
-        if (_editedEvent.value is Event) {
-            _editedEvent.value = (_editedEvent.value as Event).update()
-        }
+        _editedEvent.value = _editedEvent.value.update()
     }
 
     override fun updateEvent() {

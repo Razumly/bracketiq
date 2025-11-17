@@ -38,7 +38,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuDefaults
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -48,6 +50,7 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,6 +74,7 @@ import com.razumly.mvp.eventDetail.composables.CollapsableHeader
 import com.razumly.mvp.eventDetail.composables.MatchEditControls
 import com.razumly.mvp.eventDetail.composables.MatchEditDialog
 import com.razumly.mvp.eventDetail.composables.ParticipantsView
+import com.razumly.mvp.eventDetail.composables.ScheduleView
 import com.razumly.mvp.eventDetail.composables.SendNotificationDialog
 import com.razumly.mvp.eventDetail.composables.TeamSelectionDialog
 import com.razumly.mvp.eventDetail.composables.TournamentBracketView
@@ -82,6 +86,12 @@ import kotlin.time.ExperimentalTime
 
 val LocalTournamentComponent =
     compositionLocalOf<EventDetailComponent> { error("No tournament provided") }
+
+private enum class DetailTab(val label: String) {
+    PARTICIPANTS("Participants"),
+    BRACKET("Bracket"),
+    SCHEDULE("Schedule")
+}
 
 @Composable
 @OptIn(ExperimentalTime::class)
@@ -103,7 +113,6 @@ fun EventDetailScreen(
     val showMatchEditDialog by component.showMatchEditDialog.collectAsState()
     val eventImageIds by component.eventImageIds.collectAsState()
 
-    val isBracketView by component.isBracketView.collectAsState()
     var isRefundAutomatic by remember { mutableStateOf(false) }
     val isHost by component.isHost.collectAsState()
     val isEditing by component.isEditing.collectAsState()
@@ -114,7 +123,11 @@ fun EventDetailScreen(
     val isCaptain by component.isUserCaptain.collectAsState()
     val isDark = isSystemInDarkTheme()
     val isEditingMatches by component.isEditingMatches.collectAsState()
-    val isTournamentEvent = selectedEvent.event.eventType == EventType.TOURNAMENT
+    val eventType = selectedEvent.event.eventType
+    val isTournamentEvent = eventType == EventType.TOURNAMENT
+    val hasBracketView = isTournamentEvent ||
+        (eventType == EventType.LEAGUE && selectedEvent.event.includePlayoffs)
+    val hasScheduleView = selectedEvent.matches.isNotEmpty()
 
     var showTeamSelectionDialog by remember { mutableStateOf(false) }
     var showFab by remember { mutableStateOf(false) }
@@ -457,25 +470,69 @@ fun EventDetailScreen(
                                 onCommitEdit = component::commitMatchChanges
                             )
                         }
-                        Box(Modifier.fillMaxSize()) {
-                            if (isTournamentEvent && isBracketView) {
-                                TournamentBracketView(
-                                    showFab = { showFab = it },
-                                    onMatchClick = { match ->
-                                        if (!isEditingMatches) {
-                                            component.matchSelected(match)
-                                        }
-                                    },
-                                    isEditingMatches = isEditingMatches,
-                                    editableMatches = editableMatches,
-                                    onEditMatch = { match ->
-                                        component.showMatchEditDialog(match)
-                                    })
-                            } else {
-                                ParticipantsView(
-                                    showFab = { showFab = it },
-                                    onNavigateToChat = component::onNavigateToChat
+                        val availableTabs = remember(hasBracketView, hasScheduleView) {
+                            buildList {
+                                add(DetailTab.PARTICIPANTS)
+                                if (hasBracketView) add(DetailTab.BRACKET)
+                                if (hasScheduleView) add(DetailTab.SCHEDULE)
+                            }
+                        }
+                        var selectedTab by rememberSaveable { mutableStateOf(DetailTab.PARTICIPANTS) }
+                        LaunchedEffect(availableTabs) {
+                            if (selectedTab !in availableTabs) {
+                                selectedTab = availableTabs.first()
+                            }
+                        }
+                        val selectedTabIndex =
+                            availableTabs.indexOf(selectedTab).takeIf { it >= 0 } ?: 0
+                        PrimaryTabRow(
+                            selectedTabIndex = selectedTabIndex,
+                            modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
+                        ) {
+                            availableTabs.forEachIndexed { index, tab ->
+                                Tab(
+                                    selected = index == selectedTabIndex,
+                                    onClick = { selectedTab = tab },
+                                    text = { Text(tab.label) }
                                 )
+                            }
+                        }
+                        Box(Modifier.fillMaxSize()) {
+                            when (selectedTab) {
+                                DetailTab.BRACKET -> {
+                                    TournamentBracketView(
+                                        showFab = { showFab = it },
+                                        onMatchClick = { match ->
+                                            if (!isEditingMatches) {
+                                                component.matchSelected(match)
+                                            }
+                                        },
+                                        isEditingMatches = isEditingMatches,
+                                        editableMatches = editableMatches,
+                                        onEditMatch = { match ->
+                                            component.showMatchEditDialog(match)
+                                        }
+                                    )
+                                }
+
+                                DetailTab.SCHEDULE -> {
+                                    ScheduleView(
+                                        matches = selectedEvent.matches,
+                                        showFab = { showFab = it },
+                                        onMatchClick = { match ->
+                                            if (!isEditingMatches) {
+                                                component.matchSelected(match)
+                                            }
+                                        }
+                                    )
+                                }
+
+                                DetailTab.PARTICIPANTS -> {
+                                    ParticipantsView(
+                                        showFab = { showFab = it },
+                                        onNavigateToChat = component::onNavigateToChat
+                                    )
+                                }
                             }
                             androidx.compose.animation.AnimatedVisibility(
                                 visible = showFab,
