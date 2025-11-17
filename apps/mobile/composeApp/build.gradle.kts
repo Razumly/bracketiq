@@ -121,7 +121,8 @@ kotlin {
                 api(libs.permissions)
                 api(libs.permissions.location)
                 api(libs.permissions.notifications)
-                implementation(libs.sdk.for1.kmp)
+                api(libs.sdk.for1.kmp)
+                implementation(libs.compose.multiplatform)
                 api(libs.geo)
             }
         }

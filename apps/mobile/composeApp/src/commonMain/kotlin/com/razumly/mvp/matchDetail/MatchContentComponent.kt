@@ -96,7 +96,7 @@ class DefaultMatchContentComponent(
     override val errorState = _errorState.asStateFlow()
 
     override val event =
-        eventRepository.getEventWithRelationsFlow(selectedMatch.match.tournamentId)
+        eventRepository.getEventWithRelationsFlow(selectedMatch.match.eventId)
             .distinctUntilChanged()
             .map { eventResult ->
                 eventResult.map { it.event as Event }.getOrElse {

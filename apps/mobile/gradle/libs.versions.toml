@@ -9,6 +9,7 @@ androidx-lifecycle = "2.9.6"
 assertk = "0.28.1"
 coil3 = "3.3.0"
 compose-multiplatform = "1.9.3"
+calendar = "2.9.0"
 concurrentFuturesKtx = "1.3.0"
 core = "1.7.0"
 coroutines = "1.10.2"
@@ -59,6 +60,7 @@ browser = "1.8.0"
 [libraries]
 androidx-core = { module = "androidx.test:core", version.ref = "core" }
 androidx-performance-annotation = { module = "androidx.performance:performance-annotation", version.ref = "performanceAnnotation" }
+compose-multiplatform = { module = "com.kizitonwose.calendar:compose-multiplatform", version.ref = "calendar" }
 firebase-messaging = { module = "com.google.firebase:firebase-messaging", version.ref = "firebaseMessaging" }
 imagepickerkmp = { module = "io.github.ismoy:imagepickerkmp", version.ref = "imagepickerkmp" }
 jetbrains-kotlin-metadata-jvm = { module = "org.jetbrains.kotlin:kotlin-metadata-jvm", version.ref = "kotlin" }

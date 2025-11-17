@@ -31,10 +31,10 @@ interface MatchDao {
     @Query("SELECT COUNT(*) FROM MatchMVP")
     suspend fun getTotalMatchCount(): Int
 
-    @Query("SELECT * FROM MatchMVP WHERE tournamentId = :tournamentId")
+    @Query("SELECT * FROM MatchMVP WHERE eventId = :tournamentId")
     suspend fun getMatchesOfTournament(tournamentId: String): List<MatchMVP>
 
-    @Query("DELETE FROM MatchMVP WHERE tournamentId = :tournamentId")
+    @Query("DELETE FROM MatchMVP WHERE eventId = :tournamentId")
     suspend fun deleteMatchesOfTournament(tournamentId: String)
 
     @Query("DELETE FROM MatchMVP WHERE id IN (:ids)")
@@ -49,6 +49,6 @@ interface MatchDao {
     suspend fun getMatchById(id: String): MatchWithRelations?
 
     @Transaction
-    @Query("SELECT * FROM MatchMVP WHERE tournamentId = :tournamentId")
+    @Query("SELECT * FROM MatchMVP WHERE eventId = :tournamentId")
     fun getMatchesFlowOfTournament(tournamentId: String): Flow<List<MatchWithRelations>>
 }

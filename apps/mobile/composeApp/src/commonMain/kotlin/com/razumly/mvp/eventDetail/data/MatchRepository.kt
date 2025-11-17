@@ -30,7 +30,6 @@ import kotlinx.serialization.Contextual
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
@@ -141,7 +140,7 @@ class MatchRepository(
                     body = Json.encodeToString(
                         UpdateMatchArguments(
                             time = Clock.System.now(),
-                            tournament = match.tournamentId,
+                            tournament = match.eventId,
                             matchId = match.id
                         )
                     ),

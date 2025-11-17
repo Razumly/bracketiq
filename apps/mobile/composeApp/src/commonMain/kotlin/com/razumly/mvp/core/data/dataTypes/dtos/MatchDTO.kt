@@ -4,10 +4,10 @@ package com.razumly.mvp.core.data.dataTypes.dtos
 
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.util.normalizeDivisionLabel
-import kotlin.time.Instant
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 import kotlin.time.ExperimentalTime
+import kotlin.time.Instant
 
 @Serializable
 data class MatchDTO(
@@ -16,7 +16,7 @@ data class MatchDTO(
     val matchId: Int,
     val team1: String?,
     val team2: String?,
-    val tournamentId: String,
+    val eventId: String,
     val refId: String?,
     val field: String?,
     val start: String,
@@ -36,7 +36,7 @@ data class MatchDTO(
 fun MatchDTO.toMatch(id: String): MatchMVP {
     return MatchMVP(
         id = id,
-        tournamentId = tournamentId,
+        eventId = eventId,
         team1 = team1,
         team2 = team2,
         matchNumber = matchId,

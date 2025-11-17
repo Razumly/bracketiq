@@ -16,7 +16,7 @@ data class MatchMVP (
     val matchNumber: Int,
     val team1: String?,
     val team2: String?,
-    val tournamentId: String,
+    val eventId: String,
     val refId: String?,
     val field: String?,
     @Contextual
@@ -40,7 +40,7 @@ data class MatchMVP (
             matchId = matchNumber,
             team1 = team1,
             team2 = team2,
-            tournamentId = tournamentId,
+            eventId = eventId,
             refId = refId,
             field = field,
             start = start.toString(),

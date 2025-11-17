@@ -47,7 +47,7 @@ import com.razumly.mvp.core.data.util.Converters
         TeamPendingPlayerCrossRef::class,
         ChatUserCrossRef::class,
         RefundRequest::class,
-    ], version = 78
+    ], version = 79
 )
 @TypeConverters(Converters::class)
 @ConstructedBy(MVPDatabaseCtor::class)
