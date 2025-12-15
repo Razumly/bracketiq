@@ -56,10 +56,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.ktx.DynamicScheme
+import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfig
+import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.FeeBreakdown
@@ -79,6 +82,9 @@ import com.razumly.mvp.eventDetail.composables.SendNotificationDialog
 import com.razumly.mvp.eventDetail.composables.TeamSelectionDialog
 import com.razumly.mvp.eventDetail.composables.TournamentBracketView
 import com.razumly.mvp.eventMap.MapComponent
+import kotlin.math.absoluteValue
+import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.round
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.hours
@@ -90,7 +96,8 @@ val LocalTournamentComponent =
 private enum class DetailTab(val label: String) {
     PARTICIPANTS("Participants"),
     BRACKET("Bracket"),
-    SCHEDULE("Schedule")
+    SCHEDULE("Schedule"),
+    LEAGUES("Leagues")
 }
 
 @Composable
@@ -128,6 +135,18 @@ fun EventDetailScreen(
     val hasBracketView = isTournamentEvent ||
         (eventType == EventType.LEAGUE && selectedEvent.event.includePlayoffs)
     val hasScheduleView = selectedEvent.matches.isNotEmpty()
+    val hasStandingsView = eventType == EventType.LEAGUE
+    val leagueStandings = remember(
+        selectedEvent.teams,
+        selectedEvent.matches,
+        selectedEvent.leagueScoringConfig
+    ) {
+        buildLeagueStandings(
+            teams = selectedEvent.teams,
+            matches = selectedEvent.matches,
+            config = selectedEvent.leagueScoringConfig
+        )
+    }
 
     var showTeamSelectionDialog by remember { mutableStateOf(false) }
     var showFab by remember { mutableStateOf(false) }
@@ -470,11 +489,12 @@ fun EventDetailScreen(
                                 onCommitEdit = component::commitMatchChanges
                             )
                         }
-                        val availableTabs = remember(hasBracketView, hasScheduleView) {
+                        val availableTabs = remember(hasBracketView, hasScheduleView, hasStandingsView) {
                             buildList {
                                 add(DetailTab.PARTICIPANTS)
-                                if (hasBracketView) add(DetailTab.BRACKET)
                                 if (hasScheduleView) add(DetailTab.SCHEDULE)
+                                if (hasStandingsView) add(DetailTab.LEAGUES)
+                                if (hasBracketView) add(DetailTab.BRACKET)
                             }
                         }
                         var selectedTab by rememberSaveable { mutableStateOf(DetailTab.PARTICIPANTS) }
@@ -524,6 +544,13 @@ fun EventDetailScreen(
                                                 component.matchSelected(match)
                                             }
                                         }
+                                    )
+                                }
+                                DetailTab.LEAGUES -> {
+                                    LeagueStandingsTab(
+                                        standings = leagueStandings,
+                                        pointPrecision = selectedEvent.leagueScoringConfig?.pointPrecision,
+                                        showFab = { showFab = it }
                                     )
                                 }
 
@@ -681,6 +708,346 @@ fun TeamSelectionDialog(
             }
         })
 }
+
+@Composable
+private fun LeagueStandingsTab(
+    standings: List<TeamStanding>,
+    pointPrecision: Int?,
+    showFab: (Boolean) -> Unit
+) {
+    LaunchedEffect(standings) {
+        showFab(true)
+    }
+
+    if (standings.isEmpty()) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                "Standings will appear once scores are reported.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        return
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surface)
+    ) {
+        LeagueStandingsHeader()
+        LazyColumn {
+            items(standings, key = { it.team.team.id }) { standing ->
+                LeagueStandingRow(
+                    standing = standing,
+                    pointPrecision = pointPrecision
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LeagueStandingsHeader() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = "Team",
+            modifier = Modifier.weight(1.6f),
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Row(
+            modifier = Modifier
+                .weight(0.8f)
+                .padding(start = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = "Score",
+                modifier = Modifier.weight(1.2f),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "W",
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "L",
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "D",
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun LeagueStandingRow(
+    standing: TeamStanding,
+    pointPrecision: Int?,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(modifier = Modifier.weight(1.6f)) {
+            TeamCard(team = standing.team)
+        }
+        Row(
+            modifier = Modifier
+                .weight(0.8f)
+                .padding(start = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            StandingsCell(
+                label = "Score",
+                value = standing.score.formatPoints(pointPrecision),
+                modifier = Modifier.weight(1.2f)
+            )
+            StandingsCell(
+                label = "W",
+                value = standing.wins.toString(),
+                modifier = Modifier.weight(1f)
+            )
+            StandingsCell(
+                label = "L",
+                value = standing.losses.toString(),
+                modifier = Modifier.weight(1f)
+            )
+            StandingsCell(
+                label = "D",
+                value = standing.draws.toString(),
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun StandingsCell(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(
+            text = value,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+private data class TeamStanding(
+    val team: TeamWithPlayers,
+    val wins: Int,
+    val losses: Int,
+    val draws: Int,
+    val goalsFor: Int,
+    val goalsAgainst: Int,
+    val score: Double
+) {
+    val goalDifferential: Int get() = goalsFor - goalsAgainst
+}
+
+private data class StandingAccumulator(
+    var wins: Int = 0,
+    var losses: Int = 0,
+    var draws: Int = 0,
+    var goalsFor: Int = 0,
+    var goalsAgainst: Int = 0,
+    var score: Double = 0.0
+)
+
+private enum class MatchOutcome { WIN, LOSS, DRAW }
+
+private fun buildLeagueStandings(
+    teams: List<TeamWithPlayers>,
+    matches: List<MatchWithRelations>,
+    config: LeagueScoringConfig?
+): List<TeamStanding> {
+    if (teams.isEmpty()) return emptyList()
+
+    val teamMap = teams.associateBy { it.team.id }
+    val accumulators = teams.associate { it.team.id to StandingAccumulator() }.toMutableMap()
+
+    matches.forEach { match ->
+        val teamOneId = match.match.team1 ?: return@forEach
+        val teamTwoId = match.match.team2 ?: return@forEach
+        if (teamOneId == teamTwoId) return@forEach
+
+        val teamOneScore = match.match.team1Points.takeIf { it.isNotEmpty() }?.sum()
+        val teamTwoScore = match.match.team2Points.takeIf { it.isNotEmpty() }?.sum()
+        if (teamOneScore == null || teamTwoScore == null) return@forEach
+
+        if (!teamMap.containsKey(teamOneId) || !teamMap.containsKey(teamTwoId)) return@forEach
+
+        val outcome = when {
+            teamOneScore > teamTwoScore -> MatchOutcome.WIN to MatchOutcome.LOSS
+            teamOneScore < teamTwoScore -> MatchOutcome.LOSS to MatchOutcome.WIN
+            else -> MatchOutcome.DRAW to MatchOutcome.DRAW
+        }
+
+        accumulators[teamOneId]?.applyMatchResult(
+            goalsFor = teamOneScore,
+            goalsAgainst = teamTwoScore,
+            outcome = outcome.first,
+            config = config
+        )
+        accumulators[teamTwoId]?.applyMatchResult(
+            goalsFor = teamTwoScore,
+            goalsAgainst = teamOneScore,
+            outcome = outcome.second,
+            config = config
+        )
+    }
+
+    return teams.map { team ->
+        val stats = accumulators[team.team.id] ?: StandingAccumulator()
+        TeamStanding(
+            team = team,
+            wins = stats.wins,
+            losses = stats.losses,
+            draws = stats.draws,
+            goalsFor = stats.goalsFor,
+            goalsAgainst = stats.goalsAgainst,
+            score = stats.score
+        )
+    }.sortedWith(
+        compareByDescending<TeamStanding> { it.score }
+            .thenByDescending { it.wins }
+            .thenByDescending { it.goalDifferential }
+            .thenBy { it.team.team.seed }
+            .thenBy { it.team.team.name ?: it.team.team.id }
+    )
+}
+
+private fun StandingAccumulator.applyMatchResult(
+    goalsFor: Int,
+    goalsAgainst: Int,
+    outcome: MatchOutcome,
+    config: LeagueScoringConfig?
+) {
+    this.goalsFor += goalsFor
+    this.goalsAgainst += goalsAgainst
+
+    when (outcome) {
+        MatchOutcome.WIN -> wins++
+        MatchOutcome.LOSS -> losses++
+        MatchOutcome.DRAW -> draws++
+    }
+
+    var matchPoints = when (outcome) {
+        MatchOutcome.WIN -> (config?.pointsForWin ?: DEFAULT_POINTS_FOR_WIN).toDouble()
+        MatchOutcome.LOSS -> (config?.pointsForLoss ?: DEFAULT_POINTS_FOR_LOSS).toDouble()
+        MatchOutcome.DRAW -> (config?.pointsForDraw ?: DEFAULT_POINTS_FOR_DRAW).toDouble()
+    }
+
+    config?.pointsPerGoalScored?.let { matchPoints += it * goalsFor }
+    config?.pointsPerGoalConceded?.let { matchPoints += it * goalsAgainst }
+    config?.pointsForParticipation?.let { matchPoints += it }
+
+    val goalDiff = goalsFor - goalsAgainst
+    if (goalDiff > 0) {
+        config?.pointsPerGoalDifference?.let { perDiff ->
+            val cappedDiff =
+                config.maxGoalDifferencePoints?.let { min(goalDiff, it) } ?: goalDiff
+            matchPoints += cappedDiff * perDiff
+        }
+    } else if (goalDiff < 0) {
+        config?.pointsPenaltyPerGoalDifference?.let { penalty ->
+            val cappedPenalty =
+                config.maxGoalDifferencePoints?.let { min(goalDiff.absoluteValue, it) }
+                    ?: goalDiff.absoluteValue
+            matchPoints -= cappedPenalty * penalty
+        }
+    }
+
+    config?.maxPointsPerMatch?.toDouble()?.let { maxPoints ->
+        matchPoints = min(matchPoints, maxPoints)
+    }
+    config?.minPointsPerMatch?.toDouble()?.let { minPoints ->
+        matchPoints = max(matchPoints, minPoints)
+    }
+
+    score += matchPoints
+}
+
+private fun Double.formatPoints(precisionOverride: Int?): String {
+    val decimals = when {
+        precisionOverride != null -> precisionOverride
+        (this % 1.0).absoluteValue < 0.0001 -> 0
+        else -> 2
+    }
+    if (decimals <= 0) return this.toLong().toString()
+
+    var factor = 1.0
+    repeat(decimals) { factor *= 10 }
+    val roundedValue = (round(this * factor) / factor).let { if (it == -0.0) 0.0 else it }
+    val rawText = roundedValue.toString()
+    val decimalIndex = rawText.indexOf('.')
+    return if (decimalIndex == -1) {
+        buildString {
+            append(rawText)
+            append('.')
+            repeat(decimals) { append('0') }
+        }
+    } else {
+        val digits = rawText.length - decimalIndex - 1
+        when {
+            digits == decimals -> rawText
+            digits > decimals -> rawText.substring(0, decimalIndex + 1 + decimals)
+            else -> buildString {
+                append(rawText)
+                repeat(decimals - digits) { append('0') }
+            }
+        }
+    }
+}
+
+private const val DEFAULT_POINTS_FOR_WIN = 3
+private const val DEFAULT_POINTS_FOR_DRAW = 1
+private const val DEFAULT_POINTS_FOR_LOSS = 0
 
 @Composable
 fun RefundReasonDialog(
