@@ -1,10 +1,7 @@
 package com.razumly.mvp.core.data.dataTypes
 
 import androidx.room.Embedded
-import androidx.room.Junction
 import androidx.room.Relation
-import com.razumly.mvp.core.data.dataTypes.crossRef.FieldMatchCrossRef
-import com.razumly.mvp.core.data.dataTypes.crossRef.MatchTeamCrossRef
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -13,37 +10,28 @@ data class MatchWithRelations(
     val match: MatchMVP,
 
     @Relation(
-        parentColumn = "field",
-        entityColumn = "id",
-        associateBy = Junction(
-            value = FieldMatchCrossRef::class,
-            parentColumn = "matchId",
-            entityColumn = "fieldId"
-        )
+        parentColumn = "fieldId",
+        entityColumn = "id"
     )
     val field: Field?,
 
     @Relation(
-        parentColumn = "team1",
-        entityColumn = "id",
-        associateBy = Junction(
-            value = MatchTeamCrossRef::class,
-            parentColumn = "matchId",
-            entityColumn = "teamId"
-        )
+        parentColumn = "team1Id",
+        entityColumn = "id"
     )
     val team1: Team?,
 
     @Relation(
-        parentColumn = "team2",
-        entityColumn = "id",
-        associateBy = Junction(
-            value = MatchTeamCrossRef::class,
-            parentColumn = "matchId",
-            entityColumn = "teamId"
-        )
+        parentColumn = "team2Id",
+        entityColumn = "id"
     )
     val team2: Team?,
+
+    @Relation(
+        parentColumn = "teamRefereeId",
+        entityColumn = "id"
+    )
+    val teamReferee: Team?,
 
     @Relation(
         parentColumn = "winnerNextMatchId",
@@ -60,14 +48,14 @@ data class MatchWithRelations(
     val loserNextMatch: MatchMVP?,
 
     @Relation(
-        parentColumn = "previousLeftMatchId",
+        parentColumn = "previousLeftId",
         entityColumn = "id",
         entity = MatchMVP::class,
     )
     val previousLeftMatch: MatchMVP?,
 
     @Relation(
-        parentColumn = "previousRightMatchId",
+        parentColumn = "previousRightId",
         entityColumn = "id",
         entity = MatchMVP::class,
     )

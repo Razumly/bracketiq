@@ -135,17 +135,19 @@ class MatchRepository(
             val updatedMatch = match.copy(end = time)
 
             return updateMatch(updatedMatch).onSuccess {
-                functions.createExecution(
-                    functionId = DbConstants.EVENT_MANAGER_FUNCTION,
-                    body = Json.encodeToString(
-                        UpdateMatchArguments(
-                            time = Clock.System.now(),
-                            tournament = match.eventId,
-                            matchId = match.id
-                        )
-                    ),
-                    async = false,
-                )
+                match.eventId?.let { eventId ->
+                    functions.createExecution(
+                        functionId = DbConstants.EVENT_MANAGER_FUNCTION,
+                        body = Json.encodeToString(
+                            UpdateMatchArguments(
+                                time = Clock.System.now(),
+                                tournament = eventId,
+                                matchId = match.id
+                            )
+                        ),
+                        async = false,
+                    )
+                }
             }
         }
 
@@ -181,17 +183,21 @@ class MatchRepository(
                     return@launch
                 }
                 dbMatch?.let { match ->
-                    val updatedMatch = match.copy(
-                        match = match.match.copy(team1Points = matchUpdates.team1Points,
-                            team2Points = matchUpdates.team2Points,
-                            field = matchUpdates.field,
-                            refId = matchUpdates.refId,
-                            team1 = matchUpdates.team1,
-                            team2 = matchUpdates.team2,
-                            refCheckedIn = matchUpdates.refereeCheckedIn,
-                            start = Instant.parse(matchUpdates.start),
-                            end = matchUpdates.end?.let { Instant.parse(it) })
-                    )
+                val updatedMatch = match.copy(
+                    match = match.match.copy(
+                        team1Points = matchUpdates.team1Points,
+                        team2Points = matchUpdates.team2Points,
+                        fieldId = matchUpdates.fieldId,
+                        refereeId = matchUpdates.refereeId,
+                        team1Id = matchUpdates.team1Id,
+                        team2Id = matchUpdates.team2Id,
+                        refereeCheckedIn = matchUpdates.refereeCheckedIn,
+                        setResults = matchUpdates.setResults,
+                        side = matchUpdates.side,
+                        teamRefereeId = matchUpdates.teamRefereeId,
+                        start = Instant.parse(matchUpdates.start),
+                        end = matchUpdates.end?.let { Instant.parse(it) })
+                )
                     databaseService.getMatchDao.upsertMatch(updatedMatch.match)
                 }
             }
@@ -211,6 +217,6 @@ data class UpdateMatchArguments(
     @EncodeDefault val task: String = "updateMatch",
     @Contextual
     val time: Instant,
-    val tournament: String,
+    val tournament: String?,
     val matchId: String,
 )

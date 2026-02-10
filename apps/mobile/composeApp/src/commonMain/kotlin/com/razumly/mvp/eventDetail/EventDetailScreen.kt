@@ -912,8 +912,8 @@ private fun buildLeagueStandings(
     val accumulators = teams.associate { it.team.id to StandingAccumulator() }.toMutableMap()
 
     matches.forEach { match ->
-        val teamOneId = match.match.team1 ?: return@forEach
-        val teamTwoId = match.match.team2 ?: return@forEach
+        val teamOneId = match.match.team1Id ?: return@forEach
+        val teamTwoId = match.match.team2Id ?: return@forEach
         if (teamOneId == teamTwoId) return@forEach
 
         val teamOneScore = match.match.team1Points.takeIf { it.isNotEmpty() }?.sum()

@@ -8,7 +8,7 @@ import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.presentation.INavigationHandler
-import io.appwrite.ID
+import com.razumly.mvp.core.util.newId
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -49,7 +49,7 @@ class DefaultChatListComponent(
 
     private val _newChat = MutableStateFlow(
         ChatGroupWithRelations(
-            ChatGroup(ID.unique(), "", listOf(currentUser.id), currentUser.id),
+            ChatGroup(newId(), "", listOf(currentUser.id), currentUser.id),
             users = listOf(currentUser),
             messages = listOf(),
         )
@@ -101,7 +101,7 @@ class DefaultChatListComponent(
             }
             _newChat.value =
                 ChatGroupWithRelations(
-                    ChatGroup(ID.unique(), "", listOf(currentUser.id), currentUser.id),
+                    ChatGroup(newId(), "", listOf(currentUser.id), currentUser.id),
                     users = listOf(currentUser),
                     messages = listOf(),
                 )

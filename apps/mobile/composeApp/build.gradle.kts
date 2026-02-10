@@ -13,7 +13,6 @@ plugins {
     alias(libs.plugins.room)
     alias(libs.plugins.compose.vectorize)
     alias(libs.plugins.secrets)
-    id("org.kodein.mock.mockmp") version "2.0.0"
     id("kotlin-parcelize")
     id("com.google.gms.google-services") version "4.4.3"
     id("co.touchlab.skie") version "0.10.5"
@@ -92,6 +91,8 @@ kotlin {
                 implementation(libs.compose.vectorize.core)
                 implementation(libs.permissions.compose)
                 implementation(libs.ktor.client.core)
+                implementation(libs.ktor.client.content.negotiation)
+                implementation(libs.ktor.serialization.kotlinx.json)
                 implementation(libs.coil.compose.core)
                 implementation(libs.coil.compose)
                 implementation(libs.coil.mp)
@@ -161,6 +162,12 @@ kotlin {
                 implementation(libs.stripe.android)
                 implementation(libs.financial.connections)
                 implementation(libs.androidx.browser)
+                implementation(libs.ktor.client.okhttp)
+            }
+        }
+        iosMain {
+            dependencies {
+                implementation(libs.ktor.client.darwin)
             }
         }
         commonTest {
@@ -171,6 +178,7 @@ kotlin {
                 implementation(libs.koin.test)
                 implementation(libs.androidx.sqlite.bundled)
                 implementation(libs.kotlinx.coroutines.test)
+                implementation(libs.ktor.client.mock)
                 implementation(kotlin("test-annotations-common"))
             }
         }
@@ -202,12 +210,6 @@ kotlin {
         dependencies {
             implementation("org.jetbrains.skiko:skiko-awt-runtime-$target:$version")
         }
-    }
-}
-
-mockmp {
-    onTest {
-        withHelper()
     }
 }
 

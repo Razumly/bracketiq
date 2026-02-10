@@ -10,7 +10,7 @@ import com.razumly.mvp.core.data.dataTypes.enums.FieldType
 import com.razumly.mvp.core.data.util.DivisionConverters
 import com.razumly.mvp.core.data.util.normalizeDivisionLabels
 import com.razumly.mvp.core.presentation.Primary
-import io.appwrite.ID
+import com.razumly.mvp.core.util.newId
 import kotlinx.serialization.Contextual
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
@@ -27,10 +27,8 @@ data class Event(
     val loserSetCount: Int = 0,
     val winnerBracketPointsToVictory: List<Int> = emptyList(),
     val loserBracketPointsToVictory: List<Int> = emptyList(),
-    val winnerScoreLimitsPerSet: List<Int> = emptyList(),
-    val loserScoreLimitsPerSet: List<Int> = emptyList(),
     val prize: String = "",
-    @PrimaryKey override val id: String = ID.unique(),
+    @PrimaryKey override val id: String = newId(),
     val name: String = "",
     val description: String = "",
     @field:TypeConverters(DivisionConverters::class)
@@ -39,7 +37,7 @@ data class Event(
     val fieldType: FieldType = FieldType.GRASS,
     @Contextual val start: Instant = Instant.DISTANT_PAST,
     @Contextual val end: Instant = Instant.DISTANT_PAST,
-    val price: Double = 0.0,
+    val priceCents: Int = 0,
     val rating: Double? = null,
     val imageId: String = "",
     val coordinates: List<Double> = listOf(0.0, 0.0),
@@ -53,7 +51,6 @@ data class Event(
     val cancellationRefundHours: Int = 0,
     val registrationCutoffHours: Int = 0,
     val seedColor: Int = Primary.toArgb(),
-    val isTaxed: Boolean = true,
     val sportId: String? = null,
     val timeSlotIds: List<String> = emptyList(),
     val fieldIds: List<String> = emptyList(),
@@ -75,8 +72,15 @@ data class Event(
     val restTimeMinutes: Int? = null,
     val state: String = "UNPUBLISHED",
     val pointsToVictory: List<Int> = emptyList(),
+    val refereeIds: List<String> = emptyList(),
+    val allowPaymentPlans: Boolean? = null,
+    val installmentCount: Int? = null,
+    val installmentDueDates: List<String> = emptyList(),
+    val installmentAmounts: List<Int> = emptyList(),
+    val allowTeamSplitDefault: Boolean? = null,
     @Transient val lastUpdated: Instant = Clock.System.now(),
 ) : MVPDocument {
+    val price: Double get() = priceCents.toDouble() / 100.0
 
     val latitude: Double get() = coordinates.getOrNull(1) ?: 0.0
     val longitude: Double get() = coordinates.getOrNull(0) ?: 0.0
@@ -98,14 +102,12 @@ fun Event.toEventDTO(): EventDTO =
         loserSetCount = loserSetCount,
         winnerBracketPointsToVictory = winnerBracketPointsToVictory,
         loserBracketPointsToVictory = loserBracketPointsToVictory,
-        winnerScoreLimitsPerSet = winnerScoreLimitsPerSet,
-        loserScoreLimitsPerSet = loserScoreLimitsPerSet,
         prize = prize,
         location = location,
         fieldType = fieldType.name,
         start = start.toString(),
         end = end.toString(),
-        price = price,
+        priceCents = priceCents,
         rating = rating,
         imageId = imageId,
         hostId = hostId,
@@ -121,7 +123,6 @@ fun Event.toEventDTO(): EventDTO =
         cancellationRefundHours = cancellationRefundHours,
         registrationCutoffHours = registrationCutoffHours,
         seedColor = seedColor,
-        isTaxed = isTaxed,
         sportId = sportId,
         timeSlotIds = timeSlotIds,
         fieldIds = fieldIds,
@@ -140,5 +141,11 @@ fun Event.toEventDTO(): EventDTO =
         doTeamsRef = doTeamsRef,
         restTimeMinutes = restTimeMinutes,
         state = state,
-        pointsToVictory = pointsToVictory
+        pointsToVictory = pointsToVictory,
+        refereeIds = refereeIds,
+        allowPaymentPlans = allowPaymentPlans,
+        installmentCount = installmentCount,
+        installmentDueDates = installmentDueDates,
+        installmentAmounts = installmentAmounts,
+        allowTeamSplitDefault = allowTeamSplitDefault
     )

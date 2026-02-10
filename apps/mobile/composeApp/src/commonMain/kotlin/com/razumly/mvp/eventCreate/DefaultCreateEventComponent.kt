@@ -170,21 +170,29 @@ class DefaultCreateEventComponent(
     override fun createEvent() {
         scope.launch {
             loadingHandler.showLoading("Creating event...")
-            eventRepository.createEvent(newEventState.value).onSuccess {
-                if (_fieldCount.value > 0) {
-                    fieldRepository.createFields(
-                        tournamentId = newEventState.value.id,
-                        count = _fieldCount.value
-                    ).onFailure { error ->
+            val eventWithFields = if (_fieldCount.value > 0) {
+                fieldRepository.createFields(
+                    count = _fieldCount.value, organizationId = newEventState.value.organizationId
+                ).fold(
+                    onSuccess = { createdFields ->
+                        newEventState.value.copy(fieldIds = createdFields.map { it.id })
+                    },
+                    onFailure = { error ->
                         _errorState.value = ErrorMessage(error.message ?: "")
+                        newEventState.value
                     }
-                }
+                )
+            } else {
+                newEventState.value
+            }
+
+            eventRepository.createEvent(eventWithFields).onSuccess {
                 loadingHandler.hideLoading()
                 onEventCreated()
             }.onFailure {
                 _errorState.value = ErrorMessage(it.message ?: "")
+                loadingHandler.hideLoading()
             }
-            loadingHandler.hideLoading()
         }
     }
 
@@ -250,7 +258,7 @@ class DefaultCreateEventComponent(
         if (amount == null || amount < 0) {
             onError(true)
         } else {
-            updateEventField { copy(price = amount) }
+            updateEventField { copy(priceCents = (amount * 100).toInt()) }
             onError(false)
         }
     }

@@ -99,8 +99,8 @@ fun MatchCard(
                         MatchInfoSection(match, fields)
                         VerticalDivider(color = localColors.current.onPrimary)
                         TeamsSection(
-                            team1 = teams[match.match.team1],
-                            team2 = teams[match.match.team2],
+                    team1 = teams[match.match.team1Id],
+                            team2 = teams[match.match.team2Id],
                             match = match,
                             matches = matches,
                         )
@@ -120,7 +120,7 @@ fun MatchCard(
                             style = MaterialTheme.typography.labelLarge,
                             color = localColors.current.onPrimaryContainer
                         )
-                        teams[match.match.refId]?.players?.forEach { player ->
+                        teams[match.match.teamRefereeId]?.players?.forEach { player ->
                             Text(
                                 "${player.firstName}.${player.lastName.first()}",
                                 modifier = Modifier.padding(start = 4.dp),
@@ -155,10 +155,10 @@ private fun MatchInfoSection(match: MatchWithRelations, fields: List<FieldWithMa
         modifier = Modifier.padding(8.dp).width(IntrinsicSize.Max),
         verticalArrangement = Arrangement.SpaceEvenly
     ) {
-        Text("M: ${match.match.matchNumber}", color = localColors.current.onPrimary)
+        Text("M: ${match.match.matchId}", color = localColors.current.onPrimary)
         HorizontalDivider(color = localColors.current.onPrimary)
         Text(
-            "F: ${fields.find { it.field.id == match.match.field }?.field?.fieldNumber}",
+            "F: ${fields.find { it.field.id == match.match.fieldId }?.field?.fieldNumber}",
             color = localColors.current.onPrimary
         )
     }
@@ -213,7 +213,7 @@ private fun TeamRow(
             }
             Text(" ${points.joinToString(separator = ", ")}")
         } ?: run {
-            previousMatch?.match?.matchNumber?.let { matchNumber ->
+            previousMatch?.match?.matchId?.let { matchNumber ->
                 val prefix =
                     if (isLosersBracket && !previousMatch.match.losersBracket) "Loser" else "Winner"
                 Text(

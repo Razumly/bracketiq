@@ -9,9 +9,10 @@ data class RefundRequestDTO(
     @Transient val id: String = "",
     val eventId: String,
     val userId: String,
-    val hostId: String,
+    val hostId: String?,
     val reason: String,
-    val isTournament: Boolean,
+    val organizationId: String? = null,
+    val status: String? = null,
 ) {
     fun toRefundRequest(id: String): RefundRequest {
         return RefundRequest(
@@ -20,7 +21,8 @@ data class RefundRequestDTO(
             userId = userId,
             hostId = hostId,
             reason = reason,
-            isTournament = isTournament
+            organizationId = organizationId,
+            status = status
         )
     }
 }

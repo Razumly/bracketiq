@@ -57,11 +57,13 @@ fun ProfileDetailsScreen(
     var email by remember { mutableStateOf("") }
     var firstName by remember { mutableStateOf("") }
     var lastName by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
+    var currentPassword by remember { mutableStateOf("") }
+    var newPassword by remember { mutableStateOf("") }
     var userName by remember { mutableStateOf("") }
-    var confirmPassword by remember { mutableStateOf("") }
-    var passwordVisible by remember { mutableStateOf(false) }
-    var confirmPasswordVisible by remember { mutableStateOf(false) }
+    var confirmNewPassword by remember { mutableStateOf("") }
+    var currentPasswordVisible by remember { mutableStateOf(false) }
+    var newPasswordVisible by remember { mutableStateOf(false) }
+    var confirmNewPasswordVisible by remember { mutableStateOf(false) }
 
     val isEmailValid by remember {
         derivedStateOf {
@@ -72,13 +74,13 @@ fun ProfileDetailsScreen(
     val isLastNameValid by remember { derivedStateOf { lastName.isNotBlank() } }
     val isPasswordValid by remember {
         derivedStateOf {
-            password.isBlank() || (password.length >= 6 && password == confirmPassword)
+            if (newPassword.isBlank() && confirmNewPassword.isBlank()) return@derivedStateOf true
+            // Server requires currentPassword + newPassword >= 8
+            currentPassword.isNotBlank() && newPassword.length >= 8 && newPassword == confirmNewPassword
         }
     }
     val passwordsMatch by remember {
-        derivedStateOf {
-            password.isBlank() || password == confirmPassword
-        }
+        derivedStateOf { newPassword.isBlank() || newPassword == confirmNewPassword }
     }
 
     val isFormValid by remember {
@@ -146,7 +148,9 @@ fun ProfileDetailsScreen(
                 label = "Email",
                 keyboardType = "email",
                 isError = !isEmailValid && email.isNotBlank(),
-                supportingText = if (!isEmailValid && email.isNotBlank()) "Please enter a valid email" else ""
+                supportingText = "Email changes are not supported yet",
+                enabled = false,
+                readOnly = true,
             )
 
             Row(
@@ -180,53 +184,76 @@ fun ProfileDetailsScreen(
             )
 
             OutlinedTextField(
-                value = password,
-                onValueChange = { password = it },
-                label = { Text("New Password") },
+                value = currentPassword,
+                onValueChange = { currentPassword = it },
+                label = { Text("Current Password") },
                 modifier = Modifier.fillMaxWidth(),
-                visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                visualTransformation = if (currentPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                 trailingIcon = {
-                    IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                    IconButton(onClick = { currentPasswordVisible = !currentPasswordVisible }) {
                         Icon(
-                            if (passwordVisible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
-                            contentDescription = if (passwordVisible) "Hide password" else "Show password"
+                            if (currentPasswordVisible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                            contentDescription = if (currentPasswordVisible) "Hide password" else "Show password"
                         )
                     }
                 },
                 supportingText = {
-                    if (password.isNotBlank() && password.length < 6) {
+                    if (newPassword.isNotBlank() && currentPassword.isBlank()) {
+                        Text("Required to change password", color = MaterialTheme.colorScheme.error)
+                    }
+                },
+                isError = newPassword.isNotBlank() && currentPassword.isBlank()
+            )
+
+            OutlinedTextField(
+                value = newPassword,
+                onValueChange = { newPassword = it },
+                label = { Text("New Password") },
+                modifier = Modifier.fillMaxWidth(),
+                visualTransformation = if (newPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                trailingIcon = {
+                    IconButton(onClick = { newPasswordVisible = !newPasswordVisible }) {
+                        Icon(
+                            if (newPasswordVisible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                            contentDescription = if (newPasswordVisible) "Hide password" else "Show password"
+                        )
+                    }
+                },
+                supportingText = {
+                    if (newPassword.isNotBlank() && newPassword.length < 8) {
                         Text(
-                            "Password must be at least 6 characters",
+                            "Password must be at least 8 characters",
                             color = MaterialTheme.colorScheme.error
                         )
                     }
                 },
-                isError = password.isNotBlank() && password.length < 6
+                isError = newPassword.isNotBlank() && newPassword.length < 8
             )
 
-            if (password.isNotBlank()) {
+            if (newPassword.isNotBlank()) {
                 OutlinedTextField(
-                    value = confirmPassword,
-                    onValueChange = { confirmPassword = it },
-                    label = { Text("Confirm Password") },
+                    value = confirmNewPassword,
+                    onValueChange = { confirmNewPassword = it },
+                    label = { Text("Confirm New Password") },
                     modifier = Modifier.fillMaxWidth(),
-                    visualTransformation = if (confirmPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    visualTransformation = if (confirmNewPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                     trailingIcon = {
-                        IconButton(onClick = { confirmPasswordVisible = !confirmPasswordVisible }) {
+                        IconButton(onClick = { confirmNewPasswordVisible = !confirmNewPasswordVisible }) {
                             Icon(
-                                if (confirmPasswordVisible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
-                                contentDescription = if (confirmPasswordVisible) "Hide password" else "Show password"
+                                if (confirmNewPasswordVisible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                contentDescription = if (confirmNewPasswordVisible) "Hide password" else "Show password"
                             )
                         }
                     },
                     supportingText = {
-                        if (confirmPassword.isNotBlank() && !passwordsMatch) {
+                        if (confirmNewPassword.isNotBlank() && !passwordsMatch) {
                             Text("Passwords do not match", color = MaterialTheme.colorScheme.error)
                         }
                     },
-                    isError = confirmPassword.isNotBlank() && !passwordsMatch
+                    isError = confirmNewPassword.isNotBlank() && !passwordsMatch
                 )
             }
 
@@ -237,7 +264,8 @@ fun ProfileDetailsScreen(
                         firstName = firstName,
                         lastName = lastName,
                         email = email,
-                        password = password,
+                        currentPassword = currentPassword,
+                        newPassword = newPassword,
                         userName = userName,
                     )
                 },

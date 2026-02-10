@@ -5,7 +5,7 @@ import androidx.room.PrimaryKey
 import com.razumly.mvp.core.data.dataTypes.dtos.TeamDTO
 import com.razumly.mvp.core.data.util.DEFAULT_DIVISION
 import com.razumly.mvp.core.data.util.normalizeDivisionLabel
-import io.appwrite.ID
+import com.razumly.mvp.core.util.newId
 import kotlinx.serialization.Serializable
 
 @Entity
@@ -20,11 +20,12 @@ data class Team(
     val playerIds: List<String> = emptyList(),
     val pending: List<String> = emptyList(),
     val teamSize: Int,
-    val profileImage: String? = null,
+    val profileImageId: String? = null,
+    val sport: String? = null,
     @PrimaryKey override val id: String
 ) : MVPDocument, DisplayableEntity {
     override val displayName: String get() = name ?: "Team ${playerIds.size}"
-    override val imageUrl: String? get() = profileImage
+    override val imageUrl: String? get() = profileImageId
 
     companion object {
         operator fun invoke(captainId: String): Team {
@@ -33,13 +34,15 @@ data class Team(
                 division = DEFAULT_DIVISION,
                 wins = 0,
                 losses = 0,
-                name = null,
-                playerIds = listOf(captainId),
-                teamSize = 2,
-                id = ID.unique(),
-                captainId = ""
-            )
-        }
+            name = null,
+            playerIds = listOf(captainId),
+            teamSize = 2,
+            id = newId(),
+            captainId = "",
+            profileImageId = null,
+            sport = null
+        )
+    }
     }
 
     fun toTeamDTO(): TeamDTO {
@@ -53,7 +56,9 @@ data class Team(
             captainId = captainId,
             teamSize = teamSize,
             id = id,
-            pending = pending
+            pending = pending,
+            profileImageId = profileImageId,
+            sport = sport
         )
     }
 }

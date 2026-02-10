@@ -9,7 +9,6 @@ import androidx.room.Upsert
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
-import com.razumly.mvp.core.data.dataTypes.crossRef.MatchTeamCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPendingPlayerCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
 import io.github.aakira.napier.Napier
@@ -61,9 +60,6 @@ interface TeamDao {
 
     @Upsert
     suspend fun upsertTeamPendingPlayerCrossRefs(crossRefs: List<TeamPendingPlayerCrossRef>)
-
-    @Upsert
-    suspend fun upsertMatchTeamCrossRefs(crossRefs: List<MatchTeamCrossRef>)
 
     @Delete
     suspend fun deleteTeamPlayerCrossRef(crossRef: TeamPlayerCrossRef)

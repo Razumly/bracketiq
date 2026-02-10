@@ -9,9 +9,9 @@ import kotlin.time.Instant
 @OptIn(ExperimentalTime::class)
 data class TimeSlot(
     val id: String,
-    val dayOfWeek: Int,
-    val startTimeMinutes: Int,
-    val endTimeMinutes: Int,
+    val dayOfWeek: Int?,
+    val startTimeMinutes: Int?,
+    val endTimeMinutes: Int?,
     @Contextual val startDate: Instant,
     val repeating: Boolean,
     @Contextual val endDate: Instant?,
@@ -22,9 +22,9 @@ data class TimeSlot(
 @Serializable
 @OptIn(ExperimentalTime::class)
 data class TimeSlotDTO(
-    val dayOfWeek: Int,
-    val startTimeMinutes: Int,
-    val endTimeMinutes: Int,
+    val dayOfWeek: Int? = null,
+    val startTimeMinutes: Int? = null,
+    val endTimeMinutes: Int? = null,
     val startDate: String,
     val repeating: Boolean = false,
     val endDate: String? = null,

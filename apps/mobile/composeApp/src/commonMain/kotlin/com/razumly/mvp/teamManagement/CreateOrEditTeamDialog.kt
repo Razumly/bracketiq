@@ -29,6 +29,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,6 +44,7 @@ import com.razumly.mvp.core.presentation.composables.PlatformTextField
 import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.SearchPlayerDialog
 import com.razumly.mvp.core.presentation.util.teamSizeFormat
+import kotlinx.coroutines.launch
 
 @Composable
 fun CreateOrEditTeamDialog(
@@ -58,7 +60,8 @@ fun CreateOrEditTeamDialog(
     selectedEvent: Event?,
     isCaptain: Boolean,
     currentUser: UserData,
-    isNewTeam: Boolean
+    isNewTeam: Boolean,
+    onEnsureUserByEmail: (suspend (email: String) -> Result<UserData>)? = null,
 ) {
     var teamName by remember { mutableStateOf(team.team.name ?: "") }
     var teamSize by remember { mutableStateOf(team.team.teamSize) }
@@ -67,6 +70,8 @@ fun CreateOrEditTeamDialog(
     var playersInTeam by remember { mutableStateOf(team.players) }
     var showLeaveTeamDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
+    var inviteError by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
     val showEditDetails = isCaptain || isNewTeam
 
     Card(
@@ -77,6 +82,14 @@ fun CreateOrEditTeamDialog(
         Column(modifier = Modifier.padding(16.dp)) {
             Text("Team Setup", style = MaterialTheme.typography.titleLarge)
             Spacer(modifier = Modifier.height(8.dp))
+
+            inviteError?.let {
+                Text(
+                    text = it,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+            }
 
             PlatformTextField(
                 value = teamName,
@@ -235,6 +248,22 @@ fun CreateOrEditTeamDialog(
                     invitedPlayers = invitedPlayers + it
                 }
                 showSearchDialog = false
+            },
+            onInviteByEmail = onEnsureUserByEmail?.let { ensure ->
+                { email ->
+                    inviteError = null
+                    scope.launch {
+                        ensure(email)
+                            .onSuccess { user ->
+                                val alreadySelected = playersInTeam.any { it.id == user.id } ||
+                                    invitedPlayers.any { it.id == user.id }
+                                if (!alreadySelected) {
+                                    invitedPlayers = invitedPlayers + user
+                                }
+                            }
+                            .onFailure { inviteError = it.message ?: "Invite failed" }
+                    }
+                }
             },
             onDismiss = { showSearchDialog = false },
             eventName = selectedEvent?.name ?: ""

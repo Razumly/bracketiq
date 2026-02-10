@@ -24,6 +24,14 @@ object AppSecrets {
             fileType = "plist",
             valueKey = "mvpProjectId"
         ) ?: ""
+
+    // Next.js API base URL, e.g. "http://localhost:3000" for the iOS simulator.
+    val mvpApiBaseUrl: String
+        get() = getStringResource(
+            filename = "Secrets",
+            fileType = "plist",
+            valueKey = "mvpApiBaseUrl"
+        ) ?: ""
 }
 
 internal fun getStringResource(

@@ -21,6 +21,7 @@ actual class KoinInitializer(
                 mapComponentModule,
                 datastoreModule,
                 currentUserDataSourceModule,
+                networkModule,
             )
         }
     }

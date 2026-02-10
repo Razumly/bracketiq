@@ -110,7 +110,7 @@ private fun MatchEditDialogContent(
     ) {
         // Header
         Text(
-            text = "Edit Match #${match.match.matchNumber}",
+            text = "Edit Match #${match.match.matchId}",
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(bottom = 16.dp)
@@ -138,13 +138,13 @@ private fun MatchEditDialogContent(
                     // Team 1 Dropdown
                     TeamSelectionField(
                         label = "Team 1",
-                        selectedTeam = teams.find { it.team.id == editedMatch.match.team1 },
+                        selectedTeam = teams.find { it.team.id == editedMatch.match.team1Id },
                         expanded = showTeam1Dropdown,
                         onExpandedChange = { showTeam1Dropdown = it },
                         teams = teams,
                         onTeamSelected = { team ->
                             editedMatch = editedMatch.copy(
-                                match = editedMatch.match.copy(team1 = team?.team?.id)
+                                match = editedMatch.match.copy(team1Id = team?.team?.id)
                             )
                             showTeam1Dropdown = false
                         },
@@ -154,13 +154,13 @@ private fun MatchEditDialogContent(
                     // Team 2 Dropdown
                     TeamSelectionField(
                         label = "Team 2",
-                        selectedTeam = teams.find { it.team.id == editedMatch.match.team2 },
+                        selectedTeam = teams.find { it.team.id == editedMatch.match.team2Id },
                         expanded = showTeam2Dropdown,
                         onExpandedChange = { showTeam2Dropdown = it },
                         teams = teams,
                         onTeamSelected = { team ->
                             editedMatch = editedMatch.copy(
-                                match = editedMatch.match.copy(team2 = team?.team?.id)
+                                match = editedMatch.match.copy(team2Id = team?.team?.id)
                             )
                             showTeam2Dropdown = false
                         },
@@ -173,13 +173,13 @@ private fun MatchEditDialogContent(
             item {
                 TeamSelectionField(
                     label = "Referee",
-                    selectedTeam = teams.find { it.team.id == editedMatch.match.refId },
+                    selectedTeam = teams.find { it.team.id == editedMatch.match.teamRefereeId },
                     expanded = showRefDropdown,
                     onExpandedChange = { showRefDropdown = it },
                     teams = teams,
                     onTeamSelected = { team ->
                         editedMatch = editedMatch.copy(
-                            match = editedMatch.match.copy(refId = team?.team?.id)
+                            match = editedMatch.match.copy(teamRefereeId = team?.team?.id)
                         )
                         showRefDropdown = false
                     })
@@ -196,9 +196,9 @@ private fun MatchEditDialogContent(
 
             item {
                 IndividualScoreInputSection(
-                    team1Name = teams.find { it.team.id == editedMatch.match.team1 }?.team?.name
+                    team1Name = teams.find { it.team.id == editedMatch.match.team1Id }?.team?.name
                         ?: "Team 1",
-                    team2Name = teams.find { it.team.id == editedMatch.match.team2 }?.team?.name
+                    team2Name = teams.find { it.team.id == editedMatch.match.team2Id }?.team?.name
                         ?: "Team 2",
                     team1Scores = editedMatch.match.team1Points,
                     team2Scores = editedMatch.match.team2Points,
@@ -255,13 +255,13 @@ private fun MatchEditDialogContent(
             item {
                 FieldSelectionField(
                     label = "Field",
-                    selectedField = fields.find { it.field.id == editedMatch.match.field },
+                    selectedField = fields.find { it.field.id == editedMatch.match.fieldId },
                     expanded = showFieldDropdown,
                     onExpandedChange = { showFieldDropdown = it },
                     fields = fields,
                     onFieldSelected = { field ->
                         editedMatch = editedMatch.copy(
-                            match = editedMatch.match.copy(field = field?.field?.id)
+                            match = editedMatch.match.copy(fieldId = field?.field?.id)
                         )
                         showFieldDropdown = false
                     })

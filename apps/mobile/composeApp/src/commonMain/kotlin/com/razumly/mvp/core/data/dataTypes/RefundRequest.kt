@@ -10,7 +10,8 @@ data class RefundRequest(
     @PrimaryKey override val id: String,
     val eventId: String,
     val userId: String,
-    val hostId: String,
+    val hostId: String?,
     val reason: String,
-    val isTournament: Boolean,
+    val organizationId: String? = null,
+    val status: String? = null,
 ) : MVPDocument

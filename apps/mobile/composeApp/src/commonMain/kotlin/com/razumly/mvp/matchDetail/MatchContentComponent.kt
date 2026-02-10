@@ -118,15 +118,15 @@ class DefaultMatchContentComponent(
                         selectedMatch
                     }
 
-                    val team1Flow = baseMatch.match.team1?.let {
+                    val team1Flow = baseMatch.match.team1Id?.let {
                         teamRepository.getTeamWithPlayersFlow(it)
                     } ?: flowOf(Result.success(null))
 
-                    val team2Flow = baseMatch.match.team2?.let {
+                    val team2Flow = baseMatch.match.team2Id?.let {
                         teamRepository.getTeamWithPlayersFlow(it)
                     } ?: flowOf(Result.success(null))
 
-                    val refFlow = baseMatch.match.refId?.let {
+                    val refFlow = baseMatch.match.teamRefereeId?.let {
                         teamRepository.getTeamWithPlayersFlow(it)
                     } ?: flowOf(Result.success(null))
 
@@ -149,7 +149,7 @@ class DefaultMatchContentComponent(
     private val _matchFinished = MutableStateFlow(false)
     override val matchFinished = _matchFinished.asStateFlow()
 
-    private val _refCheckedIn = MutableStateFlow(selectedMatch.match.refCheckedIn ?: false)
+    private val _refCheckedIn = MutableStateFlow(selectedMatch.match.refereeCheckedIn ?: false)
     override val refCheckedIn: StateFlow<Boolean> = _refCheckedIn.asStateFlow()
 
     private val _currentSet = MutableStateFlow(0)
@@ -222,7 +222,8 @@ class DefaultMatchContentComponent(
         scope.launch {
             val updatedMatch = matchWithTeams.value.copy(
                 match = matchWithTeams.value.match.copy(
-                    refCheckedIn = true, refId = _currentUserTeam.value?.team?.id
+                    refereeCheckedIn = true,
+                    teamRefereeId = _currentUserTeam.value?.team?.id
                 ),
             )
             matchRepository.updateMatch(updatedMatch.match).onSuccess {

@@ -3,7 +3,6 @@ package com.razumly.mvp.core.data.dataTypes
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import com.razumly.mvp.core.data.dataTypes.dtos.MatchDTO
-import com.razumly.mvp.core.data.util.normalizeDivisionLabel
 import kotlinx.serialization.Contextual
 import kotlinx.serialization.Serializable
 import kotlin.time.ExperimentalTime
@@ -13,48 +12,52 @@ import kotlin.time.Instant
 @Serializable
 @OptIn(ExperimentalTime::class)
 data class MatchMVP (
-    val matchNumber: Int,
-    val team1: String?,
-    val team2: String?,
+    val matchId: Int,
+    val team1Id: String? = null,
+    val team2Id: String? = null,
     val eventId: String,
-    val refId: String?,
-    val field: String?,
+    val refereeId: String? = null,
+    val fieldId: String? = null,
     @Contextual
-    var start: Instant,
-    var end: Instant?,
-    val division: String,
-    var team1Points: List<Int>,
-    var team2Points: List<Int>,
-    val losersBracket: Boolean,
-    val winnerNextMatchId: String?,
-    val loserNextMatchId: String?,
-    val previousLeftMatchId: String?,
-    val previousRightMatchId: String?,
-    val setResults: List<Int>,
-    val refCheckedIn: Boolean?,
+    val start: Instant,
+    val end: Instant? = null,
+    val division: String? = null,
+    var team1Points: List<Int> = emptyList(),
+    var team2Points: List<Int> = emptyList(),
+    val setResults: List<Int> = emptyList(),
+    val side: String? = null,
+    val losersBracket: Boolean = false,
+    val winnerNextMatchId: String? = null,
+    val loserNextMatchId: String? = null,
+    val previousLeftId: String? = null,
+    val previousRightId: String? = null,
+    val refereeCheckedIn: Boolean? = null,
+    val teamRefereeId: String? = null,
     @PrimaryKey override val id: String,
 ) : MVPDocument {
     fun toMatchDTO(): MatchDTO {
         return MatchDTO(
             id = id,
-            matchId = matchNumber,
-            team1 = team1,
-            team2 = team2,
+            matchId = matchId,
+            team1Id = team1Id,
+            team2Id = team2Id,
             eventId = eventId,
-            refId = refId,
-            field = field,
+            refereeId = refereeId,
+            fieldId = fieldId,
             start = start.toString(),
             end = end?.toString(),
-            division = division.normalizeDivisionLabel(),
+            division = division,
             team1Points = team1Points,
             team2Points = team2Points,
+            setResults = setResults,
+            side = side,
             losersBracket = losersBracket,
             winnerNextMatchId = winnerNextMatchId,
             loserNextMatchId = loserNextMatchId,
-            previousLeftId = previousLeftMatchId,
-            previousRightId = previousRightMatchId,
-            setResults = setResults,
-            refereeCheckedIn = refCheckedIn,
+            previousLeftId = previousLeftId,
+            previousRightId = previousRightId,
+            refereeCheckedIn = refereeCheckedIn,
+            teamRefereeId = teamRefereeId,
         )
     }
 }

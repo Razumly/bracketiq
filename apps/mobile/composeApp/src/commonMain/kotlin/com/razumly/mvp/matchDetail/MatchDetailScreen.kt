@@ -159,7 +159,7 @@ fun MatchDetailScreen(
                 .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
             Text(
-                text = "Match: ${match.match.matchNumber}",
+                text = "Match: ${match.match.matchId}",
                 color = MaterialTheme.colorScheme.onSurface,
                 style = MaterialTheme.typography.titleLarge
             )

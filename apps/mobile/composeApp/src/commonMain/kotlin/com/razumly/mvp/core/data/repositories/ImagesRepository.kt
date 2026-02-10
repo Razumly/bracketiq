@@ -2,7 +2,7 @@ package com.razumly.mvp.core.data.repositories
 
 import com.razumly.mvp.core.presentation.util.getImageUrl
 import com.razumly.mvp.core.util.DbConstants.BUCKET_ID
-import io.appwrite.ID
+import com.razumly.mvp.core.util.newId
 import io.appwrite.models.InputFile
 import io.appwrite.services.Storage
 import kotlinx.coroutines.flow.Flow
@@ -21,7 +21,7 @@ class ImagesRepository(
     override suspend fun uploadImage(
         inputFile: InputFile
     ): Result<String> = runCatching {
-        val fileId = ID.unique()
+        val fileId = newId()
 
         storage.createFile(
             bucketId = BUCKET_ID,

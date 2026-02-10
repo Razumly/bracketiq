@@ -41,12 +41,15 @@ fun SearchPlayerDialog(
     friends: List<UserData>,
     onSearch: (query: String) -> Unit,
     onPlayerSelected: (UserData) -> Unit,
+    onInviteByEmail: ((email: String) -> Unit)? = null,
     onDismiss: () -> Unit,
     suggestions: List<UserData>,
     eventName: String
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var showSearchOverlay by remember { mutableStateOf(false) }
+    val normalizedQuery = searchQuery.trim()
+    val showInviteByEmail = onInviteByEmail != null && normalizedQuery.isProbablyEmail()
 
     Dialog(
         onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -158,6 +161,27 @@ fun SearchPlayerDialog(
                     },
                     suggestions = {
                         LazyColumn {
+                            if (showInviteByEmail) {
+                                item {
+                                    Card(
+                                        Modifier
+                                            .padding(vertical = 4.dp, horizontal = 8.dp)
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                onInviteByEmail?.invoke(normalizedQuery)
+                                                onDismiss()
+                                            }
+                                    ) {
+                                        Text(
+                                            text = "Invite $normalizedQuery",
+                                            modifier = Modifier.padding(12.dp),
+                                            overflow = TextOverflow.Ellipsis,
+                                            maxLines = 1,
+                                            style = MaterialTheme.typography.bodyLarge
+                                        )
+                                    }
+                                }
+                            }
                             items(suggestions) { player ->
                                 Row(modifier = Modifier.fillMaxWidth().clickable {
                                     onPlayerSelected(player)
@@ -171,4 +195,15 @@ fun SearchPlayerDialog(
             }
         }
     }
+}
+
+private fun String.isProbablyEmail(): Boolean {
+    val s = trim()
+    if (s.isBlank()) return false
+    if (s.length > 254) return false
+    if (s.any { it.isWhitespace() }) return false
+    val at = s.indexOf('@')
+    if (at <= 0 || at != s.lastIndexOf('@')) return false
+    val dot = s.lastIndexOf('.')
+    return dot > at + 1 && dot < s.length - 1
 }

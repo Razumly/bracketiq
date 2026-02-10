@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.razumly.mvp.core.presentation.composables.PlatformBackButton
 import com.razumly.mvp.core.presentation.composables.TeamCard
+import com.razumly.mvp.teamManagement.TeamInvite
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -40,8 +41,8 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
     val currentUser = component.currentUser
     val isCaptain = selectedTeam?.team?.captainId == currentUser.id
     var createTeam by remember { mutableStateOf(false) }
-    val teamInvites by component.teamInvites.collectAsState()
     val deleteEnabled by component.enableDeleteTeam.collectAsState()
+    val teamInvites by component.teamInvites.collectAsState()
 
     Scaffold(
         topBar = {
@@ -67,13 +68,22 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
                     }), team = team
                 )
             }
-            items(teamInvites) { team ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)) {
-                    TeamCard(
-                        modifier = Modifier.clickable(onClick = { component.selectTeam(team) }),
-                        team = team
-                    )
-                    Button(onClick = { component.joinTeam(team.team) }) { Text("Accept") }
+            items(teamInvites) { invite ->
+                val team = invite.team
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)
+                ) {
+                    team?.let {
+                        TeamCard(
+                            modifier = Modifier.clickable(onClick = { component.selectTeam(it) }),
+                            team = it
+                        )
+                    } ?: Text("Invited to team", modifier = Modifier.weight(1f))
+                    Button(onClick = { invite.team?.let { component.acceptTeamInvite(invite) } }) {
+                        Text("Accept")
+                    }
+                    Button(onClick = { component.declineTeamInvite(invite) }) { Text("Decline") }
                 }
             }
             item {
@@ -111,7 +121,8 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
                 selectedEvent = selectedEvent,
                 isCaptain = isCaptain,
                 currentUser = currentUser,
-                isNewTeam = selectedTeam!!.team.captainId == ""
+                isNewTeam = selectedTeam!!.team.captainId == "",
+                onEnsureUserByEmail = { email -> component.ensureUserByEmail(email) },
             )
         }
     }

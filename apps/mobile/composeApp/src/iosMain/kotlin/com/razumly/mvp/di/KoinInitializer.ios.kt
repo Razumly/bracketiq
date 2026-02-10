@@ -28,6 +28,7 @@ actual class KoinInitializer : SynchronizedObject() {
                                 componentModule,
                                 datastoreModule,
                                 currentUserDataSourceModule,
+                                networkModule,
                                 appwriteModule,
                                 mapComponentModule
                             )

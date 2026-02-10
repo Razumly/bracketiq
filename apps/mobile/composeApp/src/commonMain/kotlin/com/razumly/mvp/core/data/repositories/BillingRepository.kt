@@ -183,7 +183,7 @@ class BillingRepository(
                     eventId = refundRequest.eventId,
                     userId = refundRequest.userId,
                     reason = "requested_by_host",
-                    isTournament = refundRequest.isTournament
+                    isTournament = false
                 )
             )
         )

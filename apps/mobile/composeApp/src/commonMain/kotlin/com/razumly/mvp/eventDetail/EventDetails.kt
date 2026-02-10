@@ -153,7 +153,7 @@ fun EventDetails(
 
     // Validation states
     var isNameValid by remember { mutableStateOf(editEvent.name.isNotBlank()) }
-    var isPriceValid by remember { mutableStateOf(editEvent.price >= 0) }
+    var isPriceValid by remember { mutableStateOf(editEvent.priceCents >= 0) }
     var isMaxParticipantsValid by remember { mutableStateOf(editEvent.maxParticipants > 1) }
     var isTeamSizeValid by remember { mutableStateOf(editEvent.teamSizeLimit >= 2) }
     var isWinnerSetCountValid by remember { mutableStateOf(true) }
@@ -176,7 +176,7 @@ fun EventDetails(
 
     LaunchedEffect(editEvent, fieldCount) {
         isNameValid = editEvent.name.isNotBlank()
-        isPriceValid = editEvent.price >= 0
+        isPriceValid = editEvent.priceCents >= 0
         isMaxParticipantsValid = editEvent.maxParticipants > 1
         isTeamSizeValid = editEvent.teamSizeLimit >= 2
         isLocationValid =
@@ -433,23 +433,23 @@ fun EventDetails(
                         )
                     }
                     MoneyInputField(
-                        value = (editEvent.price * 100).toInt().toString(),
+                        value = editEvent.priceCents.toString(),
                         label = "Price",
                         enabled = hostHasAccount,
                         onValueChange = { newText ->
                             if (newText.isBlank()) {
-                                onEditEvent { copy(price = 0.0) }
+                                onEditEvent { copy(priceCents = 0) }
                                 return@MoneyInputField
                             }
                             val newCleaned = newText.filter { it.isDigit() }
-                            onEditEvent { copy(price = newCleaned.toDouble() / 100) }
+                            onEditEvent { copy(priceCents = newCleaned.toInt()) }
                         },
                         isError = !isPriceValid,
                         supportingText = if (isPriceValid) stringResource(Res.string.free_entry_hint) else stringResource(
                             Res.string.invalid_price
                         )
                     )
-                    if (editEvent.price > 0.0) {
+                    if (editEvent.priceCents > 0) {
                         CancellationRefundOptions(
                             selectedOption = editEvent.cancellationRefundHours, onOptionSelected = {
                                 onEditEvent {

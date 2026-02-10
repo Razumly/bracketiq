@@ -5,6 +5,7 @@ package com.razumly.mvp.eventDetail
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.backhandler.BackCallback
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
+import com.razumly.mvp.core.data.dataTypes.AuthAccount
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
@@ -37,9 +38,7 @@ import com.razumly.mvp.core.presentation.util.convertPhotoResultToInputFile
 import com.razumly.mvp.core.presentation.util.createEventUrl
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
-import com.razumly.mvp.core.util.empty
 import com.razumly.mvp.eventDetail.data.IMatchRepository
-import io.appwrite.models.User
 import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -197,8 +196,12 @@ class DefaultEventDetailComponent(
     override val currentUser = userRepository.currentUser.map { it.getOrThrow() }
         .stateIn(scope, SharingStarted.Eagerly, UserData())
 
-    private val _currentAccount = userRepository.currentAccount.map { it.getOrThrow() }
-        .stateIn(scope, SharingStarted.Eagerly, User.empty<Map<String, Any>>())
+    private val _currentAccount = userRepository.currentAccount.map { result ->
+        result.getOrElse {
+            userRepository.getCurrentAccount()
+            AuthAccount.empty()
+        }
+    }.stateIn(scope, SharingStarted.Eagerly, AuthAccount.empty())
 
     private val _errorState = MutableStateFlow<ErrorMessage?>(null)
     override val errorState = _errorState.asStateFlow()
@@ -272,7 +275,7 @@ class DefaultEventDetailComponent(
     )
 
     override val divisionFields =
-        fieldRepository.getFieldsInTournamentWithMatchesFlow(event.id).map { fields ->
+        fieldRepository.getFieldsWithMatchesFlow(event.fieldIds).map { fields ->
             val activeDivision = _selectedDivision.value
             fields.filter {
                 if (!selectedEvent.value.singleDivision && !activeDivision.isNullOrEmpty()) {
@@ -454,7 +457,7 @@ class DefaultEventDetailComponent(
         val divisionFilter = _selectedDivision.value
         _divisionMatches.value = if (!selectedEvent.value.singleDivision && !divisionFilter.isNullOrEmpty()) {
             eventWithRelations.value.matches.filter {
-                it.match.division.normalizeDivisionLabel() == divisionFilter && !(
+                it.match.division?.normalizeDivisionLabel() == divisionFilter && !(
                     it.previousRightMatch == null &&
                     it.previousLeftMatch == null &&
                     it.winnerNextMatch == null &&
@@ -903,9 +906,9 @@ class DefaultEventDetailComponent(
     override fun selectTeamForMatch(matchId: String, position: TeamPosition, teamId: String?) {
         updateEditableMatch(matchId) { match ->
             when (position) {
-                TeamPosition.TEAM1 -> match.copy(team1 = teamId)
-                TeamPosition.TEAM2 -> match.copy(team2 = teamId)
-                TeamPosition.REF -> match.copy(refId = teamId)
+                TeamPosition.TEAM1 -> match.copy(team1Id = teamId)
+                TeamPosition.TEAM2 -> match.copy(team2Id = teamId)
+                TeamPosition.REF -> match.copy(teamRefereeId = teamId)
             }
         }
         _showTeamSelectionDialog.value = null
@@ -922,21 +925,21 @@ class DefaultEventDetailComponent(
                 val match2 = matches[j].match
 
                 if (doMatchesOverlap(match1, match2)) {
-                    if (match1.field != null && match1.field == match2.field) {
+                    if (match1.fieldId != null && match1.fieldId == match2.fieldId) {
                         return ValidationResult(
                             isValid = false,
-                            errorMessage = "Matches #${match1.matchNumber} and #${match2.matchNumber} overlap on the same field"
+                            errorMessage = "Matches #${match1.matchId} and #${match2.matchId} overlap on the same field"
                         )
                     }
 
-                    val match1Teams = setOfNotNull(match1.team1, match1.team2, match1.refId)
-                    val match2Teams = setOfNotNull(match2.team1, match2.team2, match2.refId)
+                    val match1Teams = setOfNotNull(match1.team1Id, match1.team2Id, match1.teamRefereeId)
+                    val match2Teams = setOfNotNull(match2.team1Id, match2.team2Id, match2.teamRefereeId)
                     val sharedTeams = match1Teams.intersect(match2Teams)
 
                     if (sharedTeams.isNotEmpty()) {
                         return ValidationResult(
                             isValid = false,
-                            errorMessage = "Matches #${match1.matchNumber} and #${match2.matchNumber} have overlapping participants"
+                            errorMessage = "Matches #${match1.matchId} and #${match2.matchId} have overlapping participants"
                         )
                     }
                 }

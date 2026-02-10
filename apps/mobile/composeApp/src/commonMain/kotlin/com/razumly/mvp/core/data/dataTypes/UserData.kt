@@ -17,15 +17,13 @@ data class UserData(
     val friendRequestSentIds: List<String>,
     val followingIds: List<String>,
     val userName: String,
-    val teamInvites: List<String>,
-    val eventInvites: List<String>,
     val hasStripeAccount: Boolean?,
     val uploadedImages: List<String>,
-    val profileImage: String? = null,
+    val profileImageId: String? = null,
     @PrimaryKey override val id: String,
 ) : MVPDocument, DisplayableEntity {
     override val displayName: String get() = fullName
-    override val imageUrl: String? get() = profileImage
+    override val imageUrl: String? get() = profileImageId
 
     companion object {
         operator fun invoke(): UserData {
@@ -35,14 +33,12 @@ data class UserData(
                 teamIds = emptyList(),
                 friendIds = emptyList(),
                 userName = "",
-                teamInvites = emptyList(),
-                eventInvites = emptyList(),
                 hasStripeAccount = false,
                 uploadedImages = emptyList(),
                 friendRequestIds = emptyList(),
                 friendRequestSentIds = emptyList(),
                 followingIds = emptyList(),
-                profileImage = null,
+                profileImageId = null,
                 id = ""
             )
         }
@@ -57,16 +53,14 @@ data class UserData(
             lastName = lastName,
             teamIds = teamIds,
             friendIds = friendIds,
-            friendRequestIds = friendRequestIds,
-            friendRequestSentIds = friendRequestSentIds,
-            followingIds = followingIds,
-            userName = userName,
-            teamInvites = teamInvites,
-            eventInvites = eventInvites,
-            hasStripeAccount = hasStripeAccount,
-            uploadedImages = uploadedImages,
-            profileImage = profileImage,
-            id = id
-        )
-    }
+        friendRequestIds = friendRequestIds,
+        friendRequestSentIds = friendRequestSentIds,
+        followingIds = followingIds,
+        userName = userName,
+        hasStripeAccount = hasStripeAccount,
+        uploadedImages = uploadedImages,
+        profileImageId = profileImageId,
+        id = id
+    )
+}
 }

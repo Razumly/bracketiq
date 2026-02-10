@@ -2,6 +2,7 @@ package com.razumly.mvp.teamManagement
 
 import com.arkivanov.decompose.ComponentContext
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
@@ -9,7 +10,6 @@ import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.presentation.INavigationHandler
-import io.appwrite.Query
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -24,13 +24,14 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.update
 
 interface TeamManagementComponent {
     val selectedEvent: Event?
     val currentUser: UserData
     val friends: StateFlow<List<UserData>>
     val currentTeams: StateFlow<List<TeamWithPlayers>>
-    val teamInvites: StateFlow<List<TeamWithPlayers>>
+    val teamInvites: StateFlow<List<TeamInvite>>
     val selectedTeam: StateFlow<TeamWithPlayers?>
     val suggestedPlayers: StateFlow<List<UserData>>
     val freeAgentsFiltered: StateFlow<List<UserData>>
@@ -44,7 +45,15 @@ interface TeamManagementComponent {
     fun deselectTeam()
     fun deleteTeam(team: TeamWithPlayers)
     fun searchPlayers(query: String)
+    fun acceptTeamInvite(invite: TeamInvite)
+    fun declineTeamInvite(invite: TeamInvite)
+    suspend fun ensureUserByEmail(email: String): Result<UserData>
 }
+
+data class TeamInvite(
+    val invite: Invite,
+    val team: TeamWithPlayers?
+)
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class DefaultTeamManagementComponent(
@@ -74,13 +83,8 @@ class DefaultTeamManagementComponent(
             }
         }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
-    override val teamInvites =
-        teamRepository.getTeamInvitesWithPlayersFlow(currentUser.id).map { team ->
-            team.getOrElse {
-                _errorState.value = it.message
-                emptyList()
-            }
-        }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+    private val _teamInvites = MutableStateFlow<List<TeamInvite>>(emptyList())
+    override val teamInvites = _teamInvites.asStateFlow()
 
     private val _selectedTeam = MutableStateFlow<TeamWithPlayers?>(null)
     override val selectedTeam = _selectedTeam.asStateFlow()
@@ -106,7 +110,7 @@ class DefaultTeamManagementComponent(
         .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     private val hostEventsFlow =
-        eventRepository.getEventsFlow(Query.equal("hostId", currentUser.id))
+        eventRepository.getEventsByHostFlow(currentUser.id)
 
     override val enableDeleteTeam = combine(selectedTeam, hostEventsFlow) { team, eventsResult ->
         val hostEvents = eventsResult.getOrElse {
@@ -133,6 +137,7 @@ class DefaultTeamManagementComponent(
                 }
             }
         }
+        scope.launch { refreshInvites() }
     }
 
     override fun selectTeam(team: TeamWithPlayers?) {
@@ -186,6 +191,51 @@ class DefaultTeamManagementComponent(
                 emptyList()
             }.filterNot { user ->
                 currentUser.id == user.id
+            }
+        }
+    }
+
+    override fun acceptTeamInvite(invite: TeamInvite) {
+        scope.launch {
+            val teamId = invite.invite.teamId
+            if (teamId.isNullOrBlank()) {
+                _errorState.value = "Invite is missing teamId"
+                return@launch
+            }
+
+            teamRepository.acceptTeamInvite(invite.invite.id, teamId).onFailure {
+                _errorState.value = it.message
+                return@launch
+            }
+            refreshInvites()
+        }
+    }
+
+    override fun declineTeamInvite(invite: TeamInvite) {
+        scope.launch {
+            teamRepository.deleteInvite(invite.invite.id)
+            refreshInvites()
+        }
+    }
+
+    override suspend fun ensureUserByEmail(email: String): Result<UserData> {
+        return userRepository.ensureUserByEmail(email)
+    }
+
+    private suspend fun refreshInvites() {
+        val invites = teamRepository.listTeamInvites(currentUser.id).getOrElse {
+            _errorState.value = it.message
+            emptyList()
+        }
+        val teamIds = invites.mapNotNull { it.teamId }
+        val teams = teamRepository.getTeamsWithPlayers(teamIds).getOrElse {
+            _errorState.value = it.message
+            emptyList()
+        }
+        val teamMap = teams.associateBy { it.team.id }
+        _teamInvites.update {
+            invites.map { invite ->
+                TeamInvite(invite = invite, team = invite.teamId?.let(teamMap::get))
             }
         }
     }

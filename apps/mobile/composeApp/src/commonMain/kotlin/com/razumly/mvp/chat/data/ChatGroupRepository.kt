@@ -12,7 +12,7 @@ import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleRes
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.util.DbConstants
-import io.appwrite.ID
+import com.razumly.mvp.core.util.newId
 import io.appwrite.Query
 import io.appwrite.models.RealtimeSubscription
 import io.appwrite.services.TablesDB
@@ -255,7 +255,7 @@ class ChatGroupRepository(
 
             val newChatGroup = ChatGroupWithRelations(
                 chatGroup = ChatGroup(
-                    id = ID.unique(),
+                    id = newId(),
                     name = "${currentUser.firstName} & ${otherUser.firstName}",
                     userIds = listOf(currentUserId, otherUserId),
                     hostId = currentUserId,

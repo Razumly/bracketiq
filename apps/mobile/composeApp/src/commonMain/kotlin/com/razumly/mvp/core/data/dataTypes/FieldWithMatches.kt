@@ -10,13 +10,9 @@ data class FieldWithMatches(
     val field: Field,
 
     @Relation(
-        parentColumn = "matches",
-        entityColumn = "id",
-        associateBy = Junction(
-            value = FieldMatchCrossRef::class,
-            parentColumn = "fieldId",
-            entityColumn = "matchId"
-        )
+        parentColumn = "id",
+        entityColumn = "fieldId",
+        entity = MatchMVP::class
     )
-    val matches: List<MatchMVP>  // Changed to MatchMVP instead of MatchWithRelations
+    val matches: List<MatchMVP>
 )

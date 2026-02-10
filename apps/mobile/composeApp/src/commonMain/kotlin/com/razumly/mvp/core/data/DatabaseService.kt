@@ -16,8 +16,6 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.crossRef.ChatUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventTeamCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
-import com.razumly.mvp.core.data.dataTypes.crossRef.FieldMatchCrossRef
-import com.razumly.mvp.core.data.dataTypes.crossRef.MatchTeamCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPendingPlayerCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
 import com.razumly.mvp.core.data.dataTypes.daos.ChatGroupDao
@@ -42,12 +40,10 @@ import com.razumly.mvp.core.data.util.Converters
         TeamPlayerCrossRef::class,
         EventUserCrossRef::class,
         EventTeamCrossRef::class,
-        MatchTeamCrossRef::class,
-        FieldMatchCrossRef::class,
         TeamPendingPlayerCrossRef::class,
         ChatUserCrossRef::class,
         RefundRequest::class,
-    ], version = 79
+    ], version = 80
 )
 @TypeConverters(Converters::class)
 @ConstructedBy(MVPDatabaseCtor::class)

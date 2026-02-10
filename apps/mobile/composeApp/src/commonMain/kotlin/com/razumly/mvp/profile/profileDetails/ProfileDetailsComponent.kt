@@ -2,14 +2,13 @@ package com.razumly.mvp.profile.profileDetails
 
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
+import com.razumly.mvp.core.data.dataTypes.AuthAccount
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentProcessor
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
-import com.razumly.mvp.core.util.empty
-import io.appwrite.models.User
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,7 +23,7 @@ interface ProfileDetailsComponent : IPaymentProcessor {
     val errorState: StateFlow<ErrorMessage?>
     val message: StateFlow<String?>
     val currentUser: StateFlow<UserData>
-    val currentAccount: StateFlow<User<Map<String, Any>>>
+    val currentAccount: StateFlow<AuthAccount>
 
     fun onBackClicked()
     fun setLoadingHandler(loadingHandler: LoadingHandler)
@@ -33,7 +32,8 @@ interface ProfileDetailsComponent : IPaymentProcessor {
         firstName: String,
         lastName: String,
         email: String,
-        password: String,
+        currentPassword: String,
+        newPassword: String,
         userName: String
     )
 }
@@ -61,12 +61,12 @@ class DefaultProfileDetailsComponent(
     override val currentAccount = userRepository.currentAccount
         .map { result -> result.getOrElse {
             userRepository.getCurrentAccount()
-            User.empty<Map<String, Any>>()
+            AuthAccount.empty()
         } }
         .stateIn(
             scope = scope,
             started = SharingStarted.Eagerly,
-            initialValue = User.empty<Map<String, Any>>()
+            initialValue = AuthAccount.empty()
         )
 
     private lateinit var loadingHandler: LoadingHandler
@@ -83,12 +83,13 @@ class DefaultProfileDetailsComponent(
         firstName: String,
         lastName: String,
         email: String,
-        password: String,
+        currentPassword: String,
+        newPassword: String,
         userName: String
     ) {
         scope.launch {
             loadingHandler.showLoading("Updating Profile...")
-            userRepository.updateProfile(firstName, lastName, email, password, userName)
+            userRepository.updateProfile(firstName, lastName, email, currentPassword, newPassword, userName)
                 .onFailure { error ->
                     _errorState.value = ErrorMessage("Failed to update profile: ${error.message}")
                 }

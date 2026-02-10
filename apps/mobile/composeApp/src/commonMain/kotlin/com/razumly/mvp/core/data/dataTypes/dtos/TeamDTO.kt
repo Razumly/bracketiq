@@ -16,6 +16,8 @@ data class TeamDTO (
     val captainId: String,
     val pending: List<String> = emptyList(),
     val teamSize: Int,
+    val profileImageId: String? = null,
+    val sport: String? = null,
     @Transient
     val id: String = ""
 )
@@ -31,6 +33,8 @@ fun TeamDTO.toTeam(id: String): Team {
         captainId = captainId,
         pending = pending,
         teamSize = teamSize,
-        id = id
+        id = id,
+        profileImageId = profileImageId,
+        sport = sport
     )
 }

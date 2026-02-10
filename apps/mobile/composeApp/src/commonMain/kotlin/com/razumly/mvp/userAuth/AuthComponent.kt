@@ -113,9 +113,10 @@ class DefaultAuthComponent(
         }
 
         scope.launch {
+            _loginState.value = LoginState.Loading
             userRepository.createNewUser(email, password, firstName, lastName, userName)
                 .onSuccess {
-                    onLogin(email, password)
+                    _loginState.value = LoginState.Success
                 }.onFailure {
                     _loginState.value = LoginState.Error("Failed to signup")
                 }

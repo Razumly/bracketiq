@@ -2,25 +2,27 @@ package com.razumly.mvp.core.data.repositories
 
 import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.DatabaseService
+import com.razumly.mvp.core.data.dataTypes.AuthAccount
 import com.razumly.mvp.core.data.dataTypes.UserData
-import com.razumly.mvp.core.data.dataTypes.dtos.UserDataDTO
-import com.razumly.mvp.core.data.dataTypes.dtos.toUserData
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResponse
-import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
-import com.razumly.mvp.core.util.DbConstants.DATABASE_NAME
-import com.razumly.mvp.core.util.DbConstants.USER_CHANNEL
-import com.razumly.mvp.core.util.DbConstants.USER_DATA_TABLE
-import io.appwrite.ID
-import io.appwrite.Query
-import io.appwrite.models.RealtimeSubscription
-import io.appwrite.models.User
-import io.appwrite.services.Account
-import io.appwrite.services.TablesDB
-import io.appwrite.services.Realtime
+import com.razumly.mvp.core.network.AuthTokenStore
+import com.razumly.mvp.core.network.MvpApiClient
+import com.razumly.mvp.core.network.dto.AuthResponseDto
+import com.razumly.mvp.core.network.dto.EnsureUserByEmailRequestDto
+import com.razumly.mvp.core.network.dto.LoginRequestDto
+import com.razumly.mvp.core.network.dto.OkResponseDto
+import com.razumly.mvp.core.network.dto.PasswordRequestDto
+import com.razumly.mvp.core.network.dto.RegisterRequestDto
+import com.razumly.mvp.core.network.dto.UpdateUserRequestDto
+import com.razumly.mvp.core.network.dto.UserResponseDto
+import com.razumly.mvp.core.network.dto.UserUpdateDto
+import com.razumly.mvp.core.network.dto.UsersResponseDto
+import com.razumly.mvp.core.network.dto.toAuthAccountOrNull
+import com.razumly.mvp.core.network.dto.toUserDataOrNull
 import io.github.aakira.napier.Napier
+import io.ktor.http.encodeURLQueryComponent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.IO
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -34,23 +36,49 @@ import kotlinx.coroutines.launch
 
 interface IUserRepository : IMVPRepository {
     val currentUser: StateFlow<Result<UserData>>
-    val currentAccount: StateFlow<Result<User<Map<String, Any>>>>
+    val currentAccount: StateFlow<Result<AuthAccount>>
+
     suspend fun login(email: String, password: String): Result<UserData>
     suspend fun logout(): Result<Unit>
+
     suspend fun getUsers(userIds: List<String>): Result<List<UserData>>
     fun getUsersFlow(userIds: List<String>): Flow<Result<List<UserData>>>
+
     suspend fun searchPlayers(search: String): Result<List<UserData>>
+
+    /**
+     * Server-side only behavior: ensures a public user profile exists for the given email.
+     * Used for invite flows where we only have an email address.
+     *
+     * The returned [UserData] must not contain sensitive information (email/password/etc).
+     */
+    suspend fun ensureUserByEmail(email: String): Result<UserData>
+
     suspend fun createNewUser(
-        email: String, password: String, firstName: String, lastName: String, userName: String
+        email: String,
+        password: String,
+        firstName: String,
+        lastName: String,
+        userName: String,
     ): Result<UserData>
 
     suspend fun updateUser(user: UserData): Result<UserData>
+
     suspend fun updateEmail(email: String, password: String): Result<Unit>
-    suspend fun updatePassword(password: String): Result<Unit>
+
+    suspend fun updatePassword(currentPassword: String, newPassword: String): Result<Unit>
+
     suspend fun updateProfile(
-        firstName: String, lastName: String, email: String, password: String, userName: String
+        firstName: String,
+        lastName: String,
+        email: String,
+        currentPassword: String,
+        newPassword: String,
+        userName: String,
     ): Result<Unit>
+
     suspend fun getCurrentAccount(): Result<Unit>
+
     suspend fun sendFriendRequest(user: UserData): Result<Unit>
     suspend fun acceptFriendRequest(user: UserData): Result<Unit>
     suspend fun declineFriendRequest(userId: String): Result<Unit>
@@ -61,292 +89,299 @@ interface IUserRepository : IMVPRepository {
 
 class UserRepository(
     internal val databaseService: DatabaseService,
-    internal val account: Account,
-    internal val tablesDb: TablesDB,
+    private val api: MvpApiClient,
+    private val tokenStore: AuthTokenStore,
     private val currentUserDataSource: CurrentUserDataSource,
-    private val pushNotificationsRepository: IPushNotificationsRepository,
-    realtime: Realtime
 ) : IUserRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val _pushToken =
-        currentUserDataSource.getPushToken().stateIn(scope, SharingStarted.Eagerly, "")
-    private val _pushTarget =
-        currentUserDataSource.getPushTarget().stateIn(scope, SharingStarted.Eagerly, "")
 
-    private var _currentUser = MutableStateFlow(Result.failure<UserData>(Exception("No User")))
+    private val _currentUser = MutableStateFlow(Result.failure<UserData>(Exception("No User")))
     override val currentUser: StateFlow<Result<UserData>> = _currentUser.asStateFlow()
 
-    private val _currentAccount =
-        MutableStateFlow(Result.failure<User<Map<String, Any>>>(Exception("No User")))
-    override var currentAccount: StateFlow<Result<User<Map<String, Any>>>> =
-        _currentAccount.asStateFlow()
-
-    private lateinit var _userSubscription: RealtimeSubscription
+    private val _currentAccount = MutableStateFlow(Result.failure<AuthAccount>(Exception("No Account")))
+    override val currentAccount: StateFlow<Result<AuthAccount>> = _currentAccount.asStateFlow()
 
     init {
-        scope.launch { loadCurrentUser() }
-        scope.launch {
-            val channels = listOf(USER_CHANNEL)
-            _userSubscription = realtime.subscribe(
-                channels, payloadType = UserDataDTO::class
-            ) { response ->
-                val userUpdates = response.payload
-                scope.launch {
-                    databaseService.getUserDataDao.upsertUserData(userUpdates.toUserData(userUpdates.id))
-                    _currentUser.value =
-                        Result.success(userUpdates.toUserData(currentUser.value.getOrThrow().id))
-                }
+        scope.launch { runCatching { loadCurrentUser() }.onFailure { Napier.w("loadCurrentUser failed", it) } }
+    }
+
+    override suspend fun login(email: String, password: String): Result<UserData> = runCatching {
+        val res = api.post<LoginRequestDto, AuthResponseDto>(
+            path = "api/auth/login",
+            body = LoginRequestDto(email = email, password = password),
+        )
+
+        val token = res.token?.takeIf(String::isNotBlank)
+            ?: error("Login response missing token")
+        tokenStore.set(token)
+
+        val account = res.user?.toAuthAccountOrNull()
+            ?: error("Login response missing user")
+        _currentAccount.value = Result.success(account)
+
+        val profile = res.profile?.toUserDataOrNull() ?: fetchUserProfile(account.id)
+            ?: error("Login response missing profile")
+
+        databaseService.getUserDataDao.upsertUserData(profile)
+        currentUserDataSource.saveUserId(profile.id)
+        _currentUser.value = Result.success(profile)
+        profile
+    }
+
+    override suspend fun createNewUser(
+        email: String,
+        password: String,
+        firstName: String,
+        lastName: String,
+        userName: String,
+    ): Result<UserData> = runCatching {
+        val res = api.post<RegisterRequestDto, AuthResponseDto>(
+            path = "api/auth/register",
+            body = RegisterRequestDto(
+                email = email,
+                password = password,
+                name = userName,
+                firstName = firstName,
+                lastName = lastName,
+                userName = userName,
+            ),
+        )
+
+        val token = res.token?.takeIf(String::isNotBlank)
+            ?: error("Register response missing token")
+        tokenStore.set(token)
+
+        val account = res.user?.toAuthAccountOrNull()
+            ?: error("Register response missing user")
+        _currentAccount.value = Result.success(account)
+
+        val profile = res.profile?.toUserDataOrNull()
+            ?: error("Register response missing profile")
+
+        databaseService.getUserDataDao.upsertUserData(profile)
+        currentUserDataSource.saveUserId(profile.id)
+        _currentUser.value = Result.success(profile)
+        profile
+    }
+
+    override suspend fun logout(): Result<Unit> = runCatching {
+        runCatching { api.postNoResponse("api/auth/logout") }
+
+        tokenStore.clear()
+        currentUserDataSource.saveUserId("")
+
+        _currentUser.value = Result.failure(Exception("No User"))
+        _currentAccount.value = Result.failure(Exception("No Account"))
+    }
+
+    override suspend fun getCurrentAccount(): Result<Unit> = runCatching {
+        loadCurrentUser()
+    }
+
+    private suspend fun loadCurrentUser() {
+        val token = tokenStore.get().takeIf(String::isNotBlank) ?: return
+
+        // If we have a stored user id, surface cached data quickly while validating token.
+        val savedId = runCatching {
+            currentUserDataSource.getUserId().first().takeIf(String::isNotBlank)
+        }.getOrNull()
+
+        if (!savedId.isNullOrBlank()) {
+            val local = databaseService.getUserDataDao.getUserDataById(savedId)
+            if (local != null) {
+                _currentUser.value = Result.success(local)
             }
         }
+
+        val me = api.get<AuthResponseDto>("api/auth/me")
+        val account = me.user?.toAuthAccountOrNull()
+        if (account == null) {
+            clearLoginState()
+            return
+        }
+
+        _currentAccount.value = Result.success(account)
+
+        val refreshed = me.token?.takeIf(String::isNotBlank)
+        if (!refreshed.isNullOrBlank() && refreshed != token) {
+            tokenStore.set(refreshed)
+        }
+
+        val remoteProfile = me.profile?.toUserDataOrNull() ?: fetchUserProfile(account.id)
+        if (remoteProfile != null) {
+            databaseService.getUserDataDao.upsertUserData(remoteProfile)
+            currentUserDataSource.saveUserId(remoteProfile.id)
+            _currentUser.value = Result.success(remoteProfile)
+        }
     }
 
-    // Add direct account update methods
+    private suspend fun clearLoginState() {
+        runCatching { tokenStore.clear() }
+        runCatching { currentUserDataSource.saveUserId("") }
+        _currentUser.value = Result.failure(Exception("No User"))
+        _currentAccount.value = Result.failure(Exception("No Account"))
+    }
+
+    private suspend fun fetchUserProfile(userId: String): UserData? {
+        return runCatching {
+            val res = api.get<UserResponseDto>("api/users/$userId")
+            res.user?.toUserDataOrNull()
+        }.getOrNull()
+    }
+
+    override suspend fun searchPlayers(search: String): Result<List<UserData>> = runCatching {
+        val query = search.trim()
+        if (query.isBlank()) return@runCatching emptyList()
+        val encoded = query.encodeURLQueryComponent()
+        val res = api.get<UsersResponseDto>("api/users?query=$encoded")
+        res.users.mapNotNull { it.toUserDataOrNull() }
+    }
+
+    override suspend fun ensureUserByEmail(email: String): Result<UserData> = runCatching {
+        val normalized = email.trim().lowercase()
+        if (normalized.isBlank()) error("Email is required")
+
+        val res = api.post<EnsureUserByEmailRequestDto, UserResponseDto>(
+            path = "api/users/ensure",
+            body = EnsureUserByEmailRequestDto(email = normalized),
+        )
+
+        val user = res.user?.toUserDataOrNull() ?: error("Ensure user response missing user")
+        databaseService.getUserDataDao.upsertUserData(user)
+        user
+    }
+
+    override suspend fun getUsers(userIds: List<String>): Result<List<UserData>> {
+        val ids = userIds.distinct().filter(String::isNotBlank)
+        if (ids.isEmpty()) return Result.success(emptyList())
+
+        return multiResponse(
+            getRemoteData = {
+                ids.mapNotNull { fetchUserProfile(it) }
+            },
+            getLocalData = { databaseService.getUserDataDao.getUserDatasById(ids) },
+            saveData = { usersData -> databaseService.getUserDataDao.upsertUsersData(usersData) },
+            deleteData = { databaseService.getUserDataDao.deleteUsersById(it) },
+        )
+    }
+
+    override fun getUsersFlow(userIds: List<String>): Flow<Result<List<UserData>>> {
+        val ids = userIds.distinct().filter(String::isNotBlank)
+        val localUsersFlow = databaseService.getUserDataDao.getUserDatasByIdFlow(ids)
+            .map { Result.success(it) }
+
+        scope.launch {
+            getUsers(ids)
+        }
+
+        return localUsersFlow
+    }
+
+    override suspend fun updateUser(user: UserData): Result<UserData> = runCatching {
+        val currentId = currentUser.value.getOrNull()?.id
+            ?: currentAccount.value.getOrNull()?.id
+            ?: error("No user")
+
+        if (user.id != currentId) {
+            error("Forbidden")
+        }
+
+        val request = UpdateUserRequestDto(
+            data = UserUpdateDto(
+                firstName = user.firstName,
+                lastName = user.lastName,
+                userName = user.userName,
+                teamIds = user.teamIds,
+                friendIds = user.friendIds,
+                friendRequestIds = user.friendRequestIds,
+                friendRequestSentIds = user.friendRequestSentIds,
+                followingIds = user.followingIds,
+                hasStripeAccount = user.hasStripeAccount,
+                uploadedImages = user.uploadedImages,
+                profileImageId = user.profileImageId,
+            )
+        )
+
+        val res = api.patch<UpdateUserRequestDto, UserResponseDto>(
+            path = "api/users/${user.id}",
+            body = request,
+        )
+
+        val updated = res.user?.toUserDataOrNull() ?: user
+        databaseService.getUserDataDao.upsertUserWithRelations(updated)
+
+        // Update current user state.
+        _currentUser.value = Result.success(updated)
+        updated
+    }
+
     override suspend fun updateEmail(email: String, password: String): Result<Unit> {
-        return runCatching {
-            account.updateEmail(email, password)
-        }
+        return Result.failure(NotImplementedError("Email update is not supported by the Next.js API yet."))
     }
 
-    override suspend fun updatePassword(password: String): Result<Unit> {
-        return runCatching {
-            account.updatePassword(password)
-        }
+    override suspend fun updatePassword(currentPassword: String, newPassword: String): Result<Unit> = runCatching {
+        api.post<PasswordRequestDto, OkResponseDto>(
+            path = "api/auth/password",
+            body = PasswordRequestDto(
+                currentPassword = currentPassword,
+                newPassword = newPassword,
+            ),
+        )
+
+        // /api/auth/password does not return a token; refresh via /api/auth/me.
+        loadCurrentUser()
     }
 
     override suspend fun updateProfile(
         firstName: String,
         lastName: String,
         email: String,
-        password: String,
+        currentPassword: String,
+        newPassword: String,
         userName: String,
     ): Result<Unit> = runCatching {
         val currentUserData = currentUser.value.getOrThrow()
 
-        if (email.isNotBlank() && password.isNotBlank()) {
-            updateEmail(email, password).getOrThrow()
+        if (newPassword.isNotBlank()) {
+            if (currentPassword.isBlank()) error("Current password is required")
+            updatePassword(currentPassword, newPassword).getOrThrow()
         }
-
-        if (password.isNotBlank()) {
-            updatePassword(password).getOrThrow()
-        }
-
-        account.updateName(userName)
 
         val updatedUser = currentUserData.copy(
-            firstName = firstName, lastName = lastName, userName = userName
+            firstName = firstName,
+            lastName = lastName,
+            userName = userName,
         )
 
-        updateUser(updatedUser).map { }
-    }
+        updateUser(updatedUser).getOrThrow()
 
-    override suspend fun login(email: String, password: String): Result<UserData> = runCatching {
-        Napier.d("Logging in user: $email, $password")
-        account.createEmailPasswordSession(email, password)
-        _currentAccount.value = Result.success(account.get())
-        val id = currentAccount.value.getOrThrow().id
-        currentUserDataSource.saveUserId(id)
-
-        Napier.d("User logged in: $id")
-        val remoteUserData = tablesDb.getRow<UserDataDTO>(
-            databaseId = DATABASE_NAME,
-            tableId = USER_DATA_TABLE,
-            rowId = id,
-            nestedType = UserDataDTO::class
-        ).data.copy(id = id).toUserData(id)
-
-        Napier.d("User data: $remoteUserData")
-        if (_pushToken.value.isNotBlank()) {
-            pushNotificationsRepository.addDeviceAsTarget()
-        }
-        databaseService.getUserDataDao.upsertUserData(remoteUserData)
-
-        _currentUser.value = Result.success(remoteUserData)
-        return Result.success(remoteUserData)
-    }
-
-    override suspend fun logout(): Result<Unit> = kotlin.runCatching {
-        _currentUser.value = Result.failure(Exception("No User"))
-        _currentAccount.value = Result.failure(Exception("No User"))
-        currentUserDataSource.saveUserId("")
-        account.deleteSession("current")
-        pushNotificationsRepository.removeDeviceAsTarget()
-    }
-
-    @Throws(Throwable::class)
-    internal suspend fun loadCurrentUser() {
-        val savedId = runCatching {
-            currentUserDataSource.getUserId().first().takeIf(String::isNotBlank)
-        }.getOrNull()
-
-        val sessionId = runCatching {
-            _currentAccount.value = Result.success(account.get())
-            currentAccount.value.getOrThrow().id
-        }.getOrNull()
-
-        if (sessionId.isNullOrBlank()) {
-            return
-        }
-
-        if (!savedId.isNullOrBlank()) {
-            val local = databaseService.getUserDataDao.getUserDataById(savedId)
-            if (local == null) {
-                _currentUser.value = Result.failure(Exception("No User"))
-            } else {
-                _currentUser.value = Result.success(local)
-            }
-        }
-
-        val remoteRes = runCatching {
-            tablesDb.getRow<UserDataDTO>(
-                databaseId = DATABASE_NAME,
-                tableId = USER_DATA_TABLE,
-                rowId = sessionId,
-                nestedType = UserDataDTO::class
-            ).data.toUserData(sessionId)
-        }
-
-        remoteRes.onFailure { err ->
-            _currentUser.value = Result.failure(err)
-        }.onSuccess { user ->
-            databaseService.getUserDataDao.upsertUserData(user)
-            currentUserDataSource.saveUserId(user.id)
-
-            if (_pushToken.value.isNotBlank()) {
-                pushNotificationsRepository.addDeviceAsTarget()
-            }
-
-            val fresh = databaseService.getUserDataDao.getUserDataById(user.id)
-            if (fresh == null) {
-                _currentUser.value = Result.failure(Exception("No User"))
-            } else {
-                _currentUser.value = Result.success(fresh)
-            }
+        // TODO(server): add an email update endpoint. For now, ignore email changes.
+        if (email != currentAccount.value.getOrNull()?.email) {
+            Napier.w("Email update requested but not supported by API yet")
         }
     }
 
-    override suspend fun getUsers(userIds: List<String>): Result<List<UserData>> {
-        val query = Query.equal("\$id", userIds)
-        return getPlayers(
-            query, getLocalData = { databaseService.getUserDataDao.getUserDatasById(userIds) })
+    override suspend fun sendFriendRequest(user: UserData): Result<Unit> {
+        return Result.failure(NotImplementedError("Friend requests are not implemented in the Next.js API yet."))
     }
 
-    override fun getUsersFlow(userIds: List<String>): Flow<Result<List<UserData>>> {
-        val localUsersFlow =
-            databaseService.getUserDataDao.getUserDatasByIdFlow(userIds).map { Result.success(it) }
-
-        scope.launch {
-            getUsers(userIds)
-        }
-        return localUsersFlow
+    override suspend fun acceptFriendRequest(user: UserData): Result<Unit> {
+        return Result.failure(NotImplementedError("Friend requests are not implemented in the Next.js API yet."))
     }
 
-    private suspend fun getPlayers(
-        query: String, getLocalData: suspend () -> List<UserData>
-    ): Result<List<UserData>> = multiResponse(
-        getRemoteData = {
-        val docs = tablesDb.listRows<UserDataDTO>(
-            databaseId = DATABASE_NAME,
-            tableId = USER_DATA_TABLE,
-            queries = listOf(query, Query.limit(500)),
-            nestedType = UserDataDTO::class
-        )
-        docs.rows.map { it.data.toUserData(it.id) }
-    },
-        saveData = { usersData ->
-            databaseService.getUserDataDao.upsertUsersData(usersData)
-        },
-        getLocalData = getLocalData,
-        deleteData = { databaseService.getUserDataDao.deleteUsersById(it) })
-
-    override suspend fun searchPlayers(search: String): Result<List<UserData>> {
-        val query = Query.or(
-            listOf(
-                Query.contains("firstName", search),
-                Query.contains("lastName", search),
-                Query.contains("userName", search)
-            )
-        )
-        return getPlayers(query, getLocalData = { emptyList() })
+    override suspend fun declineFriendRequest(userId: String): Result<Unit> {
+        return Result.failure(NotImplementedError("Friend requests are not implemented in the Next.js API yet."))
     }
 
-    override suspend fun createNewUser(
-        email: String, password: String, firstName: String, lastName: String, userName: String
-    ): Result<UserData> {
-        return runCatching {
-            val userId = ID.unique()
-            account.create(
-                userId = userId, email = email, password = password, name = userName
-            )
-            val doc = tablesDb.createRow<UserDataDTO>(
-                databaseId = DATABASE_NAME,
-                tableId = USER_DATA_TABLE,
-                rowId = userId,
-                data = UserDataDTO(firstName, lastName, userName, userId),
-                nestedType = UserDataDTO::class
-            )
-            doc.data.toUserData(doc.id)
-        }
+    override suspend fun followUser(userId: String): Result<Unit> {
+        return Result.failure(NotImplementedError("Following is not implemented in the Next.js API yet."))
     }
 
-    override suspend fun updateUser(user: UserData): Result<UserData> {
-        val response = singleResponse(networkCall = {
-            if (user.id == currentUser.value.getOrNull()?.id) {
-                account.updateName(user.userName)
-            }
-            tablesDb.updateRow<UserDataDTO>(
-                databaseId = DATABASE_NAME,
-                tableId = USER_DATA_TABLE,
-                rowId = user.id,
-                data = user.toUserDataDTO(),
-                nestedType = UserDataDTO::class
-            ).data.toUserData(user.id)
-        }, saveCall = { newData ->
-            databaseService.getUserDataDao.upsertUserWithRelations(newData)
-        }, onReturn = { data ->
-            data
-        })
-        if (user.id == currentUser.value.getOrNull()?.id) {
-            _currentAccount.value = runCatching { account.get() }
-            _currentUser.value = Result.success(user)
-        }
-        return response
+    override suspend fun unfollowUser(userId: String): Result<Unit> {
+        return Result.failure(NotImplementedError("Following is not implemented in the Next.js API yet."))
     }
 
-    override suspend fun getCurrentAccount() = runCatching {
-        _currentAccount.value = Result.success(account.get())
-    }
-
-    override suspend fun sendFriendRequest(user: UserData): Result<Unit> = runCatching {
-        updateUser(user.copy(friendRequestIds = user.friendRequestIds + currentUser.value.getOrThrow().id))
-        val currentUserVal = currentUser.value.getOrThrow()
-        updateUser(currentUserVal.copy(friendRequestSentIds = currentUserVal.friendRequestSentIds + user.id))
-    }
-
-    override suspend fun acceptFriendRequest(user: UserData): Result<Unit> = runCatching {
-        val currentUserVal = currentUser.value.getOrThrow()
-        updateUser(currentUserVal.copy(friendIds = currentUserVal.friendIds + user.id))
-        updateUser(user.copy(friendIds = user.friendIds + currentUserVal.id))
-    }
-
-    override suspend fun declineFriendRequest(userId: String): Result<Unit> = runCatching {
-        val currentUserVal = currentUser.value.getOrThrow()
-        updateUser(currentUserVal.copy(friendRequestIds = currentUserVal.friendRequestIds - userId))
-        updateUser(currentUserVal.copy(friendRequestSentIds = currentUserVal.friendRequestSentIds - userId))
-    }
-
-    override suspend fun followUser(userId: String): Result<Unit> = runCatching {
-        val currentUserVal = currentUser.value.getOrThrow()
-        updateUser(currentUserVal.copy(followingIds = currentUserVal.followingIds + userId))
-    }
-
-    override suspend fun unfollowUser(userId: String): Result<Unit> = runCatching  {
-        val currentUserVal = currentUser.value.getOrThrow()
-        updateUser(currentUserVal.copy(followingIds = currentUserVal.followingIds - userId))
-    }
-
-    override suspend fun removeFriend(userId: String): Result<Unit> = runCatching  {
-        val currentUserVal = currentUser.value.getOrThrow()
-        updateUser(currentUserVal.copy(friendIds = currentUserVal.friendIds - userId))
-        updateUser(currentUserVal.copy(friendRequestSentIds = currentUserVal.friendRequestSentIds - userId))
+    override suspend fun removeFriend(userId: String): Result<Unit> {
+        return Result.failure(NotImplementedError("Friend management is not implemented in the Next.js API yet."))
     }
 }

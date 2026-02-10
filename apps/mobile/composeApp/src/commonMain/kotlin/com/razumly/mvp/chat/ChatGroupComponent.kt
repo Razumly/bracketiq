@@ -9,7 +9,7 @@ import com.razumly.mvp.core.data.dataTypes.MessageMVP
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
-import io.appwrite.ID
+import com.razumly.mvp.core.util.newId
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -73,7 +73,7 @@ class DefaultChatGroupComponent(
         if (text.isNotBlank()) {
             chatGroup.value ?: return
             val message = MessageMVP(
-                id = ID.unique(),
+                id = newId(),
                 userId = currentUser.id,
                 body = text,
                 attachmentUrls = listOf(),

@@ -6,7 +6,7 @@ import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Team
-import io.appwrite.ID
+import com.razumly.mvp.core.util.newId
 import io.appwrite.models.Execution
 import io.appwrite.services.Account
 import io.appwrite.services.Functions
@@ -265,7 +265,7 @@ class PushNotificationsRepository(
     }
 
     override suspend fun addDeviceAsTarget(): Result<Unit> = runCatching {
-        account.createPushTarget(ID.unique(), _pushToken.value)
+        account.createPushTarget(newId(), _pushToken.value)
     }.onSuccess {
         userDataSource.savePushTarget(it.id)
     }.map {}
