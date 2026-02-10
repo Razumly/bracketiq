@@ -10,33 +10,30 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventTeamCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
-import com.razumly.mvp.core.data.dataTypes.dtos.EventDTO
-import com.razumly.mvp.core.data.dataTypes.enums.EventType
-import com.razumly.mvp.core.data.dataTypes.toEventDTO
-import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResponse
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
-import com.razumly.mvp.core.util.DbConstants
 import com.razumly.mvp.core.util.calcDistance
-import com.razumly.mvp.core.util.convert
 import dev.icerock.moko.geo.LatLng
-import io.appwrite.Query
-import io.appwrite.extensions.json
-import io.appwrite.services.Functions
-import io.appwrite.services.TablesDB
+import com.razumly.mvp.core.network.MvpApiClient
+import com.razumly.mvp.core.network.dto.CreateEventRequestDto
+import com.razumly.mvp.core.network.dto.EventApiDto
+import com.razumly.mvp.core.network.dto.EventParticipantsRequestDto
+import com.razumly.mvp.core.network.dto.EventResponseDto
+import com.razumly.mvp.core.network.dto.EventSearchFiltersDto
+import com.razumly.mvp.core.network.dto.EventSearchRequestDto
+import com.razumly.mvp.core.network.dto.EventSearchUserLocationDto
+import com.razumly.mvp.core.network.dto.EventsResponseDto
+import com.razumly.mvp.core.network.dto.UpdateEventRequestDto
+import com.razumly.mvp.core.network.dto.toUpdateDto
+import io.ktor.http.encodeURLQueryComponent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.IO
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import kotlinx.serialization.Contextual
-import kotlinx.serialization.EncodeDefault
-import kotlinx.serialization.ExperimentalSerializationApi
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
 
 interface IEventRepository : IMVPRepository {
     fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>>
@@ -45,11 +42,8 @@ interface IEventRepository : IMVPRepository {
     suspend fun createEvent(newEvent: Event): Result<Event>
     suspend fun updateEvent(newEvent: Event): Result<Event>
     suspend fun updateLocalEvent(newEvent: Event): Result<Event>
-    suspend fun getEvents(query: String): Result<List<Event>>
-    fun getEventsFlow(query: String): Flow<Result<List<Event>>>
     fun getEventsInBoundsFlow(bounds: Bounds): Flow<Result<List<Event>>>
     suspend fun getEventsInBounds(bounds: Bounds): Result<Pair<List<Event>, Boolean>>
-    fun searchEventsFlow(searchQuery: String, userLocation: LatLng): Flow<Result<List<Event>>>
     suspend fun searchEvents(
         searchQuery: String,
         userLocation: LatLng
@@ -64,14 +58,11 @@ interface IEventRepository : IMVPRepository {
 
 class EventRepository(
     private val databaseService: DatabaseService,
-    private val tablesDb: TablesDB,
+    private val api: MvpApiClient,
     private val teamRepository: ITeamRepository,
     private val userRepository: IUserRepository,
-    private val notificationsRepository: IPushNotificationsRepository,
-    private val functions: Functions,
 ) : IEventRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private var lastDocumentId = ""
 
     init {
         scope.launch {
@@ -80,7 +71,7 @@ class EventRepository(
     }
 
     override fun resetCursor() {
-        lastDocumentId = ""
+        // Paging is currently handled by the UI by re-issuing search calls; keep this as a no-op for now.
     }
 
     override fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>> =
@@ -105,33 +96,14 @@ class EventRepository(
         }
 
     private suspend fun fetchRemoteEvent(eventId: String): Event {
-        val event = tablesDb.getRow<EventDTO>(
-            databaseId = DbConstants.DATABASE_NAME,
-            tableId = DbConstants.EVENT_TABLE,
-            rowId = eventId,
-            nestedType = EventDTO::class
-        ).data.toEvent(eventId)
+        val dto = api.get<EventApiDto>("api/events/$eventId")
+        return dto.toEventOrNull() ?: error("Event $eventId response missing required fields")
+    }
 
-        val players = if (event.playerIds.isNotEmpty()) {
-            userRepository.getUsers(event.playerIds).getOrThrow()
-        } else {
-            emptyList()
-        }
-        val host = userRepository.getUsers(listOf(event.hostId)).getOrThrow()
-        val teams = if (event.teamIds.isNotEmpty()) {
-            teamRepository.getTeams(event.teamIds).getOrThrow()
-        } else {
-            emptyList()
-        }
-
-        insertEventCrossReferences(
-            eventId = eventId,
-            players = players,
-            host = host,
-            teams = teams
-        )
-
-        return event
+    private suspend fun fetchRemoteEventsByHost(hostId: String): List<Event> {
+        val encodedHostId = hostId.encodeURLQueryComponent()
+        val res = api.get<EventsResponseDto>("api/events?hostId=$encodedHostId&limit=200")
+        return res.events.mapNotNull { it.toEventOrNull() }
     }
 
     private suspend fun insertEventCrossReferences(
@@ -156,6 +128,7 @@ class EventRepository(
             fetchRemoteEvent(eventId)
         }, saveCall = { event ->
             databaseService.getEventDao.upsertEvent(event)
+            persistEventRelations(event)
         }, onReturn = {
             databaseService.getEventDao.getEventById(eventId)
                 ?: throw IllegalStateException("Event $eventId not cached")
@@ -163,111 +136,70 @@ class EventRepository(
 
     override suspend fun createEvent(newEvent: Event): Result<Event> =
         singleResponse(networkCall = {
-            notificationsRepository.createEventTopic(newEvent)
-            tablesDb.createRow<EventDTO>(
-                databaseId = DbConstants.DATABASE_NAME,
-                tableId = DbConstants.EVENT_TABLE,
-                rowId = newEvent.id,
-                data = newEvent.toEventDTO(),
-                nestedType = EventDTO::class
-            ).data.toEvent(newEvent.id)
+            val created = api.post<CreateEventRequestDto, EventResponseDto>(
+                path = "api/events",
+                body = CreateEventRequestDto(id = newEvent.id, event = newEvent.toUpdateDto()),
+            ).event?.toEventOrNull() ?: error("Create event response missing event")
+            created
         }, saveCall = { event ->
             databaseService.getEventDao.upsertEvent(event)
+            persistEventRelations(event)
         }, onReturn = { event ->
             event
         })
 
     override suspend fun updateEvent(newEvent: Event): Result<Event> =
         singleResponse(networkCall = {
-            tablesDb.updateRow<EventDTO>(
-                databaseId = DbConstants.DATABASE_NAME,
-                tableId = DbConstants.EVENT_TABLE,
-                rowId = newEvent.id,
-                data = newEvent.toEventDTO(),
-                nestedType = EventDTO::class
-            ).data.toEvent(newEvent.id)
+            val updated = api.patch<UpdateEventRequestDto, EventApiDto>(
+                path = "api/events/${newEvent.id}",
+                body = UpdateEventRequestDto(event = newEvent.toUpdateDto()),
+            ).toEventOrNull() ?: error("Update event response missing event")
+            updated
         }, saveCall = { event ->
             databaseService.getEventDao.upsertEvent(event)
+            persistEventRelations(event)
         }, onReturn = { event ->
             event
         })
-
-    override suspend fun getEvents(query: String): Result<List<Event>> {
-        val combinedQuery = if (lastDocumentId.isNotEmpty()) {
-            listOf(query, Query.cursorAfter(lastDocumentId))
-        } else {
-            listOf(query)
-        }
-        val response = multiResponse(
-            getRemoteData = {
-            tablesDb.listRows<EventDTO>(
-                databaseId = DbConstants.DATABASE_NAME,
-                tableId = DbConstants.EVENT_TABLE,
-                queries = combinedQuery,
-                nestedType = EventDTO::class
-            ).rows.map { dtoRow -> dtoRow.convert { it.toEvent(dtoRow.id) }.data }
-        },
-            getLocalData = { emptyList() },
-            saveData = { databaseService.getEventDao.upsertEvents(it) },
-            deleteData = { })
-
-        if (response.isSuccess) {
-            lastDocumentId = response.getOrNull()?.lastOrNull()?.id ?: ""
-        }
-        return response
-    }
 
     override suspend fun updateLocalEvent(newEvent: Event): Result<Event> {
         databaseService.getEventDao.upsertEvent(newEvent)
         return Result.success(newEvent)
     }
 
-    override fun getEventsFlow(query: String): Flow<Result<List<Event>>> {
-        val queryMap = json.decodeFromString<Map<String, @Contextual Any>>(query)
-        val filterMap = if (queryMap.containsValue("equal")) {
-            { event: Event ->
-                (queryMap["values"] as List<*>).first() == event.hostId
-            }
-        } else {
-            { event: Event -> true }
-        }
-
-        val localFlow = databaseService.getEventDao.getAllCachedEvents().map {
-            Result.success(it.filter { event ->
-                filterMap(event)
-            })
-        }
-        return localFlow
-    }
-
     override fun getEventsInBoundsFlow(bounds: Bounds): Flow<Result<List<Event>>> {
-        val query = buildBoundsQuery(bounds)
-        return getEventsFlow(query).map { result ->
-            result.map { events ->
-                events.sortedBy { calcDistance(bounds.center, LatLng(it.lat, it.long)) }
+        return databaseService.getEventDao.getAllCachedEvents().map { cached ->
+            val inBounds = cached.filter { event ->
+                calcDistance(bounds.center, LatLng(event.lat, event.long)) <= bounds.radiusMiles
             }
+            Result.success(inBounds.sortedBy { calcDistance(bounds.center, LatLng(it.lat, it.long)) })
         }
     }
 
     override suspend fun getEventsInBounds(bounds: Bounds): Result<Pair<List<Event>, Boolean>> {
-        val query = buildBoundsQuery(bounds)
-        return getEvents(query).map { events ->
+        return runCatching {
+            val res = api.post<EventSearchRequestDto, EventsResponseDto>(
+                path = "api/events/search",
+                body = EventSearchRequestDto(
+                    filters = EventSearchFiltersDto(
+                        maxDistance = bounds.radiusMiles,
+                        userLocation = EventSearchUserLocationDto(
+                            lat = bounds.center.latitude,
+                            long = bounds.center.longitude,
+                        ),
+                    ),
+                    limit = 200,
+                    offset = 0,
+                ),
+            )
+
+            val events = res.events.mapNotNull { it.toEventOrNull() }
+            databaseService.getEventDao.upsertEvents(events)
+
             Pair(
                 events.sortedBy { calcDistance(bounds.center, LatLng(it.lat, it.long)) },
-                false
+                true,
             )
-        }
-    }
-
-    override fun searchEventsFlow(
-        searchQuery: String,
-        userLocation: LatLng
-    ): Flow<Result<List<Event>>> {
-        val query = Query.contains("name", searchQuery)
-        return getEventsFlow(query).map { result ->
-            result.map { events ->
-                events.sortedBy { calcDistance(userLocation, LatLng(it.lat, it.long)) }
-            }
         }
     }
 
@@ -275,29 +207,65 @@ class EventRepository(
         searchQuery: String,
         userLocation: LatLng
     ): Result<Pair<List<Event>, Boolean>> {
-        val query = Query.contains("name", searchQuery)
-        return getEvents(query).map { events ->
+        return runCatching {
+            val res = api.post<EventSearchRequestDto, EventsResponseDto>(
+                path = "api/events/search",
+                body = EventSearchRequestDto(
+                    filters = EventSearchFiltersDto(query = searchQuery),
+                    limit = 50,
+                    offset = 0,
+                ),
+            )
+
+            val events = res.events.mapNotNull { it.toEventOrNull() }
+            databaseService.getEventDao.upsertEvents(events)
+
             Pair(
                 events.sortedBy { calcDistance(userLocation, LatLng(it.lat, it.long)) },
-                false
+                true,
             )
         }
     }
 
     override fun getEventsByHostFlow(hostId: String): Flow<Result<List<Event>>> =
-        getEventsFlow(Query.equal("hostId", hostId))
+        callbackFlow {
+            val localJob = launch {
+                databaseService.getEventDao.getAllCachedEvents().collect { cached ->
+                    trySend(Result.success(cached.filter { it.hostId == hostId }))
+                }
+            }
+
+            val remoteJob = launch {
+                runCatching {
+                    val remote = fetchRemoteEventsByHost(hostId)
+
+                    val localHostEvents = databaseService.getEventDao.getAllCachedEvents().first()
+                        .filter { it.hostId == hostId }
+                    val staleIds = localHostEvents.map { it.id }.toSet() - remote.map { it.id }.toSet()
+                    if (staleIds.isNotEmpty()) {
+                        databaseService.getEventDao.deleteEventsById(staleIds.toList())
+                    }
+
+                    databaseService.getEventDao.upsertEvents(remote)
+                }.onFailure { error -> trySend(Result.failure(error)) }
+            }
+
+            awaitClose {
+                localJob.cancel()
+                remoteJob.cancel()
+            }
+        }
 
     override suspend fun addCurrentUserToEvent(event: Event): Result<Unit> =
         runCatching {
             val currentUser = userRepository.currentUser.value.getOrThrow()
-            executeEventEdit(
-                EditEventRequest(
-                    eventId = event.id,
-                    userId = currentUser.id,
-                    isTournament = event.eventType == EventType.TOURNAMENT,
-                    command = "addParticipant"
-                )
-            )
+            val updated = api.post<EventParticipantsRequestDto, EventResponseDto>(
+                path = "api/events/${event.id}/participants",
+                body = EventParticipantsRequestDto(userId = currentUser.id),
+            ).event?.toEventOrNull() ?: error("Participant update response missing event")
+
+            databaseService.getEventDao.upsertEvent(updated)
+            persistEventRelations(updated)
         }
 
     override suspend fun addTeamToEvent(event: Event, team: Team): Result<Unit> =
@@ -305,14 +273,13 @@ class EventRepository(
             if (event.waitList.contains(team.id)) {
                 throw Exception("Team already in waitlist")
             }
-            executeEventEdit(
-                EditEventRequest(
-                    eventId = event.id,
-                    teamId = team.id,
-                    isTournament = event.eventType == EventType.TOURNAMENT,
-                    command = "addParticipant"
-                )
-            )
+            val updated = api.post<EventParticipantsRequestDto, EventResponseDto>(
+                path = "api/events/${event.id}/participants",
+                body = EventParticipantsRequestDto(teamId = team.id),
+            ).event?.toEventOrNull() ?: error("Participant update response missing event")
+
+            databaseService.getEventDao.upsertEvent(updated)
+            persistEventRelations(updated)
         }
 
     override suspend fun removeTeamFromEvent(
@@ -320,71 +287,48 @@ class EventRepository(
         teamWithPlayers: TeamWithPlayers
     ): Result<Unit> =
         runCatching {
-            executeEventEdit(
-                EditEventRequest(
-                    eventId = event.id,
-                    teamId = teamWithPlayers.team.id,
-                    isTournament = event.eventType == EventType.TOURNAMENT,
-                    command = "removeParticipant"
-                )
-            )
+            val updated = api.delete<EventParticipantsRequestDto, EventResponseDto>(
+                path = "api/events/${event.id}/participants",
+                body = EventParticipantsRequestDto(teamId = teamWithPlayers.team.id),
+            ).event?.toEventOrNull() ?: error("Participant update response missing event")
+
+            databaseService.getEventDao.upsertEvent(updated)
+            persistEventRelations(updated)
         }
 
     override suspend fun removeCurrentUserFromEvent(event: Event): Result<Unit> {
         val currentUser = userRepository.currentUser.value.getOrThrow()
-        return removePlayerFromEvent(event, currentUser.id)
+        return runCatching {
+            val updated = api.delete<EventParticipantsRequestDto, EventResponseDto>(
+                path = "api/events/${event.id}/participants",
+                body = EventParticipantsRequestDto(userId = currentUser.id),
+            ).event?.toEventOrNull() ?: error("Participant update response missing event")
+
+            databaseService.getEventDao.upsertEvent(updated)
+            persistEventRelations(updated)
+        }
     }
 
     override suspend fun deleteEvent(eventId: String): Result<Unit> = runCatching {
+        api.deleteNoResponse("api/events/$eventId")
         databaseService.getEventDao.deleteEventWithCrossRefs(eventId)
     }
 
-    private fun buildBoundsQuery(bounds: Bounds): String {
-        val distanceMeters = bounds.radiusMiles * 1609.34
-        return Query.distanceLessThan(
-            DbConstants.COORDINATES_ATTRIBUTE,
-            listOf(bounds.center.longitude, bounds.center.latitude),
-            distanceMeters
-        )
-    }
-
-    private suspend fun executeEventEdit(request: EditEventRequest) {
-        val response = functions.createExecution(
-            DbConstants.EVENT_MANAGER_FUNCTION,
-            Json.encodeToString(request)
-        )
-        val result = Json.decodeFromString<EditEventResponse>(response.responseBody)
-        if (!result.error.isNullOrBlank()) {
-            throw Exception(result.error)
+    private suspend fun persistEventRelations(event: Event) {
+        val teams = if (event.teamIds.isNotEmpty()) {
+            teamRepository.getTeams(event.teamIds).getOrThrow()
+        } else {
+            emptyList()
         }
-    }
 
-    private suspend fun removePlayerFromEvent(event: Event, userId: String): Result<Unit> =
-        runCatching {
-            executeEventEdit(
-                EditEventRequest(
-                    eventId = event.id,
-                    userId = userId,
-                    isTournament = event.eventType == EventType.TOURNAMENT,
-                    command = "removeParticipant"
-                )
-            )
-        }
+        // Team-player cross refs require user rows for every player id.
+        val teamPlayerIds = teams.flatMap { team -> team.playerIds }
+        val allUserIds = (event.playerIds + event.hostId + teamPlayerIds).distinct().filter(String::isNotBlank)
+        val users = if (allUserIds.isNotEmpty()) userRepository.getUsers(allUserIds).getOrThrow() else emptyList()
+
+        val players = if (event.playerIds.isNotEmpty()) users.filter { it.id in event.playerIds } else emptyList()
+        val host = users.filter { it.id == event.hostId }
+
+        insertEventCrossReferences(event.id, players, host, teams)
+    }
 }
-
-@Serializable
-@OptIn(ExperimentalSerializationApi::class)
-data class EditEventRequest(
-    @EncodeDefault val task: String = "editEvent",
-    val eventId: String,
-    val userId: String? = null,
-    val teamId: String? = null,
-    val isTournament: Boolean,
-    val command: String
-)
-
-@kotlinx.serialization.Serializable
-data class EditEventResponse(
-    val message: String? = "",
-    val error: String? = ""
-)

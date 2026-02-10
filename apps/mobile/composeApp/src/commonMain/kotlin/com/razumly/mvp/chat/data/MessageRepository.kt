@@ -2,12 +2,12 @@ package com.razumly.mvp.chat.data
 
 import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.MessageMVP
-import com.razumly.mvp.core.data.dataTypes.dtos.MessageMVPDTO
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResponse
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
-import com.razumly.mvp.core.util.DbConstants
-import io.appwrite.Query
-import io.appwrite.services.TablesDB
+import com.razumly.mvp.core.network.MvpApiClient
+import com.razumly.mvp.core.network.dto.CreateMessageRequestDto
+import com.razumly.mvp.core.network.dto.MessageApiDto
+import com.razumly.mvp.core.network.dto.MessagesResponseDto
 
 interface IMessageRepository {
     suspend fun getMessagesInChatGroup(chatGroupId: String): Result<List<MessageMVP>>
@@ -15,17 +15,13 @@ interface IMessageRepository {
 }
 
 class MessageRepository(
+    private val api: MvpApiClient,
     private val databaseService: DatabaseService,
-    private val tablesDb: TablesDB,
 ) : IMessageRepository {
     override suspend fun getMessagesInChatGroup(chatGroupId: String): Result<List<MessageMVP>> =
         multiResponse(getRemoteData = {
-            tablesDb.listRows<MessageMVPDTO>(
-                DbConstants.DATABASE_NAME,
-                DbConstants.MESSAGES_TABLE,
-                queries = listOf(Query.equal("chatId", chatGroupId)),
-                nestedType = MessageMVPDTO::class
-            ).rows.map { it.data.toMessageMVP(it.id) }
+            api.get<MessagesResponseDto>("api/chat/groups/$chatGroupId/messages?limit=100&order=asc")
+                .messages.mapNotNull { it.toMessageOrNull() }
         }, getLocalData = {
             databaseService.getMessageDao.getMessagesInChatGroup(chatGroupId)
         }, saveData = {
@@ -34,13 +30,18 @@ class MessageRepository(
 
     override suspend fun createMessage(newMessage: MessageMVP): Result<Unit> =
         singleResponse(networkCall = {
-            tablesDb.createRow<MessageMVPDTO>(
-                databaseId = DbConstants.DATABASE_NAME,
-                tableId = DbConstants.MESSAGES_TABLE,
-                rowId = newMessage.id,
-                data = newMessage.toMessageMVPDTO(),
-                nestedType = MessageMVPDTO::class
-            ).data.toMessageMVP(id = newMessage.id)
+            api.post<CreateMessageRequestDto, MessageApiDto>(
+                path = "api/messages",
+                body = CreateMessageRequestDto(
+                    id = newMessage.id,
+                    body = newMessage.body,
+                    userId = newMessage.userId,
+                    chatId = newMessage.chatId,
+                    sentTime = newMessage.sentTime.toString(),
+                    readByIds = newMessage.readByIds,
+                    attachmentUrls = newMessage.attachmentUrls,
+                ),
+            ).toMessageOrNull() ?: error("Create message response missing message")
         }, saveCall = {
             databaseService.getMessageDao.upsertMessages(listOf(it))
         }, onReturn = {})

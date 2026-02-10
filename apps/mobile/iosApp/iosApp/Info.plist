@@ -24,16 +24,6 @@
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>CFBundleURLName</key>
-			<string>io.appwrite</string>
-			<key>CFBundleURLSchemes</key>
-			<array>
-				<string>appwrite-callback-6656a4d60016b753f942</string>
-			</array>
-		</dict>
-		<dict>
-			<key>CFBundleTypeRole</key>
-			<string>Editor</string>
-			<key>CFBundleURLName</key>
 			<string>com.razumly.mvp.deeplink</string>
 			<key>CFBundleURLSchemes</key>
 			<array>

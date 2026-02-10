@@ -27,10 +27,9 @@ import coil3.compose.SubcomposeAsyncImage
 import coil3.compose.SubcomposeAsyncImageContent
 import com.razumly.mvp.core.data.dataTypes.DisplayableEntity
 import com.razumly.mvp.core.presentation.util.toTitleCase
+import com.razumly.mvp.core.network.apiBaseUrl
 import com.razumly.mvp.core.util.UIConstants
-import com.razumly.mvp.core.util.projectId
-import io.ktor.http.URLBuilder
-import io.ktor.http.URLProtocol
+import io.ktor.http.encodeURLQueryComponent
 
 @Composable
 fun UnifiedCard(
@@ -40,15 +39,13 @@ fun UnifiedCard(
     trailingContent: @Composable (() -> Unit)? = null,
     isPending: Boolean = false
 ) {
-    val initialsUrl = URLBuilder().apply {
-        protocol = URLProtocol.HTTPS
-        host = "cloud.appwrite.io"
-        pathSegments = listOf("v1", "avatars", "initials")
-        parameters.append("name", entity.displayName)
-        parameters.append("width", UIConstants.PROFILE_PICTURE_HEIGHT.toString())
-        parameters.append("height", UIConstants.PROFILE_PICTURE_HEIGHT.toString())
-        parameters.append("project", projectId)
-    }.buildString()
+    val initialsUrl = buildString {
+        append(apiBaseUrl.trimEnd('/'))
+        append("/api/avatars/initials?name=")
+        append(entity.displayName.encodeURLQueryComponent())
+        append("&size=")
+        append(UIConstants.PROFILE_PICTURE_HEIGHT)
+    }
 
     val imageUrl = entity.imageUrl ?: initialsUrl
 

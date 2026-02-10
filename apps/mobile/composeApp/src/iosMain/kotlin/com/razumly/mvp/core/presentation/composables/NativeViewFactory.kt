@@ -46,8 +46,8 @@ interface NativeViewFactory {
 
     fun presentStripePaymentSheet(
         publishableKey: String,
-        customerId: String,
-        ephemeralKey: String,
+        customerId: String?,
+        ephemeralKey: String?,
         paymentIntent: String,
         onPaymentResult: (PaymentResult) -> Unit
     )

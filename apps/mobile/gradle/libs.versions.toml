@@ -48,7 +48,6 @@ playServicesMaps = "19.2.0"
 robolectric = "4.15.1"
 room = "2.8.3"
 runtimeSaveable = "1.9.3"
-sdkForKmp = "0.3.4"
 secrets = "2.0.1"
 sqlite = "2.6.1"
 stripeAndroid = "22.1.0"
@@ -130,7 +129,6 @@ play-services-maps = { module = "com.google.android.gms:play-services-maps", ver
 robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
 runtime-saveable = { module = "org.jetbrains.compose.runtime:runtime-saveable", version.ref = "runtimeSaveable" }
 androidx-animation-android = { group = "androidx.compose.animation", name = "animation-android", version.ref = "animationAndroid" }
-sdk-for1-kmp = { module = "io.github.camka14.appwrite:sdk-for-kmp", version.ref = "sdkForKmp" }
 stripe-android = { group = "com.stripe", name = "stripe-android", version.ref = "stripeAndroid" }
 financial-connections = { group = "com.stripe", name = "financial-connections", version.ref = "stripeAndroid" }
 turbine = { module = "app.cash.turbine:turbine", version.ref = "turbine" }

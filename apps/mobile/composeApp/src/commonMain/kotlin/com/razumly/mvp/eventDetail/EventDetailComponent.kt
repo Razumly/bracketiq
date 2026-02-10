@@ -34,7 +34,7 @@ import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentResult
 import com.razumly.mvp.core.presentation.util.ShareServiceProvider
-import com.razumly.mvp.core.presentation.util.convertPhotoResultToInputFile
+import com.razumly.mvp.core.presentation.util.convertPhotoResultToUploadFile
 import com.razumly.mvp.core.presentation.util.createEventUrl
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
@@ -502,7 +502,7 @@ class DefaultEventDetailComponent(
 
     override fun onUploadSelected(photo: GalleryPhotoResult) {
         scope.launch {
-            imageRepository.uploadImage(convertPhotoResultToInputFile(photo))
+            imageRepository.uploadImage(convertPhotoResultToUploadFile(photo))
         }
     }
 

@@ -22,7 +22,7 @@ import com.razumly.mvp.core.data.repositories.IImagesRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentProcessor
-import com.razumly.mvp.core.presentation.util.convertPhotoResultToInputFile
+import com.razumly.mvp.core.presentation.util.convertPhotoResultToUploadFile
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.eventCreate.CreateEventComponent.Child
@@ -215,7 +215,7 @@ class DefaultCreateEventComponent(
     override fun onUploadSelected(photo: GalleryPhotoResult) {
         scope.launch {
             loadingHandler.showLoading("Uploading image...")
-            imageRepository.uploadImage(convertPhotoResultToInputFile(photo))
+            imageRepository.uploadImage(convertPhotoResultToUploadFile(photo))
             loadingHandler.hideLoading()
         }
     }

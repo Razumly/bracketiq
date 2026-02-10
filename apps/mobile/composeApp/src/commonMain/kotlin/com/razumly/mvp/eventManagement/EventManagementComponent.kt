@@ -8,7 +8,6 @@ import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.presentation.INavigationHandler
-import io.appwrite.Query
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -80,10 +79,7 @@ class DefaultEventManagementComponent(
         scope.launch {
             _isLoadingMore.value = true
 
-            eventRepository.getEvents(Query.equal("hostId", currentUserId))
-                .onFailure { e ->
-                    _errorState.value = ErrorMessage("Failed to load more events: ${e.message}")
-                }
+            // Host event lists are refreshed automatically when collected. Pagination is currently disabled.
             _isLoadingMore.value = false
         }
     }

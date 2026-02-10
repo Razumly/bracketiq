@@ -1,34 +1,54 @@
 package com.razumly.mvp.core.data.repositories
 
 import com.razumly.mvp.core.presentation.util.getImageUrl
-import com.razumly.mvp.core.util.DbConstants.BUCKET_ID
-import com.razumly.mvp.core.util.newId
-import io.appwrite.models.InputFile
-import io.appwrite.services.Storage
+import com.razumly.mvp.core.network.MvpApiClient
+import com.razumly.mvp.core.network.MvpUploadFile
+import com.razumly.mvp.core.network.dto.FileUploadResponseDto
+import io.ktor.client.call.body
+import io.ktor.client.request.forms.formData
+import io.ktor.client.request.forms.submitFormWithBinaryData
+import io.ktor.client.request.header
+import io.ktor.http.Headers
+import io.ktor.http.HttpHeaders
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
 interface IImagesRepository {
-    suspend fun uploadImage(inputFile: InputFile): Result<String>
+    suspend fun uploadImage(inputFile: MvpUploadFile): Result<String>
     fun getUserImageIdsFlow(): Flow<List<String>>
     suspend fun addImageToUser(imageUrl: String): Result<Unit>
     suspend fun deleteImage(imageId: String): Result<Unit>
 }
 
 class ImagesRepository(
-    private val storage: Storage, private val userRepository: IUserRepository
+    private val api: MvpApiClient,
+    private val userRepository: IUserRepository,
 ) : IImagesRepository {
     override suspend fun uploadImage(
-        inputFile: InputFile
+        inputFile: MvpUploadFile
     ): Result<String> = runCatching {
-        val fileId = newId()
+        val token = api.tokenStore.get()
+        val response = api.http.submitFormWithBinaryData(
+            url = api.urlFor("api/files/upload"),
+            formData = formData {
+                append(
+                    key = "file",
+                    value = inputFile.bytes,
+                    headers = Headers.build {
+                        append(HttpHeaders.ContentType, inputFile.mimeType)
+                        append(
+                            HttpHeaders.ContentDisposition,
+                            "form-data; name=\"file\"; filename=\"${inputFile.filename}\"",
+                        )
+                    },
+                )
+            },
+        ) {
+            if (token.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $token")
+        }.body<FileUploadResponseDto>()
 
-        storage.createFile(
-            bucketId = BUCKET_ID,
-            fileId = fileId,
-            file = inputFile,
-            permissions = listOf("read(\"any\")")
-        )
+        val fileId = response.file?.id?.takeIf(String::isNotBlank)
+            ?: error("Upload response missing file id")
 
         addImageToUser(fileId).getOrThrow()
         getImageUrl(fileId)
@@ -48,8 +68,9 @@ class ImagesRepository(
     }
 
     override suspend fun deleteImage(imageId: String): Result<Unit> = runCatching {
-        val user = userRepository.currentUser.value.getOrThrow()
-        userRepository.updateUser(user.copy(uploadedImages = user.uploadedImages.filter { it != imageId }))
-        storage.deleteFile(BUCKET_ID, imageId)
+        api.deleteNoResponse("api/files/$imageId")
+
+        // Server will also remove the file id from any `uploadedImages` arrays it is present in.
+        runCatching { userRepository.getCurrentAccount().getOrThrow() }
     }
 }

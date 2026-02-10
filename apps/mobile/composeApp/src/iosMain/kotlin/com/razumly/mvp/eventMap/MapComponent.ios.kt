@@ -6,6 +6,7 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.util.getBounds
+import com.razumly.mvp.core.util.jsonMVP
 import dev.icerock.moko.geo.LatLng
 import dev.icerock.moko.geo.LocationTracker
 import io.github.aakira.napier.Napier
@@ -64,7 +65,7 @@ actual class MapComponent(
 
     private val httpClient = HttpClient(Darwin) {
         install(ContentNegotiation) {
-            json(io.appwrite.extensions.json)
+            json(jsonMVP)
         }
     }
 

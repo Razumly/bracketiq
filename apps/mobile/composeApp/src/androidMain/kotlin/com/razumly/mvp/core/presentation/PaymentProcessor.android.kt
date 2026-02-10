@@ -27,26 +27,37 @@ actual open class PaymentProcessor : IPaymentProcessor {
     @OptIn(AddressAutocompletePreview::class)
     actual override fun presentPaymentSheet(email: String, name: String) {
         purchaseIntent.value?.let {
+            val clientSecret = it.paymentIntent ?: return
             _paymentSheet.value?.presentWithPaymentIntent(
-                paymentIntentClientSecret = it.paymentIntent!!,
-                configuration = PaymentSheet.Configuration.Builder("MVP")
-                    .customer(_customerConfig)
-                    .allowsDelayedPaymentMethods(true)
-                    .defaultBillingDetails(
-                        PaymentSheet.BillingDetails(email = email, name = name)
-                    ).googlePlacesApiKey(BuildConfig.MAPS_API_KEY).build()
+                paymentIntentClientSecret = clientSecret,
+                configuration = PaymentSheet.Configuration.Builder("MVP").apply {
+                    _customerConfig?.let(::customer)
+                }.allowsDelayedPaymentMethods(true).defaultBillingDetails(
+                    PaymentSheet.BillingDetails(email = email, name = name)
+                ).googlePlacesApiKey(BuildConfig.MAPS_API_KEY).build()
             )
         }
     }
 
     actual override suspend fun setPaymentIntent(intent: PurchaseIntent) {
         purchaseIntent.value = intent
-        if (purchaseIntent.value == null || _context == null) return
-        _customerConfig = PaymentSheet.CustomerConfiguration(
-            id = purchaseIntent.value!!.customer!!,
-            ephemeralKeySecret = purchaseIntent.value!!.ephemeralKey!!
-        )
-        PaymentConfiguration.init(_context!!, purchaseIntent.value!!.publishableKey!!)
+        val context = _context ?: return
+
+        val publishableKey = intent.publishableKey
+        if (publishableKey.isNullOrBlank()) {
+            Napier.e("Missing Stripe publishableKey", tag = "Stripe")
+            return
+        }
+        PaymentConfiguration.init(context, publishableKey)
+
+        _customerConfig = if (!intent.customer.isNullOrBlank() && !intent.ephemeralKey.isNullOrBlank()) {
+            PaymentSheet.CustomerConfiguration(
+                id = intent.customer,
+                ephemeralKeySecret = intent.ephemeralKey,
+            )
+        } else {
+            null
+        }
     }
 
     fun onPaymentSheetResult(paymentSheetResult: PaymentSheetResult) {

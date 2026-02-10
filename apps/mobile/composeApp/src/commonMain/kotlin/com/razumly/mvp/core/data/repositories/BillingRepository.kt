@@ -4,22 +4,26 @@ import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.RefundRequest
 import com.razumly.mvp.core.data.dataTypes.RefundRequestWithRelations
-import com.razumly.mvp.core.data.dataTypes.dtos.RefundRequestDTO
-import com.razumly.mvp.core.data.dataTypes.enums.EventType
-import com.razumly.mvp.core.util.DbConstants
-import com.razumly.mvp.core.util.jsonMVP
-import io.appwrite.Query
-import io.appwrite.services.TablesDB
-import io.appwrite.services.Functions
-import kotlinx.serialization.EncodeDefault
-import kotlinx.serialization.ExperimentalSerializationApi
+import com.razumly.mvp.core.network.MvpApiClient
+import com.razumly.mvp.core.network.apiBaseUrl
+import com.razumly.mvp.core.network.dto.BillingEventRefDto
+import com.razumly.mvp.core.network.dto.BillingRefundRequestDto
+import com.razumly.mvp.core.network.dto.BillingUserRefDto
+import com.razumly.mvp.core.network.dto.PurchaseIntentRequestDto
+import com.razumly.mvp.core.network.dto.RefundAllRequestDto
+import com.razumly.mvp.core.network.dto.RefundRequestsResponseDto
+import com.razumly.mvp.core.network.dto.StripeHostLinkRequestDto
+import com.razumly.mvp.core.network.dto.UpdateRefundRequestDto
+import io.github.aakira.napier.Napier
+import io.ktor.http.encodeURLQueryComponent
 import kotlinx.serialization.Serializable
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
 interface IBillingRepository : IMVPRepository {
     suspend fun createPurchaseIntent(
-        event: Event, teamId: String? = null
+        event: Event,
+        teamId: String? = null,
     ): Result<PurchaseIntent?>
 
     suspend fun createAccount(): Result<String>
@@ -34,125 +38,115 @@ interface IBillingRepository : IMVPRepository {
 }
 
 class BillingRepository(
+    private val api: MvpApiClient,
     private val userRepository: IUserRepository,
-    private val functions: Functions,
     private val eventRepository: IEventRepository,
-    private val tablesDb: TablesDB,
-    private val databaseService: DatabaseService
+    private val databaseService: DatabaseService,
 ) : IBillingRepository {
     override suspend fun createPurchaseIntent(
-        event: Event, teamId: String?
+        event: Event,
+        teamId: String?,
     ): Result<PurchaseIntent> = runCatching {
         val user = userRepository.currentUser.value.getOrThrow()
-        val isTournament = event.eventType == EventType.TOURNAMENT
-        val response = jsonMVP.decodeFromString<PurchaseIntent>(
-            functions.createExecution(
-                functionId = DbConstants.BILLING_FUNCTION,
-                body = jsonMVP.encodeToString(
-                    CreatePurchaseIntent(user.id, event.id, teamId, isTournament)
+        val email = userRepository.currentAccount.value.getOrNull()?.email
+
+        val response = api.post<PurchaseIntentRequestDto, PurchaseIntent>(
+            path = "api/billing/purchase-intent",
+            body = PurchaseIntentRequestDto(
+                user = BillingUserRefDto(id = user.id, email = email),
+                event = BillingEventRefDto(
+                    id = event.id,
+                    eventType = event.eventType.name,
+                    priceCents = event.priceCents,
+                    hostId = event.hostId,
+                    organizationId = event.organizationId,
                 ),
-                async = false,
-            ).responseBody
+            ),
         )
-        if (response.error != null) {
+
+        if (!response.error.isNullOrBlank()) {
             throw Exception(response.error)
-        } else {
-            response
         }
+        response
     }
 
     override suspend fun createAccount(): Result<String> = runCatching {
         val user = userRepository.currentUser.value.getOrThrow()
-        val response = jsonMVP.decodeFromString<CreateAccountResponse>(
-            functions.createExecution(
-                functionId = DbConstants.BILLING_FUNCTION,
-                body = jsonMVP.encodeToString(
-                    CreateAccount(user.id)
-                ),
-                async = false,
-            ).responseBody
-        )
-        response.onboardingUrl
+        val email = userRepository.currentAccount.value.getOrNull()?.email
+        val base = apiBaseUrl.trimEnd('/')
+
+        val onboardingUrl = api.post<StripeHostLinkRequestDto, StripeOnboardingLinkResponseDto>(
+            path = "api/billing/host/connect",
+            body = StripeHostLinkRequestDto(
+                refreshUrl = base,
+                returnUrl = base,
+                user = BillingUserRefDto(id = user.id, email = email),
+            ),
+        ).onboardingUrl
+
+        // Server may update `hasStripeAccount`; refresh local user/profile cache.
+        runCatching { userRepository.getCurrentAccount().getOrThrow() }
+
+        onboardingUrl
     }
 
     override suspend fun getOnboardingLink(): Result<String> = runCatching {
         val user = userRepository.currentUser.value.getOrThrow()
-        if (user.hasStripeAccount != true) throw Exception("User has no stripe account")
+        val email = userRepository.currentAccount.value.getOrNull()?.email
+        val base = apiBaseUrl.trimEnd('/')
 
-        val response = jsonMVP.decodeFromString<CreateAccountResponse>(
-            functions.createExecution(
-                functionId = DbConstants.BILLING_FUNCTION,
-                body = jsonMVP.encodeToString(GetHostOnboardingLink(user.id)),
-                async = false,
-            ).responseBody
-        )
-        response.onboardingUrl
+        api.post<StripeHostLinkRequestDto, StripeOnboardingLinkResponseDto>(
+            path = "api/billing/host/onboarding-link",
+            body = StripeHostLinkRequestDto(
+                refreshUrl = base,
+                returnUrl = base,
+                user = BillingUserRefDto(id = user.id, email = email),
+            ),
+        ).onboardingUrl
     }
 
     override suspend fun leaveAndRefundEvent(event: Event, reason: String): Result<Unit> =
         runCatching {
-            val response = functions.createExecution(
-                DbConstants.BILLING_FUNCTION, jsonMVP.encodeToString(
-                    RefundApiRequest(
-                        eventId = event.id,
-                        userId = userRepository.currentUser.value.getOrThrow().id,
-                        reason = reason,
-                        isTournament = event.eventType == EventType.TOURNAMENT
-                    )
-                )
+            val response = api.post<BillingRefundRequestDto, RefundResponse>(
+                path = "api/billing/refund",
+                body = BillingRefundRequestDto(
+                    payloadEvent = BillingEventRefDto(
+                        id = event.id,
+                        hostId = event.hostId,
+                        organizationId = event.organizationId,
+                    ),
+                    reason = reason,
+                ),
             )
 
-            val refundResponse = jsonMVP.decodeFromString<RefundResponse>(response.responseBody)
-            if (!refundResponse.error.isNullOrBlank()) {
-                throw Exception(refundResponse.error)
-            }
-            if (refundResponse.success == false) {
-                throw Exception(refundResponse.message)
-            }
+            if (!response.error.isNullOrBlank()) throw Exception(response.error)
+            if (response.success == false) throw Exception(response.message ?: "Refund request failed")
         }
 
     override suspend fun deleteAndRefundEvent(event: Event): Result<Unit> = runCatching {
-        val isTournament = event.eventType == EventType.TOURNAMENT
-        val response = functions.createExecution(
-            DbConstants.BILLING_FUNCTION,
-            jsonMVP.encodeToString(
-                RefundFullEvent(
-                    eventId = event.id,
-                    isTournament = isTournament
-                )
-            )
+        // Server-side operation: create refund requests for event participants.
+        api.post<RefundAllRequestDto, RefundResponse>(
+            path = "api/billing/refund-all",
+            body = RefundAllRequestDto(eventId = event.id),
         )
 
-        val refundResponse = jsonMVP.decodeFromString<RefundResponse>(response.responseBody)
-        if (!refundResponse.error.isNullOrBlank()) {
-            throw Exception(refundResponse.error)
-        }
-        if (refundResponse.success == false) {
-            throw Exception(refundResponse.message)
-        }
         eventRepository.deleteEvent(event.id).getOrThrow()
     }
 
     override suspend fun getRefundsWithRelations(): Result<List<RefundRequestWithRelations>> =
         runCatching {
             val currentUserId = userRepository.currentUser.value.getOrThrow().id
+            val encoded = currentUserId.encodeURLQueryComponent()
 
-            val serverRefunds = tablesDb.listRows<RefundRequestDTO>(
-                databaseId = DbConstants.DATABASE_NAME,
-                tableId = DbConstants.REFUNDS_TABLE,
-                queries = listOf(
-                    Query.contains("hostId", currentUserId)
-                ),
-                nestedType = RefundRequestDTO::class
-            ).rows.map { it.data.toRefundRequest(it.id) }
-
+            val serverRefunds = api.get<RefundRequestsResponseDto>("api/refund-requests?hostId=$encoded&limit=200").refunds
             databaseService.getRefundRequestDao.upsertRefundRequests(serverRefunds)
 
             serverRefunds.forEach { refund ->
-                userRepository.getUsers(listOf(refund.userId)).onSuccess { _ ->
+                userRepository.getUsers(listOf(refund.userId)).onFailure { e ->
+                    Napier.e("Failed to cache user for refund ${refund.id}", e)
                 }
-
-                eventRepository.getEvent(refund.eventId).onSuccess { _ ->
+                eventRepository.getEvent(refund.eventId).onFailure { e ->
+                    Napier.e("Failed to cache event for refund ${refund.id}", e)
                 }
             }
 
@@ -161,97 +155,37 @@ class BillingRepository(
 
     override suspend fun getRefunds(): Result<List<RefundRequest>> = runCatching {
         val currentUserId = userRepository.currentUser.value.getOrThrow().id
+        val encoded = currentUserId.encodeURLQueryComponent()
 
-        val serverRefunds = tablesDb.listRows<RefundRequestDTO>(
-            databaseId = DbConstants.DATABASE_NAME,
-            tableId = DbConstants.REFUNDS_TABLE,
-            queries = listOf(
-                Query.contains("hostId", currentUserId)
-            ),
-            nestedType = RefundRequestDTO::class
-        ).rows.map { it.data.toRefundRequest(it.id) }
-
+        val serverRefunds = api.get<RefundRequestsResponseDto>("api/refund-requests?hostId=$encoded&limit=200").refunds
         databaseService.getRefundRequestDao.upsertRefundRequests(serverRefunds)
-
         serverRefunds
     }
 
     override suspend fun approveRefund(refundRequest: RefundRequest): Result<Unit> = runCatching {
-        val response = functions.createExecution(
-            DbConstants.BILLING_FUNCTION, jsonMVP.encodeToString(
-                RefundApiRequest(
-                    eventId = refundRequest.eventId,
-                    userId = refundRequest.userId,
-                    reason = "requested_by_host",
-                    isTournament = false
-                )
-            )
+        api.patch<UpdateRefundRequestDto, RefundRequest>(
+            path = "api/refund-requests/${refundRequest.id}",
+            body = UpdateRefundRequestDto(status = "APPROVED"),
         )
-
-        val refundResponse = jsonMVP.decodeFromString<RefundResponse>(response.responseBody)
-        if (!refundResponse.error.isNullOrBlank()) {
-            throw Exception(refundResponse.error)
-        }
-
-        if (refundResponse.success == false) {
-            throw Exception(refundResponse.message)
-        }
 
         databaseService.getRefundRequestDao.deleteRefundRequest(refundRequest.id)
     }
 
     override suspend fun rejectRefund(refundId: String): Result<Unit> = runCatching {
-        tablesDb.deleteRow(
-            databaseId = DbConstants.DATABASE_NAME,
-            tableId = DbConstants.REFUNDS_TABLE,
-            rowId = refundId
+        api.patch<UpdateRefundRequestDto, RefundRequest>(
+            path = "api/refund-requests/$refundId",
+            body = UpdateRefundRequestDto(status = "REJECTED"),
         )
 
         databaseService.getRefundRequestDao.deleteRefundRequest(refundId)
     }
 }
 
-@OptIn(ExperimentalSerializationApi::class)
 @Serializable
-private data class CreatePurchaseIntent(
-    val userId: String,
-    val eventId: String,
-    val teamId: String?,
-    val isTournament: Boolean,
-    @EncodeDefault val command: String = "create_purchase_intent",
-)
-
-@OptIn(ExperimentalSerializationApi::class)
-@Serializable
-private data class CreateAccount(
-    val userId: String,
-    @EncodeDefault val command: String = "connect_host_account",
-)
-
-@OptIn(ExperimentalSerializationApi::class)
-@Serializable
-private data class CreateCustomer(
-    val userId: String,
-    @EncodeDefault val command: String = "create_customer",
-)
-
-@OptIn(ExperimentalSerializationApi::class)
-@Serializable
-private data class GetHostOnboardingLink(
-    val userId: String,
-    @EncodeDefault val command: String = "get_host_onboarding_link",
-)
-
-@Serializable
-@OptIn(ExperimentalTime::class)
-private data class CreateAccountResponse(
+private data class StripeOnboardingLinkResponseDto(
     val onboardingUrl: String,
-    val expiresAt: Long,
-) {
-    fun getExpirationDate(): String {
-        return Instant.fromEpochSeconds(expiresAt).toString()
-    }
-}
+    val expiresAt: Long? = null,
+)
 
 @Serializable
 data class PurchaseIntent(
@@ -274,24 +208,7 @@ data class FeeBreakdown(
 )
 
 @Serializable
-@OptIn(ExperimentalSerializationApi::class)
-data class RefundApiRequest(
-    @EncodeDefault val command: String = "refund_payment",
-    val isTournament: Boolean,
-    val userId: String,
-    val eventId: String,
-    val reason: String,
-)
-
-@Serializable
-@OptIn(ExperimentalSerializationApi::class)
-data class RefundFullEvent(
-    @EncodeDefault val command: String = "refund_all_payments",
-    val eventId: String,
-    val isTournament: Boolean,
-)
-
-@Serializable
+@OptIn(ExperimentalTime::class)
 data class RefundResponse(
     val refundId: String? = null,
     val success: Boolean? = null,

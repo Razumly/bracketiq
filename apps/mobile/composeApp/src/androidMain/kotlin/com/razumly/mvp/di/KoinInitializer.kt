@@ -14,8 +14,6 @@ actual class KoinInitializer(
                 MVPRepositoryModule,
                 permissionsControllerModule,
                 locationTrackerModule,
-                clientModule,
-                appwriteModule,
                 roomDBModule,
                 componentModule,
                 mapComponentModule,

@@ -116,8 +116,8 @@ class IOSNativeViewFactory: NativeViewFactory {
         
     func presentStripePaymentSheet(
         publishableKey: String,
-        customerId: String,
-        ephemeralKey: String,
+        customerId: String?,
+        ephemeralKey: String?,
         paymentIntent: String,
         onPaymentResult: @escaping (PaymentResult) -> Void
     ) {
@@ -126,7 +126,9 @@ class IOSNativeViewFactory: NativeViewFactory {
         
         var configuration = PaymentSheet.Configuration()
         configuration.merchantDisplayName = "MVP"
-        configuration.customer = .init(id: customerId, ephemeralKeySecret: ephemeralKey)
+        if let customerId = customerId, let ephemeralKey = ephemeralKey {
+            configuration.customer = .init(id: customerId, ephemeralKeySecret: ephemeralKey)
+        }
         configuration.allowsDelayedPaymentMethods = true
         
         let paymentSheet = PaymentSheet(

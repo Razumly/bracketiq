@@ -3,7 +3,6 @@ package com.razumly.mvp.core.util
 import com.razumly.mvp.core.data.dataTypes.Bounds
 import dev.icerock.moko.geo.LatLng
 import dev.icerock.moko.geo.LocationTracker
-import io.appwrite.models.Row
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.Json
@@ -16,10 +15,6 @@ import kotlin.math.sin
 
 fun Int.ceilDiv(other: Int): Int {
     return this.floorDiv(other) + this.rem(other).sign.absoluteValue
-}
-
-fun <T, R> Row<T>.convert(converter: (T) -> R): Row<R> {
-    return Row(id, sequence, tableId, databaseId, createdAt, updatedAt, permissions, converter(data))
 }
 
 val emailAddressRegex = Regex(
@@ -86,5 +81,3 @@ expect object Platform {
     val name: String
     val isIOS: Boolean
 }
-
-expect val projectId: String

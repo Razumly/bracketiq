@@ -5,7 +5,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.core.net.toUri
 import com.razumly.mvp.MvpApp
-import io.appwrite.models.InputFile
+import com.razumly.mvp.core.network.MvpUploadFile
 import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
 
 private fun uriToByteArray(context: Context, uri: Uri): ByteArray {
@@ -23,7 +23,7 @@ private fun getFileNameFromUri(context: Context, uri: Uri): String {
     } ?: "image_${System.currentTimeMillis()}.jpg"
 }
 
-actual fun convertPhotoResultToInputFile(photoResult: GalleryPhotoResult): InputFile {
+actual fun convertPhotoResultToUploadFile(photoResult: GalleryPhotoResult): MvpUploadFile {
     val context = MvpApp.applicationContext()
 
     val uri = photoResult.uri.toUri()
@@ -31,9 +31,5 @@ actual fun convertPhotoResultToInputFile(photoResult: GalleryPhotoResult): Input
     val fileName = getFileNameFromUri(context, uri)
     val mimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
 
-    return InputFile.fromBytes(
-        bytes = bytes,
-        filename = fileName,
-        mimeType = mimeType
-    )
+    return MvpUploadFile(bytes = bytes, filename = fileName, mimeType = mimeType)
 }

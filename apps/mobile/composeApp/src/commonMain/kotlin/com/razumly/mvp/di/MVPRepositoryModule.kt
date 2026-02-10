@@ -25,7 +25,7 @@ import org.koin.dsl.module
 
 val MVPRepositoryModule = module {
     single {
-        EventRepository(get(), get(), get(), get(), get(), get())
+        EventRepository(get(), get(), get(), get())
     } bind IEventRepository::class
     single {
         FieldRepository(get(), get())
@@ -37,21 +37,19 @@ val MVPRepositoryModule = module {
         UserRepository(get(), get(), get(), get())
     } bind IUserRepository::class
     single {
-        MatchRepository(get(), get(), get(), get())
+        MatchRepository(get(), get())
     } bind IMatchRepository::class
     single {
-        PushNotificationsRepository(get(), get(), get())
+        PushNotificationsRepository(get())
     } bind IPushNotificationsRepository::class
     single {
         MessageRepository(get(), get())
     } bind IMessageRepository::class
     single {
-        ChatGroupRepository(get(), get(), get(), get(), get(), get())
+        ChatGroupRepository(get(), get(), get(), get())
     } bind IChatGroupRepository::class
     single {
-        BillingRepository(
-            get(), get(), get(), get(), get()
-        )
+        BillingRepository(get(), get(), get(), get())
     } bind IBillingRepository::class
     single {
         ImagesRepository(

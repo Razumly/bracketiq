@@ -1,7 +1,7 @@
 // PhotoResultConverter.ios.kt (iosMain)
 package com.razumly.mvp.core.presentation.util
 
-import io.appwrite.models.InputFile
+import com.razumly.mvp.core.network.MvpUploadFile
 import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.addressOf
@@ -12,7 +12,7 @@ import platform.Foundation.dataWithContentsOfURL
 import platform.Foundation.getBytes
 import kotlin.time.Clock
 
-actual fun convertPhotoResultToInputFile(photoResult: GalleryPhotoResult): InputFile {
+actual fun convertPhotoResultToUploadFile(photoResult: GalleryPhotoResult): MvpUploadFile {
     val fileName = photoResult.fileName ?: "image_${Clock.System.now().toEpochMilliseconds()}.jpg"
     val mimeType = when {
         fileName.endsWith(".png", ignoreCase = true) -> "image/png"
@@ -22,11 +22,7 @@ actual fun convertPhotoResultToInputFile(photoResult: GalleryPhotoResult): Input
 
     val byteArray = convertUriToByteArray(photoResult.uri!!)
 
-    return InputFile.fromBytes(
-        bytes = byteArray,
-        filename = fileName,
-        mimeType = mimeType
-    )
+    return MvpUploadFile(bytes = byteArray, filename = fileName, mimeType = mimeType)
 }
 
 @OptIn(ExperimentalForeignApi::class)

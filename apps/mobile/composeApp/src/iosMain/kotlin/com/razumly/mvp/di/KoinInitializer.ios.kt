@@ -24,12 +24,10 @@ actual class KoinInitializer : SynchronizedObject() {
                                 permissionsControllerModule,
                                 locationTrackerModule,
                                 roomDBModule,
-                                clientModule,
                                 componentModule,
                                 datastoreModule,
                                 currentUserDataSourceModule,
                                 networkModule,
-                                appwriteModule,
                                 mapComponentModule
                             )
                         }
