@@ -131,6 +131,7 @@ val componentModule = module {
             componentContext = componentContext,
             userRepository = get(),
             billingRepository = get(),
+            teamRepository = get(),
             navigationHandler = navHandler,
         )
     }

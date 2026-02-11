@@ -25,6 +25,7 @@ import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
 import com.razumly.mvp.core.data.repositories.IImagesRepository
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
+import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
@@ -40,6 +41,7 @@ import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.eventDetail.data.IMatchRepository
 import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
+import io.github.aakira.napier.Napier
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
@@ -92,6 +94,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val editableRounds: StateFlow<List<List<MatchWithRelations?>>>
     val showTeamSelectionDialog: StateFlow<TeamSelectionDialogState?>
     val showMatchEditDialog: StateFlow<MatchEditDialogState?>
+    val textSignaturePrompt: StateFlow<TextSignaturePromptState?>
     val eventImageIds: StateFlow<List<String>>
 
 
@@ -133,6 +136,8 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun showMatchEditDialog(match: MatchWithRelations)
     fun dismissMatchEditDialog()
     fun updateMatchFromDialog(updatedMatch: MatchWithRelations)
+    fun confirmTextSignature()
+    fun dismissTextSignature()
     fun onUploadSelected(photo: GalleryPhotoResult)
     fun deleteImage(imageId: String)
     fun sendNotification(title: String, message: String)
@@ -146,6 +151,12 @@ data class MatchEditDialogState(
     val match: MatchWithRelations,
     val teams: List<TeamWithPlayers>,
     val fields: List<FieldWithMatches>
+)
+
+data class TextSignaturePromptState(
+    val step: SignStep,
+    val currentStep: Int,
+    val totalSteps: Int,
 )
 
 enum class TeamPosition { TEAM1, TEAM2, REF }
@@ -363,6 +374,14 @@ class DefaultEventDetailComponent(
     private val _showMatchEditDialog = MutableStateFlow<MatchEditDialogState?>(null)
     override val showMatchEditDialog = _showMatchEditDialog.asStateFlow()
 
+    private val _textSignaturePrompt = MutableStateFlow<TextSignaturePromptState?>(null)
+    override val textSignaturePrompt = _textSignaturePrompt.asStateFlow()
+
+    private var pendingSignatureSteps: List<SignStep> = emptyList()
+    private var pendingSignatureStepIndex = 0
+    private var pendingPostSignatureAction: (suspend () -> Unit)? = null
+    private val completedSignatureTemplateIds = mutableSetOf<String>()
+
     private val shareServiceProvider = ShareServiceProvider()
 
     init {
@@ -516,6 +535,23 @@ class DefaultEventDetailComponent(
 
     override fun joinEvent() {
         scope.launch {
+            runActionAfterRequiredSigning {
+                executeJoinEvent()
+            }
+        }
+    }
+
+    override fun joinEventAsTeam(team: TeamWithPlayers) {
+        scope.launch {
+            _usersTeam.value = team
+            runActionAfterRequiredSigning {
+                executeJoinEventAsTeam(team)
+            }
+        }
+    }
+
+    private suspend fun executeJoinEvent() {
+        try {
             if (selectedEvent.value.price == 0.0 || isEventFull.value || selectedEvent.value.teamSignup) {
                 loadingHandler.showLoading("Joining Event ...")
                 eventRepository.addCurrentUserToEvent(selectedEvent.value).onSuccess {
@@ -535,14 +571,13 @@ class DefaultEventDetailComponent(
                         _errorState.value = ErrorMessage(it.message ?: "")
                     }
             }
+        } finally {
             loadingHandler.hideLoading()
         }
     }
 
-    override fun joinEventAsTeam(team: TeamWithPlayers) {
-        scope.launch {
-            _usersTeam.value = team
-
+    private suspend fun executeJoinEventAsTeam(team: TeamWithPlayers) {
+        try {
             if (selectedEvent.value.price == 0.0 || isEventFull.value) {
                 loadingHandler.showLoading("Joining Event ...")
                 eventRepository.addTeamToEvent(selectedEvent.value, team.team).onSuccess {
@@ -562,11 +597,90 @@ class DefaultEventDetailComponent(
                         _errorState.value = ErrorMessage(it.message ?: "")
                     }
             }
+        } finally {
             loadingHandler.hideLoading()
         }
     }
 
+    private suspend fun runActionAfterRequiredSigning(onReady: suspend () -> Unit) {
+        billingRepository.getRequiredSignLinks(selectedEvent.value.id).onFailure { throwable ->
+            Napier.e("Failed to load required signing documents.", throwable)
+            _errorState.value = ErrorMessage(
+                "Unable to load required documents: ${throwable.message ?: "Unknown error"}"
+            )
+        }.onSuccess { allSteps ->
+            val pendingSteps = allSteps.filterNot { step ->
+                completedSignatureTemplateIds.contains(step.templateId)
+            }
+
+            if (pendingSteps.isEmpty()) {
+                onReady()
+                return@onSuccess
+            }
+
+            pendingSignatureSteps = pendingSteps
+            pendingSignatureStepIndex = 0
+            pendingPostSignatureAction = onReady
+            processNextSignatureStep()
+        }
+    }
+
+    private suspend fun processNextSignatureStep() {
+        val currentStep = pendingSignatureSteps.getOrNull(pendingSignatureStepIndex)
+        if (currentStep == null) {
+            val action = pendingPostSignatureAction
+            clearPendingSignatureFlow()
+            action?.invoke()
+            return
+        }
+
+        if (currentStep.isTextStep()) {
+            _textSignaturePrompt.value = TextSignaturePromptState(
+                step = currentStep,
+                currentStep = pendingSignatureStepIndex + 1,
+                totalSteps = pendingSignatureSteps.size
+            )
+            return
+        }
+
+        val signingUrl = currentStep.resolvedSigningUrl()
+        if (signingUrl.isNullOrBlank()) {
+            clearPendingSignatureFlow()
+            _errorState.value = ErrorMessage(
+                "A required document is missing a signing URL."
+            )
+            return
+        }
+
+        val openResult = urlHandler?.openUrlInWebView(signingUrl)
+            ?: Result.failure(IllegalStateException("Web view is unavailable."))
+
+        openResult.onFailure { throwable ->
+            Napier.e("Failed to open signing URL.", throwable)
+            _errorState.value = ErrorMessage(
+                "Unable to open signing document: ${throwable.message ?: "Unknown error"}"
+            )
+        }.onSuccess {
+            _errorState.value = ErrorMessage(
+                "Please complete document signing, then tap Join/Purchase again."
+            )
+        }
+
+        clearPendingSignatureFlow()
+    }
+
+    private fun clearPendingSignatureFlow() {
+        pendingSignatureSteps = emptyList()
+        pendingSignatureStepIndex = 0
+        pendingPostSignatureAction = null
+        _textSignaturePrompt.value = null
+    }
+
     private suspend fun processPurchaseIntent(intent: PurchaseIntent) {
+        if (!ensureDocumentSignedBeforePurchase(intent)) {
+            return
+        }
+
         intent.feeBreakdown?.let { feeBreakdown ->
             showFeeBreakdown(feeBreakdown, onConfirm = {
                 scope.launch {
@@ -578,6 +692,34 @@ class DefaultEventDetailComponent(
         } ?: run {
             showPaymentSheet(intent)
         }
+    }
+
+    private suspend fun ensureDocumentSignedBeforePurchase(intent: PurchaseIntent): Boolean {
+        if (!intent.isSignatureRequired() || intent.isSignatureCompleted()) {
+            return true
+        }
+
+        val signingUrl = intent.resolvedSigningUrl()
+        if (signingUrl.isNullOrBlank()) {
+            Napier.w("Purchase intent requires signature but did not include a signing URL.")
+            return true
+        }
+
+        val openResult = urlHandler?.openUrlInWebView(signingUrl)
+            ?: Result.failure(IllegalStateException("Web view is unavailable."))
+
+        openResult.onFailure { throwable ->
+            Napier.e("Failed to open signing URL before purchase.", throwable)
+            _errorState.value = ErrorMessage(
+                "Unable to open signing document: ${throwable.message ?: "Unknown error"}"
+            )
+        }.onSuccess {
+            _errorState.value = ErrorMessage(
+                "Please complete document signing, then tap Purchase Ticket again."
+            )
+        }
+
+        return false
     }
 
     private suspend fun showPaymentSheet(intent: PurchaseIntent) {
@@ -832,6 +974,41 @@ class DefaultEventDetailComponent(
     override fun confirmFeeBreakdown() {
         pendingPaymentAction?.invoke()
         dismissFeeBreakdown()
+    }
+
+    override fun confirmTextSignature() {
+        val prompt = _textSignaturePrompt.value ?: return
+
+        scope.launch {
+            loadingHandler.showLoading("Recording signature ...")
+
+            val documentId = prompt.step.resolvedDocumentId()
+                ?: "mobile-text-${prompt.step.templateId}-${Clock.System.now().toEpochMilliseconds()}"
+
+            billingRepository.recordSignature(
+                eventId = selectedEvent.value.id,
+                templateId = prompt.step.templateId,
+                documentId = documentId,
+                type = prompt.step.type,
+            ).onFailure { throwable ->
+                Napier.e("Failed to record signature.", throwable)
+                _errorState.value = ErrorMessage(
+                    throwable.message ?: "Failed to record signature."
+                )
+            }.onSuccess {
+                completedSignatureTemplateIds += prompt.step.templateId
+                _textSignaturePrompt.value = null
+                pendingSignatureStepIndex += 1
+                processNextSignatureStep()
+            }
+
+            loadingHandler.hideLoading()
+        }
+    }
+
+    override fun dismissTextSignature() {
+        clearPendingSignatureFlow()
+        _errorState.value = ErrorMessage("Document signing canceled.")
     }
 
     override fun startEditingMatches() {

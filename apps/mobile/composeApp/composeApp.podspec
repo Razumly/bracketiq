@@ -10,6 +10,7 @@ Pod::Spec.new do |spec|
     spec.libraries                = 'c++'
     spec.ios.deployment_target    = '15.3'
     spec.dependency 'GooglePlaces'
+    spec.dependency 'GoogleSignIn'
     spec.dependency 'IQKeyboardManagerSwift'
                 
     if !Dir.exist?('build/cocoapods/framework/ComposeApp.framework') || Dir.empty?('build/cocoapods/framework/ComposeApp.framework')

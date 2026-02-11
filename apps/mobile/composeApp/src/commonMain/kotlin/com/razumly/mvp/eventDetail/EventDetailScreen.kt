@@ -11,12 +11,15 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -31,6 +34,7 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonColors
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -118,6 +122,7 @@ fun EventDetailScreen(
     val editableMatches by component.editableMatches.collectAsState()
     val showTeamDialog by component.showTeamSelectionDialog.collectAsState()
     val showMatchEditDialog by component.showMatchEditDialog.collectAsState()
+    val textSignaturePrompt by component.textSignaturePrompt.collectAsState()
     val eventImageIds by component.eventImageIds.collectAsState()
 
     var isRefundAutomatic by remember { mutableStateOf(false) }
@@ -669,6 +674,14 @@ fun EventDetailScreen(
                     })
             }
 
+            textSignaturePrompt?.let { prompt ->
+                TextSignatureDialog(
+                    prompt = prompt,
+                    onConfirm = component::confirmTextSignature,
+                    onDismiss = component::dismissTextSignature,
+                )
+            }
+
             if (showFeeBreakdown && currentFeeBreakdown != null) {
                 FeeBreakdownDialog(
                     feeBreakdown = currentFeeBreakdown!!,
@@ -1048,6 +1061,57 @@ private fun Double.formatPoints(precisionOverride: Int?): String {
 private const val DEFAULT_POINTS_FOR_WIN = 3
 private const val DEFAULT_POINTS_FOR_DRAW = 1
 private const val DEFAULT_POINTS_FOR_LOSS = 0
+
+@Composable
+fun TextSignatureDialog(
+    prompt: TextSignaturePromptState,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var accepted by remember(prompt.step.templateId) { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(prompt.step.title ?: "Required Document Signature") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = "Document ${prompt.currentStep} of ${prompt.totalSteps}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = prompt.step.content ?: "No document text was provided.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 120.dp, max = 320.dp)
+                        .verticalScroll(rememberScrollState())
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Checkbox(checked = accepted, onCheckedChange = { accepted = it })
+                    Text("I have read and agree to this document.")
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                enabled = accepted
+            ) {
+                Text("Accept and Continue")
+            }
+        },
+        dismissButton = {
+            Button(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
 
 @Composable
 fun RefundReasonDialog(

@@ -5,11 +5,16 @@ import android.content.Context
 import com.mmk.kmpnotifier.notification.NotifierManager
 import com.mmk.kmpnotifier.notification.configuration.NotificationPlatformConfiguration
 import com.razumly.mvp.di.KoinInitializer
+import io.github.aakira.napier.DebugAntilog
 import io.github.aakira.napier.Napier
 
 class MvpApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        if (BuildConfig.DEBUG) {
+            Napier.base(DebugAntilog())
+            Napier.d("Napier DebugAntilog initialized for Android debug builds", tag = "Logging")
+        }
         instance = this
         NotifierManager.initialize(
             configuration = NotificationPlatformConfiguration.Android(

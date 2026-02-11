@@ -32,6 +32,7 @@ import com.razumly.mvp.core.presentation.composables.EmailSignInButton
 import com.razumly.mvp.core.presentation.composables.GoogleSignInButton
 import com.razumly.mvp.core.presentation.composables.PlatformTextField
 import com.razumly.mvp.core.presentation.composables.rememberPlatformFocusManager
+import io.github.aakira.napier.Napier
 
 @Composable
 fun AuthScreenBase(component: AuthComponent, onOauth2: () -> Unit?) {
@@ -71,6 +72,12 @@ fun AuthScreenBase(component: AuthComponent, onOauth2: () -> Unit?) {
         userNameFocusManager.setOnNextAction { emailFocusManager.requestFocus() }
         emailFocusManager.setOnNextAction { passwordFocusManager.requestFocus() }
         passwordFocusManager.setOnDoneAction { handleSubmit() }
+    }
+
+    LaunchedEffect(loginState) {
+        if (loginState is LoginState.Error) {
+            Napier.e("AuthScreen error state: ${(loginState as LoginState.Error).message}")
+        }
     }
 
     Box(

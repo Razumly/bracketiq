@@ -9,6 +9,7 @@ import com.razumly.mvp.core.network.AuthTokenStore
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.dto.AuthResponseDto
 import com.razumly.mvp.core.network.dto.EnsureUserByEmailRequestDto
+import com.razumly.mvp.core.network.dto.GoogleMobileLoginRequestDto
 import com.razumly.mvp.core.network.dto.LoginRequestDto
 import com.razumly.mvp.core.network.dto.OkResponseDto
 import com.razumly.mvp.core.network.dto.PasswordRequestDto
@@ -121,6 +122,29 @@ class UserRepository(
 
         val profile = res.profile?.toUserDataOrNull() ?: fetchUserProfile(account.id)
             ?: error("Login response missing profile")
+
+        databaseService.getUserDataDao.upsertUserData(profile)
+        currentUserDataSource.saveUserId(profile.id)
+        _currentUser.value = Result.success(profile)
+        profile
+    }
+
+    suspend fun loginWithGoogleIdToken(idToken: String): Result<UserData> = runCatching {
+        val res = api.post<GoogleMobileLoginRequestDto, AuthResponseDto>(
+            path = "api/auth/google/mobile",
+            body = GoogleMobileLoginRequestDto(idToken = idToken),
+        )
+
+        val token = res.token?.takeIf(String::isNotBlank)
+            ?: error("Google login response missing token")
+        tokenStore.set(token)
+
+        val account = res.user?.toAuthAccountOrNull()
+            ?: error("Google login response missing user")
+        _currentAccount.value = Result.success(account)
+
+        val profile = res.profile?.toUserDataOrNull() ?: fetchUserProfile(account.id)
+            ?: error("Google login response missing profile")
 
         databaseService.getUserDataDao.upsertUserData(profile)
         currentUserDataSource.saveUserId(profile.id)

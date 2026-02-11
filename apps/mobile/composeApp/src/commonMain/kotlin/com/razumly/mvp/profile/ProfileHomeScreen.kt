@@ -1,95 +1,185 @@
 package com.razumly.mvp.profile
 
-import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
-import com.razumly.mvp.core.presentation.composables.StripeButton
-import com.razumly.mvp.core.util.LocalLoadingHandler
-import com.razumly.mvp.core.util.LocalPopupHandler
+import com.razumly.mvp.icons.MVPIcons
+import com.razumly.mvp.icons.ProfileActionChildren
+import com.razumly.mvp.icons.ProfileActionClearCache
+import com.razumly.mvp.icons.ProfileActionDetails
+import com.razumly.mvp.icons.ProfileActionEvents
+import com.razumly.mvp.icons.ProfileActionMemberships
+import com.razumly.mvp.icons.ProfileActionPaymentPlans
+import com.razumly.mvp.icons.ProfileActionPayments
+import com.razumly.mvp.icons.ProfileActionRefunds
+import com.razumly.mvp.icons.ProfileActionTeams
+
+private data class ProfileAction(
+    val title: String,
+    val description: String,
+    val icon: ImageVector,
+    val onClick: () -> Unit,
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileHomeScreen(component: ProfileComponent) {
-    val popupHandler = LocalPopupHandler.current
     val navPadding = LocalNavBarPadding.current
-    val loadingHandler = LocalLoadingHandler.current
-
-    LaunchedEffect(Unit) {
-        component.setLoadingHandler(loadingHandler)
+    val actions = remember(component) {
+        listOf(
+            ProfileAction(
+                title = "Profile Details",
+                description = "Update profile and password",
+                icon = MVPIcons.ProfileActionDetails,
+                onClick = component::navigateToProfileDetails,
+            ),
+            ProfileAction(
+                title = "Payments",
+                description = "Stripe account actions",
+                icon = MVPIcons.ProfileActionPayments,
+                onClick = component::navigateToPayments,
+            ),
+            ProfileAction(
+                title = "Payment Plans",
+                description = "Installment plan section",
+                icon = MVPIcons.ProfileActionPaymentPlans,
+                onClick = component::navigateToPaymentPlans,
+            ),
+            ProfileAction(
+                title = "Memberships",
+                description = "Recurring membership section",
+                icon = MVPIcons.ProfileActionMemberships,
+                onClick = component::navigateToMemberships,
+            ),
+            ProfileAction(
+                title = "Children",
+                description = "Linked child profiles",
+                icon = MVPIcons.ProfileActionChildren,
+                onClick = component::navigateToChildren,
+            ),
+            ProfileAction(
+                title = "Teams",
+                description = "Team management",
+                icon = MVPIcons.ProfileActionTeams,
+                onClick = component::manageTeams,
+            ),
+            ProfileAction(
+                title = "Events",
+                description = "Event management",
+                icon = MVPIcons.ProfileActionEvents,
+                onClick = component::manageEvents,
+            ),
+            ProfileAction(
+                title = "Refund Requests",
+                description = "Refund moderation",
+                icon = MVPIcons.ProfileActionRefunds,
+                onClick = component::manageRefunds,
+            ),
+            ProfileAction(
+                title = "Clear Cache",
+                description = "Reset local cached data",
+                icon = MVPIcons.ProfileActionClearCache,
+                onClick = component::clearCache,
+            ),
+        )
     }
 
-    LaunchedEffect(Unit) {
-        component.errorState.collect { error ->
-            if (error != null) {
-                popupHandler.showPopup(error)
+    Scaffold(
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text("Profile") },
+            )
+        },
+    ) { innerPadding ->
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .padding(navPadding),
+            contentPadding = PaddingValues(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            items(actions) { action ->
+                ProfileActionCard(action = action)
+            }
+
+            item(span = { GridItemSpan(2) }) {
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = component::onLogout,
+                ) {
+                    Text("Logout")
+                }
             }
         }
     }
+}
 
-    Scaffold(topBar = {
-        CenterAlignedTopAppBar(
-            title = { Text("Profile") },
-        )
-    }) { innerPadding ->
-        Column(
-            modifier = Modifier.fillMaxSize().padding(innerPadding).padding(navPadding)
-                .padding(bottom = 16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+@Composable
+private fun ProfileActionCard(action: ProfileAction) {
+    Card(
+        onClick = action.onClick,
+        modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(1f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        androidx.compose.foundation.layout.Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
         ) {
-
-            // Add Profile Details button
-            Button(onClick = { component.navigateToProfileDetails() }) {
-                Text("Edit Profile Details")
-            }
-
-            Button(onClick = { component.manageTeams() }) {
-                Text("Manage Teams")
-            }
-
-            Button(
-                onClick = { component.clearCache() },
-            ) {
-                Text("Clear Cache")
-            }
-
-            Button(
-                onClick = { component.manageEvents() },
-            ) {
-                Text("Manage Events")
-            }
-
-            StripeButton(
-                onClick = { component.manageStripeAccountOnboarding() },
-                component,
-                "Manage Stripe Onboarding",
+            Icon(
+                imageVector = action.icon,
+                contentDescription = action.title,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(top = 2.dp),
             )
 
-            Button(
-                onClick = { component.manageStripeAccount() },
-            ) { Text("Stripe Dashboard") }
+            Text(
+                text = action.title,
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
 
-            Button(
-                onClick = { component.manageRefunds() },
-            ) {
-                Text("Manage Refunds")
-            }
-
-            Button(
-                onClick = { component.onLogout() },
-            ) {
-                Text("Logout")
-            }
+            Text(
+                text = action.description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }

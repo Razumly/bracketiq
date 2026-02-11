@@ -3,6 +3,7 @@ import ComposeApp
 import FirebaseCore
 import FirebaseMessaging
 import GoogleMaps
+import GoogleSignIn
 import IQKeyboardManagerSwift
 
 class AppDelegate: NSObject, UIApplicationDelegate {
@@ -53,6 +54,10 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     }
     
     func application(_ application: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey : Any] = [:]) -> Bool {
+        if GIDSignIn.sharedInstance.handle(url) {
+            return true
+        }
+
         AppDelegate.pendingDeepLink = url
         
         NotificationCenter.default.post(name: .deepLinkReceived, object: url)
@@ -105,6 +110,9 @@ struct iOSApp: App {
                     }
                 }
                 .onOpenURL { url in
+                    if GIDSignIn.sharedInstance.handle(url) {
+                        return
+                    }
                     updateDeepLink(url)
                     SharedWebAuthComponent.companion.handleIncomingCookie(url: url.absoluteString)
                 }

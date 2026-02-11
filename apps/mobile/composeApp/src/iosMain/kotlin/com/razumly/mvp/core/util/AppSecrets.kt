@@ -25,6 +25,18 @@ object AppSecrets {
             valueKey = "mvpProjectId"
         ) ?: ""
 
+    // Prefer explicit app secret, fall back to GoogleService-Info.plist when present.
+    val googleMobileIosClientId: String
+        get() = getStringResource(
+            filename = "Secrets",
+            fileType = "plist",
+            valueKey = "googleMobileIosClientId"
+        ) ?: getStringResource(
+            filename = "GoogleService-Info",
+            fileType = "plist",
+            valueKey = "CLIENT_ID"
+        ) ?: ""
+
     // Next.js API base URL, e.g. "http://localhost:3000" for the iOS simulator.
     val mvpApiBaseUrl: String
         get() = getStringResource(

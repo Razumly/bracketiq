@@ -73,14 +73,19 @@ class DefaultAuthComponent(
 
     override fun onLogin(email: String, password: String) {
         scope.launch {
+            val maskedEmail = maskEmail(email)
+            Napier.d("Auth: email login started for $maskedEmail")
             _loginState.value = LoginState.Loading
-            userRepository.login(email, password).onFailure {
-                _loginState.value = LoginState.Error(it.message.toString())
+            userRepository.login(email, password).onFailure { throwable ->
+                logAuthFailure("email login", throwable)
+                _loginState.value = LoginState.Error(throwable.message.toString())
             }.onSuccess {
                 val currentUser = userRepository.currentUser.value.getOrNull()
                 if (currentUser?.id.isNullOrBlank()) {
+                    Napier.w("Auth: email login returned user with blank id for $maskedEmail")
                     _loginState.value = LoginState.Error("Invalid email or password")
                 } else {
+                    Napier.i("Auth: email login succeeded for userId=${currentUser?.id}")
                     _loginState.value = LoginState.Success
                     // Navigation will be handled by RootComponent automatically
                 }
@@ -90,11 +95,14 @@ class DefaultAuthComponent(
 
     override fun onLogout() {
         scope.launch {
+            Napier.d("Auth: logout started")
             userRepository.logout()
                 .onSuccess {
+                    Napier.i("Auth: logout succeeded")
                     _loginState.value = LoginState.Initial
                     navigationHandler.navigateToLogin()
-                }.onFailure {
+                }.onFailure { throwable ->
+                    logAuthFailure("logout", throwable)
                     _loginState.value = LoginState.Error("Failed to logout")
                 }
         }
@@ -113,13 +121,27 @@ class DefaultAuthComponent(
         }
 
         scope.launch {
+            val maskedEmail = maskEmail(email)
+            Napier.d("Auth: signup started for $maskedEmail")
             _loginState.value = LoginState.Loading
             userRepository.createNewUser(email, password, firstName, lastName, userName)
                 .onSuccess {
+                    Napier.i("Auth: signup succeeded for $maskedEmail")
                     _loginState.value = LoginState.Success
-                }.onFailure {
+                }.onFailure { throwable ->
+                    logAuthFailure("signup", throwable)
                     _loginState.value = LoginState.Error("Failed to signup")
                 }
         }
+    }
+
+    private fun logAuthFailure(action: String, throwable: Throwable) {
+        Napier.e("Auth: $action failed: ${throwable.message}", throwable)
+    }
+
+    private fun maskEmail(email: String): String {
+        val atIndex = email.indexOf('@')
+        if (atIndex <= 1) return "***"
+        return "${email.first()}***${email.substring(atIndex)}"
     }
 }

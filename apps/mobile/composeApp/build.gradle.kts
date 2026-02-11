@@ -60,6 +60,7 @@ kotlin {
         ios.deploymentTarget = "15.3"
         podfile = project.file("../iosApp/Podfile")
 
+        pod("GoogleSignIn")
         pod("GooglePlaces")
         pod("IQKeyboardManagerSwift") {
             extraOpts += listOf("-compiler-option", "-fmodules")
@@ -147,6 +148,9 @@ kotlin {
                 implementation(libs.kotlinx.coroutines.android)
                 implementation(libs.androidx.navigation.common.ktx)
                 implementation(libs.androidx.activity.ktx)
+                implementation(libs.androidx.credentials)
+                implementation(libs.androidx.credentials.play.services.auth)
+                implementation(libs.googleid)
                 implementation("com.google.auth:google-auth-library-oauth2-http:1.37.1") {
                     exclude(group = "org.apache.httpcomponents", module = "httpclient")
                     exclude(group = "org.apache.httpcomponents", module = "httpcore")
