@@ -6,7 +6,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -119,6 +118,7 @@ fun ScheduleView(
     ) {
         HorizontalCalendar(
             state = calendarState,
+            modifier = Modifier.fillMaxWidth(),
             monthHeader = { calendarMonth ->
                 val currentMonth = calendarMonth.yearMonth
                 SimpleCalendarTitle(
@@ -144,7 +144,6 @@ fun ScheduleView(
                     }
                 )
             },
-            contentPadding = PaddingValues(horizontal = 16.dp),
             dayContent = { day ->
                 ScheduleDay(
                     day = day,
@@ -209,6 +208,7 @@ private fun ScheduleDay(
 
     Box(
         modifier = Modifier
+            .fillMaxWidth()
             .padding(6.dp)
             .clip(RoundedCornerShape(12.dp))
             .clickable(enabled = enabled, onClick = onClick)

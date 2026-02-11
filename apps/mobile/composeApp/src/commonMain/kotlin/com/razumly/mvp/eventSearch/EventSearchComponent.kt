@@ -7,6 +7,8 @@ import com.arkivanov.essenty.backhandler.BackCallback
 import com.arkivanov.essenty.instancekeeper.InstanceKeeper
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.Organization
+import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.util.ErrorMessage
@@ -27,6 +29,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
@@ -44,6 +47,8 @@ interface EventSearchComponent {
     val isLoadingMore: StateFlow<Boolean>
     val hasMoreEvents: StateFlow<Boolean>
     val filter: StateFlow<EventFilter>
+    val organizations: StateFlow<List<Organization>>
+    val rentals: StateFlow<List<Organization>>
 
     val events: StateFlow<List<Event>>
     val selectedEvent: StateFlow<Event?>
@@ -61,6 +66,7 @@ interface EventSearchComponent {
 class DefaultEventSearchComponent(
     componentContext: ComponentContext,
     private val eventRepository: IEventRepository,
+    private val billingRepository: IBillingRepository,
     eventId: String?,
     override val locationTracker: LocationTracker,
     private val navigationHandler: INavigationHandler
@@ -93,6 +99,11 @@ class DefaultEventSearchComponent(
 
     private val _filter = MutableStateFlow(EventFilter())
     override val filter = _filter.asStateFlow()
+    private val _organizations = MutableStateFlow<List<Organization>>(emptyList())
+    override val organizations: StateFlow<List<Organization>> = _organizations.asStateFlow()
+    override val rentals: StateFlow<List<Organization>> = _organizations
+        .map { organizations -> organizations.filter { organization -> organization.fieldIds.isNotEmpty() } }
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     private lateinit var loadingHandler: LoadingHandler
 
@@ -185,6 +196,37 @@ class DefaultEventSearchComponent(
                     }
                 }
             }
+        }
+
+        scope.launch {
+            events
+                .map { currentEvents ->
+                    currentEvents.mapNotNull { event -> event.organizationId?.trim() }
+                        .filter(String::isNotBlank)
+                        .distinct()
+                        .sorted()
+                }
+                .distinctUntilChanged()
+                .collect { organizationIds ->
+                    if (organizationIds.isEmpty()) {
+                        _organizations.value = emptyList()
+                        return@collect
+                    }
+
+                    billingRepository.getOrganizationsByIds(organizationIds)
+                        .onSuccess { organizations ->
+                            val organizationsById = organizations.associateBy { organization -> organization.id }
+                            _organizations.value = organizationIds.mapNotNull { organizationId ->
+                                organizationsById[organizationId]
+                            }.ifEmpty {
+                                organizations.sortedBy { organization -> organization.name }
+                            }
+                        }
+                        .onFailure { e ->
+                            _errorState.value =
+                                ErrorMessage("Failed to fetch organizations: ${e.message}")
+                        }
+                }
         }
     }
 

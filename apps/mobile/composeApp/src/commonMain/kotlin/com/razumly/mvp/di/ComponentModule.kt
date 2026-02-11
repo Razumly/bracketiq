@@ -100,6 +100,7 @@ val componentModule = module {
             componentContext = componentContext,
             locationTracker = get(),
             eventRepository = get(),
+            billingRepository = get(),
             eventId = eventId,
             navigationHandler = navHandler
         )

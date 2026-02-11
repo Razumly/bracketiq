@@ -21,6 +21,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -40,6 +41,24 @@ fun EventList(
     onMapClick: (Offset, Event) -> Unit,
     onEventClick: (Event) -> Unit
 ) {
+    var lastLoadRequestKey by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(lazyListState, events.size, hasMoreEvents, isLoadingMore) {
+        snapshotFlow { lazyListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
+            .collect { lastVisibleIndex ->
+                val nearListEnd = events.isNotEmpty() && lastVisibleIndex >= events.lastIndex - 2
+                val currentRequestKey = "${events.size}:${events.lastOrNull()?.id.orEmpty()}"
+                val canRequestMore =
+                    hasMoreEvents && !isLoadingMore && nearListEnd &&
+                        lastLoadRequestKey != currentRequestKey
+
+                if (canRequestMore) {
+                    lastLoadRequestKey = currentRequestKey
+                    onLoadMore()
+                }
+            }
+    }
+
     LazyColumn(
         state = lazyListState,
     ) {
@@ -73,11 +92,6 @@ fun EventList(
                 )
             }
 
-            if (index >= events.size - 3 && hasMoreEvents && !isLoadingMore) {
-                LaunchedEffect(Unit) {
-                    onLoadMore()
-                }
-            }
         }
 
         if (isLoadingMore) {
