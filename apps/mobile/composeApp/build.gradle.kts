@@ -1,6 +1,11 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
 import java.io.ByteArrayOutputStream
+import java.net.InetSocketAddress
+import java.net.URI
+import java.net.Socket
+import java.util.Properties
+import java.util.concurrent.TimeUnit
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
@@ -306,4 +311,293 @@ tasks.withType<KotlinNativeSimulatorTest>().configureEach {
     dependsOn("bootIOSSimulator")
     standalone.set(false)
     device.set(deviceName)
+}
+
+fun isPortOpen(host: String, port: Int, timeoutMs: Int = 250): Boolean {
+    return try {
+        Socket().use { socket ->
+            socket.connect(InetSocketAddress(host, port), timeoutMs)
+        }
+        true
+    } catch (_: Exception) {
+        false
+    }
+}
+
+fun loadPropertiesIfExists(file: File): Properties {
+    val props = Properties()
+    if (!file.exists()) return props
+    file.inputStream().use { props.load(it) }
+    return props
+}
+
+fun detectPackageManager(
+    backendDir: File,
+    preferred: String?,
+): String {
+    val normalizedPreferred = preferred?.trim()?.lowercase()?.takeIf { it.isNotBlank() }
+    if (normalizedPreferred != null) return normalizedPreferred
+
+    val hasPnpmLock = File(backendDir, "pnpm-lock.yaml").exists()
+    if (hasPnpmLock) return "pnpm"
+
+    val hasYarnLock = File(backendDir, "yarn.lock").exists()
+    if (hasYarnLock) return "yarn"
+
+    return "npm"
+}
+
+fun pmCommand(pm: String, isWindows: Boolean): String {
+    return if (isWindows) "$pm.cmd" else pm
+}
+
+fun toWslPath(windowsPath: String): String? {
+    // Convert "C:\foo\bar" -> "/mnt/c/foo/bar" for WSL.
+    val m = Regex("""^([A-Za-z]):\\(.*)$""").matchEntire(windowsPath) ?: return null
+    val drive = m.groupValues[1].lowercase()
+    val rest = m.groupValues[2].replace('\\', '/')
+    return "/mnt/$drive/$rest"
+}
+
+fun resolveBackendDir(project: Project): File? {
+    val fromGradleProp = project.findProperty("mvp.site.dir")?.toString()?.takeIf { it.isNotBlank() }?.let { File(it) }
+    val fromEnv = System.getenv("MVP_SITE_DIR")?.takeIf { it.isNotBlank() }?.let { File(it) }
+
+    val userHome = System.getProperty("user.home") ?: ""
+
+    val candidates = listOfNotNull(
+        fromGradleProp,
+        fromEnv,
+        // Prefer sibling checkout for a mono-workspace style setup.
+        project.rootProject.file("../mvp-site"),
+        // Common personal setups (including macOS-style path segments, but under user.home).
+        File(userHome, "Projects/MVP/mvp-site"),
+        File(userHome, "StudioProjects/mvp-site"),
+    )
+
+    return candidates.firstOrNull { dir ->
+        dir.exists() && File(dir, "package.json").exists()
+    }
+}
+
+fun resolveWslBackendDir(project: Project): String {
+    val fromGradleProp = project.findProperty("mvp.site.wsl.dir")?.toString()?.takeIf { it.isNotBlank() }
+    val fromEnv = System.getenv("MVP_SITE_WSL_DIR")?.takeIf { it.isNotBlank() }
+    return fromGradleProp ?: fromEnv ?: "~/Projects/MVP/mvp-site"
+}
+
+fun resolveWslDistro(project: Project): String? {
+    val fromGradleProp = project.findProperty("mvp.site.wsl.distro")?.toString()?.takeIf { it.isNotBlank() }
+    val fromEnv = System.getenv("MVP_SITE_WSL_DISTRO")?.takeIf { it.isNotBlank() }
+    return fromGradleProp ?: fromEnv
+}
+
+fun wslArgs(distro: String?, script: String): List<String> {
+    val args = mutableListOf("wsl.exe")
+    if (!distro.isNullOrBlank()) {
+        args.addAll(listOf("-d", distro))
+    }
+    args.addAll(listOf("--", "bash", "-c", script))
+    return args
+}
+
+fun runProcess(
+    command: List<String>,
+    timeoutSeconds: Long,
+    outAppend: File? = null,
+    errAppend: File? = null,
+): Int? {
+    val pb = ProcessBuilder(command)
+    pb.redirectOutput(outAppend?.let { ProcessBuilder.Redirect.appendTo(it) } ?: ProcessBuilder.Redirect.DISCARD)
+    pb.redirectError(errAppend?.let { ProcessBuilder.Redirect.appendTo(it) } ?: ProcessBuilder.Redirect.DISCARD)
+
+    val proc = pb.start()
+    val finished = proc.waitFor(timeoutSeconds, TimeUnit.SECONDS)
+    if (!finished) {
+        proc.destroy()
+        return null
+    }
+
+    return proc.exitValue()
+}
+
+fun resolveBackendPort(project: Project, backendPortProp: String?): Int {
+    val fromProp = backendPortProp?.toIntOrNull()?.takeIf { it > 0 }
+    if (fromProp != null) return fromProp
+
+    // Derive from MVP_API_BASE_URL when possible so one configuration drives both app and server.
+    val secrets = loadPropertiesIfExists(project.rootProject.file("secrets.properties"))
+    val defaults = loadPropertiesIfExists(project.rootProject.file("local.defaults.properties"))
+    val baseUrl = (secrets.getProperty("MVP_API_BASE_URL") ?: defaults.getProperty("MVP_API_BASE_URL"))?.trim()
+        ?.takeIf { it.isNotBlank() } ?: return 3000
+
+    return try {
+        val port = URI(baseUrl).port
+        if (port > 0) port else 3000
+    } catch (_: Exception) {
+        3000
+    }
+}
+
+val startLocalBackend = tasks.register("startLocalBackend") {
+    group = "mvp"
+    description = "Starts the local mvp-site backend (Next.js dev server) if it's not already running."
+
+    doLast {
+        val startBackend = (findProperty("mvp.startBackend")?.toString() ?: "true").toBoolean()
+        if (!startBackend) {
+            logger.lifecycle("startLocalBackend: disabled via -Pmvp.startBackend=false")
+            return@doLast
+        }
+
+        val isCi = !System.getenv("CI").isNullOrBlank() || !System.getenv("GITHUB_ACTIONS").isNullOrBlank()
+        if (isCi) {
+            logger.lifecycle("startLocalBackend: skipping on CI")
+            return@doLast
+        }
+
+        val isWindows = System.getProperty("os.name")?.lowercase()?.contains("win") == true
+
+        val backendPort = resolveBackendPort(project, findProperty("mvp.site.port")?.toString())
+        if (isPortOpen("127.0.0.1", backendPort)) {
+            logger.lifecycle("startLocalBackend: already running on http://localhost:$backendPort")
+            return@doLast
+        }
+
+        val backendDir = resolveBackendDir(project)
+
+        val logDir = layout.buildDirectory.dir("localBackend").get().asFile
+        logDir.mkdirs()
+        val outFile = File(logDir, "backend.out.log").also { it.writeText("") }
+        val errFile = File(logDir, "backend.err.log").also { it.writeText("") }
+
+        if (backendDir == null) {
+            // Many dev setups keep mvp-site under WSL (~//Projects/MVP/mvp-site). If so, start it there.
+            if (!isWindows) {
+                logger.lifecycle(
+                    "startLocalBackend: mvp-site not found; skipping. " +
+                        "Set MVP_SITE_DIR or -Pmvp.site.dir=<path-to-mvp-site>."
+                )
+                return@doLast
+            }
+
+            val wslDir = resolveWslBackendDir(project)
+            val wslDistro = resolveWslDistro(project)
+
+            val checkExit = try {
+                runProcess(
+                    command = wslArgs(wslDistro, "cd \"$wslDir\" && test -f package.json"),
+                    timeoutSeconds = 10,
+                )
+            } catch (_: Exception) {
+                null
+            }
+
+            if (checkExit != 0) {
+                logger.lifecycle(
+                    "startLocalBackend: mvp-site not found (Windows or WSL). " +
+                        "Windows: set MVP_SITE_DIR or -Pmvp.site.dir=<path-to-mvp-site>. " +
+                        "WSL: set MVP_SITE_WSL_DIR or -Pmvp.site.wsl.dir=<wsl-path>."
+                )
+                return@doLast
+            }
+
+            val nodeModulesExit = runProcess(
+                command = wslArgs(wslDistro, "cd \"$wslDir\" && test -d node_modules"),
+                timeoutSeconds = 10,
+            )
+            if (nodeModulesExit != 0) {
+                logger.lifecycle("startLocalBackend: installing backend dependencies (WSL / npm) ...")
+                runProcess(
+                    command = wslArgs(wslDistro, "cd \"$wslDir\" && npm install"),
+                    timeoutSeconds = 60 * 15,
+                    outAppend = outFile,
+                    errAppend = errFile,
+                )
+            }
+
+            logger.lifecycle(
+                "startLocalBackend: starting (WSL) in $wslDir on port $backendPort. " +
+                    "Logs: ${outFile.absolutePath}"
+            )
+
+            try {
+                // Keep wsl.exe alive running the server (like we do on Windows). This is more reliable than
+                // trying to background inside WSL and hoping the process survives after this command exits.
+                ProcessBuilder(
+                    wslArgs(
+                        wslDistro,
+                        "cd \"$wslDir\" && npm run dev -- --hostname 0.0.0.0 --port $backendPort",
+                    )
+                )
+                    .redirectOutput(ProcessBuilder.Redirect.appendTo(outFile))
+                    .redirectError(ProcessBuilder.Redirect.appendTo(errFile))
+                    .start()
+            } catch (e: Exception) {
+                logger.error(
+                    "startLocalBackend: failed to start backend via WSL. " +
+                        "You can disable via -Pmvp.startBackend=false. " +
+                        "Error: ${e.message}"
+                )
+            }
+        } else {
+            val pm = detectPackageManager(
+                backendDir = backendDir,
+                preferred = findProperty("mvp.site.pm")?.toString(),
+            )
+            val pmCmd = pmCommand(pm, isWindows)
+
+            // Install deps if needed. This keeps the "one click run" experience intact after a fresh clone.
+            if (!File(backendDir, "node_modules").exists()) {
+                logger.lifecycle("startLocalBackend: installing backend dependencies ($pm) ...")
+                val installArgs = listOf(pmCmd, "install")
+                exec {
+                    workingDir = backendDir
+                    commandLine(installArgs)
+                }
+            }
+
+            val devArgs = when (pm) {
+                "pnpm" -> listOf(pmCmd, "run", "dev", "--", "--hostname", "0.0.0.0", "--port", backendPort.toString())
+                "yarn" -> listOf(pmCmd, "run", "dev", "--hostname", "0.0.0.0", "--port", backendPort.toString())
+                else -> listOf(pmCmd, "run", "dev", "--", "--hostname", "0.0.0.0", "--port", backendPort.toString())
+            }
+
+            logger.lifecycle(
+                "startLocalBackend: starting ($pm) in $backendDir on port $backendPort. " +
+                    "Logs: ${outFile.absolutePath}"
+            )
+
+            try {
+                ProcessBuilder(devArgs)
+                    .directory(backendDir)
+                    .redirectOutput(ProcessBuilder.Redirect.appendTo(outFile))
+                    .redirectError(ProcessBuilder.Redirect.appendTo(errFile))
+                    .start()
+            } catch (e: Exception) {
+                logger.error(
+                    "startLocalBackend: failed to start backend. " +
+                        "You can disable via -Pmvp.startBackend=false. " +
+                        "Error: ${e.message}"
+                )
+            }
+        }
+
+        // Give the server a moment to bind to its port so the app doesn't immediately fail on first launch.
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20)
+        while (System.nanoTime() < deadline) {
+            if (isPortOpen("127.0.0.1", backendPort)) {
+                logger.lifecycle("startLocalBackend: backend reachable on http://localhost:$backendPort")
+                return@doLast
+            }
+            Thread.sleep(500)
+        }
+
+        logger.lifecycle("startLocalBackend: backend still starting; continuing build.")
+    }
+}
+
+// Android Studio "Run" triggers the debug build graph; wiring here makes it effectively one click.
+tasks.matching { it.name == "preDebugBuild" }.configureEach {
+    dependsOn(startLocalBackend)
 }
