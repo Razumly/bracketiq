@@ -27,13 +27,24 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+
+data class FamilyChild(
+    val userId: String,
+    val firstName: String,
+    val lastName: String,
+    val dateOfBirth: String? = null,
+    val age: Int? = null,
+    val linkStatus: String? = null,
+    val email: String? = null,
+    val hasEmail: Boolean? = null,
+)
 
 interface IUserRepository : IMVPRepository {
     val currentUser: StateFlow<Result<UserData>>
@@ -54,6 +65,20 @@ interface IUserRepository : IMVPRepository {
      * The returned [UserData] must not contain sensitive information (email/password/etc).
      */
     suspend fun ensureUserByEmail(email: String): Result<UserData>
+    suspend fun listChildren(): Result<List<FamilyChild>>
+    suspend fun createChildAccount(
+        firstName: String,
+        lastName: String,
+        dateOfBirth: String,
+        email: String? = null,
+        relationship: String? = null,
+    ): Result<Unit>
+
+    suspend fun linkChildToParent(
+        childEmail: String? = null,
+        childUserId: String? = null,
+        relationship: String? = null,
+    ): Result<Unit>
 
     suspend fun createNewUser(
         email: String,
@@ -275,6 +300,62 @@ class UserRepository(
         user
     }
 
+    override suspend fun listChildren(): Result<List<FamilyChild>> = runCatching {
+        val response = api.get<FamilyChildrenResponseDto>(path = "api/family/children")
+        response.error?.takeIf(String::isNotBlank)?.let { error(it) }
+        response.children.mapNotNull { it.toFamilyChildOrNull() }
+    }
+
+    override suspend fun createChildAccount(
+        firstName: String,
+        lastName: String,
+        dateOfBirth: String,
+        email: String?,
+        relationship: String?,
+    ): Result<Unit> = runCatching {
+        val normalizedFirstName = firstName.trim()
+        val normalizedLastName = lastName.trim()
+        val normalizedDateOfBirth = dateOfBirth.trim()
+
+        if (normalizedFirstName.isBlank() || normalizedLastName.isBlank() || normalizedDateOfBirth.isBlank()) {
+            error("First name, last name, and date of birth are required.")
+        }
+
+        val response = api.post<CreateChildAccountRequestDto, FamilyActionResponseDto>(
+            path = "api/family/children",
+            body = CreateChildAccountRequestDto(
+                firstName = normalizedFirstName,
+                lastName = normalizedLastName,
+                email = email?.trim()?.takeIf(String::isNotBlank),
+                dateOfBirth = normalizedDateOfBirth,
+                relationship = relationship?.trim()?.takeIf(String::isNotBlank),
+            ),
+        )
+        response.error?.takeIf(String::isNotBlank)?.let { error(it) }
+    }
+
+    override suspend fun linkChildToParent(
+        childEmail: String?,
+        childUserId: String?,
+        relationship: String?,
+    ): Result<Unit> = runCatching {
+        val normalizedChildEmail = childEmail?.trim()?.lowercase()?.takeIf(String::isNotBlank)
+        val normalizedChildUserId = childUserId?.trim()?.takeIf(String::isNotBlank)
+        if (normalizedChildEmail == null && normalizedChildUserId == null) {
+            error("Provide a child email or user ID.")
+        }
+
+        val response = api.post<LinkChildToParentRequestDto, FamilyActionResponseDto>(
+            path = "api/family/links",
+            body = LinkChildToParentRequestDto(
+                childEmail = normalizedChildEmail,
+                childUserId = normalizedChildUserId,
+                relationship = relationship?.trim()?.takeIf(String::isNotBlank),
+            ),
+        )
+        response.error?.takeIf(String::isNotBlank)?.let { error(it) }
+    }
+
     override suspend fun getUsers(userIds: List<String>): Result<List<UserData>> {
         val ids = userIds.distinct().filter(String::isNotBlank)
         if (ids.isEmpty()) return Result.success(emptyList())
@@ -409,3 +490,59 @@ class UserRepository(
         return Result.failure(NotImplementedError("Friend management is not implemented in the Next.js API yet."))
     }
 }
+
+@Serializable
+private data class FamilyChildrenResponseDto(
+    val children: List<FamilyChildDto> = emptyList(),
+    val error: String? = null,
+)
+
+@Serializable
+private data class FamilyChildDto(
+    val userId: String? = null,
+    @SerialName("\$id") val legacyUserId: String? = null,
+    val firstName: String? = null,
+    val lastName: String? = null,
+    val dateOfBirth: String? = null,
+    val age: Int? = null,
+    val linkStatus: String? = null,
+    val email: String? = null,
+    val hasEmail: Boolean? = null,
+) {
+    fun toFamilyChildOrNull(): FamilyChild? {
+        val resolvedUserId = userId ?: legacyUserId
+        if (resolvedUserId.isNullOrBlank()) return null
+
+        return FamilyChild(
+            userId = resolvedUserId,
+            firstName = firstName.orEmpty(),
+            lastName = lastName.orEmpty(),
+            dateOfBirth = dateOfBirth,
+            age = age,
+            linkStatus = linkStatus,
+            email = email,
+            hasEmail = hasEmail,
+        )
+    }
+}
+
+@Serializable
+private data class CreateChildAccountRequestDto(
+    val firstName: String,
+    val lastName: String,
+    val email: String? = null,
+    val dateOfBirth: String,
+    val relationship: String? = null,
+)
+
+@Serializable
+private data class LinkChildToParentRequestDto(
+    val childEmail: String? = null,
+    val childUserId: String? = null,
+    val relationship: String? = null,
+)
+
+@Serializable
+private data class FamilyActionResponseDto(
+    val error: String? = null,
+)

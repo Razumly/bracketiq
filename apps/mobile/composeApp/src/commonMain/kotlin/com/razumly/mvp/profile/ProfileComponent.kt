@@ -12,6 +12,7 @@ import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.Bill
 import com.razumly.mvp.core.data.dataTypes.BillPayment
 import com.razumly.mvp.core.data.dataTypes.Subscription
+import com.razumly.mvp.core.data.repositories.FamilyChild
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
@@ -75,11 +76,39 @@ data class ProfileMembershipsState(
     val error: String? = null,
 )
 
+data class ProfileChild(
+    val userId: String,
+    val firstName: String,
+    val lastName: String,
+    val dateOfBirth: String? = null,
+    val age: Int? = null,
+    val linkStatus: String? = null,
+    val email: String? = null,
+    val hasEmail: Boolean = false,
+) {
+    val fullName: String
+        get() = listOf(firstName.trim(), lastName.trim())
+            .filter { it.isNotBlank() }
+            .joinToString(" ")
+            .ifBlank { "Child" }
+}
+
+data class ProfileChildrenState(
+    val isLoading: Boolean = false,
+    val children: List<ProfileChild> = emptyList(),
+    val error: String? = null,
+    val isCreatingChild: Boolean = false,
+    val createError: String? = null,
+    val isLinkingChild: Boolean = false,
+    val linkError: String? = null,
+)
+
 interface ProfileComponent : IPaymentProcessor {
     val childStack: Value<ChildStack<*, Child>>
     val errorState: StateFlow<ErrorMessage?>
     val paymentPlansState: StateFlow<ProfilePaymentPlansState>
     val membershipsState: StateFlow<ProfileMembershipsState>
+    val childrenState: StateFlow<ProfileChildrenState>
     val activeBillPaymentId: StateFlow<String?>
     val activeMembershipActionId: StateFlow<String?>
     val isStripeAccountConnected: StateFlow<Boolean>
@@ -105,6 +134,20 @@ interface ProfileComponent : IPaymentProcessor {
     fun refreshMemberships()
     fun cancelMembership(membership: ProfileMembership)
     fun restartMembership(membership: ProfileMembership)
+    fun refreshChildren()
+    fun createChild(
+        firstName: String,
+        lastName: String,
+        dateOfBirth: String,
+        email: String? = null,
+        relationship: String = "parent",
+    )
+
+    fun linkChild(
+        childEmail: String? = null,
+        childUserId: String? = null,
+        relationship: String = "parent",
+    )
 
     sealed class Child {
         data class ProfileHome(val component: ProfileComponent) : Child()
@@ -158,6 +201,9 @@ class DefaultProfileComponent(
 
     private val _membershipsState = MutableStateFlow(ProfileMembershipsState())
     override val membershipsState = _membershipsState.asStateFlow()
+
+    private val _childrenState = MutableStateFlow(ProfileChildrenState())
+    override val childrenState = _childrenState.asStateFlow()
 
     private val _activeBillPaymentId = MutableStateFlow<String?>(null)
     override val activeBillPaymentId = _activeBillPaymentId.asStateFlow()
@@ -493,6 +539,125 @@ class DefaultProfileComponent(
         }
     }
 
+    override fun refreshChildren() {
+        scope.launch {
+            _childrenState.value = _childrenState.value.copy(
+                isLoading = true,
+                error = null,
+            )
+
+            userRepository.listChildren()
+                .onSuccess { children ->
+                    _childrenState.value = _childrenState.value.copy(
+                        isLoading = false,
+                        children = children.map { it.toProfileChild() },
+                        error = null,
+                    )
+                }
+                .onFailure {
+                    _childrenState.value = _childrenState.value.copy(
+                        isLoading = false,
+                        children = emptyList(),
+                        error = it.message ?: "Failed to load children.",
+                    )
+                }
+        }
+    }
+
+    override fun createChild(
+        firstName: String,
+        lastName: String,
+        dateOfBirth: String,
+        email: String?,
+        relationship: String,
+    ) {
+        val normalizedFirstName = firstName.trim()
+        val normalizedLastName = lastName.trim()
+        val normalizedDateOfBirth = dateOfBirth.trim()
+        val normalizedRelationship = relationship.trim().ifBlank { "parent" }
+        val normalizedEmail = email?.trim()?.takeIf(String::isNotBlank)
+
+        if (normalizedFirstName.isBlank() || normalizedLastName.isBlank() || normalizedDateOfBirth.isBlank()) {
+            _childrenState.value = _childrenState.value.copy(
+                createError = "First name, last name, and date of birth are required.",
+            )
+            return
+        }
+
+        if (!normalizedDateOfBirth.matches(DATE_OF_BIRTH_REGEX)) {
+            _childrenState.value = _childrenState.value.copy(
+                createError = "Date of birth must use YYYY-MM-DD format.",
+            )
+            return
+        }
+
+        scope.launch {
+            _childrenState.value = _childrenState.value.copy(
+                isCreatingChild = true,
+                createError = null,
+            )
+
+            userRepository.createChildAccount(
+                firstName = normalizedFirstName,
+                lastName = normalizedLastName,
+                dateOfBirth = normalizedDateOfBirth,
+                email = normalizedEmail,
+                relationship = normalizedRelationship,
+            ).onSuccess {
+                _childrenState.value = _childrenState.value.copy(
+                    isCreatingChild = false,
+                    createError = null,
+                )
+                refreshChildren()
+            }.onFailure {
+                _childrenState.value = _childrenState.value.copy(
+                    isCreatingChild = false,
+                    createError = it.message ?: "Failed to create child.",
+                )
+            }
+        }
+    }
+
+    override fun linkChild(
+        childEmail: String?,
+        childUserId: String?,
+        relationship: String,
+    ) {
+        val normalizedChildEmail = childEmail?.trim()?.takeIf(String::isNotBlank)
+        val normalizedChildUserId = childUserId?.trim()?.takeIf(String::isNotBlank)
+        val normalizedRelationship = relationship.trim().ifBlank { "parent" }
+        if (normalizedChildEmail == null && normalizedChildUserId == null) {
+            _childrenState.value = _childrenState.value.copy(
+                linkError = "Provide a child email or user ID.",
+            )
+            return
+        }
+
+        scope.launch {
+            _childrenState.value = _childrenState.value.copy(
+                isLinkingChild = true,
+                linkError = null,
+            )
+
+            userRepository.linkChildToParent(
+                childEmail = normalizedChildEmail,
+                childUserId = normalizedChildUserId,
+                relationship = normalizedRelationship,
+            ).onSuccess {
+                _childrenState.value = _childrenState.value.copy(
+                    isLinkingChild = false,
+                    linkError = null,
+                )
+                refreshChildren()
+            }.onFailure {
+                _childrenState.value = _childrenState.value.copy(
+                    isLinkingChild = false,
+                    linkError = it.message ?: "Failed to link child.",
+                )
+            }
+        }
+    }
+
     private fun createChild(
         config: ProfileConfig,
         componentContext: ComponentContext,
@@ -509,4 +674,19 @@ class DefaultProfileComponent(
         ProfileConfig.Memberships -> ProfileComponent.Child.Memberships(this@DefaultProfileComponent)
         ProfileConfig.Children -> ProfileComponent.Child.Children(this@DefaultProfileComponent)
     }
+}
+
+private val DATE_OF_BIRTH_REGEX = Regex("""\d{4}-\d{2}-\d{2}""")
+
+private fun FamilyChild.toProfileChild(): ProfileChild {
+    return ProfileChild(
+        userId = userId,
+        firstName = firstName,
+        lastName = lastName,
+        dateOfBirth = dateOfBirth,
+        age = age,
+        linkStatus = linkStatus,
+        email = email,
+        hasEmail = hasEmail ?: email?.isNotBlank() == true,
+    )
 }
