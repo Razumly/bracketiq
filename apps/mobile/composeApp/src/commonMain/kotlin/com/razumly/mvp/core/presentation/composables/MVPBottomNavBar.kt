@@ -40,7 +40,7 @@ fun MVPBottomNavBar(
     val items = listOf(
         NavigationItem(AppConfig.Search(),"search","Discover"),
         NavigationItem(AppConfig.ChatList,"messages", "Messages"),
-        NavigationItem(AppConfig.Create, "add", "Create"),
+        NavigationItem(AppConfig.Create(), "add", "Create"),
         NavigationItem(AppConfig.ProfileHome, "person", "Profile")
     )
 

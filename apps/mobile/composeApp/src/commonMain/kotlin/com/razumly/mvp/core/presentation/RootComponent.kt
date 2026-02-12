@@ -123,7 +123,7 @@ class RootComponent(
         when (page) {
             is AppConfig.Search -> navigation.replaceAll(AppConfig.Search())
             AppConfig.ChatList -> navigation.replaceAll(AppConfig.ChatList)
-            AppConfig.Create -> navigation.replaceAll(AppConfig.Create)
+            is AppConfig.Create -> navigation.replaceAll(AppConfig.Create())
             AppConfig.ProfileHome -> navigation.replaceAll(AppConfig.ProfileHome)
             else -> {}
         }
@@ -170,6 +170,11 @@ class RootComponent(
 
     override fun navigateToChat(user: UserData?, chat: ChatGroupWithRelations?) {
         navigation.pushNew(AppConfig.Chat(user, chat))
+    }
+
+    override fun navigateToCreate(rentalContext: RentalCreateContext?) {
+        navigation.pushNew(AppConfig.Create(rentalContext = rentalContext))
+        _selectedPage.value = AppConfig.Create()
     }
 
     override fun navigateToEvent(event: Event) {
@@ -233,8 +238,8 @@ class RootComponent(
             _koin.get { parametersOf(componentContext, config.user, config.chat) }
         )
 
-        AppConfig.Create -> Child.Create(
-            _koin.get { parametersOf(componentContext, ::onEventCreated) },
+        is AppConfig.Create -> Child.Create(
+            _koin.get { parametersOf(componentContext, config.rentalContext, ::onEventCreated) },
             _koin.get { parametersOf(componentContext) }
         )
 

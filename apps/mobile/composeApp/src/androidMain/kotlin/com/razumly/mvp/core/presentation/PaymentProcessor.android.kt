@@ -60,6 +60,10 @@ actual open class PaymentProcessor : IPaymentProcessor {
         }
     }
 
+    actual override fun clearPaymentResult() {
+        _paymentResult.value = null
+    }
+
     fun onPaymentSheetResult(paymentSheetResult: PaymentSheetResult) {
         when (paymentSheetResult) {
             is PaymentSheetResult.Canceled -> {

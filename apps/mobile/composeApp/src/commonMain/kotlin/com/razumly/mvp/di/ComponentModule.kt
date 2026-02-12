@@ -12,6 +12,7 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.presentation.DefaultPlayerInteractionComponent
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.PlayerInteractionComponent
+import com.razumly.mvp.core.presentation.RentalCreateContext
 import com.razumly.mvp.core.presentation.RootComponent
 import com.razumly.mvp.core.presentation.RootComponent.DeepLinkNav
 import com.razumly.mvp.eventCreate.CreateEventComponent
@@ -83,10 +84,11 @@ val componentModule = module {
         )
     }
 
-    factory<CreateEventComponent> { (componentContext: ComponentContext, onCreatedEvent: () -> Unit) ->
+    factory<CreateEventComponent> { (componentContext: ComponentContext, rentalContext: RentalCreateContext?, onCreatedEvent: () -> Unit) ->
         DefaultCreateEventComponent(
             componentContext = componentContext,
             onEventCreated = onCreatedEvent,
+            rentalContext = rentalContext,
             userRepository = get(),
             eventRepository = get(),
             fieldRepository = get(),
@@ -101,6 +103,7 @@ val componentModule = module {
             locationTracker = get(),
             eventRepository = get(),
             billingRepository = get(),
+            fieldRepository = get(),
             eventId = eventId,
             navigationHandler = navHandler
         )

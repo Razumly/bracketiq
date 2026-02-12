@@ -9,6 +9,7 @@ interface IPaymentProcessor {
     var urlHandler: UrlHandler?
     fun presentPaymentSheet(email: String, name: String)
     suspend fun setPaymentIntent(intent: PurchaseIntent)
+    fun clearPaymentResult()
 }
 
 expect open class PaymentProcessor(): IPaymentProcessor {
@@ -16,6 +17,7 @@ expect open class PaymentProcessor(): IPaymentProcessor {
     override var urlHandler: UrlHandler?
     override fun presentPaymentSheet(email: String, name: String)
     override suspend fun setPaymentIntent(intent: PurchaseIntent)
+    override fun clearPaymentResult()
 }
 
 sealed class PaymentResult {

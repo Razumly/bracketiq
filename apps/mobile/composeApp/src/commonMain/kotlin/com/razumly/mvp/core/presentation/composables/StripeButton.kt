@@ -5,6 +5,9 @@ import androidx.compose.runtime.Composable
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 
 @Composable
+expect fun PreparePaymentProcessor(paymentProcessor: IPaymentProcessor)
+
+@Composable
 expect fun StripeButton(
     onClick: () -> Unit,
     paymentProcessor: IPaymentProcessor,

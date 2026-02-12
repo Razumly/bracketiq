@@ -32,7 +32,9 @@ sealed class AppConfig {
     ) : AppConfig()
 
     @Serializable
-    data object Create : AppConfig()
+    data class Create(
+        val rentalContext: RentalCreateContext? = null,
+    ) : AppConfig()
 
     @Serializable
     data object ProfileHome : AppConfig()

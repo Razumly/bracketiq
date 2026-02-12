@@ -32,6 +32,7 @@ import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.ktx.DynamicScheme
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
+import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
 import com.razumly.mvp.core.presentation.util.backAnimation
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
@@ -61,6 +62,8 @@ fun CreateEventScreen(
     val isDark = isSystemInDarkTheme()
     val loadingHandler = LocalLoadingHandler.current
     val errorHandler = LocalPopupHandler.current
+
+    PreparePaymentProcessor(component)
 
     LaunchedEffect(Unit) {
         component.setLoadingHandler(loadingHandler)

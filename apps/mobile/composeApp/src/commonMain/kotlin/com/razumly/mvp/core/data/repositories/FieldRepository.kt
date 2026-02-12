@@ -3,9 +3,11 @@ package com.razumly.mvp.core.data.repositories
 import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
+import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResponse
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.dto.FieldsResponseDto
+import com.razumly.mvp.core.network.dto.TimeSlotsResponseDto
 import io.ktor.http.encodeURLQueryComponent
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
@@ -14,6 +16,8 @@ interface IFieldRepository : IMVPRepository {
     suspend fun createFields(count: Int, organizationId: String? = null): Result<List<Field>>
     fun getFieldsWithMatchesFlow(ids: List<String>): Flow<List<FieldWithMatches>>
     suspend fun getFields(ids: List<String>): Result<List<Field>>
+    suspend fun listFields(eventId: String? = null): Result<List<Field>>
+    suspend fun getTimeSlots(ids: List<String>): Result<List<TimeSlot>>
 }
 
 class FieldRepository(
@@ -47,5 +51,34 @@ class FieldRepository(
             getLocalData = { databaseService.getFieldDao.getFieldsByIds(ids) },
             deleteData = { staleIds -> databaseService.getFieldDao.deleteFieldsById(staleIds) },
         )
-}
 
+    override suspend fun listFields(eventId: String?): Result<List<Field>> = runCatching {
+        val params = buildList {
+            eventId
+                ?.takeIf(String::isNotBlank)
+                ?.trim()
+                ?.let { add("eventId=${it.encodeURLQueryComponent()}") }
+        }
+        val path = if (params.isEmpty()) {
+            "api/fields"
+        } else {
+            "api/fields?${params.joinToString("&")}"
+        }
+
+        val fields = api.get<FieldsResponseDto>(path).fields
+        if (fields.isNotEmpty()) {
+            databaseService.getFieldDao.upsertFields(fields)
+            fields
+        } else {
+            databaseService.getFieldDao.getAllFields()
+        }
+    }
+
+    override suspend fun getTimeSlots(ids: List<String>): Result<List<TimeSlot>> = runCatching {
+        val slotIds = ids.distinct().filter(String::isNotBlank)
+        if (slotIds.isEmpty()) return@runCatching emptyList()
+
+        val encodedIds = slotIds.joinToString(",") { it.trim() }.encodeURLQueryComponent()
+        api.get<TimeSlotsResponseDto>("api/time-slots?ids=$encodedIds").timeSlots
+    }
+}

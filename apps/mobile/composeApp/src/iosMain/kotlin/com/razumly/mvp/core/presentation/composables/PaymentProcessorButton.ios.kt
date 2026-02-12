@@ -10,15 +10,20 @@ import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentProcessor
 
 @Composable
+actual fun PreparePaymentProcessor(paymentProcessor: IPaymentProcessor) {
+    val factory = LocalNativeViewFactory.current
+    paymentProcessor as PaymentProcessor
+    paymentProcessor.setNativeViewFactory(factory)
+}
+
+@Composable
 actual fun StripeButton(
     onClick: () -> Unit,
     paymentProcessor: IPaymentProcessor,
     text: String,
     colors: ButtonColors?
 ) {
-    val factory = LocalNativeViewFactory.current
-    paymentProcessor as PaymentProcessor
-    paymentProcessor.setNativeViewFactory(factory)
+    PreparePaymentProcessor(paymentProcessor)
 
     Button(
         onClick = onClick,

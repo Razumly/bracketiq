@@ -50,6 +50,7 @@ interface IBillingRepository : IMVPRepository {
     suspend fun cancelSubscription(subscriptionId: String): Result<Boolean>
     suspend fun restartSubscription(subscriptionId: String): Result<Boolean>
     suspend fun getProductsByIds(productIds: List<String>): Result<List<Product>>
+    suspend fun listOrganizations(limit: Int = 100): Result<List<Organization>>
     suspend fun getOrganizationsByIds(organizationIds: List<String>): Result<List<Organization>>
     suspend fun leaveAndRefundEvent(event: Event, reason: String): Result<Unit>
     suspend fun deleteAndRefundEvent(event: Event): Result<Unit>
@@ -265,6 +266,12 @@ class BillingRepository(
         val encodedIds = ids.joinToString(",") { it.encodeURLQueryComponent() }
         val response = api.get<ProductsResponseDto>(path = "api/products?ids=$encodedIds")
         response.products.mapNotNull { it.toProductOrNull() }
+    }
+
+    override suspend fun listOrganizations(limit: Int): Result<List<Organization>> = runCatching {
+        val normalizedLimit = limit.coerceIn(1, 1000)
+        val response = api.get<OrganizationsResponseDto>(path = "api/organizations?limit=$normalizedLimit")
+        response.organizations.mapNotNull { it.toOrganizationOrNull() }
     }
 
     override suspend fun getOrganizationsByIds(organizationIds: List<String>): Result<List<Organization>> = runCatching {
@@ -634,8 +641,8 @@ private data class OrganizationApiDto(
     fun toOrganizationOrNull(): Organization? {
         val resolvedId = id ?: legacyId
         val resolvedName = name
-        val resolvedOwnerId = ownerId
-        if (resolvedId.isNullOrBlank() || resolvedName.isNullOrBlank() || resolvedOwnerId.isNullOrBlank()) {
+        val resolvedOwnerId = ownerId ?: ""
+        if (resolvedId.isNullOrBlank() || resolvedName.isNullOrBlank()) {
             return null
         }
 

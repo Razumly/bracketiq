@@ -21,6 +21,10 @@ actual open class PaymentProcessor : IPaymentProcessor {
         purchaseIntent = intent
     }
 
+    actual override fun clearPaymentResult() {
+        _paymentResult.value = null
+    }
+
     actual override fun presentPaymentSheet(email: String, name: String) {
         val intent = purchaseIntent ?: return
 
