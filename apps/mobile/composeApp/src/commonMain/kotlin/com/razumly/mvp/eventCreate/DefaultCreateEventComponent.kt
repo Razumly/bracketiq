@@ -12,13 +12,17 @@ import com.arkivanov.decompose.value.Value
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
+import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
+import com.razumly.mvp.core.data.dataTypes.Sport
+import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
 import com.razumly.mvp.core.data.repositories.IImagesRepository
+import com.razumly.mvp.core.data.repositories.ISportsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentResult
@@ -27,8 +31,10 @@ import com.razumly.mvp.core.presentation.RentalCreateContext
 import com.razumly.mvp.core.presentation.util.convertPhotoResultToUploadFile
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
+import com.razumly.mvp.core.util.newId
 import com.razumly.mvp.eventCreate.CreateEventComponent.Child
 import com.razumly.mvp.eventCreate.CreateEventComponent.Config
+import com.razumly.mvp.eventDetail.data.IMatchRepository
 import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -41,6 +47,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlin.time.Clock
+import kotlin.time.Duration.Companion.seconds
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
@@ -55,6 +62,9 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     val errorState: StateFlow<ErrorMessage?>
     val eventImageUrls: StateFlow<List<String>>
     val isRentalFlow: StateFlow<Boolean>
+    val sports: StateFlow<List<Sport>>
+    val localFields: StateFlow<List<Field>>
+    val leagueSlots: StateFlow<List<TimeSlot>>
 
     fun onBackClicked()
     fun updateEventField(update: Event.() -> Event)
@@ -70,6 +80,10 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     fun validateAndUpdateMaxPlayers(input: String, onError: (Boolean) -> Unit)
     fun addUserToEvent(add: Boolean)
     fun selectFieldCount(count: Int)
+    fun updateLocalFieldName(index: Int, name: String)
+    fun addLeagueTimeSlot()
+    fun updateLeagueTimeSlot(index: Int, update: TimeSlot.() -> TimeSlot)
+    fun removeLeagueTimeSlot(index: Int)
     fun createAccount()
     fun onUploadSelected(photo: GalleryPhotoResult)
     fun deleteImage(url: String)
@@ -93,7 +107,9 @@ class DefaultCreateEventComponent(
     componentContext: ComponentContext,
     private val userRepository: IUserRepository,
     private val eventRepository: IEventRepository,
+    private val matchRepository: IMatchRepository,
     private val fieldRepository: IFieldRepository,
+    private val sportsRepository: ISportsRepository,
     private val billingRepository: IBillingRepository,
     private val imageRepository: IImagesRepository,
     private val rentalContext: RentalCreateContext?,
@@ -135,9 +151,16 @@ class DefaultCreateEventComponent(
         .stateIn(scope, SharingStarted.Eagerly, emptyList())
     private val _isRentalFlow = MutableStateFlow(rentalContext != null)
     override val isRentalFlow = _isRentalFlow.asStateFlow()
+    private val _sports = MutableStateFlow<List<Sport>>(emptyList())
+    override val sports = _sports.asStateFlow()
+    private val _localFields = MutableStateFlow<List<Field>>(emptyList())
+    override val localFields = _localFields.asStateFlow()
+    private val _leagueSlots = MutableStateFlow<List<TimeSlot>>(emptyList())
+    override val leagueSlots = _leagueSlots.asStateFlow()
     private val _fieldCount = MutableStateFlow(0)
     private val pendingEventAfterPayment = MutableStateFlow<Event?>(null)
     private val awaitingRentalPayment = MutableStateFlow(false)
+    private var activeRentalLockKeys: List<String> = emptyList()
 
     private lateinit var loadingHandler: LoadingHandler
 
@@ -162,6 +185,7 @@ class DefaultCreateEventComponent(
     init {
         childStack.subscribe {}
         applyRentalDefaults()
+        loadSports()
         scope.launch {
             userRepository.currentUser.collect { currentUser ->
                 updateEventField { copy(hostId = currentUser.getOrThrow().id) }
@@ -192,6 +216,7 @@ class DefaultCreateEventComponent(
                     PaymentResult.Canceled -> {
                         awaitingRentalPayment.value = false
                         pendingEventAfterPayment.value = null
+                        releaseRentalCheckoutLocks()
                         _errorState.value = ErrorMessage("Payment canceled.")
                         loadingHandler.hideLoading()
                     }
@@ -199,6 +224,7 @@ class DefaultCreateEventComponent(
                     is PaymentResult.Failed -> {
                         awaitingRentalPayment.value = false
                         pendingEventAfterPayment.value = null
+                        releaseRentalCheckoutLocks()
                         _errorState.value = ErrorMessage(result.error)
                         loadingHandler.hideLoading()
                     }
@@ -236,9 +262,13 @@ class DefaultCreateEventComponent(
 
     override fun updateEventField(update: Event.() -> Event) {
         scope.launch {
-            if (_newEventState.value is Event) {
-                _newEventState.value = (_newEventState.value as Event).update()
-            }
+            val previous = _newEventState.value
+            val updated = previous
+                .update()
+                .withSportRules()
+
+            _newEventState.value = updated
+            syncLocalFieldsForEvent(updated)
         }
     }
 
@@ -262,15 +292,39 @@ class DefaultCreateEventComponent(
 
     override fun updateTournamentField(update: Event.() -> Event) {
         scope.launch {
-            if (_newEventState.value is Event) {
-                _newEventState.value = (_newEventState.value as Event).update()
-            }
+            val previous = _newEventState.value
+            val updated = previous
+                .update()
+                .withSportRules()
+
+            _newEventState.value = updated
+            syncLocalFieldsForEvent(updated)
         }
     }
 
     override fun onTypeSelected(type: EventType) {
         _currentEventType.value = type
-        updateEventField { copy(eventType = type) }
+        updateEventField {
+            when (type) {
+                EventType.LEAGUE, EventType.TOURNAMENT -> copy(
+                    eventType = type,
+                    teamSignup = true,
+                    singleDivision = true,
+                    end = start,
+                )
+
+                EventType.EVENT -> copy(eventType = type)
+            }
+        }
+        if (type == EventType.LEAGUE || type == EventType.TOURNAMENT) {
+            if (_fieldCount.value <= 0) {
+                val selectedCount = (newEventState.value.fieldCount ?: 1).coerceAtLeast(1)
+                selectFieldCount(selectedCount)
+            }
+        }
+        if (type == EventType.LEAGUE && _leagueSlots.value.isEmpty()) {
+            _leagueSlots.value = listOf(createDefaultLeagueSlot())
+        }
     }
 
     override fun selectPlace(place: MVPPlace?) {
@@ -331,7 +385,67 @@ class DefaultCreateEventComponent(
     }
 
     override fun selectFieldCount(count: Int) {
-        _fieldCount.value = count
+        val normalized = count.coerceAtLeast(0)
+        _fieldCount.value = normalized
+        updateEventField {
+            copy(fieldCount = normalized.takeIf { it > 0 })
+        }
+
+        val currentEvent = newEventState.value
+        val currentFields = _localFields.value
+        val resized = currentFields
+            .take(normalized)
+            .mapIndexed { index, field ->
+                field.copy(
+                    fieldNumber = index + 1,
+                    type = currentEvent.fieldType.name,
+                    organizationId = currentEvent.organizationId,
+                )
+            }
+            .toMutableList()
+
+        while (resized.size < normalized) {
+            val fieldNumber = resized.size + 1
+            resized += Field(fieldNumber = fieldNumber, organizationId = currentEvent.organizationId).copy(
+                name = "Field $fieldNumber",
+                type = currentEvent.fieldType.name,
+            )
+        }
+        _localFields.value = resized
+
+        val validFieldIds = resized.map { it.id }.toSet()
+        _leagueSlots.value = _leagueSlots.value.map { slot ->
+            if (slot.scheduledFieldId != null && !validFieldIds.contains(slot.scheduledFieldId)) {
+                slot.copy(scheduledFieldId = null)
+            } else {
+                slot
+            }
+        }
+    }
+
+    override fun updateLocalFieldName(index: Int, name: String) {
+        val fields = _localFields.value.toMutableList()
+        if (index !in fields.indices) return
+        fields[index] = fields[index].copy(name = name)
+        _localFields.value = fields
+    }
+
+    override fun addLeagueTimeSlot() {
+        _leagueSlots.value = _leagueSlots.value + createDefaultLeagueSlot()
+    }
+
+    override fun updateLeagueTimeSlot(index: Int, update: TimeSlot.() -> TimeSlot) {
+        val slots = _leagueSlots.value.toMutableList()
+        if (index !in slots.indices) return
+        slots[index] = slots[index].update()
+        _leagueSlots.value = slots
+    }
+
+    override fun removeLeagueTimeSlot(index: Int) {
+        val slots = _leagueSlots.value.toMutableList()
+        if (index !in slots.indices) return
+        slots.removeAt(index)
+        _leagueSlots.value = slots
     }
 
     private fun applyRentalDefaults() {
@@ -374,6 +488,30 @@ class DefaultCreateEventComponent(
             return
         }
 
+        if (!reserveRentalCheckoutLocks(eventDraft)) {
+            _errorState.value = ErrorMessage(
+                "Selected fields are temporarily locked. Please wait a few seconds and try again."
+            )
+            return
+        }
+
+        loadingHandler.showLoading("Checking field availability...")
+        val overlappingEvents = findOverlappingRentalEvents(eventDraft)
+            .getOrElse { throwable ->
+                releaseRentalCheckoutLocks()
+                _errorState.value = ErrorMessage(
+                    throwable.message ?: "Unable to verify field availability."
+                )
+                loadingHandler.hideLoading()
+                return
+            }
+        if (overlappingEvents.isNotEmpty()) {
+            releaseRentalCheckoutLocks()
+            _errorState.value = ErrorMessage(buildOverlapConflictMessage(overlappingEvents.first()))
+            loadingHandler.hideLoading()
+            return
+        }
+
         loadingHandler.showLoading("Creating rental payment...")
         billingRepository.createPurchaseIntent(eventDraft)
             .onSuccess { intent ->
@@ -389,11 +527,13 @@ class DefaultCreateEventComponent(
                 }.onFailure { throwable ->
                     awaitingRentalPayment.value = false
                     pendingEventAfterPayment.value = null
+                    releaseRentalCheckoutLocks()
                     _errorState.value = ErrorMessage(throwable.message ?: "Unable to start payment.")
                     loadingHandler.hideLoading()
                 }
             }
             .onFailure { throwable ->
+                releaseRentalCheckoutLocks()
                 _errorState.value = ErrorMessage(throwable.message ?: "Unable to create rental payment.")
                 loadingHandler.hideLoading()
             }
@@ -401,32 +541,436 @@ class DefaultCreateEventComponent(
 
     private suspend fun createEventAfterPayment(eventDraft: Event) {
         loadingHandler.showLoading("Creating event...")
-        val eventWithFields = if (_fieldCount.value > 0) {
-            fieldRepository.createFields(
-                count = _fieldCount.value,
-                organizationId = eventDraft.organizationId
-            ).fold(
-                onSuccess = { createdFields ->
-                    eventDraft.copy(fieldIds = createdFields.map { it.id })
-                },
-                onFailure = { error ->
-                    _errorState.value = ErrorMessage(error.message ?: "")
-                    eventDraft
+        val eventWithFields = prepareEventForCreation(eventDraft).getOrElse { error ->
+            releaseRentalCheckoutLocks()
+            _errorState.value = ErrorMessage(error.message ?: "Failed to prepare event setup.")
+            loadingHandler.hideLoading()
+            return
+        }
+
+        if (_isRentalFlow.value) {
+            val overlappingEvents = findOverlappingRentalEvents(eventWithFields)
+                .getOrElse { throwable ->
+                    releaseRentalCheckoutLocks()
+                    _errorState.value = ErrorMessage(
+                        throwable.message ?: "Unable to recheck field availability."
+                    )
+                    loadingHandler.hideLoading()
+                    return
                 }
-            )
-        } else {
-            eventDraft
+
+            if (overlappingEvents.isNotEmpty()) {
+                releaseRentalCheckoutLocks()
+                _errorState.value = ErrorMessage(buildOverlapConflictMessage(overlappingEvents.first()))
+                loadingHandler.hideLoading()
+                return
+            }
         }
 
         eventRepository.createEvent(eventWithFields)
             .onSuccess {
+                releaseRentalCheckoutLocks()
                 loadingHandler.hideLoading()
                 onEventCreated()
             }
             .onFailure {
+                releaseRentalCheckoutLocks()
                 _errorState.value = ErrorMessage(it.message ?: "")
                 loadingHandler.hideLoading()
             }
+    }
+
+    private suspend fun prepareEventForCreation(eventDraft: Event): Result<Event> = runCatching {
+        var preparedEvent = eventDraft
+
+        val shouldManageLocalFields = !_isRentalFlow.value &&
+            (preparedEvent.eventType == EventType.LEAGUE || preparedEvent.eventType == EventType.TOURNAMENT) &&
+            _fieldCount.value > 0
+
+        val fieldIdReplacements = mutableMapOf<String, String>()
+        if (shouldManageLocalFields) {
+            val fieldDrafts = buildFieldDrafts(preparedEvent, _fieldCount.value)
+            val createdFields = mutableListOf<Field>()
+            fieldDrafts.forEach { draft ->
+                val createdField = fieldRepository.createField(draft).getOrElse { error ->
+                    throw IllegalStateException(
+                        error.message ?: "Failed to create field ${draft.name ?: draft.fieldNumber}.",
+                        error
+                    )
+                }
+                createdFields += createdField
+                fieldIdReplacements[draft.id] = createdField.id
+            }
+            preparedEvent = preparedEvent.copy(
+                fieldIds = createdFields.map { it.id },
+                fieldCount = createdFields.size,
+            )
+        }
+
+        if (!_isRentalFlow.value && preparedEvent.eventType == EventType.LEAGUE) {
+            val slotDrafts = buildLeagueSlotDrafts(
+                event = preparedEvent,
+                fieldIdReplacements = fieldIdReplacements,
+            )
+
+            if (slotDrafts.isNotEmpty()) {
+                val createdSlots = mutableListOf<TimeSlot>()
+                slotDrafts.forEach { slotDraft ->
+                    val createdSlot = fieldRepository.createTimeSlot(slotDraft).getOrElse { error ->
+                        throw IllegalStateException(
+                            error.message ?: "Failed to create a league timeslot.",
+                            error
+                        )
+                    }
+                    createdSlots += createdSlot
+                }
+                preparedEvent = preparedEvent.copy(timeSlotIds = createdSlots.map { it.id })
+            } else {
+                preparedEvent = preparedEvent.copy(timeSlotIds = emptyList())
+            }
+        }
+
+        preparedEvent
+    }
+
+    private fun buildFieldDrafts(event: Event, targetCount: Int): List<Field> {
+        val normalizedCount = targetCount.coerceAtLeast(0)
+        val drafts = _localFields.value
+            .take(normalizedCount)
+            .mapIndexed { index, field ->
+                field.copy(
+                    id = if (field.id.isBlank()) newId() else field.id,
+                    fieldNumber = index + 1,
+                    name = field.name?.takeIf { it.isNotBlank() } ?: "Field ${index + 1}",
+                    type = event.fieldType.name,
+                    organizationId = event.organizationId,
+                )
+            }
+            .toMutableList()
+
+        while (drafts.size < normalizedCount) {
+            val number = drafts.size + 1
+            drafts += Field(
+                fieldNumber = number,
+                organizationId = event.organizationId,
+            ).copy(
+                name = "Field $number",
+                type = event.fieldType.name,
+            )
+        }
+
+        return drafts
+    }
+
+    private fun buildLeagueSlotDrafts(
+        event: Event,
+        fieldIdReplacements: Map<String, String>,
+    ): List<TimeSlot> {
+        return _leagueSlots.value.mapNotNull { slot ->
+            val mappedFieldId = slot.scheduledFieldId
+                ?.let { fieldIdReplacements[it] ?: it }
+                ?.takeIf { it.isNotBlank() }
+            val day = slot.dayOfWeek
+            val startMinutes = slot.startTimeMinutes
+            val endMinutes = slot.endTimeMinutes
+
+            if (mappedFieldId == null || day == null || startMinutes == null || endMinutes == null) {
+                return@mapNotNull null
+            }
+            if (endMinutes <= startMinutes) {
+                return@mapNotNull null
+            }
+
+            slot.copy(
+                id = slot.id.ifBlank { newId() },
+                scheduledFieldId = mappedFieldId,
+                startDate = event.start,
+                endDate = event.end.takeIf { it > event.start },
+            )
+        }
+    }
+
+    private fun syncLocalFieldsForEvent(event: Event) {
+        val currentFields = _localFields.value
+        if (currentFields.isEmpty()) return
+
+        _localFields.value = currentFields.mapIndexed { index, field ->
+            field.copy(
+                fieldNumber = index + 1,
+                type = event.fieldType.name,
+                organizationId = event.organizationId,
+            )
+        }
+    }
+
+    private fun loadSports() {
+        scope.launch {
+            sportsRepository.getSports()
+                .onSuccess { loadedSports ->
+                    _sports.value = loadedSports
+                    _newEventState.value = _newEventState.value.withSportRules()
+                }
+                .onFailure { error ->
+                    _errorState.value = ErrorMessage(error.message ?: "Failed to load sports.")
+                }
+        }
+    }
+
+    private fun Event.withSportRules(): Event {
+        val requiresSets = sportId
+            ?.let { selectedSportId -> _sports.value.firstOrNull { it.id == selectedSportId } }
+            ?.usePointsPerSetWin
+            ?: false
+        return when (eventType) {
+            EventType.EVENT -> this
+            EventType.LEAGUE -> applyLeagueSportRules(requiresSets)
+            EventType.TOURNAMENT -> applyTournamentSportRules(requiresSets)
+        }
+    }
+
+    private fun Event.applyLeagueSportRules(requiresSets: Boolean): Event {
+        return if (requiresSets) {
+            val allowedSetCounts = setOf(1, 3, 5)
+            val normalizedSets = setsPerMatch?.takeIf { allowedSetCounts.contains(it) } ?: 1
+            val normalizedPoints = pointsToVictory
+                .take(normalizedSets)
+                .toMutableList()
+                .apply {
+                    while (size < normalizedSets) add(21)
+                }
+            copy(
+                usesSets = true,
+                setsPerMatch = normalizedSets,
+                setDurationMinutes = setDurationMinutes ?: 20,
+                pointsToVictory = normalizedPoints,
+                matchDurationMinutes = 60,
+            )
+        } else {
+            copy(
+                usesSets = false,
+                setsPerMatch = null,
+                setDurationMinutes = null,
+                pointsToVictory = emptyList(),
+                matchDurationMinutes = matchDurationMinutes ?: 60,
+            )
+        }
+    }
+
+    private fun Event.applyTournamentSportRules(requiresSets: Boolean): Event {
+        return if (!requiresSets) {
+            copy(
+                winnerSetCount = 1,
+                loserSetCount = 1,
+                winnerBracketPointsToVictory = winnerBracketPointsToVictory.take(1).ifEmpty { listOf(21) },
+                loserBracketPointsToVictory = loserBracketPointsToVictory.take(1).ifEmpty { listOf(21) },
+            )
+        } else {
+            val allowedSetCounts = setOf(1, 3, 5)
+            val winnerSets = winnerSetCount.takeIf { allowedSetCounts.contains(it) } ?: 1
+            val loserSets = loserSetCount.takeIf { allowedSetCounts.contains(it) } ?: 1
+            copy(
+                winnerSetCount = winnerSets,
+                loserSetCount = loserSets,
+                winnerBracketPointsToVictory = winnerBracketPointsToVictory
+                    .take(winnerSets)
+                    .toMutableList()
+                    .apply {
+                        while (size < winnerSets) add(21)
+                    },
+                loserBracketPointsToVictory = loserBracketPointsToVictory
+                    .take(loserSets)
+                    .toMutableList()
+                    .apply {
+                        while (size < loserSets) add(21)
+                    },
+            )
+        }
+    }
+
+    private fun createDefaultLeagueSlot(): TimeSlot {
+        val event = newEventState.value
+        val startDate = if (event.start == Instant.DISTANT_PAST) Clock.System.now() else event.start
+        val endDate = event.end.takeIf { it > event.start }
+        return TimeSlot(
+            id = newId(),
+            dayOfWeek = null,
+            startTimeMinutes = null,
+            endTimeMinutes = null,
+            startDate = startDate,
+            repeating = true,
+            endDate = endDate,
+            scheduledFieldId = null,
+            price = null,
+        )
+    }
+
+    private fun reserveRentalCheckoutLocks(eventDraft: Event): Boolean {
+        if (!_isRentalFlow.value) {
+            return true
+        }
+
+        val organizationId = eventDraft.organizationId?.trim().orEmpty()
+        val fieldIds = eventDraft.fieldIds
+            .map { fieldId -> fieldId.trim() }
+            .filter(String::isNotBlank)
+            .distinct()
+        if (organizationId.isEmpty() || fieldIds.isEmpty()) {
+            return true
+        }
+        if (eventDraft.end <= eventDraft.start) {
+            return false
+        }
+
+        val now = Clock.System.now()
+        val expiresAt = now + 10.seconds
+        rentalCheckoutLocks.entries.removeAll { (_, lockExpiry) -> lockExpiry <= now }
+
+        val lockKeys = fieldIds.map { fieldId ->
+            buildRentalLockKey(
+                organizationId = organizationId,
+                fieldId = fieldId,
+                start = eventDraft.start,
+                end = eventDraft.end,
+            )
+        }
+        val hasActiveLock = lockKeys.any { lockKey ->
+            val lockExpiry = rentalCheckoutLocks[lockKey]
+            lockExpiry != null && lockExpiry > now
+        }
+        if (hasActiveLock) {
+            return false
+        }
+
+        lockKeys.forEach { lockKey ->
+            rentalCheckoutLocks[lockKey] = expiresAt
+        }
+        activeRentalLockKeys = lockKeys
+        return true
+    }
+
+    private fun releaseRentalCheckoutLocks() {
+        if (activeRentalLockKeys.isEmpty()) {
+            return
+        }
+        activeRentalLockKeys.forEach { lockKey ->
+            rentalCheckoutLocks.remove(lockKey)
+        }
+        activeRentalLockKeys = emptyList()
+    }
+
+    private suspend fun findOverlappingRentalEvents(eventDraft: Event): Result<List<Event>> {
+        val organizationId = eventDraft.organizationId?.trim().orEmpty()
+        if (organizationId.isEmpty()) {
+            return Result.success(emptyList())
+        }
+
+        val selectedFieldIds = eventDraft.fieldIds
+            .map { fieldId -> fieldId.trim() }
+            .filter(String::isNotBlank)
+            .distinct()
+        if (selectedFieldIds.isEmpty()) {
+            return Result.success(emptyList())
+        }
+        if (eventDraft.end <= eventDraft.start) {
+            return Result.failure(IllegalArgumentException("Selected rental time range is invalid."))
+        }
+
+        val selectedFieldSet = selectedFieldIds.toSet()
+        return eventRepository.getEventsByOrganization(
+            organizationId = organizationId,
+            limit = 400,
+        ).mapCatching { organizationEvents ->
+            organizationEvents.filter { existingEvent ->
+                existingEvent.id != eventDraft.id
+            }.filter { existingEvent ->
+                doesScheduledEventOverlapRentalWindow(
+                    scheduledEvent = existingEvent,
+                    selectedFieldSet = selectedFieldSet,
+                    selectedStart = eventDraft.start,
+                    selectedEnd = eventDraft.end,
+                )
+            }
+        }
+    }
+
+    private suspend fun doesScheduledEventOverlapRentalWindow(
+        scheduledEvent: Event,
+        selectedFieldSet: Set<String>,
+        selectedStart: Instant,
+        selectedEnd: Instant,
+    ): Boolean {
+        if (selectedEnd <= selectedStart) {
+            return false
+        }
+
+        return when (scheduledEvent.eventType) {
+            EventType.EVENT -> {
+                val eventFieldIds = scheduledEvent.fieldIds
+                    .map { fieldId -> fieldId.trim() }
+                    .filter(String::isNotBlank)
+                    .distinct()
+                if (eventFieldIds.intersect(selectedFieldSet).isEmpty()) {
+                    false
+                } else {
+                    rangesOverlap(
+                        firstStart = selectedStart,
+                        firstEnd = selectedEnd,
+                        secondStart = scheduledEvent.start,
+                        secondEnd = scheduledEvent.end,
+                    )
+                }
+            }
+
+            EventType.LEAGUE, EventType.TOURNAMENT -> {
+                val matches = matchRepository.getMatchesOfTournament(scheduledEvent.id).getOrElse { error ->
+                    throw IllegalStateException(
+                        "Failed to load matches for ${scheduledEvent.name.ifBlank { "event" }}: ${error.message}",
+                        error
+                    )
+                }
+
+                matches.any { match ->
+                    val fieldId = match.fieldId?.trim()
+                    val matchEnd = match.end
+                    !fieldId.isNullOrBlank() &&
+                        selectedFieldSet.contains(fieldId) &&
+                        matchEnd != null &&
+                        matchEnd > match.start &&
+                        rangesOverlap(
+                            firstStart = selectedStart,
+                            firstEnd = selectedEnd,
+                            secondStart = match.start,
+                            secondEnd = matchEnd,
+                        )
+                }
+            }
+        }
+    }
+
+    private fun buildOverlapConflictMessage(existingEvent: Event): String {
+        val eventName = existingEvent.name.ifBlank { "Another event" }
+        return "$eventName was registered for one of these fields and times. Checkout was stopped; choose different slots."
+    }
+
+    private fun buildRentalLockKey(
+        organizationId: String,
+        fieldId: String,
+        start: Instant,
+        end: Instant,
+    ): String {
+        return "$organizationId:$fieldId:${start.toEpochMilliseconds()}:${end.toEpochMilliseconds()}"
+    }
+
+    private fun rangesOverlap(
+        firstStart: Instant,
+        firstEnd: Instant,
+        secondStart: Instant,
+        secondEnd: Instant,
+    ): Boolean {
+        if (firstEnd <= firstStart || secondEnd <= secondStart) {
+            return false
+        }
+        return firstStart < secondEnd && secondStart < firstEnd
     }
 
     private fun createChild(
@@ -439,5 +983,6 @@ class DefaultCreateEventComponent(
 
     companion object {
         private const val ONE_HOUR_MILLIS = 60L * 60L * 1000L
+        private val rentalCheckoutLocks = mutableMapOf<String, Instant>()
     }
 }

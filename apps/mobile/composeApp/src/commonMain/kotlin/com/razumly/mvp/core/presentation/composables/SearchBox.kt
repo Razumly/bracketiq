@@ -317,6 +317,12 @@ private fun EventTypeFilterSection(
                     onClick = { onFilterChange { copy(eventType = EventType.EVENT) } },
                     label = { Text("Events") })
             }
+
+            item {
+                FilterChip(selected = currentFilter.eventType == EventType.LEAGUE,
+                    onClick = { onFilterChange { copy(eventType = EventType.LEAGUE) } },
+                    label = { Text("Leagues") })
+            }
         }
     }
 }

@@ -31,6 +31,8 @@ import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.ktx.DynamicScheme
+import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
 import com.razumly.mvp.core.presentation.util.backAnimation
@@ -57,6 +59,10 @@ fun CreateEventScreen(
     val newEventState by component.newEventState.collectAsState()
     val childStack by component.childStack.subscribeAsState()
     val eventImageUrls by component.eventImageUrls.collectAsState()
+    val isRentalFlow by component.isRentalFlow.collectAsState()
+    val sports by component.sports.collectAsState()
+    val localFields by component.localFields.collectAsState()
+    val leagueSlots by component.leagueSlots.collectAsState()
     val isEditing = true
     val currentUser by component.currentUser.collectAsState()
     val isDark = isSystemInDarkTheme()
@@ -92,6 +98,53 @@ fun CreateEventScreen(
             specVersion = ColorSpec.SpecVersion.SPEC_2025,
             style = PaletteStyle.Neutral,
         )
+    }
+
+    LaunchedEffect(isRentalFlow, newEventState.eventType) {
+        if (isRentalFlow && newEventState.eventType != EventType.EVENT) {
+            component.onTypeSelected(EventType.EVENT)
+        }
+    }
+
+    val eventWithRelations = remember(defaultEvent, newEventState) {
+        defaultEvent
+            .toEventWithFullRelations(listOf(), listOf())
+            .copy(event = newEventState)
+    }
+
+    val eventWithCreateRelations = remember(eventWithRelations, sports, leagueSlots) {
+        eventWithRelations.copy(
+            sport = sports.firstOrNull { it.id == newEventState.sportId },
+            timeSlots = leagueSlots,
+        )
+    }
+
+    val onEditEvent: (Event.() -> Event) -> Unit = remember(component, isRentalFlow) {
+        { update ->
+            component.updateEventField {
+                update().applyCreateSelectionRules(isRentalFlow)
+            }
+        }
+    }
+
+    val onEditTournament: (Event.() -> Event) -> Unit = remember(component, isRentalFlow) {
+        { update ->
+            component.updateTournamentField {
+                update().applyCreateSelectionRules(isRentalFlow)
+            }
+        }
+    }
+
+    val onEventTypeSelected: (EventType) -> Unit = remember(component, isRentalFlow) {
+        { selectedType ->
+            val normalizedType = if (isRentalFlow) EventType.EVENT else selectedType
+            component.onTypeSelected(normalizedType)
+            if (normalizedType == EventType.LEAGUE || normalizedType == EventType.TOURNAMENT) {
+                component.updateEventField {
+                    copy(teamSignup = true, singleDivision = true, end = start)
+                }
+            }
+        }
     }
 
     Scaffold(
@@ -150,20 +203,32 @@ fun CreateEventScreen(
                         paymentProcessor = component,
                         mapComponent = mapComponent,
                         hostHasAccount = currentUser?.hasStripeAccount ?: false,
-                        eventWithRelations = defaultEvent.toEventWithFullRelations(listOf(), listOf()),
+                        eventWithRelations = eventWithCreateRelations,
                         editEvent = newEventState,
                         navPadding = LocalNavBarPadding.current,
                         editView = isEditing,
                         isNewEvent = true,
-                        onAddCurrentUser = {},
+                        onAddCurrentUser = component::addUserToEvent,
                         imageScheme = imageScheme,
                         imageIds = eventImageUrls,
+                        sports = sports,
+                        editableFields = localFields,
+                        leagueTimeSlots = leagueSlots,
                         onHostCreateAccount = component::createAccount,
                         onPlaceSelected = component::selectPlace,
-                        onEditEvent = component::updateEventField,
-                        onEditTournament = component::updateTournamentField,
-                        onEventTypeSelected = component::onTypeSelected,
+                        onEditEvent = onEditEvent,
+                        onEditTournament = onEditTournament,
+                        onEventTypeSelected = onEventTypeSelected,
+                        onSportSelected = { sportId ->
+                            onEditEvent { copy(sportId = sportId.takeIf(String::isNotBlank)) }
+                        },
                         onSelectFieldCount = component::selectFieldCount,
+                        onUpdateLocalFieldName = component::updateLocalFieldName,
+                        onAddLeagueTimeSlot = component::addLeagueTimeSlot,
+                        onUpdateLeagueTimeSlot = { index, updated ->
+                            component.updateLeagueTimeSlot(index) { updated }
+                        },
+                        onRemoveLeagueTimeSlot = component::removeLeagueTimeSlot,
                         onUploadSelected = component::onUploadSelected,
                         onDeleteImage = component::deleteImage,
                     ) { isValid -> canProceed = isValid }

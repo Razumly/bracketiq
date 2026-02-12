@@ -51,7 +51,7 @@ class TeamRepository(
     private val userRepository: IUserRepository,
     private val pushNotificationRepository: IPushNotificationsRepository,
 ) : ITeamRepository {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun getTeamsFlow(ids: List<String>): Flow<Result<List<TeamWithPlayers>>> =
         databaseService.getTeamDao.getTeamsWithPlayersFlowByIds(ids)

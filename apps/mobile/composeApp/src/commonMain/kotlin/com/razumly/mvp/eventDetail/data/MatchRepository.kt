@@ -40,7 +40,7 @@ class MatchRepository(
     private val api: MvpApiClient,
     private val databaseService: DatabaseService,
 ) : IMatchRepository {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var _ignoreMatch = MutableStateFlow<MatchMVP?>(null)
 
     override suspend fun getMatch(matchId: String): Result<MatchMVP> =

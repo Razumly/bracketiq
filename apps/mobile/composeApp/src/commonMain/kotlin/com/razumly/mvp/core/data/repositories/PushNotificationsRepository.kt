@@ -9,7 +9,6 @@ import com.razumly.mvp.core.data.dataTypes.Team
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.IO
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
@@ -73,7 +72,7 @@ interface IPushNotificationsRepository {
 class PushNotificationsRepository(
     private val userDataSource: CurrentUserDataSource,
 ) : IPushNotificationsRepository {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val _pushToken =
         userDataSource.getPushToken().stateIn(scope, SharingStarted.Eagerly, "")
 

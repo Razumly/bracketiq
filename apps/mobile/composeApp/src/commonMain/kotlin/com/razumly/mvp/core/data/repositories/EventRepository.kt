@@ -39,6 +39,7 @@ interface IEventRepository : IMVPRepository {
     fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>>
     fun resetCursor()
     suspend fun getEvent(eventId: String): Result<Event>
+    suspend fun getEventsByOrganization(organizationId: String, limit: Int = 200): Result<List<Event>>
     suspend fun createEvent(newEvent: Event): Result<Event>
     suspend fun updateEvent(newEvent: Event): Result<Event>
     suspend fun updateLocalEvent(newEvent: Event): Result<Event>
@@ -62,7 +63,7 @@ class EventRepository(
     private val teamRepository: ITeamRepository,
     private val userRepository: IUserRepository,
 ) : IEventRepository {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     init {
         scope.launch {
@@ -106,6 +107,15 @@ class EventRepository(
         return res.events.mapNotNull { it.toEventOrNull() }
     }
 
+    private suspend fun fetchRemoteEventsByOrganization(organizationId: String, limit: Int): List<Event> {
+        val encodedOrganizationId = organizationId.encodeURLQueryComponent()
+        val safeLimit = limit.coerceIn(1, 500)
+        val res = api.get<EventsResponseDto>(
+            "api/events?organizationId=$encodedOrganizationId&limit=$safeLimit"
+        )
+        return res.events.mapNotNull { it.toEventOrNull() }
+    }
+
     private suspend fun insertEventCrossReferences(
         eventId: String, players: List<UserData>, host: List<UserData>, teams: List<Team>
     ) {
@@ -133,6 +143,24 @@ class EventRepository(
             databaseService.getEventDao.getEventById(eventId)
                 ?: throw IllegalStateException("Event $eventId not cached")
         })
+
+    override suspend fun getEventsByOrganization(
+        organizationId: String,
+        limit: Int,
+    ): Result<List<Event>> {
+        val normalizedOrganizationId = organizationId.trim()
+        if (normalizedOrganizationId.isEmpty()) {
+            return Result.success(emptyList())
+        }
+
+        return runCatching {
+            val events = fetchRemoteEventsByOrganization(normalizedOrganizationId, limit)
+            if (events.isNotEmpty()) {
+                databaseService.getEventDao.upsertEvents(events)
+            }
+            events
+        }
+    }
 
     override suspend fun createEvent(newEvent: Event): Result<Event> =
         singleResponse(networkCall = {

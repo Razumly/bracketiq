@@ -7,7 +7,12 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,17 +20,24 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
@@ -35,7 +47,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FabPosition
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -44,6 +55,7 @@ import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -55,23 +67,31 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import com.kizitonwose.calendar.compose.WeekCalendar
+import com.kizitonwose.calendar.compose.weekcalendar.rememberWeekCalendarState
+import com.kizitonwose.calendar.core.Week
+import com.kizitonwose.calendar.core.WeekDay
+import com.kizitonwose.calendar.core.WeekDayPosition
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.RentalCreateContext
-import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
 import com.razumly.mvp.core.presentation.composables.SearchBox
 import com.razumly.mvp.core.presentation.composables.SearchOverlay
+import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
 import com.razumly.mvp.core.presentation.util.isScrollingUp
 import com.razumly.mvp.core.presentation.util.moneyFormat
@@ -88,11 +108,15 @@ import dev.chrisbanes.haze.rememberHazeState
 import dev.icerock.moko.geo.LatLng
 import dev.icerock.moko.geo.compose.BindLocationTrackerEffect
 import kotlinx.datetime.DayOfWeek
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.format
 import kotlinx.datetime.isoDayNumber
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.datetime.toInstant
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.ExperimentalTime
@@ -102,6 +126,40 @@ private enum class DiscoverTab(val label: String, val searchPlaceholder: String)
     EVENTS(label = "Events", searchPlaceholder = "Search events"),
     RENTALS(label = "Rentals", searchPlaceholder = "Search rentals")
 }
+
+private enum class RentalDetailsStep {
+    BUILDER,
+    CONFIRMATION,
+}
+
+private enum class RentalDragHandle {
+    TOP,
+    BOTTOM,
+}
+
+private data class RentalSelectionDraft(
+    val id: Long,
+    val fieldId: String,
+    val date: LocalDate,
+    val startMinutes: Int,
+    val endMinutes: Int,
+)
+
+private data class ResolvedRentalSelection(
+    val selection: RentalSelectionDraft,
+    val field: Field,
+    val slots: List<TimeSlot>,
+    val startInstant: Instant,
+    val endInstant: Instant,
+    val totalPriceCents: Int,
+)
+
+private data class RentalBusyRange(
+    val eventId: String,
+    val eventName: String,
+    val startMinutes: Int,
+    val endMinutes: Int,
+)
 
 @OptIn(ExperimentalHazeMaterialsApi::class)
 @Composable
@@ -113,6 +171,7 @@ fun EventSearchScreen(
     val rentals by component.rentals.collectAsState()
     val isLoadingRentals by component.isLoadingRentals.collectAsState()
     val rentalFieldOptions by component.rentalFieldOptions.collectAsState()
+    val rentalBusyBlocks by component.rentalBusyBlocks.collectAsState()
     val isLoadingRentalFields by component.isLoadingRentalFields.collectAsState()
     val showMapCard by component.showMapCard.collectAsState()
     val selectedEvent by component.selectedEvent.collectAsState()
@@ -142,12 +201,13 @@ fun EventSearchScreen(
     var showFloatingSearch by remember { mutableStateOf(true) }
     var showingFilter by remember { mutableStateOf(false) }
 
+    val timeZone = remember { TimeZone.currentSystemDefault() }
+    val today = remember(timeZone) { Clock.System.now().toLocalDateTime(timeZone).date }
     var selectedRentalOrganization by remember { mutableStateOf<Organization?>(null) }
-    var rentalStart by remember { mutableStateOf<Instant?>(null) }
-    var rentalEnd by remember { mutableStateOf<Instant?>(null) }
-    var selectedRentalFieldIds by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var showStartPicker by remember { mutableStateOf(false) }
-    var showEndPicker by remember { mutableStateOf(false) }
+    var selectedRentalDate by remember { mutableStateOf(today) }
+    var rentalSelections by remember { mutableStateOf<List<RentalSelectionDraft>>(emptyList()) }
+    var nextRentalSelectionId by remember { mutableStateOf(1L) }
+    var rentalDetailsStep by remember { mutableStateOf(RentalDetailsStep.BUILDER) }
 
     val eventsScrollingUp by eventsListState.isScrollingUp()
     val rentalsScrollingUp by rentalsListState.isScrollingUp()
@@ -167,61 +227,53 @@ fun EventSearchScreen(
     }
 
     val hasRentalDetailsOpen = selectedRentalOrganization != null
-    val matchingSlotsByField = remember(rentalFieldOptions, rentalStart, rentalEnd) {
-        val start = rentalStart
-        val end = rentalEnd
-        if (start == null || end == null || end <= start) {
-            emptyMap()
-        } else {
-            rentalFieldOptions.associate { option ->
-                option.field.id to option.rentalSlots.firstOrNull { slot ->
-                    slot.matchesRentalSelection(
-                        rangeStart = start,
-                        rangeEnd = end,
-                        fieldId = option.field.id
-                    )
-                }
-            }
+    val resolvedSelections = remember(rentalSelections, rentalFieldOptions, timeZone) {
+        rentalSelections.mapNotNull { selection ->
+            resolveRentalSelection(
+                selection = selection,
+                fieldOptions = rentalFieldOptions,
+                timeZone = timeZone,
+            )
         }
     }
-    val availableRentalFieldIds = remember(matchingSlotsByField) {
-        matchingSlotsByField.mapNotNull { (fieldId, slot) ->
-            fieldId.takeIf { slot != null }
-        }.toSet()
+    val validResolvedSelections = remember(resolvedSelections) {
+        resolvedSelections.filter { it.totalPriceCents > 0 }
     }
-    val orderedSelectedFieldIds = remember(selectedRentalFieldIds) {
-        selectedRentalFieldIds.toList().sorted()
+    val invalidSelectionCount = remember(rentalSelections, resolvedSelections) {
+        rentalSelections.size - resolvedSelections.size
     }
-    val selectedTimeSlotIds = remember(orderedSelectedFieldIds, matchingSlotsByField) {
-        orderedSelectedFieldIds.mapNotNull { fieldId ->
-            matchingSlotsByField[fieldId]?.id
-        }
+    val totalRentalPriceCents = remember(validResolvedSelections) {
+        validResolvedSelections.sumOf { resolved -> resolved.totalPriceCents }
     }
-    val totalRentalPriceCents = remember(orderedSelectedFieldIds, matchingSlotsByField) {
-        orderedSelectedFieldIds.sumOf { fieldId ->
-            matchingSlotsByField[fieldId]?.price ?: 0
-        }
+    val selectedFieldIdsForCreate = remember(validResolvedSelections) {
+        validResolvedSelections.map { resolved -> resolved.field.id }.distinct()
     }
-    val hasSelectableRentalFields = remember(availableRentalFieldIds) {
-        availableRentalFieldIds.isNotEmpty()
+    val selectedTimeSlotIdsForCreate = remember(validResolvedSelections) {
+        validResolvedSelections.flatMap { resolved -> resolved.slots.map { slot -> slot.id } }.distinct()
     }
+    val rentalStartInstant = remember(validResolvedSelections) {
+        validResolvedSelections.minOfOrNull { resolved -> resolved.startInstant }
+    }
+    val rentalEndInstant = remember(validResolvedSelections) {
+        validResolvedSelections.maxOfOrNull { resolved -> resolved.endInstant }
+    }
+    val canGoToConfirmation = validResolvedSelections.isNotEmpty() &&
+        invalidSelectionCount == 0 &&
+        totalRentalPriceCents > 0
     val canContinueRental = selectedRentalOrganization != null &&
-        rentalStart != null &&
-        rentalEnd != null &&
-        rentalEnd!! > rentalStart!! &&
-        selectedRentalFieldIds.isNotEmpty() &&
-        selectedTimeSlotIds.size == selectedRentalFieldIds.size &&
+        rentalStartInstant != null &&
+        rentalEndInstant != null &&
+        selectedFieldIdsForCreate.isNotEmpty() &&
+        selectedTimeSlotIdsForCreate.isNotEmpty() &&
+        invalidSelectionCount == 0 &&
         totalRentalPriceCents > 0
     val rentalValidationMessage = when {
         selectedRentalOrganization == null -> null
-        rentalStart == null || rentalEnd == null -> "Select a start and end time to continue."
-        rentalEnd!! <= rentalStart!! -> "End time must be after start time."
-        isLoadingRentalFields -> "Loading fields and rental slots..."
+        isLoadingRentalFields && rentalFieldOptions.isEmpty() -> "Loading fields and rental slots..."
         rentalFieldOptions.isEmpty() -> "No fields are configured for this organization."
-        !hasSelectableRentalFields -> "No fields are available for the selected date/time."
-        selectedRentalFieldIds.isEmpty() -> "Select one or more fields/courts to continue."
-        selectedTimeSlotIds.size != selectedRentalFieldIds.size -> "One or more selected fields are unavailable."
-        totalRentalPriceCents <= 0 -> "Selected fields do not have valid rental pricing."
+        rentalSelections.isEmpty() -> "Tap any available 30-minute cell to add a rental selection."
+        invalidSelectionCount > 0 -> "One or more selections are outside available rental slot ranges."
+        totalRentalPriceCents <= 0 -> "Selected rentals do not have valid pricing."
         else -> null
     }
 
@@ -290,15 +342,11 @@ fun EventSearchScreen(
             showSearchOverlay = false
         } else {
             component.clearRentalFieldOptions()
-            selectedRentalFieldIds = emptySet()
-        }
-    }
-
-    LaunchedEffect(availableRentalFieldIds) {
-        if (selectedRentalFieldIds.any { fieldId -> fieldId !in availableRentalFieldIds }) {
-            selectedRentalFieldIds = selectedRentalFieldIds.filter { fieldId ->
-                fieldId in availableRentalFieldIds
-            }.toSet()
+            component.clearRentalBusyBlocks()
+            rentalSelections = emptyList()
+            rentalDetailsStep = RentalDetailsStep.BUILDER
+            selectedRentalDate = today
+            nextRentalSelectionId = 1L
         }
     }
 
@@ -312,12 +360,13 @@ fun EventSearchScreen(
     }
 
     fun openRentalDetails(organization: Organization) {
-        val nowMillis = Clock.System.now().toEpochMilliseconds()
         selectedRentalOrganization = organization
-        rentalStart = Instant.fromEpochMilliseconds(nowMillis + ONE_HOUR_MILLIS)
-        rentalEnd = Instant.fromEpochMilliseconds(nowMillis + THREE_HOURS_MILLIS)
-        selectedRentalFieldIds = emptySet()
+        selectedRentalDate = today
+        rentalSelections = emptyList()
+        rentalDetailsStep = RentalDetailsStep.BUILDER
+        nextRentalSelectionId = 1L
         component.loadRentalFieldOptions(organization.fieldIds)
+        component.loadRentalBusyBlocks(organization.id, organization.fieldIds)
         showSearchOverlay = false
     }
 
@@ -344,8 +393,12 @@ fun EventSearchScreen(
                                 onClick = {
                                     selectedTab = tab
                                     selectedRentalOrganization = null
-                                    selectedRentalFieldIds = emptySet()
+                                    rentalSelections = emptyList()
+                                    rentalDetailsStep = RentalDetailsStep.BUILDER
+                                    selectedRentalDate = today
+                                    nextRentalSelectionId = 1L
                                     component.clearRentalFieldOptions()
+                                    component.clearRentalBusyBlocks()
                                 },
                                 text = { Text(tab.label) }
                             )
@@ -429,61 +482,178 @@ fun EventSearchScreen(
                     }
 
                     DiscoverTab.RENTALS -> {
-                        if (selectedRentalOrganization != null && rentalStart != null && rentalEnd != null) {
-                            RentalDetailsContent(
-                                organization = selectedRentalOrganization!!,
-                                start = rentalStart!!,
-                                end = rentalEnd!!,
-                                fieldOptions = rentalFieldOptions,
-                                matchingSlotsByField = matchingSlotsByField,
-                                selectedFieldIds = selectedRentalFieldIds,
-                                totalPriceCents = totalRentalPriceCents,
-                                isLoadingFields = isLoadingRentalFields,
-                                topPadding = paddingValues.calculateTopPadding(),
-                                bottomPadding = offsetNavPadding.calculateBottomPadding(),
-                                canContinue = canContinueRental,
-                                validationMessage = rentalValidationMessage,
-                                onBack = {
-                                    selectedRentalOrganization = null
-                                    selectedRentalFieldIds = emptySet()
-                                    component.clearRentalFieldOptions()
-                                },
-                                onStartClick = { showStartPicker = true },
-                                onEndClick = { showEndPicker = true },
-                                onFieldToggle = { fieldId, checked ->
-                                    selectedRentalFieldIds = if (checked) {
-                                        selectedRentalFieldIds + fieldId
-                                    } else {
-                                        selectedRentalFieldIds - fieldId
-                                    }
-                                },
-                                onContinue = {
-                                    if (canContinueRental) {
-                                        val organization = selectedRentalOrganization
-                                        val start = rentalStart
-                                        val end = rentalEnd
-                                        if (organization != null && start != null && end != null) {
-                                            component.startRentalCreate(
-                                                RentalCreateContext(
-                                                    organizationId = organization.id,
-                                                    organizationName = organization.name,
-                                                    organizationLocation = organization.location,
-                                                    organizationCoordinates = organization.coordinates,
-                                                    organizationFieldIds = organization.fieldIds,
-                                                    selectedFieldIds = orderedSelectedFieldIds,
-                                                    selectedTimeSlotIds = selectedTimeSlotIds,
-                                                    rentalPriceCents = totalRentalPriceCents,
-                                                    startEpochMillis = start.toEpochMilliseconds(),
-                                                    endEpochMillis = end.toEpochMilliseconds(),
+                        if (selectedRentalOrganization != null) {
+                            val selectionsForCurrentDate = remember(rentalSelections, selectedRentalDate) {
+                                rentalSelections.filter { selection -> selection.date == selectedRentalDate }
+                            }
+
+                            if (rentalDetailsStep == RentalDetailsStep.BUILDER) {
+                                RentalDetailsContent(
+                                    organization = selectedRentalOrganization!!,
+                                    selectedDate = selectedRentalDate,
+                                    fieldOptions = rentalFieldOptions,
+                                    busyBlocks = rentalBusyBlocks,
+                                    selectionsForSelectedDate = selectionsForCurrentDate,
+                                    allSelectionCount = rentalSelections.size,
+                                    totalPriceCents = totalRentalPriceCents,
+                                    isLoadingFields = isLoadingRentalFields,
+                                    topPadding = paddingValues.calculateTopPadding(),
+                                    bottomPadding = offsetNavPadding.calculateBottomPadding(),
+                                    canGoNext = canGoToConfirmation,
+                                    validationMessage = rentalValidationMessage,
+                                    onBack = {
+                                        selectedRentalOrganization = null
+                                        rentalSelections = emptyList()
+                                        rentalDetailsStep = RentalDetailsStep.BUILDER
+                                        component.clearRentalFieldOptions()
+                                        component.clearRentalBusyBlocks()
+                                    },
+                                    onSelectedDateChange = { selectedDate ->
+                                        selectedRentalDate = selectedDate
+                                    },
+                                    onCreateSelection = { fieldId, startMinutes ->
+                                        val endMinutes = startMinutes + SLOT_INTERVAL_MINUTES
+                                        val fieldOption = rentalFieldOptions.firstOrNull { option ->
+                                            option.field.id == fieldId
+                                        }
+                                        val overlapsSelection = rentalSelections.any { selection ->
+                                            selection.fieldId == fieldId &&
+                                                selection.date == selectedRentalDate &&
+                                                rangesOverlap(
+                                                    selection.startMinutes,
+                                                    selection.endMinutes,
+                                                    startMinutes,
+                                                    endMinutes,
                                                 )
+                                        }
+                                        val overlapsBusyBlock = rentalBusyBlocks.any { block ->
+                                            block.fieldId == fieldId &&
+                                                rangeOverlapsBusyBlockOnDate(
+                                                    block = block,
+                                                    date = selectedRentalDate,
+                                                    startMinutes = startMinutes,
+                                                    endMinutes = endMinutes,
+                                                    timeZone = timeZone,
+                                                )
+                                        }
+                                        val isWithinRentalAvailability = fieldOption != null &&
+                                            isRangeCoveredByRentalAvailability(
+                                                option = fieldOption,
+                                                date = selectedRentalDate,
+                                                startMinutes = startMinutes,
+                                                endMinutes = endMinutes,
+                                                timeZone = timeZone,
                                             )
-                                            selectedRentalOrganization = null
-                                            selectedRentalFieldIds = emptySet()
-                                            component.clearRentalFieldOptions()
+
+                                        if (!overlapsSelection && !overlapsBusyBlock && isWithinRentalAvailability) {
+                                            rentalSelections = rentalSelections + RentalSelectionDraft(
+                                                id = nextRentalSelectionId,
+                                                fieldId = fieldId,
+                                                date = selectedRentalDate,
+                                                startMinutes = startMinutes,
+                                                endMinutes = endMinutes,
+                                            )
+                                            nextRentalSelectionId += 1L
+                                        }
+                                    },
+                                    onCanUpdateSelection = { selectionId, startMinutes, endMinutes ->
+                                        val targetSelection = rentalSelections.firstOrNull { selection ->
+                                            selection.id == selectionId
+                                        } ?: return@RentalDetailsContent false
+
+                                        canApplyRentalSelectionRange(
+                                            selectionId = selectionId,
+                                            fieldId = targetSelection.fieldId,
+                                            date = targetSelection.date,
+                                            startMinutes = startMinutes,
+                                            endMinutes = endMinutes,
+                                            selections = rentalSelections,
+                                            fieldOptions = rentalFieldOptions,
+                                            busyBlocks = rentalBusyBlocks,
+                                            timeZone = timeZone,
+                                        )
+                                    },
+                                    onUpdateSelection = { selectionId, startMinutes, endMinutes ->
+                                        val targetSelection = rentalSelections.firstOrNull { selection ->
+                                            selection.id == selectionId
+                                        }
+                                        if (targetSelection == null) return@RentalDetailsContent false
+
+                                        if (!canApplyRentalSelectionRange(
+                                                selectionId = selectionId,
+                                                fieldId = targetSelection.fieldId,
+                                                date = targetSelection.date,
+                                                startMinutes = startMinutes,
+                                                endMinutes = endMinutes,
+                                                selections = rentalSelections,
+                                                fieldOptions = rentalFieldOptions,
+                                                busyBlocks = rentalBusyBlocks,
+                                                timeZone = timeZone,
+                                            )
+                                        ) {
+                                            return@RentalDetailsContent false
+                                        }
+
+                                        rentalSelections = rentalSelections.map { selection ->
+                                            if (selection.id == selectionId) {
+                                                selection.copy(startMinutes = startMinutes, endMinutes = endMinutes)
+                                            } else {
+                                                selection
+                                            }
+                                        }
+                                        true
+                                    },
+                                    onDeleteSelection = { selectionId ->
+                                        rentalSelections = rentalSelections.filterNot { it.id == selectionId }
+                                    },
+                                    onNext = {
+                                        if (canGoToConfirmation) {
+                                            rentalDetailsStep = RentalDetailsStep.CONFIRMATION
                                         }
                                     }
-                                }
-                            )
+                                )
+                            } else {
+                                RentalConfirmationContent(
+                                    organization = selectedRentalOrganization!!,
+                                    selections = validResolvedSelections,
+                                    totalPriceCents = totalRentalPriceCents,
+                                    topPadding = paddingValues.calculateTopPadding(),
+                                    bottomPadding = offsetNavPadding.calculateBottomPadding(),
+                                    validationMessage = rentalValidationMessage,
+                                    canContinue = canContinueRental,
+                                    onBack = {
+                                        rentalDetailsStep = RentalDetailsStep.BUILDER
+                                    },
+                                    onContinue = {
+                                        if (canContinueRental) {
+                                            val organization = selectedRentalOrganization
+                                            val start = rentalStartInstant
+                                            val end = rentalEndInstant
+                                            if (organization != null && start != null && end != null) {
+                                                component.startRentalCreate(
+                                                    RentalCreateContext(
+                                                        organizationId = organization.id,
+                                                        organizationName = organization.name,
+                                                        organizationLocation = organization.location,
+                                                        organizationCoordinates = organization.coordinates,
+                                                        organizationFieldIds = organization.fieldIds,
+                                                        selectedFieldIds = selectedFieldIdsForCreate,
+                                                        selectedTimeSlotIds = selectedTimeSlotIdsForCreate,
+                                                        rentalPriceCents = totalRentalPriceCents,
+                                                        startEpochMillis = start.toEpochMilliseconds(),
+                                                        endEpochMillis = end.toEpochMilliseconds(),
+                                                    )
+                                                )
+                                                selectedRentalOrganization = null
+                                                rentalSelections = emptyList()
+                                                rentalDetailsStep = RentalDetailsStep.BUILDER
+                                                component.clearRentalFieldOptions()
+                                                component.clearRentalBusyBlocks()
+                                            }
+                                        }
+                                    }
+                                )
+                            }
                         } else {
                             DiscoverOrganizationList(
                                 organizations = filteredRentals,
@@ -635,27 +805,6 @@ fun EventSearchScreen(
         )
     }
 
-    PlatformDateTimePicker(
-        onDateSelected = { selectedInstant ->
-            rentalStart = selectedInstant ?: rentalStart
-            showStartPicker = false
-        },
-        onDismissRequest = { showStartPicker = false },
-        showPicker = showStartPicker,
-        getTime = true,
-        canSelectPast = false,
-    )
-
-    PlatformDateTimePicker(
-        onDateSelected = { selectedInstant ->
-            rentalEnd = selectedInstant ?: rentalEnd
-            showEndPicker = false
-        },
-        onDismissRequest = { showEndPicker = false },
-        showPicker = showEndPicker,
-        getTime = true,
-        canSelectPast = false,
-    )
 }
 
 private fun List<Organization>.filterByQuery(query: String): List<Organization> {
@@ -829,23 +978,27 @@ private fun DiscoverOrganizationSuggestion(
 @Composable
 private fun RentalDetailsContent(
     organization: Organization,
-    start: Instant,
-    end: Instant,
+    selectedDate: LocalDate,
     fieldOptions: List<RentalFieldOption>,
-    matchingSlotsByField: Map<String, TimeSlot?>,
-    selectedFieldIds: Set<String>,
+    busyBlocks: List<RentalBusyBlock>,
+    selectionsForSelectedDate: List<RentalSelectionDraft>,
+    allSelectionCount: Int,
     totalPriceCents: Int,
     isLoadingFields: Boolean,
     topPadding: Dp,
     bottomPadding: Dp,
-    canContinue: Boolean,
+    canGoNext: Boolean,
     validationMessage: String?,
     onBack: () -> Unit,
-    onStartClick: () -> Unit,
-    onEndClick: () -> Unit,
-    onFieldToggle: (String, Boolean) -> Unit,
-    onContinue: () -> Unit,
+    onSelectedDateChange: (LocalDate) -> Unit,
+    onCreateSelection: (fieldId: String, startMinutes: Int) -> Unit,
+    onCanUpdateSelection: (selectionId: Long, startMinutes: Int, endMinutes: Int) -> Boolean,
+    onUpdateSelection: (selectionId: Long, startMinutes: Int, endMinutes: Int) -> Boolean,
+    onDeleteSelection: (selectionId: Long) -> Unit,
+    onNext: () -> Unit,
 ) {
+    val verticalScrollState = rememberScrollState()
+    var viewportBoundsInWindow by remember { mutableStateOf<Rect?>(null) }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -854,18 +1007,20 @@ private fun RentalDetailsContent(
                 end = 16.dp,
                 top = topPadding + 16.dp,
                 bottom = bottomPadding + 16.dp
-            ),
+            )
+            .onGloballyPositioned { coordinates ->
+                viewportBoundsInWindow = coordinates.boundsInWindow()
+            },
         verticalArrangement = Arrangement.SpaceBetween
     ) {
         Column(
+            modifier = Modifier
+                .weight(1f, fill = false)
+                .verticalScroll(verticalScrollState),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Button(
+            TextButton(
                 onClick = onBack,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                )
             ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
@@ -920,32 +1075,25 @@ private fun RentalDetailsContent(
                     }
 
                     Text(
-                        text = "Select rental times",
+                        text = "Select rental slots",
                         style = MaterialTheme.typography.titleMedium,
                         modifier = Modifier.padding(top = 6.dp)
                     )
-
-                    RentalDateTimeRow(
-                        label = "Start",
-                        value = start.toDisplayDateTime(),
-                        onClick = onStartClick
-                    )
-                    RentalDateTimeRow(
-                        label = "End",
-                        value = end.toDisplayDateTime(),
-                        onClick = onEndClick
-                    )
-
                     Text(
-                        text = "Select fields/courts",
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.padding(top = 6.dp)
+                        text = "Tap any available 30-minute cell to add a slot. Drag top/bottom handles to resize.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    RentalWeekSelector(
+                        selectedDate = selectedDate,
+                        onSelectedDateChange = onSelectedDateChange
                     )
 
                     when {
                         isLoadingFields -> {
                             Text(
-                                text = "Loading fields...",
+                                text = "Loading fields and rental slots...",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -953,42 +1101,33 @@ private fun RentalDetailsContent(
 
                         fieldOptions.isEmpty() -> {
                             Text(
-                                text = "No fields are configured for this organization.",
+                                text = "No fields/courts are configured for this organization.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
 
                         else -> {
-                            fieldOptions.forEach { option ->
-                                val matchedSlot = matchingSlotsByField[option.field.id]
-                                val hasAvailableSlot = matchedSlot != null
-                                val isChecked = option.field.id in selectedFieldIds
-                                val slotPrice = matchedSlot?.price
-                                val availabilityLabel = if (matchedSlot != null) {
-                                    matchedSlot.toRentalAvailabilityLabel()
-                                } else {
-                                    "Unavailable for selected time"
-                                }
-
-                                RentalFieldSelectionRow(
-                                    field = option.field,
-                                    checked = isChecked,
-                                    enabled = hasAvailableSlot,
-                                    priceLabel = if (slotPrice != null && slotPrice > 0) {
-                                        (slotPrice / 100.0).moneyFormat()
-                                    } else {
-                                        null
-                                    },
-                                    availabilityLabel = availabilityLabel,
-                                    onCheckedChange = { checked ->
-                                        onFieldToggle(option.field.id, checked)
-                                    }
-                                )
-                            }
+                            RentalTimelineGrid(
+                                selectedDate = selectedDate,
+                                fieldOptions = fieldOptions,
+                                busyBlocks = busyBlocks,
+                                selectionsForSelectedDate = selectionsForSelectedDate,
+                                verticalScrollState = verticalScrollState,
+                                viewportBoundsInWindow = viewportBoundsInWindow,
+                                onCreateSelection = onCreateSelection,
+                                onCanUpdateSelection = onCanUpdateSelection,
+                                onUpdateSelection = onUpdateSelection,
+                                onDeleteSelection = onDeleteSelection,
+                            )
                         }
                     }
 
+                    Text(
+                        text = "Selected slots: $allSelectionCount",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     if (totalPriceCents > 0) {
                         Text(
                             text = "Total rental: ${(totalPriceCents / 100.0).moneyFormat()}",
@@ -1008,73 +1147,481 @@ private fun RentalDetailsContent(
             }
         }
 
-        Button(
-            onClick = onContinue,
-            enabled = canContinue,
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 12.dp)
+                .padding(top = 12.dp),
+            horizontalArrangement = Arrangement.End
         ) {
-            Text("Continue to create event")
+            Button(
+                onClick = onNext,
+                enabled = canGoNext,
+            ) {
+                Text("Next")
+            }
         }
     }
 }
 
 @Composable
-private fun RentalFieldSelectionRow(
-    field: Field,
-    checked: Boolean,
-    enabled: Boolean,
-    priceLabel: String?,
-    availabilityLabel: String,
-    onCheckedChange: (Boolean) -> Unit,
+private fun RentalConfirmationContent(
+    organization: Organization,
+    selections: List<ResolvedRentalSelection>,
+    totalPriceCents: Int,
+    topPadding: Dp,
+    bottomPadding: Dp,
+    validationMessage: String?,
+    canContinue: Boolean,
+    onBack: () -> Unit,
+    onContinue: () -> Unit,
 ) {
-    Card(
+    val sortedSelections = remember(selections) {
+        selections.sortedBy { selection -> selection.startInstant }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(
+                start = 16.dp,
+                end = 16.dp,
+                top = topPadding + 16.dp,
+                bottom = bottomPadding + 16.dp
+            ),
+        verticalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column(
+            modifier = Modifier.weight(1f, fill = false),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            TextButton(onClick = onBack) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Back"
+                )
+                Text("Back to schedule")
+            }
+
+            Text(
+                text = "Confirm rentals for ${organization.name.ifBlank { "Organization" }}",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold
+            )
+
+            if (sortedSelections.isEmpty()) {
+                EmptyDiscoverListItem(
+                    message = "No rental selections added yet."
+                )
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f, fill = false),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(sortedSelections, key = { resolved -> resolved.selection.id }) { resolved ->
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant
+                            )
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = resolved.field.displayLabel(),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = "${resolved.startInstant.toDisplayDateTime()} - ${resolved.endInstant.toDisplayDateTime()}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = if (resolved.slots.size == 1) {
+                                        "Slot: ${resolved.slots.first().toRentalAvailabilityLabel()}"
+                                    } else {
+                                        "Slots: ${resolved.slots.size} selected"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                val price = resolved.totalPriceCents
+                                if (price > 0) {
+                                    Text(
+                                        text = "Price: ${(price / 100.0).moneyFormat()}",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (totalPriceCents > 0) {
+                Text(
+                    text = "Total rental: ${(totalPriceCents / 100.0).moneyFormat()}",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+
+            validationMessage?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 12.dp),
+            horizontalArrangement = Arrangement.End
+        ) {
+            Button(
+                onClick = onContinue,
+                enabled = canContinue
+            ) {
+                Text("Continue to create event")
+            }
+        }
+    }
+}
+
+@Composable
+private fun RentalWeekSelector(
+    selectedDate: LocalDate,
+    onSelectedDateChange: (LocalDate) -> Unit,
+) {
+    val selectedEpochDay = remember(selectedDate) { selectedDate.toEpochDays() }
+    val weekCalendarState = rememberWeekCalendarState(
+        startDate = LocalDate.fromEpochDays(selectedEpochDay - 180),
+        endDate = LocalDate.fromEpochDays(selectedEpochDay + 180),
+        firstVisibleWeekDate = selectedDate,
+        firstDayOfWeek = DayOfWeek.MONDAY,
+    )
+
+    LaunchedEffect(selectedDate) {
+        weekCalendarState.animateScrollToDate(selectedDate)
+    }
+
+    Column(
         modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text(
+            text = selectedDate.format(dateFormat),
+            style = MaterialTheme.typography.titleSmall
+        )
+        WeekCalendar(
+            state = weekCalendarState,
+            modifier = Modifier.fillMaxWidth(),
+            weekHeader = { week ->
+                RentalWeekHeader(week = week)
+            },
+            dayContent = { day ->
+                val isSelected = day.date == selectedDate
+                val isEnabled = day.position == WeekDayPosition.RangeDate
+                Card(
+                    modifier = Modifier
+                        .padding(horizontal = 2.dp, vertical = 4.dp)
+                        .clickable(enabled = isEnabled) {
+                            onSelectedDateChange(day.date)
+                        },
+                    colors = CardDefaults.cardColors(
+                        containerColor = when {
+                            isSelected -> MaterialTheme.colorScheme.primary
+                            else -> MaterialTheme.colorScheme.surfaceVariant
+                        },
+                        contentColor = when {
+                            isSelected -> MaterialTheme.colorScheme.onPrimary
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            text = day.date.dayOfWeek.toShortLabel(),
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                        Text(
+                            text = day.date.dayOfMonth.toString(),
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun RentalWeekHeader(week: Week) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        week.days.forEach { day ->
+            Text(
+                text = day.date.dayOfWeek.toShortLabel(),
+                modifier = Modifier.weight(1f),
+                textAlign = TextAlign.Center,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun RentalTimelineGrid(
+    selectedDate: LocalDate,
+    fieldOptions: List<RentalFieldOption>,
+    busyBlocks: List<RentalBusyBlock>,
+    selectionsForSelectedDate: List<RentalSelectionDraft>,
+    verticalScrollState: ScrollState,
+    viewportBoundsInWindow: Rect?,
+    onCreateSelection: (fieldId: String, startMinutes: Int) -> Unit,
+    onCanUpdateSelection: (selectionId: Long, startMinutes: Int, endMinutes: Int) -> Boolean,
+    onUpdateSelection: (selectionId: Long, startMinutes: Int, endMinutes: Int) -> Boolean,
+    onDeleteSelection: (selectionId: Long) -> Unit,
+) {
+    val timelineStartMinutes = RENTAL_TIMELINE_START_MINUTES
+    val timelineEndMinutes = RENTAL_TIMELINE_END_MINUTES
+    val startsByMinute = remember {
+        (timelineStartMinutes until timelineEndMinutes step SLOT_INTERVAL_MINUTES).toList()
+    }
+    val timelineHeight = remember(startsByMinute) {
+        RENTAL_FIELD_HEADER_HEIGHT + (RENTAL_TIMELINE_ROW_HEIGHT * startsByMinute.size)
+    }
+    val timeZone = remember { TimeZone.currentSystemDefault() }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(timelineHeight)
+    ) {
+        Column(
+            modifier = Modifier.width(RENTAL_TIME_COLUMN_WIDTH)
+        ) {
+            Spacer(modifier = Modifier.height(RENTAL_FIELD_HEADER_HEIGHT))
+            startsByMinute.forEach { startMinutes ->
+                Box(
+                    modifier = Modifier
+                        .height(RENTAL_TIMELINE_ROW_HEIGHT)
+                        .fillMaxWidth()
+                        .padding(end = 6.dp),
+                    contentAlignment = Alignment.TopEnd
+                ) {
+                    Text(
+                        text = startMinutes.toClockLabel().orEmpty(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        LazyRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(fieldOptions, key = { option -> option.field.id }) { option ->
+                val selectionsForField = selectionsForSelectedDate.filter { selection ->
+                    selection.fieldId == option.field.id
+                }
+
+                RentalFieldTimelineColumn(
+                    option = option,
+                    selectedDate = selectedDate,
+                    startsByMinute = startsByMinute,
+                    busyBlocks = busyBlocks,
+                    selections = selectionsForField,
+                    timeZone = timeZone,
+                    verticalScrollState = verticalScrollState,
+                    viewportBoundsInWindow = viewportBoundsInWindow,
+                    onCreateSelection = onCreateSelection,
+                    onCanUpdateSelection = onCanUpdateSelection,
+                    onUpdateSelection = onUpdateSelection,
+                    onDeleteSelection = onDeleteSelection,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RentalFieldTimelineColumn(
+    option: RentalFieldOption,
+    selectedDate: LocalDate,
+    startsByMinute: List<Int>,
+    busyBlocks: List<RentalBusyBlock>,
+    selections: List<RentalSelectionDraft>,
+    timeZone: TimeZone,
+    verticalScrollState: ScrollState,
+    viewportBoundsInWindow: Rect?,
+    onCreateSelection: (fieldId: String, startMinutes: Int) -> Unit,
+    onCanUpdateSelection: (selectionId: Long, startMinutes: Int, endMinutes: Int) -> Boolean,
+    onUpdateSelection: (selectionId: Long, startMinutes: Int, endMinutes: Int) -> Boolean,
+    onDeleteSelection: (selectionId: Long) -> Unit,
+) {
+    val busyRanges = remember(option.field.id, busyBlocks, selectedDate, timeZone) {
+        busyBlocks
+            .asSequence()
+            .filter { block -> block.fieldId == option.field.id }
+            .mapNotNull { block ->
+                block.toBusyRangeOnDate(
+                    date = selectedDate,
+                    timeZone = timeZone,
+                )
+            }
+            .sortedBy { range -> range.startMinutes }
+            .toList()
+    }
+
+    Card(
+        modifier = Modifier.width(RENTAL_FIELD_COLUMN_WIDTH),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
+            containerColor = MaterialTheme.colorScheme.surface
         )
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable(enabled = enabled) {
-                    onCheckedChange(!checked)
-                }
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+                .height(RENTAL_FIELD_HEADER_HEIGHT)
+                .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Checkbox(
-                checked = checked,
-                enabled = enabled,
-                onCheckedChange = { isChecked ->
-                    onCheckedChange(isChecked)
-                }
+            Text(
+                text = option.field.displayLabel(),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                Text(
-                    text = field.displayLabel(),
-                    style = MaterialTheme.typography.bodyLarge
-                )
-                Text(
-                    text = availabilityLabel,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (enabled) {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    } else {
-                        MaterialTheme.colorScheme.error
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(RENTAL_TIMELINE_ROW_HEIGHT * startsByMinute.size)
+        ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                startsByMinute.forEach { startMinutes ->
+                    val endMinutes = startMinutes + SLOT_INTERVAL_MINUTES
+                    val isAvailable = findMatchingSlot(
+                        option = option,
+                        date = selectedDate,
+                        startMinutes = startMinutes,
+                        endMinutes = endMinutes,
+                        timeZone = timeZone,
+                    ) != null
+                    val isBusy = busyRanges.any { range ->
+                        rangesOverlap(
+                            firstStart = range.startMinutes,
+                            firstEnd = range.endMinutes,
+                            secondStart = startMinutes,
+                            secondEnd = endMinutes,
+                        )
                     }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(RENTAL_TIMELINE_ROW_HEIGHT)
+                            .border(
+                                width = 1.dp,
+                                color = MaterialTheme.colorScheme.outlineVariant
+                            )
+                            .background(
+                                if (isBusy) {
+                                    MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f)
+                                } else if (isAvailable) {
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+                                } else {
+                                    MaterialTheme.colorScheme.surface
+                                }
+                            )
+                            .clickable(enabled = isAvailable && !isBusy) {
+                                onCreateSelection(option.field.id, startMinutes)
+                            }
+                    )
+                }
+            }
+
+            busyRanges.forEach { busyRange ->
+                val topOffset = RENTAL_TIMELINE_ROW_HEIGHT * (
+                    (busyRange.startMinutes - RENTAL_TIMELINE_START_MINUTES).toFloat() /
+                        SLOT_INTERVAL_MINUTES.toFloat()
+                    )
+                val blockHeight = RENTAL_TIMELINE_ROW_HEIGHT * (
+                    (busyRange.endMinutes - busyRange.startMinutes).toFloat() /
+                        SLOT_INTERVAL_MINUTES.toFloat()
+                    )
+                if (blockHeight <= 0.dp) {
+                    return@forEach
+                }
+
+                RentalBusyOverlayBlock(
+                    busyRange = busyRange,
+                    topOffset = topOffset,
+                    height = blockHeight,
                 )
             }
-            if (!priceLabel.isNullOrBlank()) {
-                Text(
-                    text = priceLabel,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary
+
+            selections.forEach { selection ->
+                val offsetRows = (selection.startMinutes - RENTAL_TIMELINE_START_MINUTES) / SLOT_INTERVAL_MINUTES
+                val durationRows = (selection.endMinutes - selection.startMinutes) / SLOT_INTERVAL_MINUTES
+                if (durationRows <= 0) {
+                    return@forEach
+                }
+
+                val topOffset = RENTAL_TIMELINE_ROW_HEIGHT * offsetRows
+                val blockHeight = RENTAL_TIMELINE_ROW_HEIGHT * durationRows
+                val selectedSlot = findMatchingSlot(
+                    option = option,
+                    date = selectedDate,
+                    startMinutes = selection.startMinutes,
+                    endMinutes = selection.endMinutes,
+                    timeZone = timeZone,
+                )
+                val resolvedRange = resolveRentalRange(
+                    option = option,
+                    date = selectedDate,
+                    startMinutes = selection.startMinutes,
+                    endMinutes = selection.endMinutes,
+                    timeZone = timeZone,
+                )
+
+                RentalSelectionOverlayBlock(
+                    selection = selection,
+                    topOffset = topOffset,
+                    height = blockHeight,
+                    selectionPriceCents = resolvedRange?.totalPriceCents ?: selectedSlot?.price ?: 0,
+                    verticalScrollState = verticalScrollState,
+                    viewportBoundsInWindow = viewportBoundsInWindow,
+                    onDeleteSelection = onDeleteSelection,
+                    onCanUpdateSelection = onCanUpdateSelection,
+                    onUpdateSelection = onUpdateSelection,
                 )
             }
         }
@@ -1082,33 +1629,331 @@ private fun RentalFieldSelectionRow(
 }
 
 @Composable
-private fun RentalDateTimeRow(
-    label: String,
-    value: String,
-    onClick: () -> Unit,
+private fun RentalSelectionOverlayBlock(
+    selection: RentalSelectionDraft,
+    topOffset: Dp,
+    height: Dp,
+    selectionPriceCents: Int,
+    verticalScrollState: ScrollState,
+    viewportBoundsInWindow: Rect?,
+    onDeleteSelection: (selectionId: Long) -> Unit,
+    onCanUpdateSelection: (selectionId: Long, startMinutes: Int, endMinutes: Int) -> Boolean,
+    onUpdateSelection: (selectionId: Long, startMinutes: Int, endMinutes: Int) -> Boolean,
+) {
+    val density = LocalDensity.current
+    val rowHeightPx = with(density) { RENTAL_TIMELINE_ROW_HEIGHT.toPx() }
+    val autoScrollStepPx = with(density) { RENTAL_AUTO_SCROLL_STEP.toPx() }
+    var topHandleDragRemainder by remember(selection.id) { mutableStateOf(0f) }
+    var bottomHandleDragRemainder by remember(selection.id) { mutableStateOf(0f) }
+    var previewStartMinutes by remember(selection.id, selection.startMinutes) {
+        mutableStateOf(selection.startMinutes)
+    }
+    var previewEndMinutes by remember(selection.id, selection.endMinutes) {
+        mutableStateOf(selection.endMinutes)
+    }
+    var activeDragHandle by remember(selection.id) { mutableStateOf<RentalDragHandle?>(null) }
+    var dragPointerWindowY by remember(selection.id) { mutableStateOf<Float?>(null) }
+    var topHandleBoundsInWindow by remember(selection.id) { mutableStateOf<Rect?>(null) }
+    var bottomHandleBoundsInWindow by remember(selection.id) { mutableStateOf<Rect?>(null) }
+
+    fun applyHandleDragDelta(handle: RentalDragHandle, dragDeltaPx: Float) {
+        if (dragDeltaPx == 0f) {
+            return
+        }
+        when (handle) {
+            RentalDragHandle.TOP -> {
+                topHandleDragRemainder += dragDeltaPx
+                val steps = (topHandleDragRemainder / rowHeightPx).toInt()
+                if (steps == 0) {
+                    return
+                }
+                topHandleDragRemainder -= steps * rowHeightPx
+                val proposedStart = (previewStartMinutes + (steps * SLOT_INTERVAL_MINUTES))
+                    .coerceAtLeast(RENTAL_TIMELINE_START_MINUTES)
+                    .coerceAtMost(previewEndMinutes - SLOT_INTERVAL_MINUTES)
+                if (proposedStart != previewStartMinutes) {
+                    val canApply = onCanUpdateSelection(
+                        selection.id,
+                        proposedStart,
+                        previewEndMinutes
+                    )
+                    if (canApply) {
+                        previewStartMinutes = proposedStart
+                    } else {
+                        topHandleDragRemainder = 0f
+                    }
+                }
+            }
+
+            RentalDragHandle.BOTTOM -> {
+                bottomHandleDragRemainder += dragDeltaPx
+                val steps = (bottomHandleDragRemainder / rowHeightPx).toInt()
+                if (steps == 0) {
+                    return
+                }
+                bottomHandleDragRemainder -= steps * rowHeightPx
+                val proposedEnd = (previewEndMinutes + (steps * SLOT_INTERVAL_MINUTES))
+                    .coerceAtLeast(previewStartMinutes + SLOT_INTERVAL_MINUTES)
+                    .coerceAtMost(RENTAL_TIMELINE_END_MINUTES)
+                if (proposedEnd != previewEndMinutes) {
+                    val canApply = onCanUpdateSelection(
+                        selection.id,
+                        previewStartMinutes,
+                        proposedEnd
+                    )
+                    if (canApply) {
+                        previewEndMinutes = proposedEnd
+                    } else {
+                        bottomHandleDragRemainder = 0f
+                    }
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(activeDragHandle, dragPointerWindowY, viewportBoundsInWindow, autoScrollStepPx) {
+        val handle = activeDragHandle ?: return@LaunchedEffect
+        while (isActive && activeDragHandle == handle) {
+            val pointerY = dragPointerWindowY ?: break
+            val viewport = viewportBoundsInWindow ?: break
+            val edgeThreshold = viewport.height * RENTAL_AUTO_SCROLL_EDGE_RATIO
+            val scrollDelta = when (handle) {
+                RentalDragHandle.TOP -> {
+                    if (pointerY <= (viewport.top + edgeThreshold)) -autoScrollStepPx else 0f
+                }
+
+                RentalDragHandle.BOTTOM -> {
+                    if (pointerY >= (viewport.bottom - edgeThreshold)) autoScrollStepPx else 0f
+                }
+            }
+            if (scrollDelta != 0f) {
+                val consumedScrollDelta = verticalScrollState.scrollBy(scrollDelta)
+                applyHandleDragDelta(handle, consumedScrollDelta)
+            }
+            delay(RENTAL_AUTO_SCROLL_FRAME_DELAY_MS)
+        }
+    }
+
+    fun resetDragState() {
+        activeDragHandle = null
+        dragPointerWindowY = null
+        topHandleDragRemainder = 0f
+        bottomHandleDragRemainder = 0f
+    }
+
+    fun finishDrag() {
+        val hasPendingChange = previewStartMinutes != selection.startMinutes ||
+            previewEndMinutes != selection.endMinutes
+        if (hasPendingChange) {
+            val wasApplied = onUpdateSelection(
+                selection.id,
+                previewStartMinutes,
+                previewEndMinutes
+            )
+            if (!wasApplied) {
+                previewStartMinutes = selection.startMinutes
+                previewEndMinutes = selection.endMinutes
+            }
+        }
+        resetDragState()
+    }
+
+    Card(
+        modifier = Modifier
+            .offset(y = topOffset)
+            .padding(horizontal = 4.dp, vertical = 2.dp)
+            .fillMaxWidth()
+            .height(height),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(start = 6.dp, end = 6.dp, top = 10.dp, bottom = 10.dp),
+                verticalArrangement = Arrangement.Top
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "${selection.startMinutes.toClockLabel().orEmpty()} - ${selection.endMinutes.toClockLabel().orEmpty()}",
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "x",
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.clickable {
+                            onDeleteSelection(selection.id)
+                        }
+                    )
+                }
+
+                selectionPriceCents.takeIf { it > 0 }?.let { priceCents ->
+                    Text(
+                        text = "Total: ${(priceCents / 100.0).moneyFormat()}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.9f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .offset(y = (-RENTAL_DRAG_HANDLE_HALF_HEIGHT))
+                    .width(RENTAL_DRAG_HANDLE_WIDTH)
+                    .height(RENTAL_DRAG_HANDLE_HEIGHT)
+                    .onGloballyPositioned { coordinates ->
+                        topHandleBoundsInWindow = coordinates.boundsInWindow()
+                    }
+                    .background(
+                        MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.9f),
+                        RoundedCornerShape(3.dp)
+                    )
+                    .pointerInput(
+                        selection.id,
+                        rowHeightPx,
+                        selection.startMinutes,
+                        selection.endMinutes
+                    ) {
+                        detectVerticalDragGestures(
+                            onDragStart = {
+                                previewStartMinutes = selection.startMinutes
+                                previewEndMinutes = selection.endMinutes
+                                activeDragHandle = RentalDragHandle.TOP
+                                dragPointerWindowY = topHandleBoundsInWindow?.center?.y
+                            },
+                            onDragEnd = {
+                                finishDrag()
+                            },
+                            onDragCancel = {
+                                previewStartMinutes = selection.startMinutes
+                                previewEndMinutes = selection.endMinutes
+                                resetDragState()
+                            },
+                            onVerticalDrag = { change, dragAmount ->
+                                change.consume()
+                                dragPointerWindowY = topHandleBoundsInWindow?.top?.plus(change.position.y)
+                                applyHandleDragDelta(RentalDragHandle.TOP, dragAmount)
+                            }
+                        )
+                    }
+            )
+
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .offset(y = RENTAL_DRAG_HANDLE_HALF_HEIGHT)
+                    .width(RENTAL_DRAG_HANDLE_WIDTH)
+                    .height(RENTAL_DRAG_HANDLE_HEIGHT)
+                    .onGloballyPositioned { coordinates ->
+                        bottomHandleBoundsInWindow = coordinates.boundsInWindow()
+                    }
+                    .background(
+                        MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.9f),
+                        RoundedCornerShape(3.dp)
+                    )
+                    .pointerInput(
+                        selection.id,
+                        rowHeightPx,
+                        selection.startMinutes,
+                        selection.endMinutes
+                    ) {
+                        detectVerticalDragGestures(
+                            onDragStart = {
+                                previewStartMinutes = selection.startMinutes
+                                previewEndMinutes = selection.endMinutes
+                                activeDragHandle = RentalDragHandle.BOTTOM
+                                dragPointerWindowY = bottomHandleBoundsInWindow?.center?.y
+                            },
+                            onDragEnd = {
+                                finishDrag()
+                            },
+                            onDragCancel = {
+                                previewStartMinutes = selection.startMinutes
+                                previewEndMinutes = selection.endMinutes
+                                resetDragState()
+                            },
+                            onVerticalDrag = { change, dragAmount ->
+                                change.consume()
+                                dragPointerWindowY = bottomHandleBoundsInWindow?.top?.plus(change.position.y)
+                                applyHandleDragDelta(RentalDragHandle.BOTTOM, dragAmount)
+                            }
+                        )
+                    }
+            )
+        }
+    }
+
+    if (activeDragHandle != null) {
+        val previewOffsetRows = (previewStartMinutes - RENTAL_TIMELINE_START_MINUTES) / SLOT_INTERVAL_MINUTES
+        val previewDurationRows = (previewEndMinutes - previewStartMinutes) / SLOT_INTERVAL_MINUTES
+        if (previewDurationRows > 0) {
+            val previewTopOffset = RENTAL_TIMELINE_ROW_HEIGHT * previewOffsetRows
+            val previewHeight = RENTAL_TIMELINE_ROW_HEIGHT * previewDurationRows
+            Card(
+                modifier = Modifier
+                    .offset(y = previewTopOffset)
+                    .padding(horizontal = 4.dp, vertical = 2.dp)
+                    .fillMaxWidth()
+                    .height(previewHeight),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.22f),
+                    contentColor = Color.Transparent
+                ),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+            ) {}
+        }
+    }
+}
+
+@Composable
+private fun RentalBusyOverlayBlock(
+    busyRange: RentalBusyRange,
+    topOffset: Dp,
+    height: Dp,
 ) {
     Card(
         modifier = Modifier
+            .offset(y = topOffset)
+            .padding(horizontal = 4.dp, vertical = 2.dp)
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .height(height),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        )
+            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.75f),
+            contentColor = MaterialTheme.colorScheme.onErrorContainer
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
-        Row(
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 14.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+                .fillMaxSize()
+                .padding(horizontal = 6.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.Center
         ) {
             Text(
-                text = label,
-                style = MaterialTheme.typography.labelLarge
+                text = busyRange.eventName,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
             Text(
-                text = value,
-                style = MaterialTheme.typography.bodyMedium
+                text = "Booked",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }
@@ -1134,6 +1979,308 @@ private fun EmptyDiscoverListItem(
     }
 }
 
+private fun resolveRentalSelection(
+    selection: RentalSelectionDraft,
+    fieldOptions: List<RentalFieldOption>,
+    timeZone: TimeZone,
+): ResolvedRentalSelection? {
+    val option = fieldOptions.firstOrNull { option -> option.field.id == selection.fieldId } ?: return null
+    val startInstant = selection.date.toInstantAtMinutes(selection.startMinutes, timeZone)
+    val endInstant = selection.date.toInstantAtMinutes(selection.endMinutes, timeZone)
+    if (endInstant <= startInstant) {
+        return null
+    }
+
+    val resolvedRange = resolveRentalRange(
+        option = option,
+        date = selection.date,
+        startMinutes = selection.startMinutes,
+        endMinutes = selection.endMinutes,
+        timeZone = timeZone,
+    ) ?: return null
+
+    return ResolvedRentalSelection(
+        selection = selection,
+        field = option.field,
+        slots = resolvedRange.slots,
+        startInstant = startInstant,
+        endInstant = endInstant,
+        totalPriceCents = resolvedRange.totalPriceCents,
+    )
+}
+
+private data class ResolvedRentalRange(
+    val slots: List<TimeSlot>,
+    val totalPriceCents: Int,
+)
+
+private fun resolveRentalRange(
+    option: RentalFieldOption,
+    date: LocalDate,
+    startMinutes: Int,
+    endMinutes: Int,
+    timeZone: TimeZone,
+): ResolvedRentalRange? {
+    if (endMinutes <= startMinutes) {
+        return null
+    }
+    if (startMinutes < RENTAL_TIMELINE_START_MINUTES || endMinutes > RENTAL_TIMELINE_END_MINUTES) {
+        return null
+    }
+
+    var segmentStartMinutes = startMinutes
+    val matchedSlots = mutableListOf<TimeSlot>()
+    var totalPriceCents = 0
+
+    while (segmentStartMinutes < endMinutes) {
+        val segmentEndMinutes = (segmentStartMinutes + SLOT_INTERVAL_MINUTES)
+            .coerceAtMost(endMinutes)
+        val segmentStart = date.toInstantAtMinutes(segmentStartMinutes, timeZone)
+        val segmentEnd = date.toInstantAtMinutes(segmentEndMinutes, timeZone)
+
+        val matchedSlot = selectBestSlotForInterval(
+            slots = option.rentalSlots,
+            rangeStart = segmentStart,
+            rangeEnd = segmentEnd,
+            fieldId = option.field.id,
+            timeZone = timeZone,
+        ) ?: return null
+
+        matchedSlots += matchedSlot
+        totalPriceCents += (matchedSlot.price ?: 0).coerceAtLeast(0)
+        segmentStartMinutes += SLOT_INTERVAL_MINUTES
+    }
+
+    return ResolvedRentalRange(
+        slots = matchedSlots.distinctBy { slot -> slot.id },
+        totalPriceCents = totalPriceCents,
+    )
+}
+
+private fun selectBestSlotForInterval(
+    slots: List<TimeSlot>,
+    rangeStart: Instant,
+    rangeEnd: Instant,
+    fieldId: String,
+    timeZone: TimeZone,
+): TimeSlot? {
+    return slots
+        .asSequence()
+        .filter { slot ->
+            slot.matchesRentalSelection(
+                rangeStart = rangeStart,
+                rangeEnd = rangeEnd,
+                fieldId = fieldId,
+            )
+        }
+        .sortedWith(
+            compareBy<TimeSlot> { slot -> slot.slotDurationMinutes(timeZone) }
+                .thenBy { slot -> slot.price ?: Int.MAX_VALUE }
+        )
+        .firstOrNull()
+}
+
+private fun findMatchingSlot(
+    option: RentalFieldOption,
+    date: LocalDate,
+    startMinutes: Int,
+    endMinutes: Int,
+    timeZone: TimeZone,
+): TimeSlot? {
+    if (endMinutes <= startMinutes) {
+        return null
+    }
+    if (startMinutes < RENTAL_TIMELINE_START_MINUTES || endMinutes > RENTAL_TIMELINE_END_MINUTES) {
+        return null
+    }
+    val startInstant = date.toInstantAtMinutes(startMinutes, timeZone)
+    val endInstant = date.toInstantAtMinutes(endMinutes, timeZone)
+    return selectBestSlotForInterval(
+        slots = option.rentalSlots,
+        rangeStart = startInstant,
+        rangeEnd = endInstant,
+        fieldId = option.field.id,
+        timeZone = timeZone,
+    )
+}
+
+private fun rangesOverlap(
+    firstStart: Int,
+    firstEnd: Int,
+    secondStart: Int,
+    secondEnd: Int,
+): Boolean {
+    if (firstEnd <= firstStart || secondEnd <= secondStart) {
+        return false
+    }
+    return firstStart < secondEnd && secondStart < firstEnd
+}
+
+private fun canApplyRentalSelectionRange(
+    selectionId: Long,
+    fieldId: String,
+    date: LocalDate,
+    startMinutes: Int,
+    endMinutes: Int,
+    selections: List<RentalSelectionDraft>,
+    fieldOptions: List<RentalFieldOption>,
+    busyBlocks: List<RentalBusyBlock>,
+    timeZone: TimeZone,
+): Boolean {
+    if (endMinutes <= startMinutes) {
+        return false
+    }
+    if (startMinutes < RENTAL_TIMELINE_START_MINUTES || endMinutes > RENTAL_TIMELINE_END_MINUTES) {
+        return false
+    }
+
+    val fieldOption = fieldOptions.firstOrNull { option ->
+        option.field.id == fieldId
+    } ?: return false
+
+    val overlapsSelection = selections.any { selection ->
+        selection.id != selectionId &&
+            selection.fieldId == fieldId &&
+            selection.date == date &&
+            rangesOverlap(
+                selection.startMinutes,
+                selection.endMinutes,
+                startMinutes,
+                endMinutes,
+            )
+    }
+    if (overlapsSelection) {
+        return false
+    }
+
+    val overlapsBusyBlock = busyBlocks.any { block ->
+        block.fieldId == fieldId &&
+            rangeOverlapsBusyBlockOnDate(
+                block = block,
+                date = date,
+                startMinutes = startMinutes,
+                endMinutes = endMinutes,
+                timeZone = timeZone,
+            )
+    }
+    if (overlapsBusyBlock) {
+        return false
+    }
+
+    return isRangeCoveredByRentalAvailability(
+        option = fieldOption,
+        date = date,
+        startMinutes = startMinutes,
+        endMinutes = endMinutes,
+        timeZone = timeZone,
+    )
+}
+
+private fun rangeOverlapsBusyBlockOnDate(
+    block: RentalBusyBlock,
+    date: LocalDate,
+    startMinutes: Int,
+    endMinutes: Int,
+    timeZone: TimeZone,
+): Boolean {
+    if (endMinutes <= startMinutes) {
+        return false
+    }
+    val rangeStart = date.toInstantAtMinutes(startMinutes, timeZone)
+    val rangeEnd = date.toInstantAtMinutes(endMinutes, timeZone)
+    return rangeStart < block.end && block.start < rangeEnd
+}
+
+private fun isRangeCoveredByRentalAvailability(
+    option: RentalFieldOption,
+    date: LocalDate,
+    startMinutes: Int,
+    endMinutes: Int,
+    timeZone: TimeZone,
+): Boolean {
+    return resolveRentalRange(
+        option = option,
+        date = date,
+        startMinutes = startMinutes,
+        endMinutes = endMinutes,
+        timeZone = timeZone,
+    ) != null
+}
+
+private fun RentalBusyBlock.toBusyRangeOnDate(
+    date: LocalDate,
+    timeZone: TimeZone,
+): RentalBusyRange? {
+    if (end <= start) {
+        return null
+    }
+
+    val dayStart = date.toInstantAtMinutes(0, timeZone)
+    val dayEnd = date.toInstantAtMinutes(24 * 60, timeZone)
+    val clippedStart = if (start > dayStart) start else dayStart
+    val clippedEnd = if (end < dayEnd) end else dayEnd
+    if (clippedEnd <= clippedStart) {
+        return null
+    }
+
+    val startMinutes = (clippedStart - dayStart).inWholeMinutes.toInt()
+    val endMinutes = (clippedEnd - dayStart).inWholeMinutes.toInt()
+    val normalizedStart = startMinutes.coerceIn(RENTAL_TIMELINE_START_MINUTES, RENTAL_TIMELINE_END_MINUTES)
+    val normalizedEnd = endMinutes.coerceIn(RENTAL_TIMELINE_START_MINUTES, RENTAL_TIMELINE_END_MINUTES)
+    if (normalizedEnd <= normalizedStart) {
+        return null
+    }
+
+    return RentalBusyRange(
+        eventId = eventId,
+        eventName = eventName.ifBlank { "Reserved event" },
+        startMinutes = normalizedStart,
+        endMinutes = normalizedEnd,
+    )
+}
+
+private fun LocalDate.toInstantAtMinutes(
+    minutesFromStartOfDay: Int,
+    timeZone: TimeZone,
+): Instant {
+    val startOfDay = LocalDateTime(
+        year = year,
+        monthNumber = monthNumber,
+        dayOfMonth = dayOfMonth,
+        hour = 0,
+        minute = 0,
+        second = 0,
+        nanosecond = 0
+    ).toInstant(timeZone)
+    return startOfDay + minutesFromStartOfDay.minutes
+}
+
+private fun DayOfWeek.toShortLabel(): String {
+    return when (this) {
+        DayOfWeek.MONDAY -> "Mon"
+        DayOfWeek.TUESDAY -> "Tue"
+        DayOfWeek.WEDNESDAY -> "Wed"
+        DayOfWeek.THURSDAY -> "Thu"
+        DayOfWeek.FRIDAY -> "Fri"
+        DayOfWeek.SATURDAY -> "Sat"
+        DayOfWeek.SUNDAY -> "Sun"
+    }
+}
+
+private const val SLOT_INTERVAL_MINUTES = 30
+private const val RENTAL_TIMELINE_START_MINUTES = 6 * 60
+private const val RENTAL_TIMELINE_END_MINUTES = 24 * 60
+private val RENTAL_TIME_COLUMN_WIDTH = 72.dp
+private val RENTAL_FIELD_COLUMN_WIDTH = 180.dp
+private val RENTAL_FIELD_HEADER_HEIGHT = 48.dp
+private val RENTAL_TIMELINE_ROW_HEIGHT = 34.dp
+private val RENTAL_DRAG_HANDLE_WIDTH = 26.dp
+private val RENTAL_DRAG_HANDLE_HEIGHT = 6.dp
+private val RENTAL_DRAG_HANDLE_HALF_HEIGHT = RENTAL_DRAG_HANDLE_HEIGHT / 2
+private val RENTAL_AUTO_SCROLL_STEP = 8.dp
+private const val RENTAL_AUTO_SCROLL_EDGE_RATIO = 0.25f
+private const val RENTAL_AUTO_SCROLL_FRAME_DELAY_MS = 16L
+
 private fun Instant.toDisplayDateTime(): String {
     return toLocalDateTime(TimeZone.currentSystemDefault()).format(dateTimeFormat)
 }
@@ -1151,12 +2298,6 @@ private fun TimeSlot.matchesRentalSelection(
     fieldId: String,
 ): Boolean {
     if (rangeEnd <= rangeStart) {
-        return false
-    }
-    if (!scheduledFieldId.isNullOrBlank() && scheduledFieldId != fieldId) {
-        return false
-    }
-    if ((price ?: 0) <= 0) {
         return false
     }
 
@@ -1187,7 +2328,7 @@ private fun TimeSlot.matchesRentalSelection(
 
     if (repeating) {
         val selectedDayIndex = selectedStartLocal.dayOfWeek.toRentalDayIndex()
-        val slotDayIndex = dayOfWeek ?: slotStartLocal.dayOfWeek.toRentalDayIndex()
+        val slotDayIndex = toMondayBasedDayIndex(timeZone) ?: slotStartLocal.dayOfWeek.toRentalDayIndex()
         if (selectedDayIndex != slotDayIndex) {
             return false
         }
@@ -1214,11 +2355,39 @@ private fun TimeSlot.matchesRentalSelection(
 private fun TimeSlot.toRentalAvailabilityLabel(): String {
     val slotStart = startTimeMinutes.toClockLabel()
     val slotEnd = endTimeMinutes.toClockLabel()
-    val dayLabel = dayOfWeek.toDayLabel()
+    val dayLabel = toMondayBasedDayIndex(TimeZone.currentSystemDefault()).toDayLabel()
     return if (slotStart != null && slotEnd != null) {
         "$dayLabel $slotStart - $slotEnd"
     } else {
         "Available"
+    }
+}
+
+private fun TimeSlot.slotDurationMinutes(timeZone: TimeZone): Int {
+    val startMinutesValue = startTimeMinutes ?: startDate.toLocalDateTime(timeZone).let { local ->
+        local.hour * 60 + local.minute
+    }
+    val endMinutesValue = endTimeMinutes ?: endDate?.toLocalDateTime(timeZone)?.let { local ->
+        local.hour * 60 + local.minute
+    } ?: return Int.MAX_VALUE
+
+    return if (endMinutesValue > startMinutesValue) {
+        endMinutesValue - startMinutesValue
+    } else {
+        Int.MAX_VALUE
+    }
+}
+
+private fun TimeSlot.toMondayBasedDayIndex(timeZone: TimeZone): Int? {
+    val startDayIndex = startDate.toLocalDateTime(timeZone).dayOfWeek.toRentalDayIndex()
+    val raw = dayOfWeek?.let { value -> ((value % 7) + 7) % 7 } ?: return startDayIndex
+
+    // Support both Monday-based (Mon=0) and Sunday-based (Sun=0) persisted values.
+    val sundayBasedStartIndex = (startDayIndex + 1) % 7
+    return when {
+        raw == startDayIndex -> raw
+        raw == sundayBasedStartIndex -> (raw + 6) % 7
+        else -> raw
     }
 }
 
@@ -1252,6 +2421,3 @@ private fun Int?.toDayLabel(): String {
 }
 
 private fun DayOfWeek.toRentalDayIndex(): Int = isoDayNumber - 1
-
-private const val ONE_HOUR_MILLIS = 60L * 60L * 1000L
-private const val THREE_HOURS_MILLIS = 3L * ONE_HOUR_MILLIS

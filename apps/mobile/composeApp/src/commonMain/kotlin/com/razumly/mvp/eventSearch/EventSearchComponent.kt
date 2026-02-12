@@ -7,6 +7,7 @@ import com.arkivanov.essenty.backhandler.BackCallback
 import com.arkivanov.essenty.instancekeeper.InstanceKeeper
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
@@ -19,6 +20,7 @@ import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.util.calcDistance
 import com.razumly.mvp.core.util.getBounds
+import com.razumly.mvp.eventDetail.data.IMatchRepository
 import com.razumly.mvp.eventSearch.util.EventFilter
 import dev.icerock.moko.geo.LatLng
 import dev.icerock.moko.geo.LocationTracker
@@ -56,6 +58,7 @@ interface EventSearchComponent {
     val isLoadingRentals: StateFlow<Boolean>
     val rentalFieldOptions: StateFlow<List<RentalFieldOption>>
     val isLoadingRentalFields: StateFlow<Boolean>
+    val rentalBusyBlocks: StateFlow<List<RentalBusyBlock>>
 
     val events: StateFlow<List<Event>>
     val selectedEvent: StateFlow<Event?>
@@ -71,7 +74,9 @@ interface EventSearchComponent {
     fun updateFilter(update: EventFilter.() -> EventFilter)
     fun refreshRentals(force: Boolean = false)
     fun loadRentalFieldOptions(fieldIds: List<String>)
+    fun loadRentalBusyBlocks(organizationId: String, fieldIds: List<String>)
     fun clearRentalFieldOptions()
+    fun clearRentalBusyBlocks()
 }
 
 data class RentalFieldOption(
@@ -79,9 +84,18 @@ data class RentalFieldOption(
     val rentalSlots: List<TimeSlot>,
 )
 
+data class RentalBusyBlock(
+    val eventId: String,
+    val eventName: String,
+    val fieldId: String,
+    val start: kotlin.time.Instant,
+    val end: kotlin.time.Instant,
+)
+
 class DefaultEventSearchComponent(
     componentContext: ComponentContext,
     private val eventRepository: IEventRepository,
+    private val matchRepository: IMatchRepository,
     private val billingRepository: IBillingRepository,
     private val fieldRepository: IFieldRepository,
     eventId: String?,
@@ -126,6 +140,8 @@ class DefaultEventSearchComponent(
     override val rentalFieldOptions: StateFlow<List<RentalFieldOption>> = _rentalFieldOptions.asStateFlow()
     private val _isLoadingRentalFields = MutableStateFlow(false)
     override val isLoadingRentalFields: StateFlow<Boolean> = _isLoadingRentalFields.asStateFlow()
+    private val _rentalBusyBlocks = MutableStateFlow<List<RentalBusyBlock>>(emptyList())
+    override val rentalBusyBlocks: StateFlow<List<RentalBusyBlock>> = _rentalBusyBlocks.asStateFlow()
     private var rentalsLoaded = false
 
     private lateinit var loadingHandler: LoadingHandler
@@ -276,8 +292,9 @@ class DefaultEventSearchComponent(
         scope.launch {
             if (_currentLocation.value == null) return@launch
             eventRepository.searchEvents(searchQuery, _currentLocation.value!!)
-                .onSuccess {
-                    _suggestedEvents.value = it.first
+                .onSuccess { (events, _) ->
+                    val activeFilter = _filter.value
+                    _suggestedEvents.value = events.filter { event -> activeFilter.filter(event) }
                     _isLoading.value = false
                 }.onFailure { e ->
                     _errorState.value = ErrorMessage("Failed to fetch events: ${e.message}")
@@ -322,50 +339,147 @@ class DefaultEventSearchComponent(
             _isLoadingRentalFields.value = true
             _rentalFieldOptions.value = emptyList()
 
-            fieldRepository.getFields(fieldIds)
-                .onSuccess { fields ->
-                    val slotIds = fields
-                        .flatMap { field -> field.rentalSlotIds }
-                        .distinct()
-                        .filter(String::isNotBlank)
-
-                    if (slotIds.isEmpty()) {
-                        _rentalFieldOptions.value = fields
-                            .sortedBy { field -> fieldDisplayLabel(field).lowercase() }
-                            .map { field -> RentalFieldOption(field = field, rentalSlots = emptyList()) }
-                        return@onSuccess
-                    }
-
-                    fieldRepository.getTimeSlots(slotIds)
-                        .onSuccess { timeSlots ->
-                            val timeSlotById = timeSlots.associateBy { slot -> slot.id }
-                            _rentalFieldOptions.value = fields
-                                .sortedBy { field -> fieldDisplayLabel(field).lowercase() }
-                                .map { field ->
-                                    val fieldSlots = field.rentalSlotIds.mapNotNull { slotId ->
-                                        timeSlotById[slotId]
-                                    }.sortedBy { slot ->
-                                        slot.startTimeMinutes ?: Int.MAX_VALUE
-                                    }
-
-                                    RentalFieldOption(field = field, rentalSlots = fieldSlots)
-                                }
-                        }
-                        .onFailure { e ->
-                            _errorState.value = ErrorMessage("Failed to fetch rental time slots: ${e.message}")
-                        }
-                }
-                .onFailure { e ->
+            val fields = fieldRepository.getFields(fieldIds)
+                .getOrElse { e ->
                     _errorState.value = ErrorMessage("Failed to fetch organization fields: ${e.message}")
+                    _isLoadingRentalFields.value = false
+                    return@launch
                 }
+
+            val sortedFields = fields.sortedBy { field -> fieldDisplayLabel(field).lowercase() }
+            val slotIds = sortedFields
+                .flatMap { field -> field.rentalSlotIds }
+                .distinct()
+                .filter(String::isNotBlank)
+
+            val timeSlotById = if (slotIds.isEmpty()) {
+                emptyMap()
+            } else {
+                fieldRepository.getTimeSlots(slotIds)
+                    .getOrElse { e ->
+                        _errorState.value = ErrorMessage("Failed to fetch rental time slots: ${e.message}")
+                        _isLoadingRentalFields.value = false
+                        return@launch
+                    }
+                    .associateBy { slot -> slot.id }
+            }
+
+            _rentalFieldOptions.value = sortedFields.map { field ->
+                val linkedSlots = field.rentalSlotIds.mapNotNull { slotId -> timeSlotById[slotId] }
+
+                // Fallback for legacy/stale data where field.rentalSlotIds is empty but slots exist by scheduledFieldId.
+                val fallbackSlots = if (linkedSlots.isEmpty()) {
+                    fieldRepository.getTimeSlotsForField(field.id)
+                        .onFailure { error ->
+                            Napier.w("Fallback rental-slot lookup failed for field ${field.id}: ${error.message}")
+                        }
+                        .getOrElse { emptyList() }
+                } else {
+                    emptyList()
+                }
+
+                val mergedSlots = (linkedSlots + fallbackSlots)
+                    .distinctBy { slot -> slot.id }
+                    .sortedBy { slot -> slot.startTimeMinutes ?: Int.MAX_VALUE }
+
+                RentalFieldOption(field = field, rentalSlots = mergedSlots)
+            }
 
             _isLoadingRentalFields.value = false
+        }
+    }
+
+    override fun loadRentalBusyBlocks(organizationId: String, fieldIds: List<String>) {
+        scope.launch {
+            val normalizedFieldIds = fieldIds.map { id -> id.trim() }.filter(String::isNotBlank).distinct()
+            if (organizationId.isBlank() || normalizedFieldIds.isEmpty()) {
+                _rentalBusyBlocks.value = emptyList()
+                return@launch
+            }
+            val selectedFieldSet = normalizedFieldIds.toSet()
+
+            eventRepository.getEventsByOrganization(organizationId, limit = 300)
+                .onSuccess { organizationEvents ->
+                    val busyBlocks = organizationEvents.flatMap { event ->
+                        when (event.eventType) {
+                            EventType.EVENT -> {
+                                val eventFieldIds = event.fieldIds
+                                    .map { id -> id.trim() }
+                                    .filter(String::isNotBlank)
+                                    .distinct()
+                                if (eventFieldIds.isEmpty()) {
+                                    emptyList()
+                                } else {
+                                    eventFieldIds
+                                        .intersect(selectedFieldSet)
+                                        .map { fieldId ->
+                                            RentalBusyBlock(
+                                                eventId = event.id,
+                                                eventName = event.name.ifBlank { "Reserved event" },
+                                                fieldId = fieldId,
+                                                start = event.start,
+                                                end = event.end,
+                                            )
+                                        }
+                                }
+                            }
+
+                            EventType.LEAGUE, EventType.TOURNAMENT -> {
+                                val eventFieldIds = event.fieldIds
+                                    .map { id -> id.trim() }
+                                    .filter(String::isNotBlank)
+                                    .distinct()
+                                if (eventFieldIds.isNotEmpty() &&
+                                    eventFieldIds.intersect(selectedFieldSet).isEmpty()
+                                ) {
+                                    emptyList()
+                                } else {
+                                    matchRepository.getMatchesOfTournament(event.id)
+                                        .onFailure { error ->
+                                            Napier.w(
+                                                "Failed to load matches for event ${event.id}: ${error.message}",
+                                                tag = "Discover"
+                                            )
+                                        }
+                                        .getOrElse { emptyList() }
+                                        .mapNotNull { match ->
+                                            val fieldId = match.fieldId?.trim()
+                                            val matchEnd = match.end
+                                            if (fieldId.isNullOrBlank()) return@mapNotNull null
+                                            if (!selectedFieldSet.contains(fieldId)) return@mapNotNull null
+                                            if (matchEnd == null || matchEnd <= match.start) return@mapNotNull null
+
+                                            RentalBusyBlock(
+                                                eventId = event.id,
+                                                eventName = event.name.ifBlank { "Reserved match" },
+                                                fieldId = fieldId,
+                                                start = match.start,
+                                                end = matchEnd,
+                                            )
+                                        }
+                                }
+                            }
+                        }
+                    }
+                        .filter { block -> block.end > block.start }
+                        .distinctBy { block -> "${block.eventId}:${block.fieldId}:${block.start.toEpochMilliseconds()}:${block.end.toEpochMilliseconds()}" }
+
+                    _rentalBusyBlocks.value = busyBlocks
+                }
+                .onFailure { error ->
+                    _rentalBusyBlocks.value = emptyList()
+                    _errorState.value = ErrorMessage("Failed to load existing field events: ${error.message}")
+                }
         }
     }
 
     override fun clearRentalFieldOptions() {
         _rentalFieldOptions.value = emptyList()
         _isLoadingRentalFields.value = false
+    }
+
+    override fun clearRentalBusyBlocks() {
+        _rentalBusyBlocks.value = emptyList()
     }
 
     private suspend fun loadRentalOrganizations(force: Boolean = false) {

@@ -9,7 +9,6 @@ import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.IO
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -34,7 +33,7 @@ class DefaultRefundManagerComponent(
 ) : ComponentContext by componentContext, RefundManagerComponent {
 
     private val scopeMain = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    private val scopeIO = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val scopeIO = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
     private val _errorState = MutableStateFlow<ErrorMessage?>(null)
     override val errorState = _errorState.asStateFlow()

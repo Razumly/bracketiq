@@ -119,7 +119,7 @@ class UserRepository(
     private val tokenStore: AuthTokenStore,
     private val currentUserDataSource: CurrentUserDataSource,
 ) : IUserRepository {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     private val _currentUser = MutableStateFlow(Result.failure<UserData>(Exception("No User")))
     override val currentUser: StateFlow<Result<UserData>> = _currentUser.asStateFlow()

@@ -21,6 +21,8 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material3.AlertDialog
@@ -62,7 +64,14 @@ import com.kmpalette.loader.rememberNetworkLoader
 import com.kmpalette.rememberDominantColorState
 import com.materialkolor.scheme.DynamicScheme
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
+import com.razumly.mvp.core.data.dataTypes.Sport
+import com.razumly.mvp.core.data.dataTypes.TimeSlot
+import com.razumly.mvp.core.data.dataTypes.toLeagueConfig
+import com.razumly.mvp.core.data.dataTypes.toTournamentConfig
+import com.razumly.mvp.core.data.dataTypes.withLeagueConfig
+import com.razumly.mvp.core.data.dataTypes.withTournamentConfig
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.enums.FieldType
 import com.razumly.mvp.core.data.util.normalizeDivisionLabels
@@ -82,6 +91,8 @@ import com.razumly.mvp.core.presentation.util.teamSizeFormat
 import com.razumly.mvp.core.presentation.util.toTitleCase
 import com.razumly.mvp.core.presentation.util.transitionSpec
 import com.razumly.mvp.eventDetail.composables.CancellationRefundOptions
+import com.razumly.mvp.eventDetail.composables.LeagueConfigurationFields
+import com.razumly.mvp.eventDetail.composables.LeagueScheduleFields
 import com.razumly.mvp.eventDetail.composables.LoserSetCountDropdown
 import com.razumly.mvp.eventDetail.composables.MultiSelectDropdownField
 import com.razumly.mvp.eventDetail.composables.NumberInputField
@@ -136,7 +147,15 @@ fun EventDetails(
     onEditTournament: (Event.() -> Event) -> Unit,
     onAddCurrentUser: (Boolean) -> Unit,
     onEventTypeSelected: (EventType) -> Unit,
+    sports: List<Sport> = emptyList(),
+    editableFields: List<Field> = emptyList(),
+    leagueTimeSlots: List<TimeSlot> = emptyList(),
+    onSportSelected: (String) -> Unit = {},
     onSelectFieldCount: (Int) -> Unit,
+    onUpdateLocalFieldName: (Int, String) -> Unit = { _, _ -> },
+    onAddLeagueTimeSlot: () -> Unit = {},
+    onUpdateLeagueTimeSlot: (Int, TimeSlot) -> Unit = { _, _ -> },
+    onRemoveLeagueTimeSlot: (Int) -> Unit = {},
     onUploadSelected: (GalleryPhotoResult) -> Unit,
     onDeleteImage: (String) -> Unit,
     joinButton: @Composable (isValid: Boolean) -> Unit
@@ -162,34 +181,61 @@ fun EventDetails(
     var isLoserPointsValid by remember { mutableStateOf(true) }
     var isLocationValid by remember { mutableStateOf(editEvent.location.isNotBlank() && editEvent.lat != 0.0 && editEvent.long != 0.0) }
     var isFieldCountValid by remember { mutableStateOf(true) }
+    var isLeagueGamesValid by remember { mutableStateOf(true) }
+    var isLeagueDurationValid by remember { mutableStateOf(true) }
+    var isLeaguePointsValid by remember { mutableStateOf(true) }
+    var isLeaguePlayoffTeamsValid by remember { mutableStateOf(true) }
+    var isLeagueSlotsValid by remember { mutableStateOf(true) }
     var isSkillLevelValid by remember { mutableStateOf(true) }
+    var isSportValid by remember { mutableStateOf(true) }
     var isColorLoaded by remember { mutableStateOf(editEvent.imageId.isNotBlank()) }
 
     val lazyListState = rememberLazyListState()
 
-    var fieldCount by remember { mutableStateOf(0) }
+    var fieldCount by remember { mutableStateOf(editEvent.fieldCount ?: editableFields.size) }
     var selectedDivisions by remember { mutableStateOf(editEvent.divisions.normalizeDivisionLabels()) }
     var addSelfToEvent by remember { mutableStateOf(false) }
+    val leagueSlotErrors = remember(leagueTimeSlots, editEvent.eventType, isNewEvent) {
+        if (isNewEvent && editEvent.eventType == EventType.LEAGUE) {
+            computeLeagueSlotErrors(leagueTimeSlots)
+        } else {
+            emptyMap()
+        }
+    }
 
     val roundedCornerSize = 32.dp
     val currentLocation by mapComponent.currentLocation.collectAsState()
 
-    LaunchedEffect(editEvent, fieldCount) {
+    LaunchedEffect(editEvent.fieldCount) {
+        val normalized = editEvent.fieldCount ?: editableFields.size
+        if (normalized != fieldCount) {
+            fieldCount = normalized
+        }
+    }
+
+    LaunchedEffect(editEvent, fieldCount, leagueSlotErrors) {
         isNameValid = editEvent.name.isNotBlank()
         isPriceValid = editEvent.priceCents >= 0
         isMaxParticipantsValid = editEvent.maxParticipants > 1
         isTeamSizeValid = editEvent.teamSizeLimit >= 2
         isLocationValid =
             editEvent.location.isNotBlank() && editEvent.lat != 0.0 && editEvent.long != 0.0
-        isSkillLevelValid = editEvent.divisions.isNotEmpty()
+        isSkillLevelValid = editEvent.eventType == EventType.LEAGUE || editEvent.divisions.isNotEmpty()
+        isSportValid = !isNewEvent || !editEvent.sportId.isNullOrBlank()
+        isLeagueSlotsValid = if (isNewEvent && editEvent.eventType == EventType.LEAGUE) {
+            leagueTimeSlots.isNotEmpty() && leagueSlotErrors.isEmpty()
+        } else {
+            true
+        }
 
         if (editEvent.eventType == EventType.TOURNAMENT) {
             isWinnerSetCountValid = editEvent.winnerSetCount in 1..5
-            isWinnerPointsValid = editEvent.winnerBracketPointsToVictory.all { it > 0 }
-            isFieldCountValid = fieldCount > 0
+            isWinnerPointsValid = editEvent.winnerBracketPointsToVictory.size >= editEvent.winnerSetCount &&
+                editEvent.winnerBracketPointsToVictory.take(editEvent.winnerSetCount).all { it > 0 }
             if (editEvent.doubleElimination) {
                 isLoserSetCountValid = editEvent.loserSetCount in 1..5
-                isLoserPointsValid = editEvent.loserBracketPointsToVictory.all { it > 0 }
+                isLoserPointsValid = editEvent.loserBracketPointsToVictory.size >= editEvent.loserSetCount &&
+                    editEvent.loserBracketPointsToVictory.take(editEvent.loserSetCount).all { it > 0 }
             } else {
                 isLoserSetCountValid = true
                 isLoserPointsValid = true
@@ -200,9 +246,54 @@ fun EventDetails(
             isLoserSetCountValid = true
             isLoserPointsValid = true
         }
+        isFieldCountValid = if (isNewEvent && (editEvent.eventType == EventType.LEAGUE || editEvent.eventType == EventType.TOURNAMENT)) {
+            fieldCount > 0
+        } else {
+            true
+        }
+
+        if (editEvent.eventType == EventType.LEAGUE) {
+            val setCount = when (editEvent.setsPerMatch) {
+                1, 3, 5 -> editEvent.setsPerMatch
+                else -> null
+            }
+            isLeagueGamesValid = (editEvent.gamesPerOpponent ?: 0) >= 1
+            isLeaguePlayoffTeamsValid = !editEvent.includePlayoffs || (editEvent.playoffTeamCount
+                ?: 0) >= 2
+            if (editEvent.usesSets) {
+                isLeagueDurationValid = setCount != null && (editEvent.setDurationMinutes ?: 0) >= 5
+                isLeaguePointsValid = setCount != null &&
+                    editEvent.pointsToVictory.size >= setCount &&
+                    editEvent.pointsToVictory.take(setCount).all { it > 0 }
+            } else {
+                isLeagueDurationValid = (editEvent.matchDurationMinutes ?: 0) >= 15
+                isLeaguePointsValid = true
+            }
+        } else {
+            isLeagueGamesValid = true
+            isLeagueDurationValid = true
+            isLeaguePointsValid = true
+            isLeaguePlayoffTeamsValid = true
+        }
 
         isValid =
-            isPriceValid && isMaxParticipantsValid && isTeamSizeValid && isWinnerSetCountValid && isWinnerPointsValid && isLoserSetCountValid && isLoserPointsValid && isLocationValid && isSkillLevelValid && isFieldCountValid && isColorLoaded
+            isPriceValid &&
+                isMaxParticipantsValid &&
+                isTeamSizeValid &&
+                isWinnerSetCountValid &&
+                isWinnerPointsValid &&
+                isLoserSetCountValid &&
+                isLoserPointsValid &&
+                isLocationValid &&
+                isSkillLevelValid &&
+                isFieldCountValid &&
+                isLeagueGamesValid &&
+                isLeagueDurationValid &&
+                isLeaguePointsValid &&
+                isLeaguePlayoffTeamsValid &&
+                isLeagueSlotsValid &&
+                isSportValid &&
+                isColorLoaded
     }
 
     val dateRangeText = remember(event.start, event.end) {
@@ -350,7 +441,13 @@ fun EventDetails(
                 }
 
                 // Description Card
-                animatedCardSection(isEditMode = editView, animationDelay = 100, viewContent = {
+                animatedCardSection(
+                    sectionId = "description",
+                    sectionTitle = "Description",
+                    collapsibleInEditMode = true,
+                    isEditMode = editView,
+                    animationDelay = 100,
+                    viewContent = {
                     CardSection(
                         title = "Hosted by ${host?.firstName?.toTitleCase()} ${host?.lastName?.toTitleCase()}",
                         content = event.description,
@@ -367,7 +464,13 @@ fun EventDetails(
                 })
 
                 // Event Type Card
-                animatedCardSection(isEditMode = editView, animationDelay = 150, viewContent = {
+                animatedCardSection(
+                    sectionId = "event_type",
+                    sectionTitle = "Event Type",
+                    collapsibleInEditMode = true,
+                    isEditMode = editView,
+                    animationDelay = 150,
+                    viewContent = {
                     CardSection(
                         "Type",
                         "${event.fieldType} • ${event.eventType}".toTitleCase(),
@@ -412,8 +515,42 @@ fun EventDetails(
                     }
                 })
 
+                animatedCardSection(
+                    sectionId = "sport",
+                    sectionTitle = "Sport",
+                    collapsibleInEditMode = true,
+                    isEditMode = editView,
+                    animationDelay = 175,
+                    viewContent = {
+                        val sportName = eventWithRelations.sport?.name
+                            ?: sports.firstOrNull { it.id == event.sportId }?.name
+                            ?: "Not selected"
+                        CardSection("Sport", sportName)
+                    },
+                    editContent = {
+                        PlatformDropdown(
+                            selectedValue = editEvent.sportId.orEmpty(),
+                            onSelectionChange = onSportSelected,
+                            options = sports.map { sport ->
+                                DropdownOption(value = sport.id, label = sport.name)
+                            },
+                            label = "Sport",
+                            placeholder = if (sports.isEmpty()) "No sports available" else "Select a sport",
+                            isError = !isSportValid,
+                            supportingText = if (!isSportValid) "Select a sport to continue." else "",
+                            enabled = sports.isNotEmpty(),
+                        )
+                    },
+                )
+
                 // Price Card
-                animatedCardSection(isEditMode = editView, animationDelay = 200, viewContent = {
+                animatedCardSection(
+                    sectionId = "pricing",
+                    sectionTitle = "Pricing",
+                    collapsibleInEditMode = true,
+                    isEditMode = editView,
+                    animationDelay = 200,
+                    viewContent = {
                     CardSection("Price", event.price.moneyFormat())
 
                     CardSection(
@@ -462,7 +599,13 @@ fun EventDetails(
                     }
                 })
 
-                animatedCardSection(isEditMode = editView, animationDelay = 250, viewContent = {
+                animatedCardSection(
+                    sectionId = "registration",
+                    sectionTitle = "Registration",
+                    collapsibleInEditMode = true,
+                    isEditMode = editView,
+                    animationDelay = 250,
+                    viewContent = {
                     CardSection(
                         "Registration Cutoff", when (editEvent.registrationCutoffHours) {
                             0 -> "No Cutoff"
@@ -480,7 +623,13 @@ fun EventDetails(
                 })
 
                 // Date Card
-                animatedCardSection(isEditMode = editView, animationDelay = 300, viewContent = {
+                animatedCardSection(
+                    sectionId = "date_time",
+                    sectionTitle = "Date & Time",
+                    collapsibleInEditMode = true,
+                    isEditMode = editView,
+                    animationDelay = 300,
+                    viewContent = {
                     CardSection("Date", dateRangeText)
                 }, editContent = {
                     Row(
@@ -495,20 +644,35 @@ fun EventDetails(
                             label = "Start Date & Time",
                             readOnly = true,
                             onTap = { showStartPicker = true })
-                        PlatformTextField(
-                            value = editEvent.end.toLocalDateTime(
-                                TimeZone.currentSystemDefault()
-                            ).format(dateTimeFormat),
-                            onValueChange = {},
-                            modifier = Modifier.weight(1f),
-                            label = "End Date & Time",
-                            readOnly = true,
-                            onTap = { showEndPicker = true })
+                        if (editEvent.eventType == EventType.EVENT) {
+                            PlatformTextField(
+                                value = editEvent.end.toLocalDateTime(
+                                    TimeZone.currentSystemDefault()
+                                ).format(dateTimeFormat),
+                                onValueChange = {},
+                                modifier = Modifier.weight(1f),
+                                label = "End Date & Time",
+                                readOnly = true,
+                                onTap = { showEndPicker = true })
+                        }
+                    }
+                    if (editEvent.eventType != EventType.EVENT) {
+                        Text(
+                            text = "Leagues and tournaments use generated schedules. End date follows start date.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(localImageScheme.current.onSurface),
+                        )
                     }
                 })
 
                 // Divisions Card
-                animatedCardSection(isEditMode = editView, animationDelay = 350, viewContent = {
+                animatedCardSection(
+                    sectionId = "divisions",
+                    sectionTitle = "Divisions",
+                    collapsibleInEditMode = true,
+                    isEditMode = editView,
+                    animationDelay = 350,
+                    viewContent = {
                     CardSection(
                         "Divisions",
                         event.divisions.normalizeDivisionLabels().joinToString(", "),
@@ -527,7 +691,14 @@ fun EventDetails(
                 })
 
                 // Specifics Card
-                animatedCardSection(isEditMode = editView, animationDelay = 400, viewContent = {
+                animatedCardSection(
+                    sectionId = "specifics",
+                    sectionTitle = "Competition Settings",
+                    collapsibleInEditMode = true,
+                    isEditMode = editView,
+                    animationDelay = 400,
+                    defaultExpandedInEditMode = false,
+                    viewContent = {
                     Text(
                         "Specifics",
                         style = MaterialTheme.typography.titleMedium,
@@ -543,6 +714,65 @@ fun EventDetails(
                         style = MaterialTheme.typography.bodyMedium,
                         color = Color(localImageScheme.current.onSurface)
                     )
+                    Text(
+                        "Team Event: ${if (event.teamSignup) "Yes" else "No"}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color(localImageScheme.current.onSurface)
+                    )
+                    Text(
+                        "Single Division: ${if (event.singleDivision) "Yes" else "No"}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color(localImageScheme.current.onSurface)
+                    )
+                    if (event.doTeamsRef != null) {
+                        Text(
+                            "Teams Provide Referees: ${if (event.doTeamsRef) "Yes" else "No"}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color(localImageScheme.current.onSurface)
+                        )
+                    }
+                    if (event.eventType == EventType.LEAGUE) {
+                        Text(
+                            "Games per Opponent: ${event.gamesPerOpponent ?: 1}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color(localImageScheme.current.onSurface)
+                        )
+                        if (event.usesSets) {
+                            Text(
+                                "Sets per Match: ${event.setsPerMatch ?: 1}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Color(localImageScheme.current.onSurface)
+                            )
+                            Text(
+                                "Set Duration: ${(event.setDurationMinutes ?: 20)} minutes",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Color(localImageScheme.current.onSurface)
+                            )
+                            Text(
+                                "Points to Victory: ${event.pointsToVictory.joinToString()}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Color(localImageScheme.current.onSurface)
+                            )
+                        } else {
+                            Text(
+                                "Match Duration: ${(event.matchDurationMinutes ?: 60)} minutes",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Color(localImageScheme.current.onSurface)
+                            )
+                        }
+                        Text(
+                            "Rest Time: ${(event.restTimeMinutes ?: 0)} minutes",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color(localImageScheme.current.onSurface)
+                        )
+                        if (event.includePlayoffs) {
+                            Text(
+                                "Playoffs: Included (${event.playoffTeamCount ?: 0} teams)",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Color(localImageScheme.current.onSurface)
+                            )
+                        }
+                    }
                     if (event.eventType == EventType.TOURNAMENT) {
                         Text(
                             if (event.doubleElimination) "Double Elimination" else "Single Elimination",
@@ -573,7 +803,6 @@ fun EventDetails(
                         }
                     }
                 }, editContent = {
-                    Text("Specifics", style = MaterialTheme.typography.titleMedium)
 
                     val label = if (!editEvent.teamSignup) stringResource(Res.string.max_players)
                     else stringResource(Res.string.max_teams)
@@ -600,7 +829,7 @@ fun EventDetails(
                         modifier = Modifier.fillMaxWidth(.5f)
                     )
 
-                    if (event.eventType == EventType.TOURNAMENT) {
+                    if (editEvent.eventType == EventType.EVENT) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.padding(top = 8.dp)
@@ -610,6 +839,36 @@ fun EventDetails(
                                 onCheckedChange = { onEditEvent { copy(teamSignup = it) } })
                             Text(text = "Team Event")
                         }
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(top = 8.dp)
+                        ) {
+                            Checkbox(
+                                checked = editEvent.singleDivision,
+                                onCheckedChange = { onEditEvent { copy(singleDivision = it) } })
+                            Text(text = "Single Division")
+                        }
+                    } else {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(top = 8.dp)
+                        ) {
+                            Checkbox(checked = true, onCheckedChange = {}, enabled = false)
+                            Text(text = "Team Event")
+                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(top = 8.dp)
+                        ) {
+                            Checkbox(checked = true, onCheckedChange = {}, enabled = false)
+                            Text(text = "Single Division")
+                        }
+                        Text(
+                            "Leagues and tournaments are always team events and use a single division.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(localImageScheme.current.onSurface),
+                        )
                     }
 
                     if (isNewEvent) {
@@ -628,6 +887,48 @@ fun EventDetails(
                         }
                     }
 
+                    if (editEvent.eventType == EventType.LEAGUE) {
+                        LeagueConfigurationFields(
+                            leagueConfig = editEvent.toLeagueConfig(),
+                            playoffConfig = editEvent.toTournamentConfig(),
+                            onLeagueConfigChange = { updated ->
+                                onEditEvent { withLeagueConfig(updated) }
+                            },
+                            onPlayoffConfigChange = { updated ->
+                                onEditTournament { withTournamentConfig(updated) }
+                            },
+                        )
+
+                        if (!isLeagueGamesValid) {
+                            Text(
+                                "Games per opponent must be at least 1.",
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                        if (!isLeagueDurationValid) {
+                            Text(
+                                if (editEvent.usesSets) {
+                                    "Set duration must be at least 5 minutes and sets must be Best of 1, 3, or 5."
+                                } else {
+                                    "Match duration must be at least 15 minutes."
+                                },
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                        if (!isLeaguePointsValid) {
+                            Text(
+                                "Points to victory must be greater than 0 for every configured set.",
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                        if (!isLeaguePlayoffTeamsValid) {
+                            Text(
+                                "Playoff team count must be at least 2 when playoffs are enabled.",
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
+
                     // Tournament-specific fields
                     if (editEvent.eventType == EventType.TOURNAMENT) {
                         PlatformTextField(
@@ -643,25 +944,27 @@ fun EventDetails(
                             supportingText = "If there is a prize, enter it here"
                         )
 
-                        NumberInputField(
-                            value = fieldCount.toString(),
-                            onValueChange = { newValue ->
-                                if (newValue.all { it.isDigit() }) {
-                                    if (newValue.isBlank()) {
-                                        fieldCount = 0
-                                        onSelectFieldCount(0)
-                                    } else {
-                                        fieldCount = newValue.toInt()
-                                        onSelectFieldCount(newValue.toInt())
+                        if (!isNewEvent) {
+                            NumberInputField(
+                                value = fieldCount.toString(),
+                                onValueChange = { newValue ->
+                                    if (newValue.all { it.isDigit() }) {
+                                        if (newValue.isBlank()) {
+                                            fieldCount = 0
+                                            onSelectFieldCount(0)
+                                        } else {
+                                            fieldCount = newValue.toInt()
+                                            onSelectFieldCount(newValue.toInt())
+                                        }
                                     }
-                                }
-                            },
-                            label = "Field Count",
-                            isError = !isFieldCountValid,
-                            supportingText = if (!isFieldCountValid) stringResource(
-                                Res.string.value_too_low, 0
-                            ) else "",
-                        )
+                                },
+                                label = "Field Count",
+                                isError = !isFieldCountValid,
+                                supportingText = if (!isFieldCountValid) stringResource(
+                                    Res.string.value_too_low, 0
+                                ) else "",
+                            )
+                        }
 
                         WinnerSetCountDropdown(
                             selectedCount = editEvent.winnerSetCount,
@@ -833,12 +1136,64 @@ fun EventDetails(
                         }
                     }
                 })
+
+                if (isNewEvent && (editEvent.eventType == EventType.LEAGUE || editEvent.eventType == EventType.TOURNAMENT)) {
+                    animatedCardSection(
+                        sectionId = "facility_schedule",
+                        sectionTitle = "Facilities & Scheduling",
+                        collapsibleInEditMode = true,
+                        defaultExpandedInEditMode = false,
+                        isEditMode = editView,
+                        animationDelay = 450,
+                        viewContent = {
+                            CardSection("Field Count", (editEvent.fieldCount ?: 0).toString())
+                            if (editEvent.eventType == EventType.LEAGUE) {
+                                CardSection("Weekly Timeslots", "${eventWithRelations.timeSlots.size}")
+                            }
+                        },
+                        editContent = {
+                            LeagueScheduleFields(
+                                fieldCount = fieldCount,
+                                fields = editableFields,
+                                slots = leagueTimeSlots,
+                                onFieldCountChange = { count ->
+                                    fieldCount = count
+                                    onSelectFieldCount(count)
+                                },
+                                onFieldNameChange = onUpdateLocalFieldName,
+                                onAddSlot = onAddLeagueTimeSlot,
+                                onUpdateSlot = onUpdateLeagueTimeSlot,
+                                onRemoveSlot = onRemoveLeagueTimeSlot,
+                                slotErrors = leagueSlotErrors,
+                                showSlotEditor = editEvent.eventType == EventType.LEAGUE,
+                                fieldCountError = if (!isFieldCountValid) {
+                                    "Field count must be at least 1."
+                                } else {
+                                    null
+                                },
+                            )
+                            if (!isLeagueSlotsValid && editEvent.eventType == EventType.LEAGUE) {
+                                Text(
+                                    text = "Fix league timeslot issues before continuing.",
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            }
+                        },
+                    )
+                }
             }
         }
     }
     PlatformDateTimePicker(
         onDateSelected = { selectedInstant ->
-            onEditEvent { copy(start = selectedInstant ?: Clock.System.now()) }
+            val selected = selectedInstant ?: Clock.System.now()
+            onEditEvent {
+                if (eventType == EventType.EVENT) {
+                    copy(start = selected)
+                } else {
+                    copy(start = selected, end = selected)
+                }
+            }
             showStartPicker = false
         },
         onDismissRequest = { showStartPicker = false },
@@ -853,7 +1208,7 @@ fun EventDetails(
             showEndPicker = false
         },
         onDismissRequest = { showEndPicker = false },
-        showPicker = showEndPicker,
+        showPicker = showEndPicker && editEvent.eventType == EventType.EVENT,
         getTime = true,
         canSelectPast = false,
     )
@@ -964,12 +1319,25 @@ fun EventDetails(
 }
 
 fun LazyListScope.animatedCardSection(
+    sectionId: String,
+    sectionTitle: String? = null,
+    collapsibleInEditMode: Boolean = false,
+    defaultExpandedInEditMode: Boolean = true,
     isEditMode: Boolean,
     animationDelay: Int = 0,
     viewContent: @Composable() (ColumnScope.() -> Unit),
     editContent: @Composable() (ColumnScope.() -> Unit)
 ) {
-    item {
+    item(key = sectionId) {
+        var expanded by rememberSaveable(sectionId, isEditMode) {
+            mutableStateOf(if (isEditMode) defaultExpandedInEditMode else true)
+        }
+        LaunchedEffect(isEditMode) {
+            if (!isEditMode) {
+                expanded = true
+            }
+        }
+
         Card(
             modifier = Modifier.fillMaxSize(),
             shape = RectangleShape,
@@ -979,20 +1347,49 @@ fun LazyListScope.animatedCardSection(
             Card(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp, horizontal = 16.dp),
             ) {
-                AnimatedContent(
-                    targetState = isEditMode,
-                    transitionSpec = { transitionSpec(animationDelay) },
-                    label = "cardTransition"
-                ) { editMode ->
-                    Column(
-                        modifier = Modifier.fillMaxWidth().padding(16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (isEditMode && collapsibleInEditMode && sectionTitle != null) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = sectionTitle,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = Color(localImageScheme.current.onSurface),
+                            )
+                            TextButton(onClick = { expanded = !expanded }) {
+                                Icon(
+                                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                    contentDescription = if (expanded) "Collapse section" else "Expand section",
+                                )
+                            }
+                        }
+                    }
+
+                    AnimatedVisibility(
+                        visible = !isEditMode || !collapsibleInEditMode || expanded,
                     ) {
-                        if (editMode) {
-                            editContent()
-                        } else {
-                            viewContent()
+                        AnimatedContent(
+                            targetState = isEditMode,
+                            transitionSpec = { transitionSpec(animationDelay) },
+                            label = "cardTransition",
+                        ) { editMode ->
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                if (editMode) {
+                                    editContent()
+                                } else {
+                                    viewContent()
+                                }
+                            }
                         }
                     }
                 }
@@ -1017,6 +1414,51 @@ fun ColumnScope.CardSection(
         textAlign = TextAlign.Center,
         color = Color(localImageScheme.current.onSurface)
     )
+}
+
+private fun computeLeagueSlotErrors(slots: List<TimeSlot>): Map<Int, String> {
+    if (slots.isEmpty()) return emptyMap()
+
+    val errors = mutableMapOf<Int, String>()
+    slots.forEachIndexed { index, slot ->
+        val fieldId = slot.scheduledFieldId
+        val day = slot.dayOfWeek
+        val start = slot.startTimeMinutes
+        val end = slot.endTimeMinutes
+
+        val requiredMissing = when {
+            fieldId.isNullOrBlank() -> "Select a field."
+            day == null -> "Select a day."
+            start == null -> "Select a start time."
+            end == null -> "Select an end time."
+            end <= start -> "Timeslot must end after it starts."
+            else -> null
+        }
+        if (requiredMissing != null) {
+            errors[index] = requiredMissing
+            return@forEachIndexed
+        }
+
+        val hasOverlap = slots.withIndex().any { (otherIndex, other) ->
+            if (otherIndex == index) return@any false
+            if (other.scheduledFieldId != fieldId) return@any false
+            if (other.dayOfWeek != day) return@any false
+
+            val otherStart = other.startTimeMinutes
+            val otherEnd = other.endTimeMinutes
+            if (otherStart == null || otherEnd == null || otherEnd <= otherStart) return@any false
+            slotsOverlap(start!!, end!!, otherStart, otherEnd)
+        }
+
+        if (hasOverlap) {
+            errors[index] = "Overlaps with another timeslot for this field."
+        }
+    }
+    return errors
+}
+
+private fun slotsOverlap(startA: Int, endA: Int, startB: Int, endB: Int): Boolean {
+    return maxOf(startA, startB) < minOf(endA, endB)
 }
 
 @Composable

@@ -91,7 +91,9 @@ val componentModule = module {
             rentalContext = rentalContext,
             userRepository = get(),
             eventRepository = get(),
+            matchRepository = get(),
             fieldRepository = get(),
+            sportsRepository = get(),
             billingRepository = get(),
             imageRepository = get()
         )
@@ -102,6 +104,7 @@ val componentModule = module {
             componentContext = componentContext,
             locationTracker = get(),
             eventRepository = get(),
+            matchRepository = get(),
             billingRepository = get(),
             fieldRepository = get(),
             eventId = eventId,
