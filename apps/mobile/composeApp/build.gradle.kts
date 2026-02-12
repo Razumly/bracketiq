@@ -98,6 +98,7 @@ kotlin {
                 implementation(libs.permissions.compose)
                 implementation(libs.ktor.client.core)
                 implementation(libs.ktor.client.content.negotiation)
+                implementation(libs.ktor.client.logging)
                 implementation(libs.ktor.serialization.kotlinx.json)
                 implementation(libs.coil.compose.core)
                 implementation(libs.coil.compose)
@@ -424,6 +425,21 @@ fun runProcess(
     return proc.exitValue()
 }
 
+fun stopProcessByPid(pid: Long): Boolean {
+    val handle = ProcessHandle.of(pid).orElse(null) ?: return false
+    if (!handle.isAlive) return false
+
+    handle.destroy()
+    runCatching { handle.onExit().get(8, TimeUnit.SECONDS) }
+
+    if (handle.isAlive) {
+        handle.destroyForcibly()
+        runCatching { handle.onExit().get(5, TimeUnit.SECONDS) }
+    }
+
+    return !handle.isAlive
+}
+
 fun resolveBackendPort(project: Project, backendPortProp: String?): Int {
     val fromProp = backendPortProp?.toIntOrNull()?.takeIf { it > 0 }
     if (fromProp != null) return fromProp
@@ -432,13 +448,13 @@ fun resolveBackendPort(project: Project, backendPortProp: String?): Int {
     val secrets = loadPropertiesIfExists(project.rootProject.file("secrets.properties"))
     val defaults = loadPropertiesIfExists(project.rootProject.file("local.defaults.properties"))
     val baseUrl = (secrets.getProperty("MVP_API_BASE_URL") ?: defaults.getProperty("MVP_API_BASE_URL"))?.trim()
-        ?.takeIf { it.isNotBlank() } ?: return 3000
+        ?.takeIf { it.isNotBlank() } ?: return 3001
 
     return try {
         val port = URI(baseUrl).port
-        if (port > 0) port else 3000
+        if (port > 0) port else 3001
     } catch (_: Exception) {
-        3000
+        3001
     }
 }
 
@@ -461,7 +477,19 @@ val startLocalBackend = tasks.register("startLocalBackend") {
 
         val isWindows = System.getProperty("os.name")?.lowercase()?.contains("win") == true
 
-        val backendPort = resolveBackendPort(project, findProperty("mvp.site.port")?.toString())
+        val requestedBackendPort = resolveBackendPort(project, findProperty("mvp.site.port")?.toString())
+        val backendPort = when {
+            isPortOpen("127.0.0.1", requestedBackendPort) -> requestedBackendPort
+            requestedBackendPort != 3001 && isPortOpen("127.0.0.1", 3001) -> {
+                logger.lifecycle(
+                    "startLocalBackend: detected running backend on http://localhost:3001; " +
+                        "using port 3001 and skipping local launch."
+                )
+                3001
+            }
+
+            else -> requestedBackendPort
+        }
         if (isPortOpen("127.0.0.1", backendPort)) {
             logger.lifecycle("startLocalBackend: already running on http://localhost:$backendPort")
             return@doLast
@@ -473,6 +501,11 @@ val startLocalBackend = tasks.register("startLocalBackend") {
         logDir.mkdirs()
         val outFile = File(logDir, "backend.out.log").also { it.writeText("") }
         val errFile = File(logDir, "backend.err.log").also { it.writeText("") }
+        val pidFile = File(logDir, "backend.pid")
+        if (pidFile.exists() && !isPortOpen("127.0.0.1", backendPort)) {
+            pidFile.delete()
+        }
+        var startedBackendProcess: Process? = null
 
         if (backendDir == null) {
             // Many dev setups keep mvp-site under WSL (~//Projects/MVP/mvp-site). If so, start it there.
@@ -532,10 +565,11 @@ val startLocalBackend = tasks.register("startLocalBackend") {
                         wslDistro,
                         "cd \"$wslDir\" && npm run dev -- --hostname 0.0.0.0 --port $backendPort",
                     )
-                )
+                    )
                     .redirectOutput(ProcessBuilder.Redirect.appendTo(outFile))
                     .redirectError(ProcessBuilder.Redirect.appendTo(errFile))
                     .start()
+                    .also { startedBackendProcess = it }
             } catch (e: Exception) {
                 logger.error(
                     "startLocalBackend: failed to start backend via WSL. " +
@@ -577,12 +611,23 @@ val startLocalBackend = tasks.register("startLocalBackend") {
                     .redirectOutput(ProcessBuilder.Redirect.appendTo(outFile))
                     .redirectError(ProcessBuilder.Redirect.appendTo(errFile))
                     .start()
+                    .also { startedBackendProcess = it }
             } catch (e: Exception) {
                 logger.error(
                     "startLocalBackend: failed to start backend. " +
                         "You can disable via -Pmvp.startBackend=false. " +
                         "Error: ${e.message}"
                 )
+            }
+        }
+
+        startedBackendProcess?.let { process ->
+            runCatching {
+                pidFile.writeText(process.pid().toString())
+            }.onSuccess {
+                logger.lifecycle("startLocalBackend: pid=${process.pid()} (tracked in ${pidFile.absolutePath})")
+            }.onFailure { error ->
+                logger.lifecycle("startLocalBackend: failed to persist pid: ${error.message}")
             }
         }
 
@@ -600,7 +645,57 @@ val startLocalBackend = tasks.register("startLocalBackend") {
     }
 }
 
+val stopLocalBackend = tasks.register("stopLocalBackend") {
+    group = "mvp"
+    description = "Stops the local mvp-site backend started by startLocalBackend."
+
+    doLast {
+        val logDir = layout.buildDirectory.dir("localBackend").get().asFile
+        val pidFile = File(logDir, "backend.pid")
+        if (!pidFile.exists()) {
+            logger.lifecycle("stopLocalBackend: no tracked backend pid file (${pidFile.absolutePath})")
+            return@doLast
+        }
+
+        val pid = pidFile.readText().trim().toLongOrNull()
+        if (pid == null) {
+            logger.lifecycle("stopLocalBackend: invalid pid file; removing ${pidFile.absolutePath}")
+            pidFile.delete()
+            return@doLast
+        }
+
+        val stopped = runCatching { stopProcessByPid(pid) }.getOrElse { false }
+        if (stopped) {
+            logger.lifecycle("stopLocalBackend: stopped backend pid=$pid")
+        } else {
+            logger.lifecycle("stopLocalBackend: pid=$pid not running or could not be stopped")
+        }
+        pidFile.delete()
+
+        val backendPort = resolveBackendPort(project, findProperty("mvp.site.port")?.toString())
+        if (!isPortOpen("127.0.0.1", backendPort)) {
+            resolveBackendDir(project)?.let { backendDir ->
+                val lockFile = File(backendDir, ".next/dev/lock")
+                if (lockFile.exists()) {
+                    lockFile.delete()
+                    logger.lifecycle("stopLocalBackend: removed stale lock ${lockFile.absolutePath}")
+                }
+            }
+        }
+    }
+}
+
 // Android Studio "Run" triggers the debug build graph; wiring here makes it effectively one click.
 tasks.matching { it.name == "preDebugBuild" }.configureEach {
     dependsOn(startLocalBackend)
+}
+
+tasks.matching { it.name == "run" }.configureEach {
+    dependsOn(startLocalBackend)
+    finalizedBy(stopLocalBackend)
+}
+
+tasks.matching { it.name == "iosSimulatorArm64Test" || it.name == "connectedDebugAndroidTest" }.configureEach {
+    dependsOn(startLocalBackend)
+    finalizedBy(stopLocalBackend)
 }

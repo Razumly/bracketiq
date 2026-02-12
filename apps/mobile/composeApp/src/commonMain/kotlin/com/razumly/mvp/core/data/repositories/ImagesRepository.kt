@@ -1,6 +1,5 @@
 package com.razumly.mvp.core.data.repositories
 
-import com.razumly.mvp.core.presentation.util.getImageUrl
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.MvpUploadFile
 import com.razumly.mvp.core.network.dto.FileUploadResponseDto
@@ -16,7 +15,7 @@ import kotlinx.coroutines.flow.map
 interface IImagesRepository {
     suspend fun uploadImage(inputFile: MvpUploadFile): Result<String>
     fun getUserImageIdsFlow(): Flow<List<String>>
-    suspend fun addImageToUser(imageUrl: String): Result<Unit>
+    suspend fun addImageToUser(imageId: String): Result<Unit>
     suspend fun deleteImage(imageId: String): Result<Unit>
 }
 
@@ -51,17 +50,19 @@ class ImagesRepository(
             ?: error("Upload response missing file id")
 
         addImageToUser(fileId).getOrThrow()
-        getImageUrl(fileId)
+        fileId
     }
 
     override fun getUserImageIdsFlow(): Flow<List<String>> {
         return userRepository.currentUser.map { user -> user.getOrThrow().uploadedImages}
     }
 
-    override suspend fun addImageToUser(imageUrl: String): Result<Unit> = runCatching {
+    override suspend fun addImageToUser(imageId: String): Result<Unit> = runCatching {
         val user = userRepository.currentUser.value.getOrThrow()
 
-        val updatedImages = user.uploadedImages.toMutableList().apply { add(imageUrl) }
+        val updatedImages = user.uploadedImages.toMutableList().apply {
+            if (!contains(imageId)) add(imageId)
+        }
         val updatedUser = user.copy(uploadedImages = updatedImages)
 
         userRepository.updateUser(updatedUser).getOrThrow()

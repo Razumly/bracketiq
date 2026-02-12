@@ -4,7 +4,10 @@
 When writing complex features or significant refactors, use an ExecPlan (as described in .agent/PLANS.md) from design to implementation.
 
 ## Project Structure & Module Organization
-`composeApp/` hosts the shared Kotlin Multiplatform app; keep cross-platform logic under `composeApp/src/commonMain/kotlin/com/razumly/mvp/<feature>` (e.g., `chat`, `eventMap`). Platform overrides stay in `androidMain` and `iosMain`, while `iosApp/` provides the Swift entry point and Podfile. Generated Room snapshots belong in `composeApp/schemas/`; treat `build/` and other Gradle outputs as ephemeral. Root scripts (`build.gradle.kts`, `settings.gradle.kts`, `gradle/`) centralize plugin versions�edit them only when updating shared build logic.
+`composeApp/` hosts the shared Kotlin Multiplatform app; keep cross-platform logic under `composeApp/src/commonMain/kotlin/com/razumly/mvp/<feature>` (e.g., `chat`, `eventMap`). Platform overrides stay in `androidMain` and `iosMain`, while `iosApp/` provides the Swift entry point and Podfile. Generated Room snapshots belong in `composeApp/schemas/`; treat `build/` and other Gradle outputs as ephemeral. Root scripts (`build.gradle.kts`, `settings.gradle.kts`, `gradle/`) centralize plugin versions; edit them only when updating shared build logic.
+
+## Backend & Data Contract Source of Truth
+The backend and database definitions live in `~/Projects/MVP/mvp-site/` (WSL path: `/home/camka/Projects/MVP/mvp-site/`, Windows UNC path: `\\wsl.localhost\Ubuntu\home\camka\Projects\MVP\mvp-site`). For all API endpoint usage and request/response data types in this repo, reference that project as the source of truth. Do not invent or drift endpoint paths, payloads, or shared data models without first aligning with `mvp-site`.
 
 ## Build, Test, and Development Commands
 - `.\gradlew :composeApp:assembleDebug` builds the Android artifact with the shared Compose UI.

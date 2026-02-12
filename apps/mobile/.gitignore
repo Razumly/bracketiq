@@ -1,6 +1,6 @@
 *.iml
 .kotlin
-.gradle
+.gradle*
 **/build/
 xcuserdata
 !src/**/build/
@@ -19,3 +19,4 @@ captures
 /secrets.properties
 /iosApp/iosApp/Secrets.plist
 /codealike.json
+composeApp/schemas

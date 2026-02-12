@@ -412,7 +412,20 @@ class UserRepository(
             body = request,
         )
 
-        val updated = res.user?.toUserDataOrNull() ?: user
+        val responseUser = res.user
+        val updated = responseUser?.toUserDataOrNull()?.copy(
+            firstName = responseUser.firstName ?: user.firstName,
+            lastName = responseUser.lastName ?: user.lastName,
+            userName = responseUser.userName ?: user.userName,
+            teamIds = responseUser.teamIds ?: user.teamIds,
+            friendIds = responseUser.friendIds ?: user.friendIds,
+            friendRequestIds = responseUser.friendRequestIds ?: user.friendRequestIds,
+            friendRequestSentIds = responseUser.friendRequestSentIds ?: user.friendRequestSentIds,
+            followingIds = responseUser.followingIds ?: user.followingIds,
+            hasStripeAccount = responseUser.hasStripeAccount ?: user.hasStripeAccount,
+            uploadedImages = responseUser.uploadedImages ?: user.uploadedImages,
+            profileImageId = responseUser.profileImageId ?: user.profileImageId,
+        ) ?: user
         databaseService.getUserDataDao.upsertUserWithRelations(updated)
 
         // Update current user state.

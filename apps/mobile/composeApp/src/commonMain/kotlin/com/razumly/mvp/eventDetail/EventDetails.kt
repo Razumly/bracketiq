@@ -1280,7 +1280,9 @@ fun EventDetails(
             Card {
                 SelectEventImage(
                     onSelectedImage = { onEditEvent(it) },
-                    imageIds = imageIds,
+                    imageIds = (imageIds + editEvent.imageId)
+                        .filter(String::isNotBlank)
+                        .distinct(),
                     onUploadSelected = { showUploadImagePicker = true },
                     onDeleteImage = {
                         showImageDelete = true

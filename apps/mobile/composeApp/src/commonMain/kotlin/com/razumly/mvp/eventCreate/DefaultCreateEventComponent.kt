@@ -275,8 +275,19 @@ class DefaultCreateEventComponent(
     override fun onUploadSelected(photo: GalleryPhotoResult) {
         scope.launch {
             loadingHandler.showLoading("Uploading image...")
-            imageRepository.uploadImage(convertPhotoResultToUploadFile(photo))
-            loadingHandler.hideLoading()
+            try {
+                val uploadedImageId = imageRepository.uploadImage(
+                    convertPhotoResultToUploadFile(photo)
+                ).getOrThrow()
+
+                updateEventField {
+                    copy(imageId = uploadedImageId)
+                }
+            } catch (error: Throwable) {
+                _errorState.value = ErrorMessage(error.message ?: "Failed to upload image.")
+            } finally {
+                loadingHandler.hideLoading()
+            }
         }
     }
 
