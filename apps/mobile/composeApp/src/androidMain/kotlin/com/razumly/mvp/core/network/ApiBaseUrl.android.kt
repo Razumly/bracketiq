@@ -2,23 +2,21 @@ package com.razumly.mvp.core.network
 
 import com.razumly.mvp.BuildConfig
 import io.github.aakira.napier.Napier
-import java.net.InetSocketAddress
-import java.net.Socket
 import java.net.URI
 
-private const val DEFAULT_LOCAL_API_PORT = 3000
-private const val FALLBACK_LOCAL_API_PORT = 3001
-private const val PORT_CHECK_TIMEOUT_MS = 150
+private const val EMULATOR_HOST_ALIAS = "10.0.2.2"
+private const val LOOPBACK_HOST = "127.0.0.1"
 
-private val localHosts = setOf("localhost", "127.0.0.1", "10.0.2.2")
-
-private fun isPortOpen(host: String, port: Int): Boolean {
-    return runCatching {
-        Socket().use { socket ->
-            socket.connect(InetSocketAddress(host, port), PORT_CHECK_TIMEOUT_MS)
-        }
-        true
-    }.getOrDefault(false)
+private fun buildUrl(uri: URI, host: String, port: Int): String {
+    return URI(
+        uri.scheme,
+        uri.userInfo,
+        host,
+        port,
+        uri.path,
+        uri.query,
+        uri.fragment
+    ).toString().trimEnd('/')
 }
 
 private fun resolveApiBaseUrl(baseUrl: String): String {
@@ -27,30 +25,17 @@ private fun resolveApiBaseUrl(baseUrl: String): String {
     val host = uri.host ?: return normalized
     val configuredPort = uri.port.takeIf { it > 0 } ?: return normalized
 
-    if (configuredPort != DEFAULT_LOCAL_API_PORT || host.lowercase() !in localHosts) {
-        return normalized
+    if (host == EMULATOR_HOST_ALIAS) {
+        val rewritten = buildUrl(uri, LOOPBACK_HOST, configuredPort)
+        Napier.i(
+            "apiBaseUrl(android): rewriting emulator host alias from $normalized to $rewritten " +
+                "(expects adb reverse tcp:$configuredPort tcp:$configuredPort)"
+        )
+        return rewritten
     }
 
-    if (isPortOpen(host, DEFAULT_LOCAL_API_PORT)) {
-        return normalized
-    }
-
-    if (!isPortOpen(host, FALLBACK_LOCAL_API_PORT)) {
-        return normalized
-    }
-
-    val fallback = URI(
-        uri.scheme,
-        uri.userInfo,
-        host,
-        FALLBACK_LOCAL_API_PORT,
-        uri.path,
-        uri.query,
-        uri.fragment
-    ).toString().trimEnd('/')
-
-    Napier.i("apiBaseUrl: using fallback endpoint $fallback (configured $normalized is down)")
-    return fallback
+    Napier.i("apiBaseUrl(android): using configured endpoint $normalized")
+    return normalized
 }
 
 actual val apiBaseUrl: String = resolveApiBaseUrl(BuildConfig.MVP_API_BASE_URL)

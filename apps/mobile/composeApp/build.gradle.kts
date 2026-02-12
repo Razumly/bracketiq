@@ -425,6 +425,36 @@ fun runProcess(
     return proc.exitValue()
 }
 
+fun ProcessBuilder.sanitizeNodeDebugEnvironment(): ProcessBuilder {
+    val env = environment()
+    env.remove("VSCODE_INSPECTOR_OPTIONS")
+    env.remove("NODE_INSPECT_RESUME_ON_START")
+
+    val nodeOptions = env["NODE_OPTIONS"] ?: return this
+    if (nodeOptions.isBlank()) {
+        env.remove("NODE_OPTIONS")
+        return this
+    }
+
+    val sanitized = nodeOptions
+        .split(Regex("\\s+"))
+        .filter { token ->
+            token.isNotBlank() &&
+                !token.startsWith("--inspect") &&
+                !token.contains("ms-vscode.js-debug")
+        }
+        .joinToString(" ")
+        .trim()
+
+    if (sanitized.isBlank()) {
+        env.remove("NODE_OPTIONS")
+    } else {
+        env["NODE_OPTIONS"] = sanitized
+    }
+
+    return this
+}
+
 fun stopProcessByPid(pid: Long): Boolean {
     val handle = ProcessHandle.of(pid).orElse(null) ?: return false
     if (!handle.isAlive) return false
@@ -440,6 +470,9 @@ fun stopProcessByPid(pid: Long): Boolean {
     return !handle.isAlive
 }
 
+val DEFAULT_BACKEND_PORT = 3000
+val ALTERNATE_BACKEND_PORT = 3010
+
 fun resolveBackendPort(project: Project, backendPortProp: String?): Int {
     val fromProp = backendPortProp?.toIntOrNull()?.takeIf { it > 0 }
     if (fromProp != null) return fromProp
@@ -448,13 +481,63 @@ fun resolveBackendPort(project: Project, backendPortProp: String?): Int {
     val secrets = loadPropertiesIfExists(project.rootProject.file("secrets.properties"))
     val defaults = loadPropertiesIfExists(project.rootProject.file("local.defaults.properties"))
     val baseUrl = (secrets.getProperty("MVP_API_BASE_URL") ?: defaults.getProperty("MVP_API_BASE_URL"))?.trim()
-        ?.takeIf { it.isNotBlank() } ?: return 3001
+        ?.takeIf { it.isNotBlank() } ?: return DEFAULT_BACKEND_PORT
 
     return try {
         val port = URI(baseUrl).port
-        if (port > 0) port else 3001
+        if (port > 0) port else DEFAULT_BACKEND_PORT
     } catch (_: Exception) {
-        3001
+        DEFAULT_BACKEND_PORT
+    }
+}
+
+fun configureAdbReverse(
+    logger: org.gradle.api.logging.Logger,
+    ports: Collection<Int>,
+) {
+    val uniquePorts = ports.filter { it > 0 }.distinct()
+    if (uniquePorts.isEmpty()) return
+
+    val candidateAdbCommands = buildList {
+        add("adb")
+
+        val sdkRoot = System.getenv("ANDROID_SDK_ROOT")
+            ?.takeIf { it.isNotBlank() }
+            ?: System.getenv("ANDROID_HOME")?.takeIf { it.isNotBlank() }
+        if (!sdkRoot.isNullOrBlank()) {
+            add(File(sdkRoot, "platform-tools/adb").absolutePath)
+            add(File(sdkRoot, "platform-tools/adb.exe").absolutePath)
+        }
+
+        val userProfile = System.getenv("USERPROFILE")?.takeIf { it.isNotBlank() }
+        if (!userProfile.isNullOrBlank()) {
+            val windowsAdb = "$userProfile\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe"
+            add(windowsAdb)
+            toWslPath(windowsAdb)?.let { add(it) }
+        }
+    }.distinct()
+
+    val adbCommand = candidateAdbCommands.firstOrNull { cmd ->
+        runCatching { runProcess(listOf(cmd, "start-server"), timeoutSeconds = 8) }.getOrNull() != null
+    }
+
+    if (adbCommand == null) {
+        logger.lifecycle(
+            "startLocalBackend: adb not found; skipping emulator port reverse for ${uniquePorts.joinToString()}."
+        )
+        return
+    }
+
+    uniquePorts.forEach { port ->
+        val exit = runCatching {
+            runProcess(listOf(adbCommand, "reverse", "tcp:$port", "tcp:$port"), timeoutSeconds = 8)
+        }.getOrNull()
+
+        if (exit == 0) {
+            logger.lifecycle("startLocalBackend: adb reverse tcp:$port -> tcp:$port configured")
+        } else {
+            logger.lifecycle("startLocalBackend: unable to configure adb reverse for tcp:$port (no device/emulator?)")
+        }
     }
 }
 
@@ -478,18 +561,24 @@ val startLocalBackend = tasks.register("startLocalBackend") {
         val isWindows = System.getProperty("os.name")?.lowercase()?.contains("win") == true
 
         val requestedBackendPort = resolveBackendPort(project, findProperty("mvp.site.port")?.toString())
+        val alternateBackendPort = when (requestedBackendPort) {
+            DEFAULT_BACKEND_PORT -> ALTERNATE_BACKEND_PORT
+            ALTERNATE_BACKEND_PORT -> DEFAULT_BACKEND_PORT
+            else -> ALTERNATE_BACKEND_PORT
+        }
         val backendPort = when {
             isPortOpen("127.0.0.1", requestedBackendPort) -> requestedBackendPort
-            requestedBackendPort != 3001 && isPortOpen("127.0.0.1", 3001) -> {
+            isPortOpen("127.0.0.1", alternateBackendPort) -> {
                 logger.lifecycle(
-                    "startLocalBackend: detected running backend on http://localhost:3001; " +
-                        "using port 3001 and skipping local launch."
+                    "startLocalBackend: detected running backend on http://localhost:$alternateBackendPort; " +
+                        "using port $alternateBackendPort and skipping local launch."
                 )
-                3001
+                alternateBackendPort
             }
 
             else -> requestedBackendPort
         }
+        configureAdbReverse(logger, listOf(requestedBackendPort, alternateBackendPort))
         if (isPortOpen("127.0.0.1", backendPort)) {
             logger.lifecycle("startLocalBackend: already running on http://localhost:$backendPort")
             return@doLast
@@ -560,12 +649,14 @@ val startLocalBackend = tasks.register("startLocalBackend") {
             try {
                 // Keep wsl.exe alive running the server (like we do on Windows). This is more reliable than
                 // trying to background inside WSL and hoping the process survives after this command exits.
-                ProcessBuilder(
+                val builder = ProcessBuilder(
                     wslArgs(
                         wslDistro,
                         "cd \"$wslDir\" && npm run dev -- --hostname 0.0.0.0 --port $backendPort",
                     )
-                    )
+                ).sanitizeNodeDebugEnvironment()
+
+                builder
                     .redirectOutput(ProcessBuilder.Redirect.appendTo(outFile))
                     .redirectError(ProcessBuilder.Redirect.appendTo(errFile))
                     .start()
@@ -607,6 +698,7 @@ val startLocalBackend = tasks.register("startLocalBackend") {
 
             try {
                 ProcessBuilder(devArgs)
+                    .sanitizeNodeDebugEnvironment()
                     .directory(backendDir)
                     .redirectOutput(ProcessBuilder.Redirect.appendTo(outFile))
                     .redirectError(ProcessBuilder.Redirect.appendTo(errFile))
@@ -673,7 +765,12 @@ val stopLocalBackend = tasks.register("stopLocalBackend") {
         pidFile.delete()
 
         val backendPort = resolveBackendPort(project, findProperty("mvp.site.port")?.toString())
-        if (!isPortOpen("127.0.0.1", backendPort)) {
+        val alternateBackendPort = when (backendPort) {
+            DEFAULT_BACKEND_PORT -> ALTERNATE_BACKEND_PORT
+            ALTERNATE_BACKEND_PORT -> DEFAULT_BACKEND_PORT
+            else -> ALTERNATE_BACKEND_PORT
+        }
+        if (!isPortOpen("127.0.0.1", backendPort) && !isPortOpen("127.0.0.1", alternateBackendPort)) {
             resolveBackendDir(project)?.let { backendDir ->
                 val lockFile = File(backendDir, ".next/dev/lock")
                 if (lockFile.exists()) {

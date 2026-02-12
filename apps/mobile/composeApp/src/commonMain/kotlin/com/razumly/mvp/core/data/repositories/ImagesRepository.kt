@@ -31,13 +31,14 @@ class ImagesRepository(
             url = api.urlFor("api/files/upload"),
             formData = formData {
                 append(
-                    key = "file",
+                    // Next.js/Undici requires a quoted multipart field name for this route.
+                    key = "\"file\"",
                     value = inputFile.bytes,
                     headers = Headers.build {
                         append(HttpHeaders.ContentType, inputFile.mimeType)
                         append(
                             HttpHeaders.ContentDisposition,
-                            "form-data; name=\"file\"; filename=\"${inputFile.filename}\"",
+                            "filename=\"${inputFile.filename}\"",
                         )
                     },
                 )
