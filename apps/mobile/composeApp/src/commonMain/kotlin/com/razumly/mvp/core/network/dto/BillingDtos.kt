@@ -25,6 +25,7 @@ data class BillingEventRefDto(
 data class PurchaseIntentRequestDto(
     val user: BillingUserRefDto? = null,
     val event: BillingEventRefDto? = null,
+    val productId: String? = null,
 )
 
 @Serializable

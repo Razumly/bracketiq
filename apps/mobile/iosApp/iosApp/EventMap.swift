@@ -23,7 +23,7 @@ struct EventMap: View {
     @State private var events: [Event] = []
     @State private var suggestions: [MVPPlace] = []
     @State private var searchText: String = ""
-    @State private var places: [MVPPlace] = []
+    @State private var searchPlaces: [MVPPlace] = []
     @State private var reveal: Bool = false
     @State private var searchTask: Task<Void, Never>? = nil
     
@@ -49,9 +49,11 @@ struct EventMap: View {
         Observing(
             component.currentLocation,
             component.events,
-            component.isMapVisible
-        ) { (loc: LatLng?, ev: [Event], reveal: KotlinBoolean) in
+            component.isMapVisible,
+            component.places
+        ) { (loc: LatLng?, ev: [Event], reveal: KotlinBoolean, componentPlaces: [MVPPlace]) in
             ZStack(alignment: .top) {
+                let mergedPlaces = (searchPlaces + componentPlaces)
                 GoogleMapView(
                     component: component,
                     events: ev,
@@ -60,7 +62,7 @@ struct EventMap: View {
                     focusedEvent: focusedEvent,
                     onEventSelected: onEventSelected,
                     onPlaceSelected: onPlaceSelected,
-                    places: places,
+                    places: mergedPlaces,
                     revealCenter: revealCenter
                 )
                 .edgesIgnoringSafeArea(.all)
@@ -76,9 +78,9 @@ struct EventMap: View {
                             Task {
                                 if let currentLoc = loc {
                                     // Clear previous search results
-                                    places = []
+                                    searchPlaces = []
                                     // Add new search results
-                                    places = try await component.searchPlaces(
+                                    searchPlaces = try await component.searchPlaces(
                                         query: query,
                                         latLng: LatLng(latitude: currentLoc.latitude, longitude: currentLoc.longitude)
                                     )
@@ -91,19 +93,19 @@ struct EventMap: View {
                                 if place.id == "Query" {
                                     if let currentLoc = loc {
                                         // Clear previous results before new search
-                                        places = []
-                                        places = try await component.searchPlaces(
+                                        searchPlaces = []
+                                        searchPlaces = try await component.searchPlaces(
                                             query: place.name,
                                             latLng: LatLng(latitude: currentLoc.latitude, longitude: currentLoc.longitude)
                                         )
                                     } else {
-                                        places = []
+                                        searchPlaces = []
                                     }
                                 } else {
                                     let placeDetails = try await component.getPlace(placeId: place.id)
                                     if let placeDetails = placeDetails {
                                         // Clear previous results and set new single place
-                                        places = [placeDetails]
+                                        searchPlaces = [placeDetails]
                                     }
                                 }
                             }

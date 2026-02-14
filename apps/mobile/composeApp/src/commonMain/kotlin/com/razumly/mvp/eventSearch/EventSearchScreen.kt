@@ -39,7 +39,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Place
@@ -85,10 +84,10 @@ import com.kizitonwose.calendar.core.Week
 import com.kizitonwose.calendar.core.WeekDay
 import com.kizitonwose.calendar.core.WeekDayPosition
 import com.razumly.mvp.core.data.dataTypes.Field
+import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
-import com.razumly.mvp.core.presentation.RentalCreateContext
 import com.razumly.mvp.core.presentation.composables.SearchBox
 import com.razumly.mvp.core.presentation.composables.SearchOverlay
 import com.razumly.mvp.core.presentation.util.dateFormat
@@ -117,17 +116,17 @@ import kotlinx.datetime.toLocalDateTime
 import kotlinx.datetime.toInstant
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
-import kotlin.time.Clock
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
 private enum class DiscoverTab(val label: String, val searchPlaceholder: String) {
     EVENTS(label = "Events", searchPlaceholder = "Search events"),
+    ORGANIZATIONS(label = "Organizations", searchPlaceholder = "Search organizations"),
     RENTALS(label = "Rentals", searchPlaceholder = "Search rentals")
 }
 
-private enum class RentalDetailsStep {
+internal enum class RentalDetailsStep {
     BUILDER,
     CONFIRMATION,
 }
@@ -137,7 +136,7 @@ private enum class RentalDragHandle {
     BOTTOM,
 }
 
-private data class RentalSelectionDraft(
+internal data class RentalSelectionDraft(
     val id: Long,
     val fieldId: String,
     val date: LocalDate,
@@ -145,7 +144,7 @@ private data class RentalSelectionDraft(
     val endMinutes: Int,
 )
 
-private data class ResolvedRentalSelection(
+internal data class ResolvedRentalSelection(
     val selection: RentalSelectionDraft,
     val field: Field,
     val slots: List<TimeSlot>,
@@ -168,11 +167,10 @@ fun EventSearchScreen(
     mapComponent: MapComponent,
 ) {
     val events by component.events.collectAsState()
+    val organizations by component.organizations.collectAsState()
+    val isLoadingOrganizations by component.isLoadingOrganizations.collectAsState()
     val rentals by component.rentals.collectAsState()
     val isLoadingRentals by component.isLoadingRentals.collectAsState()
-    val rentalFieldOptions by component.rentalFieldOptions.collectAsState()
-    val rentalBusyBlocks by component.rentalBusyBlocks.collectAsState()
-    val isLoadingRentalFields by component.isLoadingRentalFields.collectAsState()
     val showMapCard by component.showMapCard.collectAsState()
     val selectedEvent by component.selectedEvent.collectAsState()
     val hazeState = rememberHazeState()
@@ -180,6 +178,7 @@ fun EventSearchScreen(
         PaddingValues(bottom = LocalNavBarPadding.current.calculateBottomPadding().plus(32.dp))
 
     val eventsListState = rememberLazyListState()
+    val organizationsListState = rememberLazyListState()
     val rentalsListState = rememberLazyListState()
 
     var fabOffset by remember { mutableStateOf(Offset.Zero) }
@@ -201,15 +200,8 @@ fun EventSearchScreen(
     var showFloatingSearch by remember { mutableStateOf(true) }
     var showingFilter by remember { mutableStateOf(false) }
 
-    val timeZone = remember { TimeZone.currentSystemDefault() }
-    val today = remember(timeZone) { Clock.System.now().toLocalDateTime(timeZone).date }
-    var selectedRentalOrganization by remember { mutableStateOf<Organization?>(null) }
-    var selectedRentalDate by remember { mutableStateOf(today) }
-    var rentalSelections by remember { mutableStateOf<List<RentalSelectionDraft>>(emptyList()) }
-    var nextRentalSelectionId by remember { mutableStateOf(1L) }
-    var rentalDetailsStep by remember { mutableStateOf(RentalDetailsStep.BUILDER) }
-
     val eventsScrollingUp by eventsListState.isScrollingUp()
+    val organizationsScrollingUp by organizationsListState.isScrollingUp()
     val rentalsScrollingUp by rentalsListState.isScrollingUp()
 
     val density = LocalDensity.current
@@ -220,70 +212,23 @@ fun EventSearchScreen(
     val filteredRentals = remember(rentals, searchQuery) {
         rentals.filterByQuery(searchQuery)
     }
+    val filteredOrganizations = remember(organizations, searchQuery) {
+        organizations.filterByQuery(searchQuery)
+    }
+    val organizationLookup = remember(organizations, rentals) {
+        (organizations + rentals).associateBy { organization -> organization.id }
+    }
+    val organizationPlaces = remember(filteredOrganizations) {
+        filteredOrganizations.mapNotNull { organization -> organization.toMvpPlaceOrNull() }
+    }
+    val rentalPlaces = remember(filteredRentals) {
+        filteredRentals.mapNotNull { organization -> organization.toMvpPlaceOrNull() }
+    }
 
     val currentListScrollingUp = when (selectedTab) {
         DiscoverTab.EVENTS -> eventsScrollingUp
+        DiscoverTab.ORGANIZATIONS -> organizationsScrollingUp
         DiscoverTab.RENTALS -> rentalsScrollingUp
-    }
-
-    val hasRentalDetailsOpen = selectedRentalOrganization != null
-    val resolvedSelections = remember(rentalSelections, rentalFieldOptions, timeZone) {
-        rentalSelections.mapNotNull { selection ->
-            resolveRentalSelection(
-                selection = selection,
-                fieldOptions = rentalFieldOptions,
-                timeZone = timeZone,
-            )
-        }
-    }
-    val validResolvedSelections = remember(resolvedSelections) {
-        resolvedSelections.filter { it.totalPriceCents > 0 }
-    }
-    val invalidSelectionCount = remember(rentalSelections, resolvedSelections) {
-        rentalSelections.size - resolvedSelections.size
-    }
-    val totalRentalPriceCents = remember(validResolvedSelections) {
-        validResolvedSelections.sumOf { resolved -> resolved.totalPriceCents }
-    }
-    val selectedFieldIdsForCreate = remember(validResolvedSelections) {
-        validResolvedSelections.map { resolved -> resolved.field.id }.distinct()
-    }
-    val selectedTimeSlotIdsForCreate = remember(validResolvedSelections) {
-        validResolvedSelections.flatMap { resolved -> resolved.slots.map { slot -> slot.id } }.distinct()
-    }
-    val selectedRequiredTemplateIdsForCreate = remember(validResolvedSelections) {
-        validResolvedSelections
-            .flatMap { resolved ->
-                resolved.slots.flatMap { slot -> slot.requiredTemplateIds }
-            }
-            .map { templateId -> templateId.trim() }
-            .filter { templateId -> templateId.isNotEmpty() }
-            .distinct()
-    }
-    val rentalStartInstant = remember(validResolvedSelections) {
-        validResolvedSelections.minOfOrNull { resolved -> resolved.startInstant }
-    }
-    val rentalEndInstant = remember(validResolvedSelections) {
-        validResolvedSelections.maxOfOrNull { resolved -> resolved.endInstant }
-    }
-    val canGoToConfirmation = validResolvedSelections.isNotEmpty() &&
-        invalidSelectionCount == 0 &&
-        totalRentalPriceCents > 0
-    val canContinueRental = selectedRentalOrganization != null &&
-        rentalStartInstant != null &&
-        rentalEndInstant != null &&
-        selectedFieldIdsForCreate.isNotEmpty() &&
-        selectedTimeSlotIdsForCreate.isNotEmpty() &&
-        invalidSelectionCount == 0 &&
-        totalRentalPriceCents > 0
-    val rentalValidationMessage = when {
-        selectedRentalOrganization == null -> null
-        isLoadingRentalFields && rentalFieldOptions.isEmpty() -> "Loading fields and rental slots..."
-        rentalFieldOptions.isEmpty() -> "No fields are configured for this organization."
-        rentalSelections.isEmpty() -> "Tap any available 30-minute cell to add a rental selection."
-        invalidSelectionCount > 0 -> "One or more selections are outside available rental slot ranges."
-        totalRentalPriceCents <= 0 -> "Selected rentals do not have valid pricing."
-        else -> null
     }
 
     val loadingHandler = LocalLoadingHandler.current
@@ -303,34 +248,40 @@ fun EventSearchScreen(
         }
     }
 
-    if (showMapCard) {
-        LaunchedEffect(events) {
-            mapComponent.setEvents(events)
+    LaunchedEffect(showMapCard, selectedTab, events, organizationPlaces, rentalPlaces) {
+        if (!showMapCard) {
+            return@LaunchedEffect
+        }
+        when (selectedTab) {
+            DiscoverTab.EVENTS -> {
+                mapComponent.setPlaces(emptyList())
+                mapComponent.setEvents(events)
+            }
+            DiscoverTab.ORGANIZATIONS -> {
+                mapComponent.setEvents(emptyList())
+                mapComponent.setPlaces(organizationPlaces)
+            }
+            DiscoverTab.RENTALS -> {
+                mapComponent.setEvents(emptyList())
+                mapComponent.setPlaces(rentalPlaces)
+            }
         }
     }
 
-    LaunchedEffect(eventsScrollingUp, showMapCard, showingFilter, selectedTab, hasRentalDetailsOpen) {
-        showFab = selectedTab == DiscoverTab.EVENTS &&
-            !hasRentalDetailsOpen &&
-            (eventsScrollingUp || showMapCard) &&
-            !showingFilter
+    LaunchedEffect(currentListScrollingUp, showMapCard, showingFilter, selectedTab) {
+        showFab = (currentListScrollingUp || showMapCard) && !showingFilter
     }
 
-    LaunchedEffect(currentListScrollingUp, showSearchOverlay, showingFilter, searchQuery, hasRentalDetailsOpen) {
-        showFloatingSearch = if (hasRentalDetailsOpen) {
-            false
-        } else {
-            currentListScrollingUp || showSearchOverlay || showingFilter || searchQuery.isNotEmpty()
-        }
+    LaunchedEffect(currentListScrollingUp, showSearchOverlay, showingFilter, searchQuery) {
+        showFloatingSearch = currentListScrollingUp ||
+            showSearchOverlay ||
+            showingFilter ||
+            searchQuery.isNotEmpty()
     }
 
     LaunchedEffect(selectedTab) {
         if (selectedTab != DiscoverTab.EVENTS) {
             showingFilter = false
-            if (showMapCard) {
-                component.onMapClick()
-                mapComponent.toggleMap()
-            }
         }
     }
 
@@ -346,16 +297,9 @@ fun EventSearchScreen(
         }
     }
 
-    LaunchedEffect(hasRentalDetailsOpen) {
-        if (hasRentalDetailsOpen) {
-            showSearchOverlay = false
-        } else {
-            component.clearRentalFieldOptions()
-            component.clearRentalBusyBlocks()
-            rentalSelections = emptyList()
-            rentalDetailsStep = RentalDetailsStep.BUILDER
-            selectedRentalDate = today
-            nextRentalSelectionId = 1L
+    LaunchedEffect(selectedTab, organizations, isLoadingOrganizations) {
+        if (selectedTab == DiscoverTab.ORGANIZATIONS && organizations.isEmpty() && !isLoadingOrganizations) {
+            component.refreshOrganizations()
         }
     }
 
@@ -366,17 +310,6 @@ fun EventSearchScreen(
                 popupHandler.showPopup(error)
             }
         }
-    }
-
-    fun openRentalDetails(organization: Organization) {
-        selectedRentalOrganization = organization
-        selectedRentalDate = today
-        rentalSelections = emptyList()
-        rentalDetailsStep = RentalDetailsStep.BUILDER
-        nextRentalSelectionId = 1L
-        component.loadRentalFieldOptions(organization.fieldIds)
-        component.loadRentalBusyBlocks(organization.id, organization.fieldIds)
-        showSearchOverlay = false
     }
 
     Box {
@@ -401,13 +334,6 @@ fun EventSearchScreen(
                                 selected = selectedTab.ordinal == index,
                                 onClick = {
                                     selectedTab = tab
-                                    selectedRentalOrganization = null
-                                    rentalSelections = emptyList()
-                                    rentalDetailsStep = RentalDetailsStep.BUILDER
-                                    selectedRentalDate = today
-                                    nextRentalSelectionId = 1L
-                                    component.clearRentalFieldOptions()
-                                    component.clearRentalBusyBlocks()
                                 },
                                 text = { Text(tab.label) }
                             )
@@ -475,215 +401,85 @@ fun EventSearchScreen(
                                 component.viewEvent(event)
                             }
                         )
-                        EventMap(
-                            component = mapComponent,
-                            onEventSelected = { event ->
-                                component.viewEvent(event)
+                    }
+
+                    DiscoverTab.ORGANIZATIONS -> {
+                        DiscoverOrganizationList(
+                            organizations = filteredOrganizations,
+                            listState = organizationsListState,
+                            firstElementPadding = firstElementPadding,
+                            lastElementPadding = offsetNavPadding,
+                            emptyMessage = if (isLoadingOrganizations) {
+                                "Loading organizations..."
+                            } else if (searchQuery.isBlank()) {
+                                "No organizations discovered yet."
+                            } else {
+                                "No organizations match your search."
                             },
-                            onPlaceSelected = {},
-                            canClickPOI = false,
-                            focusedLocation = selectedEvent?.let {
-                                LatLng(it.latitude, it.longitude)
-                            } ?: currentLocation ?: LatLng(0.0, 0.0),
-                            focusedEvent = null,
-                            revealCenter = revealCenter,
+                            onOrganizationClick = { organization ->
+                                component.viewOrganization(organization)
+                            }
                         )
                     }
 
                     DiscoverTab.RENTALS -> {
-                        if (selectedRentalOrganization != null) {
-                            val selectionsForCurrentDate = remember(rentalSelections, selectedRentalDate) {
-                                rentalSelections.filter { selection -> selection.date == selectedRentalDate }
-                            }
-
-                            if (rentalDetailsStep == RentalDetailsStep.BUILDER) {
-                                RentalDetailsContent(
-                                    organization = selectedRentalOrganization!!,
-                                    selectedDate = selectedRentalDate,
-                                    fieldOptions = rentalFieldOptions,
-                                    busyBlocks = rentalBusyBlocks,
-                                    selectionsForSelectedDate = selectionsForCurrentDate,
-                                    allSelectionCount = rentalSelections.size,
-                                    totalPriceCents = totalRentalPriceCents,
-                                    isLoadingFields = isLoadingRentalFields,
-                                    topPadding = paddingValues.calculateTopPadding(),
-                                    bottomPadding = offsetNavPadding.calculateBottomPadding(),
-                                    canGoNext = canGoToConfirmation,
-                                    validationMessage = rentalValidationMessage,
-                                    onBack = {
-                                        selectedRentalOrganization = null
-                                        rentalSelections = emptyList()
-                                        rentalDetailsStep = RentalDetailsStep.BUILDER
-                                        component.clearRentalFieldOptions()
-                                        component.clearRentalBusyBlocks()
-                                    },
-                                    onSelectedDateChange = { selectedDate ->
-                                        selectedRentalDate = selectedDate
-                                    },
-                                    onCreateSelection = { fieldId, startMinutes ->
-                                        val endMinutes = startMinutes + SLOT_INTERVAL_MINUTES
-                                        val fieldOption = rentalFieldOptions.firstOrNull { option ->
-                                            option.field.id == fieldId
-                                        }
-                                        val overlapsSelection = rentalSelections.any { selection ->
-                                            selection.fieldId == fieldId &&
-                                                selection.date == selectedRentalDate &&
-                                                rangesOverlap(
-                                                    selection.startMinutes,
-                                                    selection.endMinutes,
-                                                    startMinutes,
-                                                    endMinutes,
-                                                )
-                                        }
-                                        val overlapsBusyBlock = rentalBusyBlocks.any { block ->
-                                            block.fieldId == fieldId &&
-                                                rangeOverlapsBusyBlockOnDate(
-                                                    block = block,
-                                                    date = selectedRentalDate,
-                                                    startMinutes = startMinutes,
-                                                    endMinutes = endMinutes,
-                                                    timeZone = timeZone,
-                                                )
-                                        }
-                                        val isWithinRentalAvailability = fieldOption != null &&
-                                            isRangeCoveredByRentalAvailability(
-                                                option = fieldOption,
-                                                date = selectedRentalDate,
-                                                startMinutes = startMinutes,
-                                                endMinutes = endMinutes,
-                                                timeZone = timeZone,
-                                            )
-
-                                        if (!overlapsSelection && !overlapsBusyBlock && isWithinRentalAvailability) {
-                                            rentalSelections = rentalSelections + RentalSelectionDraft(
-                                                id = nextRentalSelectionId,
-                                                fieldId = fieldId,
-                                                date = selectedRentalDate,
-                                                startMinutes = startMinutes,
-                                                endMinutes = endMinutes,
-                                            )
-                                            nextRentalSelectionId += 1L
-                                        }
-                                    },
-                                    onCanUpdateSelection = { selectionId, startMinutes, endMinutes ->
-                                        val targetSelection = rentalSelections.firstOrNull { selection ->
-                                            selection.id == selectionId
-                                        } ?: return@RentalDetailsContent false
-
-                                        canApplyRentalSelectionRange(
-                                            selectionId = selectionId,
-                                            fieldId = targetSelection.fieldId,
-                                            date = targetSelection.date,
-                                            startMinutes = startMinutes,
-                                            endMinutes = endMinutes,
-                                            selections = rentalSelections,
-                                            fieldOptions = rentalFieldOptions,
-                                            busyBlocks = rentalBusyBlocks,
-                                            timeZone = timeZone,
-                                        )
-                                    },
-                                    onUpdateSelection = { selectionId, startMinutes, endMinutes ->
-                                        val targetSelection = rentalSelections.firstOrNull { selection ->
-                                            selection.id == selectionId
-                                        }
-                                        if (targetSelection == null) return@RentalDetailsContent false
-
-                                        if (!canApplyRentalSelectionRange(
-                                                selectionId = selectionId,
-                                                fieldId = targetSelection.fieldId,
-                                                date = targetSelection.date,
-                                                startMinutes = startMinutes,
-                                                endMinutes = endMinutes,
-                                                selections = rentalSelections,
-                                                fieldOptions = rentalFieldOptions,
-                                                busyBlocks = rentalBusyBlocks,
-                                                timeZone = timeZone,
-                                            )
-                                        ) {
-                                            return@RentalDetailsContent false
-                                        }
-
-                                        rentalSelections = rentalSelections.map { selection ->
-                                            if (selection.id == selectionId) {
-                                                selection.copy(startMinutes = startMinutes, endMinutes = endMinutes)
-                                            } else {
-                                                selection
-                                            }
-                                        }
-                                        true
-                                    },
-                                    onDeleteSelection = { selectionId ->
-                                        rentalSelections = rentalSelections.filterNot { it.id == selectionId }
-                                    },
-                                    onNext = {
-                                        if (canGoToConfirmation) {
-                                            rentalDetailsStep = RentalDetailsStep.CONFIRMATION
-                                        }
-                                    }
-                                )
+                        DiscoverOrganizationList(
+                            organizations = filteredRentals,
+                            listState = rentalsListState,
+                            firstElementPadding = firstElementPadding,
+                            lastElementPadding = offsetNavPadding,
+                            emptyMessage = if (isLoadingRentals) {
+                                "Loading rentals..."
+                            } else if (searchQuery.isBlank()) {
+                                "No rentals discovered nearby yet."
                             } else {
-                                RentalConfirmationContent(
-                                    organization = selectedRentalOrganization!!,
-                                    selections = validResolvedSelections,
-                                    totalPriceCents = totalRentalPriceCents,
-                                    topPadding = paddingValues.calculateTopPadding(),
-                                    bottomPadding = offsetNavPadding.calculateBottomPadding(),
-                                    validationMessage = rentalValidationMessage,
-                                    canContinue = canContinueRental,
-                                    onBack = {
-                                        rentalDetailsStep = RentalDetailsStep.BUILDER
-                                    },
-                                    onContinue = {
-                                        if (canContinueRental) {
-                                            val organization = selectedRentalOrganization
-                                            val start = rentalStartInstant
-                                            val end = rentalEndInstant
-                                            if (organization != null && start != null && end != null) {
-                                                component.startRentalCreate(
-                                                    RentalCreateContext(
-                                                        organizationId = organization.id,
-                                                        organizationName = organization.name,
-                                                        organizationLocation = organization.location,
-                                                        organizationCoordinates = organization.coordinates,
-                                                        organizationFieldIds = organization.fieldIds,
-                                                        selectedFieldIds = selectedFieldIdsForCreate,
-                                                        selectedTimeSlotIds = selectedTimeSlotIdsForCreate,
-                                                        requiredTemplateIds = selectedRequiredTemplateIdsForCreate,
-                                                        rentalPriceCents = totalRentalPriceCents,
-                                                        startEpochMillis = start.toEpochMilliseconds(),
-                                                        endEpochMillis = end.toEpochMilliseconds(),
-                                                    )
-                                                )
-                                                selectedRentalOrganization = null
-                                                rentalSelections = emptyList()
-                                                rentalDetailsStep = RentalDetailsStep.BUILDER
-                                                component.clearRentalFieldOptions()
-                                                component.clearRentalBusyBlocks()
-                                            }
-                                        }
-                                    }
+                                "No rentals match your search."
+                            },
+                            onOrganizationClick = { organization ->
+                                component.viewOrganization(
+                                    organization,
+                                    com.razumly.mvp.core.presentation.OrganizationDetailTab.RENTALS
                                 )
                             }
-                        } else {
-                            DiscoverOrganizationList(
-                                organizations = filteredRentals,
-                                listState = rentalsListState,
-                                firstElementPadding = firstElementPadding,
-                                lastElementPadding = offsetNavPadding,
-                                emptyMessage = if (isLoadingRentals) {
-                                    "Loading rentals..."
-                                } else if (searchQuery.isBlank()) {
-                                    "No rentals discovered nearby yet."
-                                } else {
-                                    "No rentals match your search."
-                                },
-                                onOrganizationClick = { organization ->
-                                    openRentalDetails(organization)
-                                }
-                            )
-                        }
+                        )
                     }
                 }
+
+                EventMap(
+                    component = mapComponent,
+                    onEventSelected = { event ->
+                        if (selectedTab == DiscoverTab.EVENTS) {
+                            component.viewEvent(event)
+                        }
+                    },
+                    onPlaceSelected = { place ->
+                        val organization = organizationLookup[place.id]
+                        when (selectedTab) {
+                            DiscoverTab.ORGANIZATIONS -> {
+                                if (organization != null) {
+                                    component.viewOrganization(organization)
+                                }
+                            }
+
+                            DiscoverTab.RENTALS -> {
+                                if (organization != null) {
+                                    component.viewOrganization(
+                                        organization,
+                                        com.razumly.mvp.core.presentation.OrganizationDetailTab.RENTALS
+                                    )
+                                }
+                            }
+
+                            else -> {}
+                        }
+                    },
+                    canClickPOI = false,
+                    focusedLocation = selectedEvent?.takeIf { selectedTab == DiscoverTab.EVENTS }?.let {
+                        LatLng(it.latitude, it.longitude)
+                    } ?: currentLocation ?: LatLng(0.0, 0.0),
+                    focusedEvent = selectedEvent?.takeIf { selectedTab == DiscoverTab.EVENTS },
+                    revealCenter = revealCenter,
+                )
             }
         }
 
@@ -785,6 +581,25 @@ fun EventSearchScreen(
                         }
                     }
 
+                    DiscoverTab.ORGANIZATIONS -> {
+                        LazyColumn(modifier = Modifier.wrapContentSize()) {
+                            if (filteredOrganizations.isEmpty()) {
+                                item {
+                                    EmptyDiscoverListItem(message = "No organization suggestions found.")
+                                }
+                            }
+                            items(filteredOrganizations.take(10)) { organization ->
+                                DiscoverOrganizationSuggestion(
+                                    organization = organization,
+                                    onClick = {
+                                        component.viewOrganization(organization)
+                                        showSearchOverlay = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+
                     DiscoverTab.RENTALS -> {
                         LazyColumn(modifier = Modifier.wrapContentSize()) {
                             if (filteredRentals.isEmpty()) {
@@ -796,7 +611,10 @@ fun EventSearchScreen(
                                 DiscoverOrganizationSuggestion(
                                     organization = organization,
                                     onClick = {
-                                        openRentalDetails(organization)
+                                        component.viewOrganization(
+                                            organization,
+                                            com.razumly.mvp.core.presentation.OrganizationDetailTab.RENTALS
+                                        )
                                         showSearchOverlay = false
                                     }
                                 )
@@ -808,6 +626,7 @@ fun EventSearchScreen(
             initial = {
                 val message = when (selectedTab) {
                     DiscoverTab.EVENTS -> "Start typing to search for events..."
+                    DiscoverTab.ORGANIZATIONS -> "Start typing to search for organizations..."
                     DiscoverTab.RENTALS -> "Start typing to search for rentals..."
                 }
                 EmptyDiscoverListItem(message = message)
@@ -828,6 +647,19 @@ private fun List<Organization>.filterByQuery(query: String): List<Organization> 
             organization.location?.contains(normalizedQuery, ignoreCase = true) == true ||
             organization.description?.contains(normalizedQuery, ignoreCase = true) == true
     }.sortedBy { organization -> organization.name.lowercase() }
+}
+
+private fun Organization.toMvpPlaceOrNull(): MVPPlace? {
+    val coords = coordinates ?: return null
+    if (coords.size < 2) return null
+    val longitude = coords[0]
+    val latitude = coords[1]
+    if (latitude.isNaN() || longitude.isNaN()) return null
+    return MVPPlace(
+        name = name,
+        id = id,
+        coordinates = listOf(longitude, latitude),
+    )
 }
 
 @Composable
@@ -986,8 +818,7 @@ private fun DiscoverOrganizationSuggestion(
 }
 
 @Composable
-private fun RentalDetailsContent(
-    organization: Organization,
+internal fun RentalDetailsContent(
     selectedDate: LocalDate,
     fieldOptions: List<RentalFieldOption>,
     busyBlocks: List<RentalBusyBlock>,
@@ -995,11 +826,9 @@ private fun RentalDetailsContent(
     allSelectionCount: Int,
     totalPriceCents: Int,
     isLoadingFields: Boolean,
-    topPadding: Dp,
     bottomPadding: Dp,
     canGoNext: Boolean,
     validationMessage: String?,
-    onBack: () -> Unit,
     onSelectedDateChange: (LocalDate) -> Unit,
     onCreateSelection: (fieldId: String, startMinutes: Int) -> Unit,
     onCanUpdateSelection: (selectionId: Long, startMinutes: Int, endMinutes: Int) -> Boolean,
@@ -1015,7 +844,7 @@ private fun RentalDetailsContent(
             .padding(
                 start = 16.dp,
                 end = 16.dp,
-                top = topPadding + 16.dp,
+                top = 0.dp,
                 bottom = bottomPadding + 16.dp
             )
             .onGloballyPositioned { coordinates ->
@@ -1029,130 +858,78 @@ private fun RentalDetailsContent(
                 .verticalScroll(verticalScrollState),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            TextButton(
-                onClick = onBack,
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back"
-                )
-                Text("Back to rentals")
-            }
-
-            Card(
+            Column(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                ),
-                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Groups,
-                            contentDescription = "Organization icon",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Text(
-                            text = organization.name.ifBlank { "Organization" },
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
+                Text(
+                    text = "Select rental slots",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(top = 6.dp)
+                )
+                Text(
+                    text = "Tap any available 30-minute cell to add a slot. Drag top/bottom handles to resize.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
 
-                    organization.location?.takeIf { it.isNotBlank() }?.let { location ->
-                        Text(
-                            text = location,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                RentalWeekSelector(
+                    selectedDate = selectedDate,
+                    onSelectedDateChange = onSelectedDateChange
+                )
 
-                    organization.description?.takeIf { it.isNotBlank() }?.let { description ->
+                when {
+                    isLoadingFields -> {
                         Text(
-                            text = description,
+                            text = "Loading fields and rental slots...",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
 
-                    Text(
-                        text = "Select rental slots",
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.padding(top = 6.dp)
-                    )
-                    Text(
-                        text = "Tap any available 30-minute cell to add a slot. Drag top/bottom handles to resize.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    RentalWeekSelector(
-                        selectedDate = selectedDate,
-                        onSelectedDateChange = onSelectedDateChange
-                    )
-
-                    when {
-                        isLoadingFields -> {
-                            Text(
-                                text = "Loading fields and rental slots...",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-
-                        fieldOptions.isEmpty() -> {
-                            Text(
-                                text = "No fields/courts are configured for this organization.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-
-                        else -> {
-                            RentalTimelineGrid(
-                                selectedDate = selectedDate,
-                                fieldOptions = fieldOptions,
-                                busyBlocks = busyBlocks,
-                                selectionsForSelectedDate = selectionsForSelectedDate,
-                                verticalScrollState = verticalScrollState,
-                                viewportBoundsInWindow = viewportBoundsInWindow,
-                                onCreateSelection = onCreateSelection,
-                                onCanUpdateSelection = onCanUpdateSelection,
-                                onUpdateSelection = onUpdateSelection,
-                                onDeleteSelection = onDeleteSelection,
-                            )
-                        }
-                    }
-
-                    Text(
-                        text = "Selected slots: $allSelectionCount",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    if (totalPriceCents > 0) {
+                    fieldOptions.isEmpty() -> {
                         Text(
-                            text = "Total rental: ${(totalPriceCents / 100.0).moneyFormat()}",
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-
-                    validationMessage?.let {
-                        Text(
-                            text = it,
+                            text = "No fields/courts are configured for this organization.",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+
+                    else -> {
+                        RentalTimelineGrid(
+                            selectedDate = selectedDate,
+                            fieldOptions = fieldOptions,
+                            busyBlocks = busyBlocks,
+                            selectionsForSelectedDate = selectionsForSelectedDate,
+                            verticalScrollState = verticalScrollState,
+                            viewportBoundsInWindow = viewportBoundsInWindow,
+                            onCreateSelection = onCreateSelection,
+                            onCanUpdateSelection = onCanUpdateSelection,
+                            onUpdateSelection = onUpdateSelection,
+                            onDeleteSelection = onDeleteSelection,
+                        )
+                    }
+                }
+
+                Text(
+                    text = "Selected slots: $allSelectionCount",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (totalPriceCents > 0) {
+                    Text(
+                        text = "Total rental: ${(totalPriceCents / 100.0).moneyFormat()}",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+
+                validationMessage?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
                 }
             }
         }
@@ -1174,7 +951,7 @@ private fun RentalDetailsContent(
 }
 
 @Composable
-private fun RentalConfirmationContent(
+internal fun RentalConfirmationContent(
     organization: Organization,
     selections: List<ResolvedRentalSelection>,
     totalPriceCents: Int,
@@ -1205,10 +982,6 @@ private fun RentalConfirmationContent(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             TextButton(onClick = onBack) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back"
-                )
                 Text("Back to schedule")
             }
 
@@ -1989,7 +1762,7 @@ private fun EmptyDiscoverListItem(
     }
 }
 
-private fun resolveRentalSelection(
+internal fun resolveRentalSelection(
     selection: RentalSelectionDraft,
     fieldOptions: List<RentalFieldOption>,
     timeZone: TimeZone,
@@ -2114,7 +1887,7 @@ private fun findMatchingSlot(
     )
 }
 
-private fun rangesOverlap(
+internal fun rangesOverlap(
     firstStart: Int,
     firstEnd: Int,
     secondStart: Int,
@@ -2126,7 +1899,7 @@ private fun rangesOverlap(
     return firstStart < secondEnd && secondStart < firstEnd
 }
 
-private fun canApplyRentalSelectionRange(
+internal fun canApplyRentalSelectionRange(
     selectionId: Long,
     fieldId: String,
     date: LocalDate,
@@ -2186,7 +1959,7 @@ private fun canApplyRentalSelectionRange(
     )
 }
 
-private fun rangeOverlapsBusyBlockOnDate(
+internal fun rangeOverlapsBusyBlockOnDate(
     block: RentalBusyBlock,
     date: LocalDate,
     startMinutes: Int,
@@ -2201,7 +1974,7 @@ private fun rangeOverlapsBusyBlockOnDate(
     return rangeStart < block.end && block.start < rangeEnd
 }
 
-private fun isRangeCoveredByRentalAvailability(
+internal fun isRangeCoveredByRentalAvailability(
     option: RentalFieldOption,
     date: LocalDate,
     startMinutes: Int,
@@ -2277,7 +2050,7 @@ private fun DayOfWeek.toShortLabel(): String {
     }
 }
 
-private const val SLOT_INTERVAL_MINUTES = 30
+internal const val SLOT_INTERVAL_MINUTES = 30
 private const val RENTAL_TIMELINE_START_MINUTES = 6 * 60
 private const val RENTAL_TIMELINE_END_MINUTES = 24 * 60
 private val RENTAL_TIME_COLUMN_WIDTH = 72.dp

@@ -50,6 +50,14 @@ interface IBillingRepository : IMVPRepository {
     suspend fun cancelSubscription(subscriptionId: String): Result<Boolean>
     suspend fun restartSubscription(subscriptionId: String): Result<Boolean>
     suspend fun getProductsByIds(productIds: List<String>): Result<List<Product>>
+    suspend fun listProductsByOrganization(organizationId: String): Result<List<Product>>
+    suspend fun createProductPurchaseIntent(productId: String): Result<PurchaseIntent>
+    suspend fun createProductSubscription(
+        productId: String,
+        organizationId: String? = null,
+        priceCents: Int? = null,
+        startDate: String? = null,
+    ): Result<Subscription>
     suspend fun listOrganizations(limit: Int = 100): Result<List<Organization>>
     suspend fun getOrganizationsByIds(organizationIds: List<String>): Result<List<Organization>>
     suspend fun leaveAndRefundEvent(event: Event, reason: String): Result<Unit>
@@ -268,6 +276,61 @@ class BillingRepository(
         response.products.mapNotNull { it.toProductOrNull() }
     }
 
+    override suspend fun listProductsByOrganization(organizationId: String): Result<List<Product>> = runCatching {
+        val normalizedId = organizationId.trim()
+        if (normalizedId.isEmpty()) return@runCatching emptyList()
+
+        val encodedId = normalizedId.encodeURLQueryComponent()
+        val response = api.get<ProductsResponseDto>(path = "api/products?organizationId=$encodedId")
+        response.products.mapNotNull { it.toProductOrNull() }
+    }
+
+    override suspend fun createProductPurchaseIntent(productId: String): Result<PurchaseIntent> = runCatching {
+        val normalizedId = productId.trim()
+        if (normalizedId.isEmpty()) {
+            throw Exception("Product id is required.")
+        }
+
+        val user = userRepository.currentUser.value.getOrThrow()
+        val email = userRepository.currentAccount.value.getOrNull()?.email
+
+        val response = api.post<PurchaseIntentRequestDto, PurchaseIntent>(
+            path = "api/billing/purchase-intent",
+            body = PurchaseIntentRequestDto(
+                user = BillingUserRefDto(id = user.id, email = email),
+                productId = normalizedId,
+            ),
+        )
+
+        if (!response.error.isNullOrBlank()) {
+            throw Exception(response.error)
+        }
+        response
+    }
+
+    override suspend fun createProductSubscription(
+        productId: String,
+        organizationId: String?,
+        priceCents: Int?,
+        startDate: String?,
+    ): Result<Subscription> = runCatching {
+        val normalizedId = productId.trim()
+        if (normalizedId.isEmpty()) {
+            throw Exception("Product id is required.")
+        }
+
+        val response = api.post<CreateProductSubscriptionRequestDto, SubscriptionApiDto>(
+            path = "api/products/$normalizedId/subscriptions",
+            body = CreateProductSubscriptionRequestDto(
+                organizationId = organizationId,
+                priceCents = priceCents,
+                startDate = startDate,
+            ),
+        )
+
+        response.toSubscriptionOrNull() ?: error("Create subscription response missing subscription")
+    }
+
     override suspend fun listOrganizations(limit: Int): Result<List<Organization>> = runCatching {
         val normalizedLimit = limit.coerceIn(1, 1000)
         val response = api.get<OrganizationsResponseDto>(path = "api/organizations?limit=$normalizedLimit")
@@ -439,6 +502,13 @@ private data class CreateBillingIntentRequestDto(
     val billId: String,
     val billPaymentId: String,
     val user: BillingUserRefDto? = null,
+)
+
+@Serializable
+private data class CreateProductSubscriptionRequestDto(
+    val organizationId: String? = null,
+    val priceCents: Int? = null,
+    val startDate: String? = null,
 )
 
 @Serializable
@@ -637,6 +707,7 @@ private data class OrganizationApiDto(
     val coordinates: List<Double>? = null,
     val fieldIds: List<String>? = null,
     val productIds: List<String>? = null,
+    val teamIds: List<String>? = null,
 ) {
     fun toOrganizationOrNull(): Organization? {
         val resolvedId = id ?: legacyId
@@ -659,6 +730,7 @@ private data class OrganizationApiDto(
             coordinates = coordinates,
             fieldIds = fieldIds ?: emptyList(),
             productIds = productIds ?: emptyList(),
+            teamIds = teamIds ?: emptyList(),
         )
     }
 }

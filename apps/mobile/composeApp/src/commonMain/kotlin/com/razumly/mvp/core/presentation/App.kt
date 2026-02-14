@@ -51,6 +51,7 @@ import com.razumly.mvp.eventDetail.EventDetailScreen
 import com.razumly.mvp.eventManagement.EventManagementScreen
 import com.razumly.mvp.eventSearch.EventSearchScreen
 import com.razumly.mvp.matchDetail.MatchDetailScreen
+import com.razumly.mvp.organizationDetail.OrganizationDetailScreen
 import com.razumly.mvp.profile.ProfileScreen
 import com.razumly.mvp.profile.profileDetails.ProfileDetailsScreen
 import com.razumly.mvp.refundManager.RefundManagerScreen
@@ -172,6 +173,10 @@ private fun AppContent(
 
                 is RootComponent.Child.EventContent -> {
                     EventDetailScreen(instance.component, instance.mapComponent)
+                }
+
+                is RootComponent.Child.OrganizationDetail -> {
+                    OrganizationDetailScreen(instance.component)
                 }
 
                 is RootComponent.Child.MatchContent -> {

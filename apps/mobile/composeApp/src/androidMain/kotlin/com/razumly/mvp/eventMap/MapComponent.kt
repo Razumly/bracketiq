@@ -45,6 +45,9 @@ actual class MapComponent(
     private val _events = MutableStateFlow<List<Event>>(emptyList())
     val events: StateFlow<List<Event>> = _events.asStateFlow()
 
+    private val _places = MutableStateFlow<List<MVPPlace>>(emptyList())
+    actual val places: StateFlow<List<MVPPlace>> = _places.asStateFlow()
+
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 
@@ -101,6 +104,10 @@ actual class MapComponent(
 
     actual fun setEvents(events: List<Event>) {
         _events.value = events
+    }
+
+    actual fun setPlaces(places: List<MVPPlace>) {
+        _places.value = places
     }
 
     actual fun toggleMap() {

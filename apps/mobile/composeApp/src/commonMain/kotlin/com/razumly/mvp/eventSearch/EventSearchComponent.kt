@@ -15,6 +15,7 @@ import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
 import com.razumly.mvp.core.presentation.INavigationHandler
+import com.razumly.mvp.core.presentation.OrganizationDetailTab
 import com.razumly.mvp.core.presentation.RentalCreateContext
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
@@ -54,6 +55,7 @@ interface EventSearchComponent {
     val hasMoreEvents: StateFlow<Boolean>
     val filter: StateFlow<EventFilter>
     val organizations: StateFlow<List<Organization>>
+    val isLoadingOrganizations: StateFlow<Boolean>
     val rentals: StateFlow<List<Organization>>
     val isLoadingRentals: StateFlow<Boolean>
     val rentalFieldOptions: StateFlow<List<RentalFieldOption>>
@@ -69,9 +71,11 @@ interface EventSearchComponent {
     fun selectRadius(radius: Double)
     fun onMapClick(event: Event? = null)
     fun viewEvent(event: Event)
+    fun viewOrganization(organization: Organization, initialTab: OrganizationDetailTab = OrganizationDetailTab.OVERVIEW)
     fun startRentalCreate(context: RentalCreateContext)
     fun suggestEvents(searchQuery: String)
     fun updateFilter(update: EventFilter.() -> EventFilter)
+    fun refreshOrganizations(force: Boolean = false)
     fun refreshRentals(force: Boolean = false)
     fun loadRentalFieldOptions(fieldIds: List<String>)
     fun loadRentalBusyBlocks(organizationId: String, fieldIds: List<String>)
@@ -132,6 +136,8 @@ class DefaultEventSearchComponent(
     override val filter = _filter.asStateFlow()
     private val _organizations = MutableStateFlow<List<Organization>>(emptyList())
     override val organizations: StateFlow<List<Organization>> = _organizations.asStateFlow()
+    private val _isLoadingOrganizations = MutableStateFlow(false)
+    override val isLoadingOrganizations: StateFlow<Boolean> = _isLoadingOrganizations.asStateFlow()
     private val _rentals = MutableStateFlow<List<Organization>>(emptyList())
     override val rentals: StateFlow<List<Organization>> = _rentals.asStateFlow()
     private val _isLoadingRentals = MutableStateFlow(false)
@@ -142,6 +148,7 @@ class DefaultEventSearchComponent(
     override val isLoadingRentalFields: StateFlow<Boolean> = _isLoadingRentalFields.asStateFlow()
     private val _rentalBusyBlocks = MutableStateFlow<List<RentalBusyBlock>>(emptyList())
     override val rentalBusyBlocks: StateFlow<List<RentalBusyBlock>> = _rentalBusyBlocks.asStateFlow()
+    private var organizationsLoaded = false
     private var rentalsLoaded = false
 
     private lateinit var loadingHandler: LoadingHandler
@@ -214,10 +221,14 @@ class DefaultEventSearchComponent(
                         _currentLocation.value = it
                         eventRepository.resetCursor()
                         loadMoreEvents()
+                        refreshOrganizations(force = true)
+                        refreshRentals(force = true)
                     }
                     if (calcDistance(_currentLocation.value!!, it) > 50) {
                         _currentLocation.value = it
                         loadMoreEvents()
+                        refreshOrganizations(force = true)
+                        refreshRentals(force = true)
                     }
                 } catch (e: Exception) {
                     _errorState.value = ErrorMessage("Failed to track location: ${e.message}")
@@ -230,6 +241,8 @@ class DefaultEventSearchComponent(
                 if (_locationStateFlow.value != null) {
                     try {
                         loadMoreEvents()
+                        refreshOrganizations(force = true)
+                        refreshRentals(force = true)
                     } catch (e: Exception) {
                         _errorState.value = ErrorMessage("Failed to update events: ${e.message}")
                     }
@@ -238,37 +251,6 @@ class DefaultEventSearchComponent(
         }
 
         refreshRentals()
-
-        scope.launch {
-            events
-                .map { currentEvents ->
-                    currentEvents.mapNotNull { event -> event.organizationId?.trim() }
-                        .filter(String::isNotBlank)
-                        .distinct()
-                        .sorted()
-                }
-                .distinctUntilChanged()
-                .collect { organizationIds ->
-                    if (organizationIds.isEmpty()) {
-                        _organizations.value = emptyList()
-                        return@collect
-                    }
-
-                    billingRepository.getOrganizationsByIds(organizationIds)
-                        .onSuccess { organizations ->
-                            val organizationsById = organizations.associateBy { organization -> organization.id }
-                            _organizations.value = organizationIds.mapNotNull { organizationId ->
-                                organizationsById[organizationId]
-                            }.ifEmpty {
-                                organizations.sortedBy { organization -> organization.name }
-                            }
-                        }
-                        .onFailure { e ->
-                            _errorState.value =
-                                ErrorMessage("Failed to fetch organizations: ${e.message}")
-                        }
-                }
-        }
     }
 
     override fun selectRadius(radius: Double) {
@@ -282,6 +264,10 @@ class DefaultEventSearchComponent(
 
     override fun viewEvent(event: Event) {
         navigationHandler.navigateToEvent(event)
+    }
+
+    override fun viewOrganization(organization: Organization, initialTab: OrganizationDetailTab) {
+        navigationHandler.navigateToOrganization(organization.id, initialTab)
     }
 
     override fun startRentalCreate(context: RentalCreateContext) {
@@ -326,6 +312,12 @@ class DefaultEventSearchComponent(
 
     override fun updateFilter(update: EventFilter.() -> EventFilter) {
         _filter.value = _filter.value.update()
+    }
+
+    override fun refreshOrganizations(force: Boolean) {
+        scope.launch {
+            loadOrganizations(force = force)
+        }
     }
 
     override fun refreshRentals(force: Boolean) {
@@ -487,54 +479,72 @@ class DefaultEventSearchComponent(
         if (rentalsLoaded && !force) return
 
         _isLoadingRentals.value = true
-        billingRepository.listOrganizations(limit = 200)
-            .onSuccess { organizations ->
-                val normalizedOrganizations = organizations.map { organization ->
+        val organizations = loadOrganizations(force = force)
+        val normalizedOrganizations = organizations.map { organization ->
+            organization.copy(
+                fieldIds = organization.fieldIds
+                    .distinct()
+                    .filter(String::isNotBlank)
+            )
+        }
+
+        val missingFieldIds = normalizedOrganizations.any { organization ->
+            organization.fieldIds.isEmpty()
+        }
+        val organizationFieldIdsFromFields = if (missingFieldIds) {
+            fieldRepository.listFields()
+                .getOrElse { emptyList() }
+                .filter { field -> !field.organizationId.isNullOrBlank() }
+                .groupBy { field -> field.organizationId!! }
+                .mapValues { (_, fields) ->
+                    fields.map { field -> field.id }
+                        .distinct()
+                        .filter(String::isNotBlank)
+                }
+        } else {
+            emptyMap()
+        }
+
+        val rentals = normalizedOrganizations
+            .map { organization ->
+                if (organization.fieldIds.isNotEmpty()) {
+                    organization
+                } else {
                     organization.copy(
-                        fieldIds = organization.fieldIds
-                            .distinct()
-                            .filter(String::isNotBlank)
+                        fieldIds = organizationFieldIdsFromFields[organization.id].orEmpty()
                     )
                 }
+            }
+            .filter { organization -> organization.fieldIds.isNotEmpty() }
+            .sortedBy { organization -> organization.name.lowercase() }
 
-                val missingFieldIds = normalizedOrganizations.any { organization ->
-                    organization.fieldIds.isEmpty()
-                }
-                val organizationFieldIdsFromFields = if (missingFieldIds) {
-                    fieldRepository.listFields()
-                        .getOrElse { emptyList() }
-                        .filter { field -> !field.organizationId.isNullOrBlank() }
-                        .groupBy { field -> field.organizationId!! }
-                        .mapValues { (_, fields) ->
-                            fields.map { field -> field.id }
-                                .distinct()
-                                .filter(String::isNotBlank)
-                        }
-                } else {
-                    emptyMap()
-                }
+        _rentals.value = rentals
+        rentalsLoaded = true
+        _isLoadingRentals.value = false
+        Napier.d("Loaded ${_rentals.value.size} rental organizations", tag = "Discover")
+    }
 
-                val rentals = normalizedOrganizations
-                    .map { organization ->
-                        if (organization.fieldIds.isNotEmpty()) {
-                            organization
-                        } else {
-                            organization.copy(
-                                fieldIds = organizationFieldIdsFromFields[organization.id].orEmpty()
-                            )
-                        }
-                    }
-                    .filter { organization -> organization.fieldIds.isNotEmpty() }
-                    .sortedBy { organization -> organization.name.lowercase() }
+    private suspend fun loadOrganizations(force: Boolean = false): List<Organization> {
+        if (_isLoadingOrganizations.value) return _organizations.value
+        if (organizationsLoaded && !force) return _organizations.value
 
-                _rentals.value = rentals
-                rentalsLoaded = true
-                Napier.d("Loaded ${_rentals.value.size} rental organizations", tag = "Discover")
+        _isLoadingOrganizations.value = true
+        var organizations: List<Organization> = emptyList()
+        billingRepository.listOrganizations(limit = 200)
+            .onSuccess { response ->
+                organizations = response
             }
             .onFailure { e ->
-                _errorState.value = ErrorMessage("Failed to fetch rentals: ${e.message}")
+                _errorState.value = ErrorMessage("Failed to fetch organizations: ${e.message}")
+                organizations = emptyList()
             }
-        _isLoadingRentals.value = false
+
+        val sortedOrganizations = organizations.sortedBy { organization -> organization.name.lowercase() }
+        val distanceFiltered = applyDistanceFilter(sortedOrganizations)
+        _organizations.value = distanceFiltered
+        organizationsLoaded = true
+        _isLoadingOrganizations.value = false
+        return distanceFiltered
     }
 
     private fun fieldDisplayLabel(field: Field): String {
@@ -542,6 +552,26 @@ class DefaultEventSearchComponent(
             return field.name
         }
         return "Field ${field.fieldNumber}"
+    }
+
+    private fun applyDistanceFilter(organizations: List<Organization>): List<Organization> {
+        val currentLocation = _currentLocation.value ?: return organizations
+        val radiusMiles = _currentRadius.value
+        if (radiusMiles <= 0) return organizations
+
+        return organizations.filter { organization ->
+            val orgLocation = organization.toLatLngOrNull() ?: return@filter false
+            calcDistance(currentLocation, orgLocation) <= radiusMiles
+        }
+    }
+
+    private fun Organization.toLatLngOrNull(): LatLng? {
+        val coords = coordinates ?: return null
+        if (coords.size < 2) return null
+        val longitude = coords[0]
+        val latitude = coords[1]
+        if (latitude.isNaN() || longitude.isNaN()) return null
+        return LatLng(latitude, longitude)
     }
 
     private class Cleanup(private val locationTracker: LocationTracker) : InstanceKeeper.Instance {
@@ -554,4 +584,3 @@ class DefaultEventSearchComponent(
         const val CLEANUP_KEY = "Cleanup_Search"
     }
 }
-

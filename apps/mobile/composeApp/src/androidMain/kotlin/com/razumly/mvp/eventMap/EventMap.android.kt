@@ -68,6 +68,7 @@ actual fun EventMap(
     val showMap by component.showMap.collectAsState()
     var searchedPlaces by remember { mutableStateOf<List<Place>>(emptyList()) }
     val events by component.events.collectAsState()
+    val places by component.places.collectAsState()
     val defaultZoom = 12f
     val defaultDurationMs = 1000
     val initCameraState = focusedLocation.toGoogle()
@@ -163,6 +164,28 @@ actual fun EventMap(
                                 )
                             }
                         }
+                    }
+                }
+
+                places.forEach { place ->
+                    val markerState = remember(place.id) {
+                        MarkerState(position = LatLng(place.latitude, place.longitude))
+                    }
+                    val newPosition = LatLng(place.latitude, place.longitude)
+                    if (markerState.position != newPosition) {
+                        markerState.position = newPosition
+                    }
+
+                    MarkerInfoWindow(
+                        state = markerState,
+                        icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_ORANGE),
+                        onClick = { marker -> false },
+                        onInfoWindowClick = { marker -> onPlaceSelected(place) },
+                    ) { marker ->
+                        MapPOICard(
+                            name = place.name,
+                            modifier = Modifier.wrapContentSize()
+                        )
                     }
                 }
 

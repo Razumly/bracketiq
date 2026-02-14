@@ -12,6 +12,7 @@ interface INavigationHandler {
     fun navigateToCreate(rentalContext: RentalCreateContext? = null)
     fun navigateToSearch()
     fun navigateToEvent(event: Event)
+    fun navigateToOrganization(organizationId: String, initialTab: OrganizationDetailTab = OrganizationDetailTab.OVERVIEW)
     fun navigateToEvents()
     fun navigateToRefunds()
     fun navigateToLogin()

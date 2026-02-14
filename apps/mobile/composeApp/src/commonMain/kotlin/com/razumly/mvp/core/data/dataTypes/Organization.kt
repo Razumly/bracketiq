@@ -15,7 +15,8 @@ data class Organization(
     val hasStripeAccount: Boolean,
     val coordinates: List<Double>?,
     val fieldIds: List<String>,
-    val productIds: List<String> = emptyList()
+    val productIds: List<String> = emptyList(),
+    val teamIds: List<String> = emptyList()
 )
 
 @Serializable
@@ -30,7 +31,8 @@ data class OrganizationDTO(
     val hasStripeAccount: Boolean = false,
     val coordinates: List<Double>? = null,
     val fieldIds: List<String> = emptyList(),
-    val productIds: List<String> = emptyList()
+    val productIds: List<String> = emptyList(),
+    val teamIds: List<String> = emptyList()
 ) {
     fun toOrganization(id: String): Organization =
         Organization(
@@ -45,6 +47,7 @@ data class OrganizationDTO(
             hasStripeAccount = hasStripeAccount,
             coordinates = coordinates,
             fieldIds = fieldIds,
-            productIds = productIds
+            productIds = productIds,
+            teamIds = teamIds
         )
 }

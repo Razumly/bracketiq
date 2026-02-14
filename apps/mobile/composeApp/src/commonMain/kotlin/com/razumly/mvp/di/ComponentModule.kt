@@ -31,6 +31,8 @@ import com.razumly.mvp.profile.profileDetails.DefaultProfileDetailsComponent
 import com.razumly.mvp.profile.profileDetails.ProfileDetailsComponent
 import com.razumly.mvp.refundManager.DefaultRefundManagerComponent
 import com.razumly.mvp.refundManager.RefundManagerComponent
+import com.razumly.mvp.organizationDetail.DefaultOrganizationDetailComponent
+import com.razumly.mvp.organizationDetail.OrganizationDetailComponent
 import com.razumly.mvp.teamManagement.DefaultTeamManagementComponent
 import com.razumly.mvp.teamManagement.TeamManagementComponent
 import com.razumly.mvp.userAuth.AuthComponent
@@ -140,6 +142,26 @@ val componentModule = module {
             userRepository = get(),
             billingRepository = get(),
             teamRepository = get(),
+            navigationHandler = navHandler,
+        )
+    }
+
+    factory<OrganizationDetailComponent> { (
+        componentContext: ComponentContext,
+        organizationId: String,
+        initialTab: com.razumly.mvp.core.presentation.OrganizationDetailTab,
+        navHandler: INavigationHandler,
+    ) ->
+        DefaultOrganizationDetailComponent(
+            componentContext = componentContext,
+            organizationId = organizationId,
+            initialTab = initialTab,
+            billingRepository = get(),
+            eventRepository = get(),
+            teamRepository = get(),
+            fieldRepository = get(),
+            matchRepository = get(),
+            userRepository = get(),
             navigationHandler = navHandler,
         )
     }

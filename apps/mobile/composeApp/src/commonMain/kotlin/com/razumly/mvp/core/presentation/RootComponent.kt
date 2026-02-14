@@ -27,6 +27,7 @@ import com.razumly.mvp.profile.ProfileComponent
 import com.razumly.mvp.profile.profileDetails.ProfileDetailsComponent
 import com.razumly.mvp.refundManager.RefundManagerComponent
 import com.razumly.mvp.teamManagement.TeamManagementComponent
+import com.razumly.mvp.organizationDetail.OrganizationDetailComponent
 import com.razumly.mvp.userAuth.AuthComponent
 import dev.icerock.moko.geo.LocationTracker
 import dev.icerock.moko.permissions.DeniedAlwaysException
@@ -211,6 +212,10 @@ class RootComponent(
         navigation.pushNew(AppConfig.EventDetail(event))
     }
 
+    override fun navigateToOrganization(organizationId: String, initialTab: OrganizationDetailTab) {
+        navigation.pushNew(AppConfig.OrganizationDetail(organizationId, initialTab))
+    }
+
     override fun navigateToEvents() {
         navigation.pushNew(AppConfig.Events)
     }
@@ -258,6 +263,10 @@ class RootComponent(
             _koin.get { parametersOf(componentContext) }
         )
 
+        is AppConfig.OrganizationDetail -> Child.OrganizationDetail(
+            _koin.get { parametersOf(componentContext, config.organizationId, config.initialTab, this@RootComponent) }
+        )
+
         is AppConfig.MatchDetail -> Child.MatchContent(
             _koin.get { parametersOf(componentContext, config.match, config.event) }
         )
@@ -300,6 +309,7 @@ class RootComponent(
         data class Login(val component: AuthComponent) : Child()
         data class Search(val component: EventSearchComponent, val mapComponent: MapComponent) : Child()
         data class EventContent(val component: EventDetailComponent, val mapComponent: MapComponent) : Child()
+        data class OrganizationDetail(val component: OrganizationDetailComponent) : Child()
         data class MatchContent(val component: MatchContentComponent) : Child()
         data class ChatList(val component: ChatListComponent) : Child()
         data class Chat(val component: ChatGroupComponent) : Child()
