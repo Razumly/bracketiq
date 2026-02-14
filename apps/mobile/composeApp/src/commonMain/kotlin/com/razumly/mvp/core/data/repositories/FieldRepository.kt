@@ -140,6 +140,7 @@ class FieldRepository(
                 endDate = slot.endDate?.toString(),
                 scheduledFieldId = slot.scheduledFieldId,
                 price = slot.price,
+                requiredTemplateIds = slot.requiredTemplateIds,
             )
         )
     }
@@ -158,6 +159,7 @@ class FieldRepository(
                     endDate = payload.endDate,
                     scheduledFieldId = payload.scheduledFieldId,
                     price = payload.price,
+                    requiredTemplateIds = payload.requiredTemplateIds,
                 )
             )
         )
@@ -176,6 +178,7 @@ class FieldRepository(
         endDate = endDate?.toString(),
         scheduledFieldId = scheduledFieldId,
         price = price,
+        requiredTemplateIds = requiredTemplateIds,
     )
 }
 
@@ -190,6 +193,7 @@ private data class CreateTimeSlotRequestDto(
     val endDate: String? = null,
     val scheduledFieldId: String? = null,
     val price: Int? = null,
+    val requiredTemplateIds: List<String> = emptyList(),
 )
 
 @Serializable
@@ -207,6 +211,7 @@ private data class UpdateTimeSlotPayload(
     val endDate: String? = null,
     val scheduledFieldId: String? = null,
     val price: Int? = null,
+    val requiredTemplateIds: List<String> = emptyList(),
 )
 
 @Serializable

@@ -15,6 +15,7 @@ import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.eventCreate.CreateEventComponent
 import com.razumly.mvp.eventDetail.EventDetailComponent
@@ -49,7 +50,8 @@ class RootComponent(
     deepLinkNavStart: DeepLinkNav?,
     val permissionsController: PermissionsController,
     val locationTracker: LocationTracker,
-    private val userRepository: IUserRepository
+    private val userRepository: IUserRepository,
+    private val pushNotificationsRepository: IPushNotificationsRepository,
 ) : ComponentContext by componentContext, INavigationHandler {
 
     private val navigation = StackNavigation<AppConfig>()
@@ -57,6 +59,7 @@ class RootComponent(
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
 
     private val deepLinkNav = MutableStateFlow(deepLinkNavStart)
+    private var registeredPushUserId: String? = null
 
     private val _selectedPage = MutableStateFlow<AppConfig>(AppConfig.Search())
     val selectedPage: StateFlow<AppConfig> = _selectedPage.asStateFlow()
@@ -77,15 +80,22 @@ class RootComponent(
 
                 userResult.fold(
                     onSuccess = { userData ->
-                        if (userData.id.isNotBlank() && currentConfig == AppConfig.Login) {
-                            // User is logged in, navigate to main app
-                            handleDeepLinkOrDefault()
-                        } else if (userData.id.isBlank() && currentConfig != AppConfig.Login) {
-                            // User is not logged in, navigate to login
-                            navigation.replaceAll(AppConfig.Login)
+                        if (userData.id.isNotBlank()) {
+                            registerPushTargetIfNeeded(userData.id)
+                            if (currentConfig == AppConfig.Login) {
+                                // User is logged in, navigate to main app
+                                handleDeepLinkOrDefault()
+                            }
+                        } else {
+                            clearPushTargetIfNeeded()
+                            if (currentConfig != AppConfig.Login) {
+                                // User is not logged in, navigate to login
+                                navigation.replaceAll(AppConfig.Login)
+                            }
                         }
                     },
                     onFailure = {
+                        clearPushTargetIfNeeded()
                         if (currentConfig != AppConfig.Login) {
                             navigation.replaceAll(AppConfig.Login)
                         }
@@ -126,6 +136,26 @@ class RootComponent(
             is AppConfig.Create -> navigation.replaceAll(AppConfig.Create())
             AppConfig.ProfileHome -> navigation.replaceAll(AppConfig.ProfileHome)
             else -> {}
+        }
+    }
+
+    private fun registerPushTargetIfNeeded(userId: String) {
+        if (registeredPushUserId == userId) return
+        registeredPushUserId = userId
+        scope.launch {
+            pushNotificationsRepository.addDeviceAsTarget().onFailure {
+                Napier.w("Push target registration failed: ${it.message}")
+            }
+        }
+    }
+
+    private fun clearPushTargetIfNeeded() {
+        if (registeredPushUserId == null) return
+        registeredPushUserId = null
+        scope.launch {
+            pushNotificationsRepository.removeDeviceAsTarget().onFailure {
+                Napier.w("Push target cleanup failed: ${it.message}")
+            }
         }
     }
 
@@ -202,8 +232,10 @@ class RootComponent(
         navigation.pop()
     }
 
-    private fun onEventCreated() {
-        navigateToSearch()
+    private fun onEventCreated(createdEvent: Event) {
+        navigation.replaceAll(AppConfig.Search())
+        _selectedPage.value = AppConfig.Search()
+        navigation.pushNew(AppConfig.EventDetail(createdEvent))
     }
 
     private fun createChild(

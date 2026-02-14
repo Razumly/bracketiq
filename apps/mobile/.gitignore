@@ -20,3 +20,5 @@ captures
 /iosApp/iosApp/Secrets.plist
 /codealike.json
 composeApp/schemas
+composeApp/debug/
+composeApp/release/

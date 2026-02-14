@@ -9,6 +9,7 @@ import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.http.isSuccess
@@ -73,6 +74,29 @@ class MvpApiClientTest {
         val api = MvpApiClient(http, "http://example.test", tokenStore)
         val res = api.get<OkResponse>("/api/ping")
         assertEquals(true, res.ok)
+    }
+
+    @Test
+    fun postNoResponse_with_body_attaches_bearer_token_when_present() = runTest {
+        val tokenStore = InMemoryAuthTokenStore("abc")
+
+        val engine = MockEngine { request ->
+            assertEquals(HttpMethod.Post, request.method)
+            assertEquals("/api/ping", request.url.encodedPath)
+            assertEquals("Bearer abc", request.headers[HttpHeaders.Authorization])
+            respond(
+                content = """{"ok":true}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        api.postNoResponse("/api/ping", OkResponse(ok = true))
     }
 
     @Test

@@ -45,6 +45,7 @@ val componentModule = module {
             locationTracker = get(),
             deepLinkNavStart = deepLinkNav,
             userRepository = get(),
+            pushNotificationsRepository = get(),
         )
     }
 
@@ -84,7 +85,7 @@ val componentModule = module {
         )
     }
 
-    factory<CreateEventComponent> { (componentContext: ComponentContext, rentalContext: RentalCreateContext?, onCreatedEvent: () -> Unit) ->
+    factory<CreateEventComponent> { (componentContext: ComponentContext, rentalContext: RentalCreateContext?, onCreatedEvent: (Event) -> Unit) ->
         DefaultCreateEventComponent(
             componentContext = componentContext,
             onEventCreated = onCreatedEvent,

@@ -12,7 +12,20 @@
           "package_name": "com.razumly.mvp"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "49655448987-2bb7cqsekb1idvhllstv2qh6lb0csk7u.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.razumly.mvp",
+            "certificate_hash": "9814b98ed9753bef8ad8ad7e29db458cdeedb1bf"
+          }
+        },
+        {
+          "client_id": "49655448987-bf9014uc7k6qm9jug483nniqsa5b2fa3.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyCp0Tvdi2_v18BNNfON0fuMCz_C3KK8vFg"
@@ -20,7 +33,19 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "49655448987-bf9014uc7k6qm9jug483nniqsa5b2fa3.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "49655448987-5mt89kqe079js16hbb4476epf06mhjgp.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.razumly.mvp"
+              }
+            }
+          ]
         }
       }
     }

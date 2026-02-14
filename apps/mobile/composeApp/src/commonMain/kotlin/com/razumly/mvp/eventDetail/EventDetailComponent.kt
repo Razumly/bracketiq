@@ -116,6 +116,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun editEventField(update: Event.() -> Event)
     fun editTournamentField(update: Event.() -> Event)
     fun updateEvent()
+    fun publishEvent()
     fun deleteEvent()
     fun shareEvent()
     fun createNewTeam()
@@ -794,10 +795,32 @@ class DefaultEventDetailComponent(
 
     override fun updateEvent() {
         scope.launch {
-            eventRepository.updateEvent(_editedEvent.value).onFailure {
-                _errorState.value = ErrorMessage(it.message ?: "")
-            }
+            eventRepository.updateEvent(_editedEvent.value)
+                .onSuccess { updated ->
+                    if (updated.eventType == EventType.LEAGUE || updated.eventType == EventType.TOURNAMENT) {
+                        matchRepository.getMatchesOfTournament(updated.id)
+                    }
+                }
+                .onFailure {
+                    _errorState.value = ErrorMessage(it.message ?: "")
+                }
             toggleEdit()
+        }
+    }
+
+    override fun publishEvent() {
+        scope.launch {
+            val currentEvent = selectedEvent.value
+            if (currentEvent.state == "PUBLISHED") {
+                return@launch
+            }
+            loadingHandler.showLoading("Publishing event...")
+            eventRepository.updateEvent(currentEvent.copy(state = "PUBLISHED"))
+                .onFailure { error ->
+                    _errorState.value = ErrorMessage(error.message ?: "Failed to publish event.")
+                }
+            eventRepository.getEvent(currentEvent.id)
+            loadingHandler.hideLoading()
         }
     }
 

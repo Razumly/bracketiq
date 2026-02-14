@@ -16,7 +16,8 @@ data class TimeSlot(
     val repeating: Boolean,
     @Contextual val endDate: Instant?,
     val scheduledFieldId: String?,
-    val price: Int?
+    val price: Int?,
+    val requiredTemplateIds: List<String> = emptyList(),
 )
 
 @Serializable
@@ -29,7 +30,8 @@ data class TimeSlotDTO(
     val repeating: Boolean = false,
     val endDate: String? = null,
     val scheduledFieldId: String? = null,
-    val price: Int? = null
+    val price: Int? = null,
+    val requiredTemplateIds: List<String> = emptyList(),
 ) {
     fun toTimeSlot(id: String): TimeSlot =
         TimeSlot(
@@ -41,6 +43,7 @@ data class TimeSlotDTO(
             repeating = repeating,
             endDate = endDate?.let(Instant::parse),
             scheduledFieldId = scheduledFieldId,
-            price = price
+            price = price,
+            requiredTemplateIds = requiredTemplateIds
         )
 }

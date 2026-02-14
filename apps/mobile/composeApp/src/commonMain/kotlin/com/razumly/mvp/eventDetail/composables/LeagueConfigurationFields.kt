@@ -1,6 +1,7 @@
 package com.razumly.mvp.eventDetail.composables
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -32,31 +33,123 @@ fun ColumnScope.LeagueConfigurationFields(
     onPlayoffConfigChange: (TournamentConfig) -> Unit,
 ) {
     val currentSets = normalizeSetCount(leagueConfig.setsPerMatch)
+    val winnerSetCount = normalizeSetCount(playoffConfig.winnerSetCount)
+    val loserSetCount = normalizeSetCount(playoffConfig.loserSetCount)
+    val scoringMode = if (leagueConfig.usesSets) "SETS" else "TIME"
 
     Text("League Configuration", style = MaterialTheme.typography.titleMedium)
 
-    NumberInputField(
-        value = leagueConfig.gamesPerOpponent.toString(),
-        label = "Games per Opponent",
-        onValueChange = { newValue ->
-            if (newValue.all { it.isDigit() }) {
-                onLeagueConfigChange(
-                    leagueConfig.copy(gamesPerOpponent = newValue.toIntOrNull() ?: 0)
-                )
-            }
-        },
-        isError = false,
-        supportingText = "Minimum 1 game against each opponent",
-    )
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Box(modifier = Modifier.weight(1f)) {
+            LabeledCheckbox(
+                checked = leagueConfig.usesSets,
+                label = "Use set-based scoring",
+                onCheckedChange = { checked ->
+                    if (checked) {
+                        onLeagueConfigChange(
+                            leagueConfig.copy(
+                                usesSets = true,
+                                setsPerMatch = currentSets,
+                                setDurationMinutes = leagueConfig.setDurationMinutes ?: 20,
+                                pointsToVictory = normalizePoints(
+                                    leagueConfig.pointsToVictory,
+                                    currentSets
+                                ),
+                                matchDurationMinutes = 60,
+                            )
+                        )
+                    } else {
+                        onLeagueConfigChange(
+                            leagueConfig.copy(
+                                usesSets = false,
+                                setDurationMinutes = null,
+                                setsPerMatch = null,
+                                pointsToVictory = emptyList(),
+                                matchDurationMinutes = leagueConfig.matchDurationMinutes,
+                            )
+                        )
+                    }
+                },
+            )
+        }
+        Box(modifier = Modifier.weight(1f)) {
+            LabeledCheckbox(
+                checked = leagueConfig.includePlayoffs,
+                label = "Include playoffs",
+                onCheckedChange = { checked ->
+                    onLeagueConfigChange(
+                        leagueConfig.copy(
+                            includePlayoffs = checked,
+                            playoffTeamCount = if (checked) {
+                                leagueConfig.playoffTeamCount ?: 4
+                            } else {
+                                null
+                            },
+                        )
+                    )
+                },
+            )
+        }
+    }
 
     Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.Top,
     ) {
-        Checkbox(
-            checked = leagueConfig.usesSets,
-            onCheckedChange = { checked ->
-                if (checked) {
+        Box(modifier = Modifier.weight(1f)) {
+            LabeledCheckbox(
+                checked = leagueConfig.doTeamsRef,
+                label = "Teams provide referees",
+                onCheckedChange = { checked ->
+                    onLeagueConfigChange(leagueConfig.copy(doTeamsRef = checked))
+                },
+            )
+        }
+        Box(modifier = Modifier.weight(1f)) {
+            LabeledCheckbox(
+                checked = leagueConfig.includePlayoffs && playoffConfig.doubleElimination,
+                label = "Double elimination",
+                enabled = leagueConfig.includePlayoffs,
+                onCheckedChange = { checked ->
+                    if (!leagueConfig.includePlayoffs) return@LabeledCheckbox
+                    val updated = if (checked) {
+                        playoffConfig.copy(
+                            doubleElimination = true,
+                            loserSetCount = loserSetCount,
+                            loserBracketPointsToVictory = normalizePoints(
+                                playoffConfig.loserBracketPointsToVictory,
+                                loserSetCount
+                            ),
+                        )
+                    } else {
+                        playoffConfig.copy(
+                            doubleElimination = false,
+                            loserSetCount = 1,
+                            loserBracketPointsToVictory = listOf(21),
+                        )
+                    }
+                    onPlayoffConfigChange(updated)
+                },
+            )
+        }
+    }
+
+    Text("League Scoring", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        PlatformDropdown(
+            selectedValue = scoringMode,
+            onSelectionChange = { selected ->
+                if (selected == "SETS") {
                     onLeagueConfigChange(
                         leagueConfig.copy(
                             usesSets = true,
@@ -76,44 +169,105 @@ fun ColumnScope.LeagueConfigurationFields(
                             setDurationMinutes = null,
                             setsPerMatch = null,
                             pointsToVictory = emptyList(),
-                            matchDurationMinutes = leagueConfig.matchDurationMinutes,
                         )
                     )
                 }
-            }
-        )
-        Text("Use set-based scoring")
-    }
-
-    if (leagueConfig.usesSets) {
-        PlatformDropdown(
-            selectedValue = currentSets.toString(),
-            onSelectionChange = { selected ->
-                val nextCount = normalizeSetCount(selected.toIntOrNull())
-                onLeagueConfigChange(
-                    leagueConfig.copy(
-                        setsPerMatch = nextCount,
-                        pointsToVictory = normalizePoints(leagueConfig.pointsToVictory, nextCount),
-                    )
-                )
             },
-            options = bestOfOptions,
-            label = "Sets per Match",
-            modifier = Modifier.fillMaxWidth(),
+            options = listOf(
+                DropdownOption("SETS", "Set-based"),
+                DropdownOption("TIME", "Timed match"),
+            ),
+            label = "Scoring format",
+            modifier = Modifier.weight(1f),
         )
-
         NumberInputField(
-            value = (leagueConfig.setDurationMinutes ?: 20).toString(),
-            label = "Set Duration (minutes)",
+            modifier = Modifier.weight(1f),
+            value = leagueConfig.gamesPerOpponent.toString(),
+            label = "Games per Opponent",
             onValueChange = { newValue ->
                 if (newValue.all { it.isDigit() }) {
                     onLeagueConfigChange(
-                        leagueConfig.copy(setDurationMinutes = newValue.toIntOrNull())
+                        leagueConfig.copy(gamesPerOpponent = newValue.toIntOrNull() ?: 0)
                     )
                 }
             },
             isError = false,
+            supportingText = "Min 1",
         )
+    }
+
+    if (leagueConfig.usesSets) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            PlatformDropdown(
+                selectedValue = currentSets.toString(),
+                onSelectionChange = { selected ->
+                    val nextCount = normalizeSetCount(selected.toIntOrNull())
+                    onLeagueConfigChange(
+                        leagueConfig.copy(
+                            setsPerMatch = nextCount,
+                            pointsToVictory = normalizePoints(leagueConfig.pointsToVictory, nextCount),
+                        )
+                    )
+                },
+                options = bestOfOptions,
+                label = "Sets per Match",
+                modifier = Modifier.weight(1f),
+            )
+            NumberInputField(
+                modifier = Modifier.weight(1f),
+                value = (leagueConfig.setDurationMinutes ?: 20).toString(),
+                label = "Set Duration (min)",
+                onValueChange = { newValue ->
+                    if (newValue.all { it.isDigit() }) {
+                        onLeagueConfigChange(
+                            leagueConfig.copy(setDurationMinutes = newValue.toIntOrNull())
+                        )
+                    }
+                },
+                isError = false,
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            NumberInputField(
+                modifier = Modifier.weight(1f),
+                value = leagueConfig.restTimeMinutes.toString(),
+                label = "Rest Time (min)",
+                onValueChange = { newValue ->
+                    if (newValue.all { it.isDigit() }) {
+                        onLeagueConfigChange(
+                            leagueConfig.copy(restTimeMinutes = newValue.toIntOrNull() ?: 0)
+                        )
+                    }
+                },
+                isError = false,
+            )
+            if (leagueConfig.includePlayoffs) {
+                NumberInputField(
+                    modifier = Modifier.weight(1f),
+                    value = (leagueConfig.playoffTeamCount ?: 4).toString(),
+                    label = "Playoff Team Count",
+                    onValueChange = { newValue ->
+                        if (newValue.all { it.isDigit() }) {
+                            onLeagueConfigChange(
+                                leagueConfig.copy(playoffTeamCount = newValue.toIntOrNull())
+                            )
+                        }
+                    },
+                    isError = false,
+                )
+            } else {
+                Box(modifier = Modifier.weight(1f))
+            }
+        }
 
         Text(
             "Points to Victory",
@@ -125,14 +279,15 @@ fun ColumnScope.LeagueConfigurationFields(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            val points = normalizePoints(leagueConfig.pointsToVictory, currentSets)
             repeat(currentSets) { index ->
                 NumberInputField(
-                    value = normalizePoints(leagueConfig.pointsToVictory, currentSets)[index].toString(),
+                    modifier = Modifier.fillMaxWidth(0.48f),
+                    value = points[index].toString(),
                     label = "Set ${index + 1}",
                     onValueChange = { newValue ->
                         if (newValue.all { it.isDigit() }) {
-                            val updated = normalizePoints(leagueConfig.pointsToVictory, currentSets)
-                                .toMutableList()
+                            val updated = points.toMutableList()
                             updated[index] = newValue.toIntOrNull() ?: 0
                             onLeagueConfigChange(leagueConfig.copy(pointsToVictory = updated))
                         }
@@ -142,122 +297,114 @@ fun ColumnScope.LeagueConfigurationFields(
             }
         }
     } else {
-        NumberInputField(
-            value = leagueConfig.matchDurationMinutes.toString(),
-            label = "Match Duration (minutes)",
-            onValueChange = { newValue ->
-                if (newValue.all { it.isDigit() }) {
-                    onLeagueConfigChange(
-                        leagueConfig.copy(matchDurationMinutes = newValue.toIntOrNull() ?: 0)
-                    )
-                }
-            },
-            isError = false,
-        )
-    }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            NumberInputField(
+                modifier = Modifier.weight(1f),
+                value = leagueConfig.matchDurationMinutes.toString(),
+                label = "Match Duration (min)",
+                onValueChange = { newValue ->
+                    if (newValue.all { it.isDigit() }) {
+                        onLeagueConfigChange(
+                            leagueConfig.copy(matchDurationMinutes = newValue.toIntOrNull() ?: 0)
+                        )
+                    }
+                },
+                isError = false,
+            )
+            NumberInputField(
+                modifier = Modifier.weight(1f),
+                value = leagueConfig.restTimeMinutes.toString(),
+                label = "Rest Time (min)",
+                onValueChange = { newValue ->
+                    if (newValue.all { it.isDigit() }) {
+                        onLeagueConfigChange(
+                            leagueConfig.copy(restTimeMinutes = newValue.toIntOrNull() ?: 0)
+                        )
+                    }
+                },
+                isError = false,
+            )
+        }
 
-    NumberInputField(
-        value = leagueConfig.restTimeMinutes.toString(),
-        label = "Rest Time Between Matches (minutes)",
-        onValueChange = { newValue ->
-            if (newValue.all { it.isDigit() }) {
-                onLeagueConfigChange(
-                    leagueConfig.copy(restTimeMinutes = newValue.toIntOrNull() ?: 0)
+        if (leagueConfig.includePlayoffs) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                NumberInputField(
+                    modifier = Modifier.weight(1f),
+                    value = (leagueConfig.playoffTeamCount ?: 4).toString(),
+                    label = "Playoff Team Count",
+                    onValueChange = { newValue ->
+                        if (newValue.all { it.isDigit() }) {
+                            onLeagueConfigChange(
+                                leagueConfig.copy(playoffTeamCount = newValue.toIntOrNull())
+                            )
+                        }
+                    },
+                    isError = false,
                 )
+                Box(modifier = Modifier.weight(1f))
             }
-        },
-        isError = false,
-    )
-
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Checkbox(
-            checked = leagueConfig.includePlayoffs,
-            onCheckedChange = { checked ->
-                onLeagueConfigChange(
-                    leagueConfig.copy(
-                        includePlayoffs = checked,
-                        playoffTeamCount = if (checked) {
-                            leagueConfig.playoffTeamCount ?: 4
-                        } else {
-                            null
-                        },
-                    )
-                )
-            }
-        )
-        Text("Include Playoffs")
+        }
     }
 
     if (leagueConfig.includePlayoffs) {
-        NumberInputField(
-            value = (leagueConfig.playoffTeamCount ?: 4).toString(),
-            label = "Playoff Team Count",
-            onValueChange = { newValue ->
-                if (newValue.all { it.isDigit() }) {
-                    onLeagueConfigChange(
-                        leagueConfig.copy(playoffTeamCount = newValue.toIntOrNull())
-                    )
-                }
-            },
-            isError = false,
-        )
-
         Text("Playoff Configuration", style = MaterialTheme.typography.titleSmall)
 
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Checkbox(
-                checked = playoffConfig.doubleElimination,
-                onCheckedChange = { checked ->
-                    val updated = if (checked) {
-                        playoffConfig.copy(
-                            doubleElimination = true,
-                            loserSetCount = normalizeSetCount(playoffConfig.loserSetCount),
-                            loserBracketPointsToVictory = normalizePoints(
-                                playoffConfig.loserBracketPointsToVictory,
-                                normalizeSetCount(playoffConfig.loserSetCount)
-                            )
-                        )
-                    } else {
-                        playoffConfig.copy(
-                            doubleElimination = false,
-                            loserSetCount = 1,
-                            loserBracketPointsToVictory = listOf(21),
-                        )
-                    }
-                    onPlayoffConfigChange(updated)
-                }
-            )
-            Text("Double Elimination")
-        }
-
         if (leagueConfig.usesSets) {
-            val winnerSetCount = normalizeSetCount(playoffConfig.winnerSetCount)
-            val loserSetCount = normalizeSetCount(playoffConfig.loserSetCount)
-
-            PlatformDropdown(
-                selectedValue = winnerSetCount.toString(),
-                onSelectionChange = { selected ->
-                    val nextCount = normalizeSetCount(selected.toIntOrNull())
-                    onPlayoffConfigChange(
-                        playoffConfig.copy(
-                            winnerSetCount = nextCount,
-                            winnerBracketPointsToVictory = normalizePoints(
-                                playoffConfig.winnerBracketPointsToVictory,
-                                nextCount
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                PlatformDropdown(
+                    selectedValue = winnerSetCount.toString(),
+                    onSelectionChange = { selected ->
+                        val nextCount = normalizeSetCount(selected.toIntOrNull())
+                        onPlayoffConfigChange(
+                            playoffConfig.copy(
+                                winnerSetCount = nextCount,
+                                winnerBracketPointsToVictory = normalizePoints(
+                                    playoffConfig.winnerBracketPointsToVictory,
+                                    nextCount
+                                )
                             )
                         )
+                    },
+                    options = bestOfOptions,
+                    label = "Winner Set Count",
+                    modifier = Modifier.weight(1f),
+                )
+
+                if (playoffConfig.doubleElimination) {
+                    PlatformDropdown(
+                        selectedValue = loserSetCount.toString(),
+                        onSelectionChange = { selected ->
+                            val nextCount = normalizeSetCount(selected.toIntOrNull())
+                            onPlayoffConfigChange(
+                                playoffConfig.copy(
+                                    loserSetCount = nextCount,
+                                    loserBracketPointsToVictory = normalizePoints(
+                                        playoffConfig.loserBracketPointsToVictory,
+                                        nextCount
+                                    )
+                                )
+                            )
+                        },
+                        options = bestOfOptions,
+                        label = "Loser Set Count",
+                        modifier = Modifier.weight(1f),
                     )
-                },
-                options = bestOfOptions,
-                label = "Winner Set Count",
-                modifier = Modifier.fillMaxWidth(),
-            )
+                } else {
+                    Box(modifier = Modifier.weight(1f))
+                }
+            }
 
             Text("Winner Bracket Points", style = MaterialTheme.typography.bodyMedium)
             FlowRow(
@@ -265,12 +412,13 @@ fun ColumnScope.LeagueConfigurationFields(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                val points = normalizePoints(
+                    playoffConfig.winnerBracketPointsToVictory,
+                    winnerSetCount
+                )
                 repeat(winnerSetCount) { index ->
-                    val points = normalizePoints(
-                        playoffConfig.winnerBracketPointsToVictory,
-                        winnerSetCount
-                    )
                     NumberInputField(
+                        modifier = Modifier.fillMaxWidth(0.48f),
                         value = points[index].toString(),
                         label = "Set ${index + 1}",
                         onValueChange = { newValue ->
@@ -288,37 +436,19 @@ fun ColumnScope.LeagueConfigurationFields(
             }
 
             if (playoffConfig.doubleElimination) {
-                PlatformDropdown(
-                    selectedValue = loserSetCount.toString(),
-                    onSelectionChange = { selected ->
-                        val nextCount = normalizeSetCount(selected.toIntOrNull())
-                        onPlayoffConfigChange(
-                            playoffConfig.copy(
-                                loserSetCount = nextCount,
-                                loserBracketPointsToVictory = normalizePoints(
-                                    playoffConfig.loserBracketPointsToVictory,
-                                    nextCount
-                                )
-                            )
-                        )
-                    },
-                    options = bestOfOptions,
-                    label = "Loser Set Count",
-                    modifier = Modifier.fillMaxWidth(),
-                )
-
                 Text("Loser Bracket Points", style = MaterialTheme.typography.bodyMedium)
                 FlowRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                    val points = normalizePoints(
+                        playoffConfig.loserBracketPointsToVictory,
+                        loserSetCount
+                    )
                     repeat(loserSetCount) { index ->
-                        val points = normalizePoints(
-                            playoffConfig.loserBracketPointsToVictory,
-                            loserSetCount
-                        )
                         NumberInputField(
+                            modifier = Modifier.fillMaxWidth(0.48f),
                             value = points[index].toString(),
                             label = "Set ${index + 1}",
                             onValueChange = { newValue ->
@@ -337,18 +467,25 @@ fun ColumnScope.LeagueConfigurationFields(
             }
         }
     }
+}
 
+@Composable
+private fun LabeledCheckbox(
+    checked: Boolean,
+    label: String,
+    enabled: Boolean = true,
+    onCheckedChange: (Boolean) -> Unit,
+) {
     Row(
+        modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth()
     ) {
         Checkbox(
-            checked = leagueConfig.doTeamsRef,
-            onCheckedChange = { checked ->
-                onLeagueConfigChange(leagueConfig.copy(doTeamsRef = checked))
-            }
+            checked = checked,
+            enabled = enabled,
+            onCheckedChange = onCheckedChange,
         )
-        Text("Teams provide referees")
+        Text(label)
     }
 }
 

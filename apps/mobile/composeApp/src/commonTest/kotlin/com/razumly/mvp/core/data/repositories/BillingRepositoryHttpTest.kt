@@ -101,7 +101,12 @@ private object BillingRepositoryHttp_UnusedEventRepository : IEventRepository {
     override fun getEventWithRelationsFlow(eventId: String): Flow<Result<com.razumly.mvp.core.data.dataTypes.EventWithRelations>> = error("unused")
     override fun resetCursor() {}
     override suspend fun getEvent(eventId: String): Result<Event> = error("unused")
-    override suspend fun createEvent(newEvent: Event): Result<Event> = error("unused")
+    override suspend fun getEventsByOrganization(organizationId: String, limit: Int): Result<List<Event>> = error("unused")
+    override suspend fun createEvent(
+        newEvent: Event,
+        requiredTemplateIds: List<String>,
+        leagueScoringConfig: com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO?,
+    ): Result<Event> = error("unused")
     override suspend fun updateEvent(newEvent: Event): Result<Event> = error("unused")
     override suspend fun updateLocalEvent(newEvent: Event): Result<Event> = error("unused")
     override fun getEventsInBoundsFlow(bounds: com.razumly.mvp.core.data.dataTypes.Bounds): Flow<Result<List<Event>>> = error("unused")

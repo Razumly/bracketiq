@@ -1,6 +1,7 @@
 package com.razumly.mvp.core.network.dto
 
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.enums.FieldType
 import com.razumly.mvp.core.data.util.normalizeDivisionLabels
@@ -175,6 +176,18 @@ data class EventResponseDto(
 )
 
 @Serializable
+data class ScheduleEventRequestDto(
+    val participantCount: Int? = null,
+)
+
+@Serializable
+data class ScheduleEventResponseDto(
+    val preview: Boolean? = null,
+    val event: EventApiDto? = null,
+    val matches: List<MatchApiDto> = emptyList(),
+)
+
+@Serializable
 data class EventSearchUserLocationDto(
     val lat: Double,
     val lng: Double? = null,
@@ -253,6 +266,7 @@ data class EventUpdateDto(
     val teamIds: List<String>? = null,
     val userIds: List<String>? = null,
     val leagueScoringConfigId: String? = null,
+    val leagueScoringConfig: LeagueScoringConfigDTO? = null,
     val organizationId: String? = null,
     val autoCancellation: Boolean? = null,
     val eventType: String? = null,
@@ -278,7 +292,16 @@ data class UpdateEventRequestDto(
     val event: EventUpdateDto,
 )
 
-fun Event.toUpdateDto(): EventUpdateDto {
+fun Event.toUpdateDto(
+    requiredTemplateIdsOverride: List<String>? = null,
+    leagueScoringConfigOverride: LeagueScoringConfigDTO? = null,
+): EventUpdateDto {
+    val resolvedRequiredTemplateIds = requiredTemplateIdsOverride
+        ?.map { templateId -> templateId.trim() }
+        ?.filter { templateId -> templateId.isNotEmpty() }
+        ?.distinct()
+        ?: emptyList()
+
     return EventUpdateDto(
         name = name,
         start = start.toString(),
@@ -323,6 +346,7 @@ fun Event.toUpdateDto(): EventUpdateDto {
         teamIds = teamIds,
         userIds = userIds,
         leagueScoringConfigId = leagueScoringConfigId,
+        leagueScoringConfig = leagueScoringConfigOverride,
         organizationId = organizationId,
         autoCancellation = autoCancellation,
         eventType = eventType.name,
@@ -334,6 +358,6 @@ fun Event.toUpdateDto(): EventUpdateDto {
         installmentDueDates = installmentDueDates,
         installmentAmounts = installmentAmounts,
         allowTeamSplitDefault = allowTeamSplitDefault,
-        requiredTemplateIds = emptyList(),
+        requiredTemplateIds = resolvedRequiredTemplateIds,
     )
 }

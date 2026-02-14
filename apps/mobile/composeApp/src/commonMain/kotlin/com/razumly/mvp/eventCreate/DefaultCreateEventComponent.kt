@@ -13,6 +13,7 @@ import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.Field
+import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
@@ -65,6 +66,7 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     val sports: StateFlow<List<Sport>>
     val localFields: StateFlow<List<Field>>
     val leagueSlots: StateFlow<List<TimeSlot>>
+    val leagueScoringConfig: StateFlow<LeagueScoringConfigDTO>
 
     fun onBackClicked()
     fun updateEventField(update: Event.() -> Event)
@@ -84,6 +86,7 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     fun addLeagueTimeSlot()
     fun updateLeagueTimeSlot(index: Int, update: TimeSlot.() -> TimeSlot)
     fun removeLeagueTimeSlot(index: Int)
+    fun updateLeagueScoringConfig(update: LeagueScoringConfigDTO.() -> LeagueScoringConfigDTO)
     fun createAccount()
     fun onUploadSelected(photo: GalleryPhotoResult)
     fun deleteImage(url: String)
@@ -113,18 +116,19 @@ class DefaultCreateEventComponent(
     private val billingRepository: IBillingRepository,
     private val imageRepository: IImagesRepository,
     private val rentalContext: RentalCreateContext?,
-    val onEventCreated: () -> Unit
+    val onEventCreated: (Event) -> Unit
 ) : CreateEventComponent, PaymentProcessor(), ComponentContext by componentContext {
     private val navigation = StackNavigation<Config>()
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
+    private val initialEventDraft = createInitialEventDraft()
 
-    private val _newEventState: MutableStateFlow<Event> = MutableStateFlow(Event())
+    private val _newEventState: MutableStateFlow<Event> = MutableStateFlow(initialEventDraft)
     override val newEventState = _newEventState.asStateFlow()
 
     override val defaultEvent =
         MutableStateFlow(
             EventWithRelations(
-                Event(),
+                initialEventDraft,
                 userRepository.currentUser.value.getOrThrow()
             )
         )
@@ -157,6 +161,8 @@ class DefaultCreateEventComponent(
     override val localFields = _localFields.asStateFlow()
     private val _leagueSlots = MutableStateFlow<List<TimeSlot>>(emptyList())
     override val leagueSlots = _leagueSlots.asStateFlow()
+    private val _leagueScoringConfig = MutableStateFlow(LeagueScoringConfigDTO())
+    override val leagueScoringConfig = _leagueScoringConfig.asStateFlow()
     private val _fieldCount = MutableStateFlow(0)
     private val pendingEventAfterPayment = MutableStateFlow<Event?>(null)
     private val awaitingRentalPayment = MutableStateFlow(false)
@@ -243,7 +249,7 @@ class DefaultCreateEventComponent(
 
     override fun createEvent() {
         scope.launch {
-            val eventDraft = newEventState.value
+            val eventDraft = applyRentalConstraints(newEventState.value)
             if (_isRentalFlow.value) {
                 processRentalPaymentBeforeCreate(eventDraft)
             } else {
@@ -266,9 +272,10 @@ class DefaultCreateEventComponent(
             val updated = previous
                 .update()
                 .withSportRules()
+            val normalized = applyRentalConstraints(updated)
 
-            _newEventState.value = updated
-            syncLocalFieldsForEvent(updated)
+            _newEventState.value = normalized
+            syncLocalFieldsForEvent(normalized)
         }
     }
 
@@ -307,9 +314,10 @@ class DefaultCreateEventComponent(
             val updated = previous
                 .update()
                 .withSportRules()
+            val normalized = applyRentalConstraints(updated)
 
-            _newEventState.value = updated
-            syncLocalFieldsForEvent(updated)
+            _newEventState.value = normalized
+            syncLocalFieldsForEvent(normalized)
         }
     }
 
@@ -324,7 +332,10 @@ class DefaultCreateEventComponent(
                     end = start,
                 )
 
-                EventType.EVENT -> copy(eventType = type)
+                EventType.EVENT -> copy(
+                    eventType = type,
+                    end = end.takeIf { it > start } ?: defaultEventEnd(start),
+                )
             }
         }
         if (type == EventType.LEAGUE || type == EventType.TOURNAMENT) {
@@ -408,6 +419,7 @@ class DefaultCreateEventComponent(
             .take(normalized)
             .mapIndexed { index, field ->
                 field.copy(
+                    id = if (field.id.isBlank()) newId() else field.id,
                     fieldNumber = index + 1,
                     type = currentEvent.fieldType.name,
                     organizationId = currentEvent.organizationId,
@@ -417,7 +429,11 @@ class DefaultCreateEventComponent(
 
         while (resized.size < normalized) {
             val fieldNumber = resized.size + 1
-            resized += Field(fieldNumber = fieldNumber, organizationId = currentEvent.organizationId).copy(
+            resized += Field(
+                fieldNumber = fieldNumber,
+                organizationId = currentEvent.organizationId,
+                id = newId(),
+            ).copy(
                 name = "Field $fieldNumber",
                 type = currentEvent.fieldType.name,
             )
@@ -459,6 +475,10 @@ class DefaultCreateEventComponent(
         _leagueSlots.value = slots
     }
 
+    override fun updateLeagueScoringConfig(update: LeagueScoringConfigDTO.() -> LeagueScoringConfigDTO) {
+        _leagueScoringConfig.value = _leagueScoringConfig.value.update()
+    }
+
     private fun applyRentalDefaults() {
         val context = rentalContext ?: return
         val now = Clock.System.now()
@@ -472,7 +492,7 @@ class DefaultCreateEventComponent(
             Instant.fromEpochMilliseconds(context.startEpochMillis + ONE_HOUR_MILLIS)
         }
 
-        _newEventState.value = _newEventState.value.copy(
+        _newEventState.value = applyRentalConstraints(_newEventState.value.copy(
             name = _newEventState.value.name.ifBlank { "${context.organizationName} Rental Event" },
             location = context.organizationLocation ?: _newEventState.value.location,
             coordinates = context.organizationCoordinates ?: _newEventState.value.coordinates,
@@ -490,7 +510,62 @@ class DefaultCreateEventComponent(
             } else {
                 normalizedEnd
             },
+        ))
+    }
+
+    private fun rentalRequiredTemplateIds(): List<String> {
+        return rentalContext?.requiredTemplateIds
+            ?.map { templateId -> templateId.trim() }
+            ?.filter { templateId -> templateId.isNotEmpty() }
+            ?.distinct()
+            ?: emptyList()
+    }
+
+    private fun applyRentalConstraints(event: Event): Event {
+        if (!_isRentalFlow.value) {
+            return event
+        }
+        val context = rentalContext ?: return event
+
+        val contextStart = Instant.fromEpochMilliseconds(context.startEpochMillis)
+        val contextEnd = Instant.fromEpochMilliseconds(context.endEpochMillis)
+        val normalizedStart = if (contextStart == Instant.DISTANT_PAST) {
+            event.start
+        } else {
+            contextStart
+        }
+        val minimumEnd = Instant.fromEpochMilliseconds(normalizedStart.toEpochMilliseconds() + ONE_HOUR_MILLIS)
+        val normalizedEnd = when {
+            contextEnd > normalizedStart -> contextEnd
+            event.end > normalizedStart -> event.end
+            else -> minimumEnd
+        }
+
+        val lockedFieldIds = context.selectedFieldIds
+            .ifEmpty { context.organizationFieldIds }
+            .map { fieldId -> fieldId.trim() }
+            .filter(String::isNotEmpty)
+            .distinct()
+        val lockedTimeSlotIds = context.selectedTimeSlotIds
+            .map { slotId -> slotId.trim() }
+            .filter(String::isNotEmpty)
+            .distinct()
+        val lockedPrice = context.rentalPriceCents.takeIf { it > 0 } ?: event.priceCents
+
+        var next = event.copy(
+            eventType = EventType.EVENT,
+            organizationId = context.organizationId,
+            start = normalizedStart,
+            end = normalizedEnd,
+            priceCents = lockedPrice,
         )
+        if (lockedFieldIds.isNotEmpty()) {
+            next = next.copy(fieldIds = lockedFieldIds)
+        }
+        if (lockedTimeSlotIds.isNotEmpty()) {
+            next = next.copy(timeSlotIds = lockedTimeSlotIds)
+        }
+        return next
     }
 
     private suspend fun processRentalPaymentBeforeCreate(eventDraft: Event) {
@@ -578,11 +653,16 @@ class DefaultCreateEventComponent(
             }
         }
 
-        eventRepository.createEvent(eventWithFields)
-            .onSuccess {
+        eventRepository.createEvent(
+            eventWithFields,
+            requiredTemplateIds = rentalRequiredTemplateIds(),
+            leagueScoringConfig = _leagueScoringConfig.value
+                .takeIf { eventWithFields.eventType == EventType.LEAGUE },
+        )
+            .onSuccess { createdEvent ->
                 releaseRentalCheckoutLocks()
                 loadingHandler.hideLoading()
-                onEventCreated()
+                onEventCreated(createdEvent)
             }
             .onFailure {
                 releaseRentalCheckoutLocks()
@@ -664,6 +744,7 @@ class DefaultCreateEventComponent(
             drafts += Field(
                 fieldNumber = number,
                 organizationId = event.organizationId,
+                id = newId(),
             ).copy(
                 name = "Field $number",
                 type = event.fieldType.name,
@@ -982,6 +1063,25 @@ class DefaultCreateEventComponent(
             return false
         }
         return firstStart < secondEnd && secondStart < firstEnd
+    }
+
+    private fun createInitialEventDraft(now: Instant = Clock.System.now()): Event {
+        val start = roundedStartAtLeastOneHourFrom(now)
+        return Event(
+            start = start,
+            end = defaultEventEnd(start),
+        )
+    }
+
+    private fun roundedStartAtLeastOneHourFrom(now: Instant): Instant {
+        val earliestStartMillis = now.toEpochMilliseconds() + ONE_HOUR_MILLIS
+        val roundedMillis =
+            ((earliestStartMillis + ONE_HOUR_MILLIS - 1) / ONE_HOUR_MILLIS) * ONE_HOUR_MILLIS
+        return Instant.fromEpochMilliseconds(roundedMillis)
+    }
+
+    private fun defaultEventEnd(start: Instant): Instant {
+        return Instant.fromEpochMilliseconds(start.toEpochMilliseconds() + ONE_HOUR_MILLIS)
     }
 
     private fun createChild(

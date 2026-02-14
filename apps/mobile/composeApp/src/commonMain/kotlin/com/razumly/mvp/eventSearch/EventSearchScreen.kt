@@ -251,6 +251,15 @@ fun EventSearchScreen(
     val selectedTimeSlotIdsForCreate = remember(validResolvedSelections) {
         validResolvedSelections.flatMap { resolved -> resolved.slots.map { slot -> slot.id } }.distinct()
     }
+    val selectedRequiredTemplateIdsForCreate = remember(validResolvedSelections) {
+        validResolvedSelections
+            .flatMap { resolved ->
+                resolved.slots.flatMap { slot -> slot.requiredTemplateIds }
+            }
+            .map { templateId -> templateId.trim() }
+            .filter { templateId -> templateId.isNotEmpty() }
+            .distinct()
+    }
     val rentalStartInstant = remember(validResolvedSelections) {
         validResolvedSelections.minOfOrNull { resolved -> resolved.startInstant }
     }
@@ -639,6 +648,7 @@ fun EventSearchScreen(
                                                         organizationFieldIds = organization.fieldIds,
                                                         selectedFieldIds = selectedFieldIdsForCreate,
                                                         selectedTimeSlotIds = selectedTimeSlotIdsForCreate,
+                                                        requiredTemplateIds = selectedRequiredTemplateIdsForCreate,
                                                         rentalPriceCents = totalRentalPriceCents,
                                                         startEpochMillis = start.toEpochMilliseconds(),
                                                         endEpochMillis = end.toEpochMilliseconds(),

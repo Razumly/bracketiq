@@ -29,6 +29,8 @@ import com.arkivanov.decompose.ExperimentalDecomposeApi
 import com.arkivanov.decompose.extensions.compose.stack.animation.predictiveback.PredictiveBackGestureIcon
 import com.arkivanov.decompose.extensions.compose.stack.animation.predictiveback.PredictiveBackGestureOverlay
 import com.arkivanov.essenty.backhandler.BackDispatcher
+import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
+import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.presentation.composables.NativeViewFactory
 
 val LocalNativeViewFactory = staticCompositionLocalOf<NativeViewFactory> {
@@ -71,7 +73,9 @@ fun MainViewController(
                         ),
                         permissionsController = permissionsController,
                         locationTracker = getKoin().get<LocationTracker>(),
-                        deepLinkNav = deepLinkNav
+                        deepLinkNavStart = deepLinkNav,
+                        userRepository = getKoin().get<IUserRepository>(),
+                        pushNotificationsRepository = getKoin().get<IPushNotificationsRepository>(),
                     )
                 } catch (e: Exception) {
                     Napier.e(tag = "Root", throwable = e) { "Component creation failed" }

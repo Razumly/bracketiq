@@ -22,7 +22,7 @@ fun NumberInputField(
         PlatformTextField(
             value = if (value == "0") "" else value,
             onValueChange = onValueChange,
-            modifier = Modifier.fillMaxWidth(.5f),
+            modifier = Modifier.fillMaxWidth(),
             label = label,
             placeholder = placeholder ?: "",
             keyboardType = "number",

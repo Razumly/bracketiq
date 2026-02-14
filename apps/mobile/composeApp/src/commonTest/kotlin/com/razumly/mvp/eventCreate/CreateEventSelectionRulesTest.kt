@@ -78,4 +78,24 @@ class CreateEventSelectionRulesTest {
 
         assertEquals(EventType.EVENT, updated.eventType)
     }
+
+    @Test
+    fun rental_flow_forces_event_type_but_does_not_apply_team_signup_defaults() {
+        val start = Instant.fromEpochMilliseconds(15_000L)
+        val end = Instant.fromEpochMilliseconds(20_000L)
+        val draft = Event(
+            eventType = EventType.TOURNAMENT,
+            teamSignup = false,
+            singleDivision = false,
+            start = start,
+            end = end,
+        )
+
+        val updated = draft.applyCreateSelectionRules(isRentalFlow = true)
+
+        assertEquals(EventType.EVENT, updated.eventType)
+        assertFalse(updated.teamSignup)
+        assertFalse(updated.singleDivision)
+        assertEquals(end, updated.end)
+    }
 }

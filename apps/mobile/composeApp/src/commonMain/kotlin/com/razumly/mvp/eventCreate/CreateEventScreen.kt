@@ -55,6 +55,7 @@ fun CreateEventScreen(
     mapComponent: MapComponent,
 ) {
     var canProceed by remember { mutableStateOf(false) }
+    var validationErrors by remember { mutableStateOf<List<String>>(emptyList()) }
     val defaultEvent by component.defaultEvent.collectAsState()
     val newEventState by component.newEventState.collectAsState()
     val childStack by component.childStack.subscribeAsState()
@@ -63,6 +64,7 @@ fun CreateEventScreen(
     val sports by component.sports.collectAsState()
     val localFields by component.localFields.collectAsState()
     val leagueSlots by component.leagueSlots.collectAsState()
+    val leagueScoringConfig by component.leagueScoringConfig.collectAsState()
     val isEditing = true
     val currentUser by component.currentUser.collectAsState()
     val isDark = isSystemInDarkTheme()
@@ -160,6 +162,8 @@ fun CreateEventScreen(
                         onClick = {
                             if (canProceed) {
                                 component.nextStep()
+                            } else {
+                                errorHandler.showPopup(buildValidationPopupMessage(validationErrors))
                             }
                         }
                     ) {
@@ -181,7 +185,11 @@ fun CreateEventScreen(
                     }
                     FloatingActionButton(
                         onClick = {
-                            component.createEvent()
+                            if (canProceed) {
+                                component.createEvent()
+                            } else {
+                                errorHandler.showPopup(buildValidationPopupMessage(validationErrors))
+                            }
                         }
                     ) {
                         Icon(
@@ -208,12 +216,14 @@ fun CreateEventScreen(
                         navPadding = LocalNavBarPadding.current,
                         editView = isEditing,
                         isNewEvent = true,
+                        rentalTimeLocked = isRentalFlow,
                         onAddCurrentUser = component::addUserToEvent,
                         imageScheme = imageScheme,
                         imageIds = eventImageUrls,
                         sports = sports,
                         editableFields = localFields,
                         leagueTimeSlots = leagueSlots,
+                        leagueScoringConfig = leagueScoringConfig,
                         onHostCreateAccount = component::createAccount,
                         onPlaceSelected = component::selectPlace,
                         onEditEvent = onEditEvent,
@@ -229,9 +239,17 @@ fun CreateEventScreen(
                             component.updateLeagueTimeSlot(index) { updated }
                         },
                         onRemoveLeagueTimeSlot = component::removeLeagueTimeSlot,
+                        onLeagueScoringConfigChange = { updated ->
+                            component.updateLeagueScoringConfig { updated }
+                        },
                         onUploadSelected = component::onUploadSelected,
                         onDeleteImage = component::deleteImage,
-                    ) { isValid -> canProceed = isValid }
+                        onValidationChange = { isValid, errors ->
+                            canProceed = isValid
+                            validationErrors = errors
+                        },
+                        joinButton = {}
+                    )
 
                     is CreateEventComponent.Child.Preview -> Preview(
                         modifier = Modifier.fillMaxSize(),
@@ -242,4 +260,17 @@ fun CreateEventScreen(
 
         }
     )
+}
+
+private fun buildValidationPopupMessage(errors: List<String>): String {
+    if (errors.isEmpty()) {
+        return "Please fix the highlighted fields."
+    }
+    if (errors.size == 1) {
+        return errors.first()
+    }
+    val shown = errors.take(3)
+    val remaining = errors.size - shown.size
+    val suffix = if (remaining > 0) " +$remaining more" else ""
+    return "Fix: ${shown.joinToString("; ")}$suffix"
 }

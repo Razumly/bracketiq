@@ -45,6 +45,15 @@ class MvpApiClient(
         }.body()
     }
 
+    suspend inline fun <reified Req : Any> postNoResponse(path: String, body: Req) {
+        val token = tokenStore.get()
+        http.post(urlFor(path)) {
+            contentType(ContentType.Application.Json)
+            if (token.isNotBlank()) header(HttpHeaders.Authorization, "Bearer $token")
+            setBody(body)
+        }.bodyAsText()
+    }
+
     suspend inline fun <reified Req : Any, reified Res> put(path: String, body: Req): Res {
         val token = tokenStore.get()
         return http.put(urlFor(path)) {

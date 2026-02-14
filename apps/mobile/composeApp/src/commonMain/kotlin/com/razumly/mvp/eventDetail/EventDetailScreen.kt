@@ -26,6 +26,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Announcement
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -433,6 +434,19 @@ fun EventDetailScreen(
                                         }, leadingIcon = {
                                             Icon(Icons.Default.Edit, contentDescription = null)
                                         }, enabled = isHost
+                                        )
+                                    }
+
+                                    if (isHost && selectedEvent.event.state == "UNPUBLISHED") {
+                                        DropdownMenuItem(
+                                            text = { Text("Publish") },
+                                            onClick = {
+                                                component.publishEvent()
+                                                showOptionsDropdown = false
+                                            },
+                                            leadingIcon = {
+                                                Icon(Icons.Default.Check, contentDescription = null)
+                                            },
                                         )
                                     }
 

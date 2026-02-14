@@ -11,6 +11,7 @@ data class RentalCreateContext(
     val organizationFieldIds: List<String> = emptyList(),
     val selectedFieldIds: List<String> = emptyList(),
     val selectedTimeSlotIds: List<String> = emptyList(),
+    val requiredTemplateIds: List<String> = emptyList(),
     val rentalPriceCents: Int = 0,
     val startEpochMillis: Long,
     val endEpochMillis: Long,

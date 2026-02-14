@@ -348,6 +348,14 @@ class TeamRepository(
                     }
                 ),
             )
+
+            added.forEach { invitedUserId ->
+                pushNotificationRepository.sendUserNotification(
+                    userId = invitedUserId,
+                    title = "Team invite",
+                    body = "You have been invited to join a team.",
+                )
+            }
         }
 
         val removed = (oldSet - newSet).filter(String::isNotBlank)

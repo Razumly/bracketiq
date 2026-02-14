@@ -26,10 +26,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.google.android.gms.maps.CameraUpdateFactory
-import com.google.android.gms.maps.MapsInitializer
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
@@ -78,11 +76,6 @@ actual fun EventMap(
     var selectedPOI by remember { mutableStateOf<PointOfInterest?>(null) }
     var isAnimating by remember { mutableStateOf(false) }
     val poiMarkerState = remember { MarkerState() }
-    val localContext = LocalContext.current
-
-    LaunchedEffect(localContext) {
-        MapsInitializer.initialize(localContext)
-    }
 
     LaunchedEffect(selectedPOI) {
         selectedPOI?.let { poi ->

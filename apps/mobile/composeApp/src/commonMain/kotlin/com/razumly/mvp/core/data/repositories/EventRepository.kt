@@ -4,6 +4,7 @@ import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.Bounds
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
+import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
@@ -22,6 +23,8 @@ import com.razumly.mvp.core.network.dto.EventSearchFiltersDto
 import com.razumly.mvp.core.network.dto.EventSearchRequestDto
 import com.razumly.mvp.core.network.dto.EventSearchUserLocationDto
 import com.razumly.mvp.core.network.dto.EventsResponseDto
+import com.razumly.mvp.core.network.dto.ScheduleEventRequestDto
+import com.razumly.mvp.core.network.dto.ScheduleEventResponseDto
 import com.razumly.mvp.core.network.dto.UpdateEventRequestDto
 import com.razumly.mvp.core.network.dto.toUpdateDto
 import io.ktor.http.encodeURLQueryComponent
@@ -40,7 +43,12 @@ interface IEventRepository : IMVPRepository {
     fun resetCursor()
     suspend fun getEvent(eventId: String): Result<Event>
     suspend fun getEventsByOrganization(organizationId: String, limit: Int = 200): Result<List<Event>>
-    suspend fun createEvent(newEvent: Event): Result<Event>
+    suspend fun createEvent(
+        newEvent: Event,
+        requiredTemplateIds: List<String> = emptyList(),
+        leagueScoringConfig: LeagueScoringConfigDTO? = null,
+    ): Result<Event>
+    suspend fun scheduleEvent(eventId: String, participantCount: Int? = null): Result<Event>
     suspend fun updateEvent(newEvent: Event): Result<Event>
     suspend fun updateLocalEvent(newEvent: Event): Result<Event>
     fun getEventsInBoundsFlow(bounds: Bounds): Flow<Result<List<Event>>>
@@ -162,11 +170,21 @@ class EventRepository(
         }
     }
 
-    override suspend fun createEvent(newEvent: Event): Result<Event> =
+    override suspend fun createEvent(
+        newEvent: Event,
+        requiredTemplateIds: List<String>,
+        leagueScoringConfig: LeagueScoringConfigDTO?,
+    ): Result<Event> =
         singleResponse(networkCall = {
             val created = api.post<CreateEventRequestDto, EventResponseDto>(
                 path = "api/events",
-                body = CreateEventRequestDto(id = newEvent.id, event = newEvent.toUpdateDto()),
+                body = CreateEventRequestDto(
+                    id = newEvent.id,
+                    event = newEvent.toUpdateDto(
+                        requiredTemplateIdsOverride = requiredTemplateIds,
+                        leagueScoringConfigOverride = leagueScoringConfig,
+                    ),
+                ),
             ).event?.toEventOrNull() ?: error("Create event response missing event")
             created
         }, saveCall = { event ->
@@ -175,6 +193,24 @@ class EventRepository(
         }, onReturn = { event ->
             event
         })
+
+    override suspend fun scheduleEvent(eventId: String, participantCount: Int?): Result<Event> =
+        singleResponse(
+            networkCall = {
+                val normalizedId = eventId.trim()
+                if (normalizedId.isEmpty()) error("Schedule event requires an event id")
+                api.post<ScheduleEventRequestDto, ScheduleEventResponseDto>(
+                    path = "api/events/$normalizedId/schedule",
+                    body = ScheduleEventRequestDto(participantCount = participantCount),
+                ).event?.toEventOrNull() ?: error("Schedule event response missing event")
+            },
+            saveCall = { event ->
+                databaseService.getMatchDao.deleteMatchesOfTournament(event.id)
+                databaseService.getEventDao.upsertEvent(event)
+                persistEventRelations(event)
+            },
+            onReturn = { event -> event },
+        )
 
     override suspend fun updateEvent(newEvent: Event): Result<Event> =
         singleResponse(networkCall = {
