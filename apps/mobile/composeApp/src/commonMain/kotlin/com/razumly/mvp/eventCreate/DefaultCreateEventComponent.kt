@@ -427,7 +427,6 @@ class DefaultCreateEventComponent(
                     divisions = field.divisions
                         .normalizeDivisionLabels()
                         .ifEmpty { defaultFieldDivisions(currentEvent) },
-                    type = currentEvent.fieldType.name,
                     organizationId = currentEvent.organizationId,
                 )
             }
@@ -442,7 +441,6 @@ class DefaultCreateEventComponent(
             ).copy(
                 name = "Field $fieldNumber",
                 divisions = defaultFieldDivisions(currentEvent),
-                type = currentEvent.fieldType.name,
             )
         }
         _localFields.value = resized
@@ -754,7 +752,6 @@ class DefaultCreateEventComponent(
                     divisions = field.divisions
                         .normalizeDivisionLabels()
                         .ifEmpty { defaultFieldDivisions(event) },
-                    type = event.fieldType.name,
                     organizationId = event.organizationId,
                 )
             }
@@ -769,7 +766,6 @@ class DefaultCreateEventComponent(
             ).copy(
                 name = "Field $number",
                 divisions = defaultFieldDivisions(event),
-                type = event.fieldType.name,
             )
         }
 
@@ -823,7 +819,6 @@ class DefaultCreateEventComponent(
                 divisions = field.divisions
                     .normalizeDivisionLabels()
                     .ifEmpty { defaultFieldDivisions(event) },
-                type = event.fieldType.name,
                 organizationId = event.organizationId,
             )
         }

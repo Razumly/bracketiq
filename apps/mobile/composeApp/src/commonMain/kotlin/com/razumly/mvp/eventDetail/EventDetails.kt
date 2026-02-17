@@ -75,7 +75,6 @@ import com.razumly.mvp.core.data.dataTypes.withLeagueConfig
 import com.razumly.mvp.core.data.dataTypes.withTournamentConfig
 import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
-import com.razumly.mvp.core.data.dataTypes.enums.FieldType
 import com.razumly.mvp.core.data.util.normalizeDivisionLabels
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.composables.DropdownOption
@@ -575,7 +574,7 @@ fun EventDetails(
                         )
                         CardSection(
                             "Type",
-                            "${event.fieldType} • ${event.eventType}".toTitleCase(),
+                            event.eventType.name.toTitleCase(),
                         )
                         val sportName = eventWithRelations.sport?.name
                             ?: sports.firstOrNull { it.id == event.sportId }?.name
@@ -627,42 +626,20 @@ fun EventDetails(
                             )
                         }
 
-                        Row(
+                        PlatformTextField(
+                            value = editEvent.start.toLocalDateTime(
+                                TimeZone.currentSystemDefault()
+                            ).format(dateTimeFormat),
+                            onValueChange = {},
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            PlatformDropdown(
-                                selectedValue = editEvent.fieldType.name,
-                                onSelectionChange = { selectedValue ->
-                                    val selectedFieldType =
-                                        FieldType.entries.find { it.name == selectedValue }
-                                    selectedFieldType?.let { fieldType ->
-                                        onEditEvent { copy(fieldType = fieldType) }
-                                    }
-                                },
-                                options = FieldType.entries.map { fieldType ->
-                                    DropdownOption(
-                                        value = fieldType.name, label = fieldType.name
-                                    )
-                                },
-                                label = "Field Type",
-                                modifier = Modifier.weight(1f),
-                            )
-                            PlatformTextField(
-                                value = editEvent.start.toLocalDateTime(
-                                    TimeZone.currentSystemDefault()
-                                ).format(dateTimeFormat),
-                                onValueChange = {},
-                                modifier = Modifier.weight(1f),
-                                label = "Start Date & Time",
-                                readOnly = true,
-                                onTap = {
-                                    if (!rentalTimeLocked) {
-                                        showStartPicker = true
-                                    }
-                                },
-                            )
-                        }
+                            label = "Start Date & Time",
+                            readOnly = true,
+                            onTap = {
+                                if (!rentalTimeLocked) {
+                                    showStartPicker = true
+                                }
+                            },
+                        )
 
                         if (editEvent.eventType == EventType.EVENT) {
                             Row(

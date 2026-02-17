@@ -167,17 +167,15 @@ fun EventCard(
                 )
             }
 
-            StylizedText("${event.fieldType} ${event.eventType}".toTitleCase(), patterns)
+            StylizedText(event.eventType.name.toTitleCase(), patterns)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 val formattedDivisions = event.divisions.normalizeDivisionLabels().joinToString(", ")
                 StylizedText("Divisions: $formattedDivisions", patterns)
-                if (event is Event) {
-                    Text(
-                        text = "Prize: " + event.prize,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.background
-                    )
-                }
+                Text(
+                    text = "Prize: " + event.prize,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.background
+                )
             }
             HorizontalDivider(thickness = 2.dp)
 

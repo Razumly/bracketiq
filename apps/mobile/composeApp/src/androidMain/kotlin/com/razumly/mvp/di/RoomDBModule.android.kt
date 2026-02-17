@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import com.razumly.mvp.core.data.DatabaseService
+import com.razumly.mvp.core.data.MIGRATION_80_81
 import com.razumly.mvp.core.data.MVPDatabaseservice
 import org.koin.dsl.bind
 import org.koin.dsl.module
@@ -16,6 +17,7 @@ actual val roomDBModule = module {
             context.applicationContext,
             dbFile.absolutePath
         ).setDriver(BundledSQLiteDriver())
+            .addMigrations(MIGRATION_80_81)
             .fallbackToDestructiveMigration(false)
             .build()
 

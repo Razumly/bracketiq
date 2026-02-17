@@ -307,7 +307,6 @@ class EventRepositoryHttpTest {
                           "end": "2026-02-10T01:00:00Z",
                           "coordinates": [-80.0, 25.0],
                           "location": "Miami",
-                          "fieldType": "GRASS",
                           "eventType": "EVENT",
                           "userIds": [],
                           "teamIds": []

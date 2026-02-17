@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -51,7 +50,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
-import com.razumly.mvp.core.data.dataTypes.enums.FieldType
 import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.eventSearch.util.EventFilter
 import kotlinx.datetime.TimeZone
@@ -171,7 +169,7 @@ fun SearchBox(
 
 @OptIn(ExperimentalTime::class)
 private fun isFilterActive(filter: EventFilter): Boolean {
-    return filter.eventType != null || filter.field != null || filter.price != null || filter.date.second != null
+    return filter.eventType != null || filter.price != null || filter.date.second != null
 }
 
 @Composable
@@ -225,13 +223,6 @@ private fun FilterDropdown(
 
                     // Event Type Filter
                     EventTypeFilterSection(
-                        currentFilter = currentFilter, onFilterChange = onFilterChange
-                    )
-
-                    HorizontalDivider()
-
-                    // Field Type Filter
-                    FieldTypeFilterSection(
                         currentFilter = currentFilter, onFilterChange = onFilterChange
                     )
 
@@ -329,37 +320,6 @@ private fun EventTypeFilterSection(
                 FilterChip(selected = currentFilter.eventType == EventType.LEAGUE,
                     onClick = { onFilterChange { copy(eventType = EventType.LEAGUE) } },
                     label = { Text("Leagues") })
-            }
-        }
-    }
-}
-
-@Composable
-@OptIn(ExperimentalTime::class)
-private fun FieldTypeFilterSection(
-    currentFilter: EventFilter, onFilterChange: (EventFilter.() -> EventFilter) -> Unit
-) {
-    Column {
-        Text(
-            text = "Field Type",
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.padding(top = 8.dp)
-        ) {
-            item {
-                FilterChip(selected = currentFilter.field == null,
-                    onClick = { onFilterChange { copy(field = null) } },
-                    label = { Text("All Fields") })
-            }
-
-            items(FieldType.entries) { fieldType ->
-                FilterChip(selected = currentFilter.field == fieldType,
-                    onClick = { onFilterChange { copy(field = fieldType) } },
-                    label = { Text(fieldType.name) })
             }
         }
     }
