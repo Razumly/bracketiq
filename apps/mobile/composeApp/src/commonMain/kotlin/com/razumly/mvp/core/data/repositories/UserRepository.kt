@@ -42,6 +42,7 @@ data class FamilyChild(
     val dateOfBirth: String? = null,
     val age: Int? = null,
     val linkStatus: String? = null,
+    val relationship: String? = null,
     val email: String? = null,
     val hasEmail: Boolean? = null,
 )
@@ -74,6 +75,15 @@ interface IUserRepository : IMVPRepository {
         relationship: String? = null,
     ): Result<Unit>
 
+    suspend fun updateChildAccount(
+        childUserId: String,
+        firstName: String,
+        lastName: String,
+        dateOfBirth: String,
+        email: String? = null,
+        relationship: String? = null,
+    ): Result<Unit>
+
     suspend fun linkChildToParent(
         childEmail: String? = null,
         childUserId: String? = null,
@@ -86,6 +96,7 @@ interface IUserRepository : IMVPRepository {
         firstName: String,
         lastName: String,
         userName: String,
+        dateOfBirth: String? = null,
     ): Result<UserData>
 
     suspend fun updateUser(user: UserData): Result<UserData>
@@ -183,6 +194,7 @@ class UserRepository(
         firstName: String,
         lastName: String,
         userName: String,
+        dateOfBirth: String?,
     ): Result<UserData> = runCatching {
         val res = api.post<RegisterRequestDto, AuthResponseDto>(
             path = "api/auth/register",
@@ -193,6 +205,7 @@ class UserRepository(
                 firstName = firstName,
                 lastName = lastName,
                 userName = userName,
+                dateOfBirth = dateOfBirth,
             ),
         )
 
@@ -324,6 +337,41 @@ class UserRepository(
         val response = api.post<CreateChildAccountRequestDto, FamilyActionResponseDto>(
             path = "api/family/children",
             body = CreateChildAccountRequestDto(
+                firstName = normalizedFirstName,
+                lastName = normalizedLastName,
+                email = email?.trim()?.takeIf(String::isNotBlank),
+                dateOfBirth = normalizedDateOfBirth,
+                relationship = relationship?.trim()?.takeIf(String::isNotBlank),
+            ),
+        )
+        response.error?.takeIf(String::isNotBlank)?.let { error(it) }
+    }
+
+    override suspend fun updateChildAccount(
+        childUserId: String,
+        firstName: String,
+        lastName: String,
+        dateOfBirth: String,
+        email: String?,
+        relationship: String?,
+    ): Result<Unit> = runCatching {
+        val normalizedChildUserId = childUserId.trim()
+        val normalizedFirstName = firstName.trim()
+        val normalizedLastName = lastName.trim()
+        val normalizedDateOfBirth = dateOfBirth.trim()
+
+        if (
+            normalizedChildUserId.isBlank() ||
+            normalizedFirstName.isBlank() ||
+            normalizedLastName.isBlank() ||
+            normalizedDateOfBirth.isBlank()
+        ) {
+            error("Child user ID, first name, last name, and date of birth are required.")
+        }
+
+        val response = api.patch<UpdateChildAccountRequestDto, FamilyActionResponseDto>(
+            path = "api/family/children/${normalizedChildUserId.encodeURLQueryComponent()}",
+            body = UpdateChildAccountRequestDto(
                 firstName = normalizedFirstName,
                 lastName = normalizedLastName,
                 email = email?.trim()?.takeIf(String::isNotBlank),
@@ -519,6 +567,7 @@ private data class FamilyChildDto(
     val dateOfBirth: String? = null,
     val age: Int? = null,
     val linkStatus: String? = null,
+    val relationship: String? = null,
     val email: String? = null,
     val hasEmail: Boolean? = null,
 ) {
@@ -533,6 +582,7 @@ private data class FamilyChildDto(
             dateOfBirth = dateOfBirth,
             age = age,
             linkStatus = linkStatus,
+            relationship = relationship,
             email = email,
             hasEmail = hasEmail,
         )
@@ -541,6 +591,15 @@ private data class FamilyChildDto(
 
 @Serializable
 private data class CreateChildAccountRequestDto(
+    val firstName: String,
+    val lastName: String,
+    val email: String? = null,
+    val dateOfBirth: String,
+    val relationship: String? = null,
+)
+
+@Serializable
+private data class UpdateChildAccountRequestDto(
     val firstName: String,
     val lastName: String,
     val email: String? = null,

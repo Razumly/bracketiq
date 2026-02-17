@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -34,6 +35,10 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.razumly.mvp.core.data.dataTypes.UserData
 
+private enum class InviteEntryMode {
+    SearchPlayers,
+    InviteByEmail,
+}
 
 @Composable
 fun SearchPlayerDialog(
@@ -48,8 +53,11 @@ fun SearchPlayerDialog(
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var showSearchOverlay by remember { mutableStateOf(false) }
+    var mode by remember(onInviteByEmail) { mutableStateOf(InviteEntryMode.SearchPlayers) }
+
+    val isEmailMode = mode == InviteEntryMode.InviteByEmail
     val normalizedQuery = searchQuery.trim()
-    val showInviteByEmail = onInviteByEmail != null && normalizedQuery.isProbablyEmail()
+    val showInviteByEmail = onInviteByEmail != null && isEmailMode && normalizedQuery.isProbablyEmail()
 
     Dialog(
         onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -78,13 +86,20 @@ fun SearchPlayerDialog(
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         SearchBox(
-                            placeholder = "Search Players",
+                            placeholder = if (isEmailMode) "Invite player by email" else "Search Players",
                             filter = false,
                             onChange = { newQuery ->
                                 searchQuery = newQuery
-                                onSearch(newQuery)
+                                if (!isEmailMode) {
+                                    onSearch(newQuery)
+                                }
                             },
-                            onSearch = { searchQuery = it },
+                            onSearch = {
+                                searchQuery = it
+                                if (!isEmailMode) {
+                                    onSearch(it)
+                                }
+                            },
                             modifier = Modifier,
                             onFocusChange = { isFocused ->
                                 if (isFocused) {
@@ -97,6 +112,27 @@ fun SearchPlayerDialog(
                             },
                             onFilterChange = { },
                             onToggleFilter = { },
+                            rowAction = onInviteByEmail?.let {
+                                {
+                                    OutlinedButton(onClick = {
+                                        mode = if (isEmailMode) {
+                                            InviteEntryMode.SearchPlayers
+                                        } else {
+                                            InviteEntryMode.InviteByEmail
+                                        }
+                                        searchQuery = ""
+                                        if (!isEmailMode) {
+                                            onSearch("")
+                                        }
+                                        showSearchOverlay = true
+                                    }) {
+                                        Text(
+                                            text = if (isEmailMode) "Search Players"
+                                            else "Invite by Email"
+                                        )
+                                    }
+                                }
+                            },
                         )
                     }
                 }
@@ -108,20 +144,22 @@ fun SearchPlayerDialog(
                         showSearchOverlay = false
                     },
                     initial = {
-                        LazyColumn {
-                            if (freeAgents.isNotEmpty()) {
-                                item {
-                                    Card(
-                                        Modifier.padding(vertical = 4.dp, horizontal = 8.dp)
-                                            .fillMaxWidth()
-                                    ) {
-                                        Text(
-                                            text = "Free Agents of $eventName",
-                                            modifier = Modifier.padding(8.dp),
-                                            overflow = TextOverflow.Ellipsis,
-                                            maxLines = 1,
-                                            style = MaterialTheme.typography.bodyLarge
-                                        )
+                        if (!isEmailMode) {
+                            LazyColumn {
+                                if (freeAgents.isNotEmpty()) {
+                                    item {
+                                        Card(
+                                            Modifier.padding(vertical = 4.dp, horizontal = 8.dp)
+                                                .fillMaxWidth()
+                                        ) {
+                                            Text(
+                                                text = "Free Agents of $eventName",
+                                                modifier = Modifier.padding(8.dp),
+                                                overflow = TextOverflow.Ellipsis,
+                                                maxLines = 1,
+                                                style = MaterialTheme.typography.bodyLarge
+                                            )
+                                        }
                                     }
                                 }
                                 items(freeAgents) { player ->
@@ -132,62 +170,97 @@ fun SearchPlayerDialog(
                                         PlayerCard(player)
                                     }
                                 }
-                            }
-                            if (friends.isNotEmpty()) {
-                                item {
-                                    Card(
-                                        Modifier.padding(vertical = 4.dp, horizontal = 8.dp)
-                                            .fillMaxWidth()
-                                    ) {
-                                        Text(
-                                            text = "Friends",
-                                            modifier = Modifier.padding(8.dp),
-                                            overflow = TextOverflow.Ellipsis,
-                                            maxLines = 1,
-                                            style = MaterialTheme.typography.bodyLarge
-                                        )
+                                if (friends.isNotEmpty()) {
+                                    item {
+                                        Card(
+                                            Modifier.padding(vertical = 4.dp, horizontal = 8.dp)
+                                                .fillMaxWidth()
+                                        ) {
+                                            Text(
+                                                text = "Friends",
+                                                modifier = Modifier.padding(8.dp),
+                                                overflow = TextOverflow.Ellipsis,
+                                                maxLines = 1,
+                                                style = MaterialTheme.typography.bodyLarge
+                                            )
+                                        }
+                                    }
+                                    items(friends) { friend ->
+                                        Row(modifier = Modifier.fillMaxWidth().clickable {
+                                            onPlayerSelected(friend)
+                                            onDismiss()
+                                        }.padding(8.dp)) {
+                                            PlayerCard(friend)
+                                        }
                                     }
                                 }
-                                items(friends) { friend ->
-                                    Row(modifier = Modifier.fillMaxWidth().clickable {
-                                        onPlayerSelected(friend)
-                                        onDismiss()
-                                    }.padding(8.dp)) {
-                                        PlayerCard(friend)
-                                    }
+                            }
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Card(modifier = Modifier.fillMaxWidth()) {
+                                    Text(
+                                        text = "Enter an email and tap Invite by Email.",
+                                        modifier = Modifier.padding(12.dp),
+                                        style = MaterialTheme.typography.bodyLarge
+                                    )
                                 }
                             }
                         }
                     },
                     suggestions = {
                         LazyColumn {
-                            if (showInviteByEmail) {
-                                item {
-                                    Card(
-                                        Modifier
-                                            .padding(vertical = 4.dp, horizontal = 8.dp)
-                                            .fillMaxWidth()
-                                            .clickable {
-                                                onInviteByEmail?.invoke(normalizedQuery)
-                                                onDismiss()
+                            if (isEmailMode) {
+                                when {
+                                    showInviteByEmail -> {
+                                        item {
+                                            Card(
+                                                Modifier
+                                                    .padding(vertical = 4.dp, horizontal = 8.dp)
+                                                    .fillMaxWidth()
+                                                    .clickable {
+                                                        onInviteByEmail?.invoke(normalizedQuery)
+                                                        onDismiss()
+                                                    }
+                                            ) {
+                                                Text(
+                                                    text = "Invite $normalizedQuery",
+                                                    modifier = Modifier.padding(12.dp),
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    maxLines = 1,
+                                                    style = MaterialTheme.typography.bodyLarge
+                                                )
                                             }
-                                    ) {
-                                        Text(
-                                            text = "Invite $normalizedQuery",
-                                            modifier = Modifier.padding(12.dp),
-                                            overflow = TextOverflow.Ellipsis,
-                                            maxLines = 1,
-                                            style = MaterialTheme.typography.bodyLarge
-                                        )
+                                        }
+                                    }
+
+                                    normalizedQuery.isNotBlank() -> {
+                                        item {
+                                            Card(
+                                                Modifier
+                                                    .padding(vertical = 4.dp, horizontal = 8.dp)
+                                                    .fillMaxWidth()
+                                            ) {
+                                                Text(
+                                                    text = "Enter a valid email address to invite.",
+                                                    modifier = Modifier.padding(12.dp),
+                                                    style = MaterialTheme.typography.bodyLarge
+                                                )
+                                            }
+                                        }
                                     }
                                 }
-                            }
-                            items(suggestions) { player ->
-                                Row(modifier = Modifier.fillMaxWidth().clickable {
-                                    onPlayerSelected(player)
-                                    onDismiss()
-                                }.padding(8.dp)) {
-                                    PlayerCard(player)
+                            } else {
+                                items(suggestions) { player ->
+                                    Row(modifier = Modifier.fillMaxWidth().clickable {
+                                        onPlayerSelected(player)
+                                        onDismiss()
+                                    }.padding(8.dp)) {
+                                        PlayerCard(player)
+                                    }
                                 }
                             }
                         }

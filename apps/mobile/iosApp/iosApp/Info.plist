@@ -89,6 +89,7 @@
 	</array>
 	<key>com.apple.developer.associated-domains</key>
 	<array>
+		<string>applinks:mvp.razumly.com</string>
 		<string>applinks:www.razumly.com</string>
 		<string>applinks:razumly.com</string>
 	</array>

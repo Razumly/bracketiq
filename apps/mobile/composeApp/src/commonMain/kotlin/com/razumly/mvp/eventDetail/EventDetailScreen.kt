@@ -123,6 +123,8 @@ fun EventDetailScreen(
     val editableMatches by component.editableMatches.collectAsState()
     val showTeamDialog by component.showTeamSelectionDialog.collectAsState()
     val showMatchEditDialog by component.showMatchEditDialog.collectAsState()
+    val joinChoiceDialog by component.joinChoiceDialog.collectAsState()
+    val childJoinSelectionDialog by component.childJoinSelectionDialog.collectAsState()
     val textSignaturePrompt by component.textSignaturePrompt.collectAsState()
     val eventImageIds by component.eventImageIds.collectAsState()
 
@@ -630,6 +632,32 @@ fun EventDetailScreen(
                     sizeLimit = selectedEvent.event.teamSizeLimit
                 )
             }
+            joinChoiceDialog?.let {
+                AlertDialog(
+                    onDismissRequest = component::dismissJoinChoiceDialog,
+                    title = { Text("Join Event") },
+                    text = {
+                        Text("You have linked children. Do you want to join yourself or register a child instead?")
+                    },
+                    confirmButton = {
+                        Button(onClick = component::confirmJoinAsSelf) {
+                            Text("Join Myself")
+                        }
+                    },
+                    dismissButton = {
+                        Button(onClick = component::showChildJoinSelection) {
+                            Text("Register Child")
+                        }
+                    },
+                )
+            }
+            childJoinSelectionDialog?.let { dialogState ->
+                ChildJoinSelectionDialog(
+                    dialogState = dialogState,
+                    onDismiss = component::dismissChildJoinSelectionDialog,
+                    onChildSelected = component::selectChildForJoin,
+                )
+            }
             if (showDeleteConfirmation) {
                 AlertDialog(
                     onDismissRequest = { showDeleteConfirmation = false },
@@ -734,6 +762,52 @@ fun TeamSelectionDialog(
                 Text("Manage Teams")
             }
         })
+}
+
+@Composable
+private fun ChildJoinSelectionDialog(
+    dialogState: ChildJoinSelectionDialogState,
+    onDismiss: () -> Unit,
+    onChildSelected: (String) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Select Child") },
+        text = {
+            LazyColumn {
+                items(dialogState.children, key = { it.userId }) { child ->
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = child.hasEmail) { onChildSelected(child.userId) }
+                            .padding(vertical = 8.dp),
+                    ) {
+                        Text(text = child.fullName, style = MaterialTheme.typography.bodyLarge)
+                        val subtitle = if (child.hasEmail) {
+                            child.email ?: "Email available"
+                        } else {
+                            "Missing email. Add an email before registration."
+                        }
+                        Text(
+                            text = subtitle,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (child.hasEmail) {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            } else {
+                                MaterialTheme.colorScheme.error
+                            },
+                        )
+                    }
+                    HorizontalDivider()
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onDismiss) {
+                Text("Close")
+            }
+        },
+    )
 }
 
 @Composable
@@ -1094,6 +1168,13 @@ fun TextSignatureDialog(
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                prompt.step.requiredSignerLabel?.let { signerLabel ->
+                    Text(
+                        text = "Required signer: $signerLabel",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 Text(
                     text = prompt.step.content ?: "No document text was provided.",
                     style = MaterialTheme.typography.bodyMedium,

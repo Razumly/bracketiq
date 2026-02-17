@@ -44,6 +44,14 @@ object AppSecrets {
             fileType = "plist",
             valueKey = "mvpApiBaseUrl"
         ) ?: ""
+
+    // Optional remote API base URL for physical devices.
+    val mvpApiBaseUrlRemote: String
+        get() = getStringResource(
+            filename = "Secrets",
+            fileType = "plist",
+            valueKey = "mvpApiBaseUrlRemote"
+        ) ?: ""
 }
 
 internal fun getStringResource(

@@ -84,34 +84,41 @@ class IOSNativeViewFactory: NativeViewFactory {
         onDateSelected: @escaping (KotlinInstant?) -> Void,
         onDismissRequest: @escaping () -> Void
     ) {
-        let scenes = UIApplication.shared.connectedScenes
-        guard let windowScene = scenes.first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
-              let window = windowScene.windows.first(where: \.isKeyWindow)
-        else { return }
-
-        let initialDateSwift = Date(timeIntervalSince1970: TimeInterval(initialDate.epochSeconds))
-        let minDateSwift = Date(timeIntervalSince1970: TimeInterval(minDate.epochSeconds))
-        let maxDateSwift = Date(timeIntervalSince1970: TimeInterval(maxDate.epochSeconds))
-
-        let vc = DateTimePickerViewController(
-            initialDate: initialDateSwift,
-            minDate: minDateSwift,
-            maxDate: maxDateSwift,
-            getTime: getTime,
-            onConfirm: { date in
-                let instant = KotlinInstant.companion.fromEpochMilliseconds(
-                    epochMilliseconds: Int64(date.timeIntervalSince1970 * 1000)
-                )
-                onDateSelected(instant)
-                window.rootViewController?.dismiss(animated: true)
-            },
-            onDismiss: {
+        DispatchQueue.main.async {
+            guard let presentingViewController = self.getTopViewController() else {
                 onDismissRequest()
-                window.rootViewController?.dismiss(animated: true)
+                return
             }
-        )
 
-        window.rootViewController?.present(vc, animated: true)
+            if presentingViewController is DateTimePickerViewController ||
+                presentingViewController.presentedViewController is DateTimePickerViewController {
+                return
+            }
+
+            let initialDateSwift = Date(timeIntervalSince1970: TimeInterval(initialDate.epochSeconds))
+            let minDateSwift = Date(timeIntervalSince1970: TimeInterval(minDate.epochSeconds))
+            let maxDateSwift = Date(timeIntervalSince1970: TimeInterval(maxDate.epochSeconds))
+
+            let vc = DateTimePickerViewController(
+                initialDate: initialDateSwift,
+                minDate: minDateSwift,
+                maxDate: maxDateSwift,
+                getTime: getTime,
+                onConfirm: { date in
+                    let instant = KotlinInstant.companion.fromEpochMilliseconds(
+                        epochMilliseconds: Int64(date.timeIntervalSince1970 * 1000)
+                    )
+                    onDateSelected(instant)
+                    presentingViewController.dismiss(animated: true)
+                },
+                onDismiss: {
+                    onDismissRequest()
+                    presentingViewController.dismiss(animated: true)
+                }
+            )
+
+            presentingViewController.present(vc, animated: true)
+        }
     }
         
     func presentStripePaymentSheet(

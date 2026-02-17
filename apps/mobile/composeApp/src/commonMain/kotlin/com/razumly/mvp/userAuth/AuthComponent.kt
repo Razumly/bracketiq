@@ -32,7 +32,8 @@ interface AuthComponent {
         confirmPassword: String,
         firstName: String,
         lastName: String,
-        userName: String
+        userName: String,
+        dateOfBirth: String?,
     )
 }
 
@@ -114,7 +115,7 @@ class DefaultAuthComponent(
 
     override fun onSignup(
         email: String, password: String, confirmPassword: String,
-        firstName: String, lastName: String, userName: String
+        firstName: String, lastName: String, userName: String, dateOfBirth: String?
     ) {
         if (password != confirmPassword) {
             return
@@ -124,7 +125,14 @@ class DefaultAuthComponent(
             val maskedEmail = maskEmail(email)
             Napier.d("Auth: signup started for $maskedEmail")
             _loginState.value = LoginState.Loading
-            userRepository.createNewUser(email, password, firstName, lastName, userName)
+            userRepository.createNewUser(
+                email = email,
+                password = password,
+                firstName = firstName,
+                lastName = lastName,
+                userName = userName,
+                dateOfBirth = dateOfBirth,
+            )
                 .onSuccess {
                     Napier.i("Auth: signup succeeded for $maskedEmail")
                     _loginState.value = LoginState.Success

@@ -2,6 +2,8 @@ package com.razumly.mvp.icons
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.unit.dp
@@ -18,37 +20,113 @@ val MVPIcons.ProfileActionEvents: ImageVector
             viewportWidth = 24f,
             viewportHeight = 24f
         ).apply {
-            path(fill = SolidColor(Color.Black)) {
-                moveTo(17f, 12f)
-                horizontalLineToRelative(-5f)
-                verticalLineToRelative(5f)
-                horizontalLineToRelative(5f)
-                verticalLineToRelative(-5f)
+            path(
+                fill = SolidColor(Color.Transparent),
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                moveTo(8f, 2f)
+                verticalLineToRelative(4f)
+            }
+            path(
+                fill = SolidColor(Color.Transparent),
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                moveTo(16f, 2f)
+                verticalLineToRelative(4f)
+            }
+            path(
+                fill = SolidColor(Color.Transparent),
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                moveTo(5f, 4f)
+                lineTo(19f, 4f)
+                arcTo(2f, 2f, 0f, isMoreThanHalf = false, isPositiveArc = true, 21f, 6f)
+                lineTo(21f, 20f)
+                arcTo(2f, 2f, 0f, isMoreThanHalf = false, isPositiveArc = true, 19f, 22f)
+                lineTo(5f, 22f)
+                arcTo(2f, 2f, 0f, isMoreThanHalf = false, isPositiveArc = true, 3f, 20f)
+                lineTo(3f, 6f)
+                arcTo(2f, 2f, 0f, isMoreThanHalf = false, isPositiveArc = true, 5f, 4f)
                 close()
-                moveTo(16f, 1f)
-                verticalLineToRelative(2f)
-                horizontalLineTo(8f)
-                verticalLineTo(1f)
-                horizontalLineTo(6f)
-                verticalLineToRelative(2f)
-                horizontalLineTo(5f)
-                curveToRelative(-1.11f, 0f, -2f, 0.89f, -2f, 2f)
-                verticalLineToRelative(14f)
-                curveToRelative(0f, 1.11f, 0.89f, 2f, 2f, 2f)
-                horizontalLineToRelative(14f)
-                curveToRelative(1.11f, 0f, 2f, -0.89f, 2f, -2f)
-                verticalLineTo(5f)
-                curveToRelative(0f, -1.11f, -0.89f, -2f, -2f, -2f)
-                horizontalLineToRelative(-1f)
-                verticalLineTo(1f)
-                horizontalLineToRelative(-2f)
-                close()
-                moveTo(19f, 19f)
-                horizontalLineTo(5f)
-                verticalLineTo(8f)
-                horizontalLineToRelative(14f)
-                verticalLineToRelative(11f)
-                close()
+            }
+            path(
+                fill = SolidColor(Color.Transparent),
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                moveTo(3f, 10f)
+                horizontalLineToRelative(18f)
+            }
+            path(
+                fill = SolidColor(Color.Transparent),
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                moveTo(8f, 14f)
+                horizontalLineToRelative(0.01f)
+            }
+            path(
+                fill = SolidColor(Color.Transparent),
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                moveTo(12f, 14f)
+                horizontalLineToRelative(0.01f)
+            }
+            path(
+                fill = SolidColor(Color.Transparent),
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                moveTo(16f, 14f)
+                horizontalLineToRelative(0.01f)
+            }
+            path(
+                fill = SolidColor(Color.Transparent),
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                moveTo(8f, 18f)
+                horizontalLineToRelative(0.01f)
+            }
+            path(
+                fill = SolidColor(Color.Transparent),
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                moveTo(12f, 18f)
+                horizontalLineToRelative(0.01f)
+            }
+            path(
+                fill = SolidColor(Color.Transparent),
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                moveTo(16f, 18f)
+                horizontalLineToRelative(0.01f)
             }
         }.build()
 

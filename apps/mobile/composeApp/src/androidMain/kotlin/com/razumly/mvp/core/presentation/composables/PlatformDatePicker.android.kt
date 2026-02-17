@@ -43,7 +43,7 @@ actual fun PlatformDateTimePicker(
         val timeState = rememberTimePickerState(
             initialHour = currentCalendar.get(Calendar.HOUR_OF_DAY),
             initialMinute = currentCalendar.get(Calendar.MINUTE),
-            is24Hour = true
+            is24Hour = false
         )
 
         if (showDatePicker) {

@@ -32,6 +32,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
+import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
+import com.razumly.mvp.core.data.util.DEFAULT_DIVISION_OPTIONS
+import com.razumly.mvp.core.data.util.normalizeDivisionLabels
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import com.razumly.mvp.core.presentation.composables.PlatformDropdown
 import com.razumly.mvp.core.presentation.composables.PlatformTextField
@@ -53,6 +56,7 @@ fun ColumnScope.LeagueScheduleFields(
     slots: List<TimeSlot>,
     onFieldCountChange: (Int) -> Unit,
     onFieldNameChange: (Int, String) -> Unit,
+    onFieldDivisionsChange: (Int, List<String>) -> Unit,
     onAddSlot: () -> Unit,
     onUpdateSlot: (Int, TimeSlot) -> Unit,
     onRemoveSlot: (Int) -> Unit,
@@ -75,14 +79,40 @@ fun ColumnScope.LeagueScheduleFields(
     )
 
     if (fields.isNotEmpty()) {
+        val divisionOptions = remember(fields) {
+            (DEFAULT_DIVISION_OPTIONS + fields.flatMap { it.divisions.normalizeDivisionLabels() })
+                .distinct()
+                .map { division ->
+                    DropdownOption(value = division, label = division)
+                }
+        }
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             fields.forEachIndexed { index, field ->
-                TextInputField(
-                    value = field.name ?: "",
-                    label = "Field ${field.fieldNumber} Name",
-                    onValueChange = { onFieldNameChange(index, it) },
-                    isError = false,
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    TextInputField(
+                        modifier = Modifier.weight(1f),
+                        value = field.name ?: "",
+                        label = "Field ${field.fieldNumber} Name",
+                        onValueChange = { onFieldNameChange(index, it) },
+                        isError = false,
+                    )
+                    PlatformDropdown(
+                        selectedValue = "",
+                        onSelectionChange = {},
+                        options = divisionOptions,
+                        label = "Allowed Divisions",
+                        multiSelect = true,
+                        selectedValues = field.divisions.normalizeDivisionLabels(),
+                        onMultiSelectionChange = { values ->
+                            onFieldDivisionsChange(index, values.normalizeDivisionLabels())
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
         }
     }
@@ -127,6 +157,7 @@ fun ColumnScope.LeagueScheduleFields(
                     modifier = Modifier.fillMaxWidth().padding(12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                    val selectedDays = slot.normalizedDaysOfWeek()
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -153,14 +184,28 @@ fun ColumnScope.LeagueScheduleFields(
                     )
 
                     PlatformDropdown(
-                        selectedValue = slot.dayOfWeek?.toString().orEmpty(),
-                        onSelectionChange = { selected ->
-                            onUpdateSlot(index, slot.copy(dayOfWeek = selected.toIntOrNull()))
-                        },
+                        selectedValue = "",
+                        onSelectionChange = {},
                         options = dayOptions,
-                        label = "Day of Week",
-                        placeholder = "Select a day",
-                        isError = slot.dayOfWeek == null,
+                        label = "Days of Week",
+                        placeholder = "Select days",
+                        multiSelect = true,
+                        selectedValues = selectedDays.map(Int::toString),
+                        onMultiSelectionChange = { selected ->
+                            val days = selected
+                                .mapNotNull(String::toIntOrNull)
+                                .map { ((it % 7) + 7) % 7 }
+                                .distinct()
+                                .sorted()
+                            onUpdateSlot(
+                                index,
+                                slot.copy(
+                                    dayOfWeek = days.firstOrNull(),
+                                    daysOfWeek = days,
+                                )
+                            )
+                        },
+                        isError = selectedDays.isEmpty(),
                     )
 
                     Row(

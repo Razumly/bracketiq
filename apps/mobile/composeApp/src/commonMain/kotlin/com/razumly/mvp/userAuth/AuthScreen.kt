@@ -30,9 +30,12 @@ import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.LoginState
 import com.razumly.mvp.core.presentation.composables.EmailSignInButton
 import com.razumly.mvp.core.presentation.composables.GoogleSignInButton
+import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
 import com.razumly.mvp.core.presentation.composables.PlatformTextField
 import com.razumly.mvp.core.presentation.composables.rememberPlatformFocusManager
 import io.github.aakira.napier.Napier
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 
 @Composable
 fun AuthScreenBase(component: AuthComponent, onOauth2: () -> Unit?) {
@@ -42,6 +45,8 @@ fun AuthScreenBase(component: AuthComponent, onOauth2: () -> Unit?) {
     var firstName by remember { mutableStateOf("") }
     var lastName by remember { mutableStateOf("") }
     var userName by remember { mutableStateOf("") }
+    var dateOfBirth by remember { mutableStateOf("") }
+    var showBirthdayPicker by remember { mutableStateOf(false) }
 
     val passwordError by component.passwordError.collectAsState()
     val loginState by component.loginState.collectAsState()
@@ -60,7 +65,15 @@ fun AuthScreenBase(component: AuthComponent, onOauth2: () -> Unit?) {
 
     val handleSubmit = {
         if (isSignup) {
-            component.onSignup(email, password, confirmPassword, firstName, lastName, userName)
+            component.onSignup(
+                email = email,
+                password = password,
+                confirmPassword = confirmPassword,
+                firstName = firstName,
+                lastName = lastName,
+                userName = userName,
+                dateOfBirth = dateOfBirth.takeIf(String::isNotBlank),
+            )
         } else {
             component.onLogin(email, password)
         }
@@ -121,6 +134,16 @@ fun AuthScreenBase(component: AuthComponent, onOauth2: () -> Unit?) {
                             label = "Username",
                             imeAction = ImeAction.Next,
                             externalFocusManager = userNameFocusManager
+                        )
+
+                        PlatformTextField(
+                            value = dateOfBirth,
+                            onValueChange = {},
+                            modifier = Modifier.fillMaxWidth(),
+                            label = "Birthday",
+                            placeholder = "Select birthday",
+                            readOnly = true,
+                            onTap = { showBirthdayPicker = true },
                         )
                     }
 
@@ -203,6 +226,21 @@ fun AuthScreenBase(component: AuthComponent, onOauth2: () -> Unit?) {
             }
         }
     }
+
+    PlatformDateTimePicker(
+        onDateSelected = { selected ->
+            dateOfBirth = selected
+                ?.toLocalDateTime(TimeZone.currentSystemDefault())
+                ?.date
+                ?.toString()
+                .orEmpty()
+            showBirthdayPicker = false
+        },
+        onDismissRequest = { showBirthdayPicker = false },
+        showPicker = showBirthdayPicker,
+        getTime = false,
+        canSelectPast = true,
+    )
 }
 
 

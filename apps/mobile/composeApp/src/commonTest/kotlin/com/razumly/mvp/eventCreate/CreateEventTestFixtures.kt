@@ -188,6 +188,15 @@ internal class CreateEvent_FakeUserRepository : IUserRepository {
         relationship: String?,
     ): Result<Unit> = Result.success(Unit)
 
+    override suspend fun updateChildAccount(
+        childUserId: String,
+        firstName: String,
+        lastName: String,
+        dateOfBirth: String,
+        email: String?,
+        relationship: String?,
+    ): Result<Unit> = Result.success(Unit)
+
     override suspend fun linkChildToParent(
         childEmail: String?,
         childUserId: String?,
@@ -200,6 +209,7 @@ internal class CreateEvent_FakeUserRepository : IUserRepository {
         firstName: String,
         lastName: String,
         userName: String,
+        dateOfBirth: String?,
     ): Result<UserData> = Result.success(user)
 
     override suspend fun updateUser(user: UserData): Result<UserData> = Result.success(user)
@@ -258,6 +268,9 @@ internal class CreateEvent_FakeEventRepository(
         )
         newEvent
     }
+
+    override suspend fun scheduleEvent(eventId: String, participantCount: Int?): Result<Event> =
+        Result.failure(IllegalStateException("unused"))
 
     override suspend fun updateEvent(newEvent: Event): Result<Event> = Result.failure(IllegalStateException("unused"))
     override suspend fun updateLocalEvent(newEvent: Event): Result<Event> = Result.failure(IllegalStateException("unused"))
@@ -392,6 +405,27 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
     override suspend fun cancelSubscription(subscriptionId: String): Result<Boolean> = Result.success(true)
     override suspend fun restartSubscription(subscriptionId: String): Result<Boolean> = Result.success(true)
     override suspend fun getProductsByIds(productIds: List<String>): Result<List<Product>> = Result.success(emptyList())
+    override suspend fun listProductsByOrganization(organizationId: String): Result<List<Product>> =
+        Result.success(emptyList())
+    override suspend fun createProductPurchaseIntent(productId: String): Result<PurchaseIntent> =
+        Result.success(PurchaseIntent(paymentIntent = "pi_product", publishableKey = "pk_product"))
+    override suspend fun createProductSubscription(
+        productId: String,
+        organizationId: String?,
+        priceCents: Int?,
+        startDate: String?,
+    ): Result<Subscription> = Result.success(
+        Subscription(
+            productId = productId,
+            userId = "user-1",
+            organizationId = organizationId,
+            startDate = startDate ?: "1970-01-01",
+            priceCents = priceCents ?: 0,
+            period = "month",
+            status = "ACTIVE",
+            id = "sub-test",
+        )
+    )
     override suspend fun listOrganizations(limit: Int): Result<List<Organization>> = Result.success(emptyList())
     override suspend fun getOrganizationsByIds(organizationIds: List<String>): Result<List<Organization>> =
         Result.success(emptyList())

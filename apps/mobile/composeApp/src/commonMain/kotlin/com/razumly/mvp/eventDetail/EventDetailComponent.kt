@@ -20,12 +20,14 @@ import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.FeeBreakdown
+import com.razumly.mvp.core.data.repositories.FamilyChild
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
 import com.razumly.mvp.core.data.repositories.IImagesRepository
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.SignStep
+import com.razumly.mvp.core.data.repositories.SignerContext
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
@@ -94,6 +96,8 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val editableRounds: StateFlow<List<List<MatchWithRelations?>>>
     val showTeamSelectionDialog: StateFlow<TeamSelectionDialogState?>
     val showMatchEditDialog: StateFlow<MatchEditDialogState?>
+    val joinChoiceDialog: StateFlow<JoinChoiceDialogState?>
+    val childJoinSelectionDialog: StateFlow<ChildJoinSelectionDialogState?>
     val textSignaturePrompt: StateFlow<TextSignaturePromptState?>
     val eventImageIds: StateFlow<List<String>>
 
@@ -110,6 +114,11 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun toggleEdit()
     fun joinEvent()
     fun joinEventAsTeam(team: TeamWithPlayers)
+    fun confirmJoinAsSelf()
+    fun showChildJoinSelection()
+    fun selectChildForJoin(childUserId: String)
+    fun dismissJoinChoiceDialog()
+    fun dismissChildJoinSelectionDialog()
     fun viewEvent()
     fun leaveEvent()
     fun requestRefund(reason: String)
@@ -160,6 +169,37 @@ data class TextSignaturePromptState(
     val totalSteps: Int,
 )
 
+data class JoinChildOption(
+    val userId: String,
+    val fullName: String,
+    val email: String?,
+    val hasEmail: Boolean,
+)
+
+data class JoinChoiceDialogState(
+    val children: List<JoinChildOption>,
+)
+
+data class ChildJoinSelectionDialogState(
+    val children: List<JoinChildOption>,
+)
+
+private fun FamilyChild.toJoinChildOption(): JoinChildOption {
+    val normalizedFirstName = firstName.trim()
+    val normalizedLastName = lastName.trim()
+    val fullName = listOf(normalizedFirstName, normalizedLastName)
+        .filter { it.isNotBlank() }
+        .joinToString(" ")
+        .ifBlank { "Child" }
+    val normalizedEmail = email?.trim()?.takeIf(String::isNotBlank)
+    return JoinChildOption(
+        userId = userId,
+        fullName = fullName,
+        email = normalizedEmail,
+        hasEmail = hasEmail ?: (normalizedEmail != null),
+    )
+}
+
 enum class TeamPosition { TEAM1, TEAM2, REF }
 
 @Serializable
@@ -192,7 +232,7 @@ fun EventWithRelations.toEventWithFullRelations(
 @OptIn(ExperimentalCoroutinesApi::class)
 class DefaultEventDetailComponent(
     componentContext: ComponentContext,
-    userRepository: IUserRepository,
+    private val userRepository: IUserRepository,
     fieldRepository: IFieldRepository,
     event: Event,
     private val notificationsRepository: IPushNotificationsRepository,
@@ -375,13 +415,22 @@ class DefaultEventDetailComponent(
     private val _showMatchEditDialog = MutableStateFlow<MatchEditDialogState?>(null)
     override val showMatchEditDialog = _showMatchEditDialog.asStateFlow()
 
+    private val _joinChoiceDialog = MutableStateFlow<JoinChoiceDialogState?>(null)
+    override val joinChoiceDialog = _joinChoiceDialog.asStateFlow()
+
+    private val _childJoinSelectionDialog = MutableStateFlow<ChildJoinSelectionDialogState?>(null)
+    override val childJoinSelectionDialog = _childJoinSelectionDialog.asStateFlow()
+
     private val _textSignaturePrompt = MutableStateFlow<TextSignaturePromptState?>(null)
     override val textSignaturePrompt = _textSignaturePrompt.asStateFlow()
 
+    private var joinableChildren: List<JoinChildOption> = emptyList()
     private var pendingSignatureSteps: List<SignStep> = emptyList()
     private var pendingSignatureStepIndex = 0
     private var pendingPostSignatureAction: (suspend () -> Unit)? = null
-    private val completedSignatureTemplateIds = mutableSetOf<String>()
+    private var pendingSignatureContext: SignerContext = SignerContext.PARTICIPANT
+    private var pendingSignatureChild: JoinChildOption? = null
+    private val completedSignatureKeys = mutableSetOf<String>()
 
     private val shareServiceProvider = ShareServiceProvider()
 
@@ -536,18 +585,127 @@ class DefaultEventDetailComponent(
 
     override fun joinEvent() {
         scope.launch {
-            runActionAfterRequiredSigning {
-                executeJoinEvent()
+            if (!selectedEvent.value.teamSignup) {
+                val children = loadJoinableChildren()
+                if (children.isNotEmpty()) {
+                    joinableChildren = children
+                    _joinChoiceDialog.value = JoinChoiceDialogState(children = children)
+                    _childJoinSelectionDialog.value = null
+                    return@launch
+                }
             }
+            runSelfJoinFlow()
         }
     }
 
     override fun joinEventAsTeam(team: TeamWithPlayers) {
         scope.launch {
             _usersTeam.value = team
+            _joinChoiceDialog.value = null
+            _childJoinSelectionDialog.value = null
             runActionAfterRequiredSigning {
                 executeJoinEventAsTeam(team)
             }
+        }
+    }
+
+    override fun confirmJoinAsSelf() {
+        _joinChoiceDialog.value = null
+        _childJoinSelectionDialog.value = null
+        scope.launch {
+            runSelfJoinFlow()
+        }
+    }
+
+    override fun showChildJoinSelection() {
+        val children = if (joinableChildren.isNotEmpty()) {
+            joinableChildren
+        } else {
+            _joinChoiceDialog.value?.children.orEmpty()
+        }
+        _joinChoiceDialog.value = null
+        if (children.isEmpty()) {
+            _errorState.value = ErrorMessage("No linked children are available for registration.")
+            _childJoinSelectionDialog.value = null
+            return
+        }
+        _childJoinSelectionDialog.value = ChildJoinSelectionDialogState(children = children)
+    }
+
+    override fun selectChildForJoin(childUserId: String) {
+        val selectedChild = joinableChildren.firstOrNull { it.userId == childUserId }
+        if (selectedChild == null) {
+            _errorState.value = ErrorMessage("Unable to find that child profile.")
+            return
+        }
+        if (!selectedChild.hasEmail || selectedChild.email.isNullOrBlank()) {
+            _errorState.value = ErrorMessage(
+                "Child email is required before registration can continue."
+            )
+            return
+        }
+
+        _joinChoiceDialog.value = null
+        _childJoinSelectionDialog.value = null
+        scope.launch {
+            runActionAfterRequiredSigning(
+                signerContext = SignerContext.PARENT_GUARDIAN,
+                child = selectedChild,
+            ) {
+                executeChildRegistration(selectedChild)
+            }
+        }
+    }
+
+    override fun dismissJoinChoiceDialog() {
+        _joinChoiceDialog.value = null
+    }
+
+    override fun dismissChildJoinSelectionDialog() {
+        _childJoinSelectionDialog.value = null
+    }
+
+    private suspend fun runSelfJoinFlow() {
+        runActionAfterRequiredSigning(
+            signerContext = SignerContext.PARTICIPANT,
+            child = null,
+        ) {
+            executeJoinEvent()
+        }
+    }
+
+    private suspend fun loadJoinableChildren(): List<JoinChildOption> {
+        return userRepository.listChildren()
+            .onFailure { throwable ->
+                Napier.w("Failed to load linked children before join flow.", throwable)
+            }
+            .getOrElse { emptyList() }
+            .asSequence()
+            .filter { child ->
+                child.userId.isNotBlank() &&
+                    (child.linkStatus?.equals("active", ignoreCase = true) != false)
+            }
+            .map { child -> child.toJoinChildOption() }
+            .toList()
+    }
+
+    private suspend fun executeChildRegistration(child: JoinChildOption) {
+        try {
+            loadingHandler.showLoading("Registering Child ...")
+            eventRepository.registerChildForEvent(
+                eventId = selectedEvent.value.id,
+                childUserId = child.userId,
+            ).onSuccess {
+                loadingHandler.showLoading("Refreshing Event ...")
+                eventRepository.getEvent(selectedEvent.value.id)
+                _errorState.value = ErrorMessage(
+                    "${child.fullName} registration started."
+                )
+            }.onFailure { throwable ->
+                _errorState.value = ErrorMessage(throwable.message ?: "Failed to register child.")
+            }
+        } finally {
+            loadingHandler.hideLoading()
         }
     }
 
@@ -603,15 +761,35 @@ class DefaultEventDetailComponent(
         }
     }
 
-    private suspend fun runActionAfterRequiredSigning(onReady: suspend () -> Unit) {
-        billingRepository.getRequiredSignLinks(selectedEvent.value.id).onFailure { throwable ->
+    private fun signatureCompletionKey(
+        templateId: String,
+        signerContext: SignerContext,
+        child: JoinChildOption?,
+    ): String = "${signerContext.name}:${child?.userId.orEmpty()}:$templateId"
+
+    private suspend fun runActionAfterRequiredSigning(
+        signerContext: SignerContext = SignerContext.PARTICIPANT,
+        child: JoinChildOption? = null,
+        onReady: suspend () -> Unit,
+    ) {
+        billingRepository.getRequiredSignLinks(
+            eventId = selectedEvent.value.id,
+            signerContext = signerContext,
+            childUserId = child?.userId,
+            childUserEmail = child?.email,
+        ).onFailure { throwable ->
             Napier.e("Failed to load required signing documents.", throwable)
             _errorState.value = ErrorMessage(
                 "Unable to load required documents: ${throwable.message ?: "Unknown error"}"
             )
         }.onSuccess { allSteps ->
             val pendingSteps = allSteps.filterNot { step ->
-                completedSignatureTemplateIds.contains(step.templateId)
+                val key = signatureCompletionKey(
+                    templateId = step.templateId,
+                    signerContext = signerContext,
+                    child = child,
+                )
+                completedSignatureKeys.contains(key)
             }
 
             if (pendingSteps.isEmpty()) {
@@ -621,6 +799,8 @@ class DefaultEventDetailComponent(
 
             pendingSignatureSteps = pendingSteps
             pendingSignatureStepIndex = 0
+            pendingSignatureContext = signerContext
+            pendingSignatureChild = child
             pendingPostSignatureAction = onReady
             processNextSignatureStep()
         }
@@ -673,6 +853,8 @@ class DefaultEventDetailComponent(
     private fun clearPendingSignatureFlow() {
         pendingSignatureSteps = emptyList()
         pendingSignatureStepIndex = 0
+        pendingSignatureContext = SignerContext.PARTICIPANT
+        pendingSignatureChild = null
         pendingPostSignatureAction = null
         _textSignaturePrompt.value = null
     }
@@ -1019,7 +1201,11 @@ class DefaultEventDetailComponent(
                     throwable.message ?: "Failed to record signature."
                 )
             }.onSuccess {
-                completedSignatureTemplateIds += prompt.step.templateId
+                completedSignatureKeys += signatureCompletionKey(
+                    templateId = prompt.step.templateId,
+                    signerContext = pendingSignatureContext,
+                    child = pendingSignatureChild,
+                )
                 _textSignaturePrompt.value = null
                 pendingSignatureStepIndex += 1
                 processNextSignatureStep()

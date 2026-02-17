@@ -234,6 +234,7 @@ fun CreateEventScreen(
                         },
                         onSelectFieldCount = component::selectFieldCount,
                         onUpdateLocalFieldName = component::updateLocalFieldName,
+                        onUpdateLocalFieldDivisions = component::updateLocalFieldDivisions,
                         onAddLeagueTimeSlot = component::addLeagueTimeSlot,
                         onUpdateLeagueTimeSlot = { index, updated ->
                             component.updateLeagueTimeSlot(index) { updated }

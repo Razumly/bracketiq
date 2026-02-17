@@ -10,6 +10,7 @@ import kotlin.time.Instant
 data class TimeSlot(
     val id: String,
     val dayOfWeek: Int?,
+    val daysOfWeek: List<Int>? = null,
     val startTimeMinutes: Int?,
     val endTimeMinutes: Int?,
     @Contextual val startDate: Instant,
@@ -24,6 +25,7 @@ data class TimeSlot(
 @OptIn(ExperimentalTime::class)
 data class TimeSlotDTO(
     val dayOfWeek: Int? = null,
+    val daysOfWeek: List<Int>? = null,
     val startTimeMinutes: Int? = null,
     val endTimeMinutes: Int? = null,
     val startDate: String,
@@ -37,6 +39,7 @@ data class TimeSlotDTO(
         TimeSlot(
             id = id,
             dayOfWeek = dayOfWeek,
+            daysOfWeek = daysOfWeek ?: dayOfWeek?.let { listOf(it) },
             startTimeMinutes = startTimeMinutes,
             endTimeMinutes = endTimeMinutes,
             startDate = Instant.parse(startDate),
@@ -46,4 +49,16 @@ data class TimeSlotDTO(
             price = price,
             requiredTemplateIds = requiredTemplateIds
         )
+}
+
+fun TimeSlot.normalizedDaysOfWeek(): List<Int> {
+    val source = when {
+        !daysOfWeek.isNullOrEmpty() -> daysOfWeek
+        dayOfWeek != null -> listOf(dayOfWeek)
+        else -> emptyList()
+    }
+    return source
+        .map { ((it % 7) + 7) % 7 }
+        .distinct()
+        .sorted()
 }

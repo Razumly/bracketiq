@@ -2,8 +2,11 @@ package com.razumly.mvp.profile
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -33,10 +36,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.composables.DropdownOption
+import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
 import com.razumly.mvp.core.presentation.composables.PullToRefreshContainer
 import com.razumly.mvp.core.presentation.composables.PlatformDropdown
 import com.razumly.mvp.core.presentation.composables.PlatformTextField
 import com.razumly.mvp.core.presentation.util.MoneyInputUtils
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 
 @Composable
 fun ProfilePaymentsScreen(component: ProfileComponent) {
@@ -181,7 +187,10 @@ fun ProfileChildrenScreen(component: ProfileComponent) {
     var childLastName by rememberSaveable { mutableStateOf("") }
     var childEmail by rememberSaveable { mutableStateOf("") }
     var childDateOfBirth by rememberSaveable { mutableStateOf("") }
+    var showChildBirthdayPicker by rememberSaveable { mutableStateOf(false) }
     var childRelationship by rememberSaveable { mutableStateOf("parent") }
+    var showAddChildForm by rememberSaveable { mutableStateOf(false) }
+    var editingChildUserId by rememberSaveable { mutableStateOf<String?>(null) }
 
     var linkChildEmail by rememberSaveable { mutableStateOf("") }
     var linkChildUserId by rememberSaveable { mutableStateOf("") }
@@ -195,7 +204,20 @@ fun ProfileChildrenScreen(component: ProfileComponent) {
     }
 
     var wasCreatingChild by remember { mutableStateOf(false) }
+    var wasUpdatingChild by remember { mutableStateOf(false) }
     var wasLinkingChild by remember { mutableStateOf(false) }
+    val isEditingChild = editingChildUserId != null
+    val isSavingChild = childrenState.isCreatingChild || childrenState.isUpdatingChild
+    val childFormError = if (isEditingChild) childrenState.updateError else childrenState.createError
+
+    val resetChildForm = {
+        childFirstName = ""
+        childLastName = ""
+        childEmail = ""
+        childDateOfBirth = ""
+        childRelationship = "parent"
+        editingChildUserId = null
+    }
 
     LaunchedEffect(component) {
         component.refreshChildren()
@@ -203,13 +225,18 @@ fun ProfileChildrenScreen(component: ProfileComponent) {
 
     LaunchedEffect(childrenState.isCreatingChild, childrenState.createError) {
         if (wasCreatingChild && !childrenState.isCreatingChild && childrenState.createError == null) {
-            childFirstName = ""
-            childLastName = ""
-            childEmail = ""
-            childDateOfBirth = ""
-            childRelationship = "parent"
+            resetChildForm()
+            showAddChildForm = false
         }
         wasCreatingChild = childrenState.isCreatingChild
+    }
+
+    LaunchedEffect(childrenState.isUpdatingChild, childrenState.updateError) {
+        if (wasUpdatingChild && !childrenState.isUpdatingChild && childrenState.updateError == null) {
+            resetChildForm()
+            showAddChildForm = false
+        }
+        wasUpdatingChild = childrenState.isUpdatingChild
     }
 
     LaunchedEffect(childrenState.isLinkingChild, childrenState.linkError) {
@@ -228,108 +255,126 @@ fun ProfileChildrenScreen(component: ProfileComponent) {
         onRefresh = component::refreshChildren,
         isRefreshing = childrenState.isLoading,
     ) {
-        SectionHeaderRow(title = "Children")
-
-        childrenState.error?.let { message ->
-            Text(
-                text = message,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
-            )
-        }
-
-        when {
-            childrenState.isLoading -> {
-                Text(
-                    text = "Loading children...",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-
-            childrenState.children.isEmpty() -> {
-                Text(
-                    text = "No children linked yet.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-
-            else -> {
-                childrenState.children.forEach { child ->
-                    ChildAccountCard(child = child)
-                }
-            }
-        }
-
-        Card(
+        SectionHeaderRow(title = "Child details")
+        Button(
             modifier = Modifier.fillMaxWidth(),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            ),
+            onClick = {
+                editingChildUserId = null
+                showAddChildForm = true
+            },
         ) {
-            Column(
-                modifier = Modifier.padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+            Text("Add child")
+        }
+
+        if (showAddChildForm) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                ),
             ) {
-                Text(
-                    text = "Add a child",
-                    style = MaterialTheme.typography.titleMedium,
-                )
-
-                childrenState.createError?.let { message ->
-                    Text(
-                        text = message,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
-
-                PlatformTextField(
-                    value = childFirstName,
-                    onValueChange = { childFirstName = it },
-                    label = "First name",
-                )
-                PlatformTextField(
-                    value = childLastName,
-                    onValueChange = { childLastName = it },
-                    label = "Last name",
-                )
-                PlatformTextField(
-                    value = childEmail,
-                    onValueChange = { childEmail = it },
-                    label = "Email (optional)",
-                    keyboardType = "email",
-                )
-                PlatformTextField(
-                    value = childDateOfBirth,
-                    onValueChange = { childDateOfBirth = it },
-                    label = "Date of birth",
-                    placeholder = "YYYY-MM-DD",
-                    supportingText = "Use YYYY-MM-DD format",
-                )
-                PlatformDropdown(
-                    selectedValue = childRelationship,
-                    onSelectionChange = { childRelationship = it },
-                    options = relationshipOptions,
-                    label = "Relationship",
-                )
-
-                Button(
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = {
-                        component.createChild(
-                            firstName = childFirstName,
-                            lastName = childLastName,
-                            dateOfBirth = childDateOfBirth,
-                            email = childEmail,
-                            relationship = childRelationship,
-                        )
-                    },
-                    enabled = !childrenState.isCreatingChild,
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text(if (childrenState.isCreatingChild) "Adding child..." else "Add child")
+                    Text(
+                        text = if (isEditingChild) "Edit child" else "Add a child",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+
+                    childFormError?.let { message ->
+                        Text(
+                            text = message,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+
+                    PlatformTextField(
+                        modifier = Modifier.fillMaxWidth(),
+                        value = childFirstName,
+                        onValueChange = { childFirstName = it },
+                        label = "First name",
+                    )
+                    PlatformTextField(
+                        modifier = Modifier.fillMaxWidth(),
+                        value = childLastName,
+                        onValueChange = { childLastName = it },
+                        label = "Last name",
+                    )
+                    PlatformTextField(
+                        modifier = Modifier.fillMaxWidth(),
+                        value = childEmail,
+                        onValueChange = { childEmail = it },
+                        label = "Email (optional)",
+                        keyboardType = "email",
+                    )
+                    PlatformTextField(
+                        modifier = Modifier.fillMaxWidth(),
+                        value = childDateOfBirth,
+                        onValueChange = {},
+                        label = "Date of birth",
+                        placeholder = "Select date",
+                        supportingText = "Date only",
+                        readOnly = true,
+                        onTap = { showChildBirthdayPicker = true },
+                    )
+                    PlatformDropdown(
+                        selectedValue = childRelationship,
+                        onSelectionChange = { childRelationship = it },
+                        options = relationshipOptions,
+                        label = "Relationship",
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Button(
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                val activeChildUserId = editingChildUserId
+                                if (activeChildUserId != null) {
+                                    component.updateChild(
+                                        childUserId = activeChildUserId,
+                                        firstName = childFirstName,
+                                        lastName = childLastName,
+                                        dateOfBirth = childDateOfBirth,
+                                        email = childEmail,
+                                        relationship = childRelationship,
+                                    )
+                                } else {
+                                    component.createChild(
+                                        firstName = childFirstName,
+                                        lastName = childLastName,
+                                        dateOfBirth = childDateOfBirth,
+                                        email = childEmail,
+                                        relationship = childRelationship,
+                                    )
+                                }
+                            },
+                            enabled = !isSavingChild,
+                        ) {
+                            val buttonText = when {
+                                childrenState.isUpdatingChild -> "Saving..."
+                                childrenState.isCreatingChild -> "Adding child..."
+                                isEditingChild -> "Save child"
+                                else -> "Add child"
+                            }
+                            Text(buttonText)
+                        }
+                        Button(
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                resetChildForm()
+                                showAddChildForm = false
+                            },
+                            enabled = !isSavingChild,
+                        ) {
+                            Text("Cancel")
+                        }
+                    }
                 }
             }
         }
@@ -396,42 +441,167 @@ fun ProfileChildrenScreen(component: ProfileComponent) {
                 }
             }
         }
+
+        SectionHeaderRow(title = "Children")
+
+        childrenState.error?.let { message ->
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
+        when {
+            childrenState.isLoading -> {
+                Text(
+                    text = "Loading children...",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            childrenState.children.isEmpty() -> {
+                Text(
+                    text = "No children linked yet.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            else -> {
+                ChildrenGrid(
+                    children = childrenState.children,
+                    onEditChild = { child ->
+                        childFirstName = child.firstName
+                        childLastName = child.lastName
+                        childEmail = child.email.orEmpty()
+                        childDateOfBirth = normalizeDateInput(child.dateOfBirth)
+                        childRelationship = child.relationship
+                            ?.trim()
+                            ?.takeIf(String::isNotBlank)
+                            ?: "parent"
+                        editingChildUserId = child.userId
+                        showAddChildForm = true
+                    },
+                )
+            }
+        }
+    }
+
+    PlatformDateTimePicker(
+        onDateSelected = { selected ->
+            childDateOfBirth = selected
+                ?.toLocalDateTime(TimeZone.currentSystemDefault())
+                ?.date
+                ?.toString()
+                .orEmpty()
+            showChildBirthdayPicker = false
+        },
+        onDismissRequest = { showChildBirthdayPicker = false },
+        showPicker = showChildBirthdayPicker,
+        getTime = false,
+        canSelectPast = true,
+    )
+}
+
+@Composable
+private fun ChildrenGrid(
+    children: List<ProfileChild>,
+    onEditChild: (ProfileChild) -> Unit,
+) {
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val minCardWidth = 160.dp
+        val horizontalSpacing = 8.dp
+        val columns = ((maxWidth + horizontalSpacing) / (minCardWidth + horizontalSpacing))
+            .toInt()
+            .coerceAtLeast(1)
+        val rows = children.chunked(columns)
+
+        Column(
+            verticalArrangement = Arrangement.spacedBy(horizontalSpacing),
+        ) {
+            rows.forEach { rowChildren ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(horizontalSpacing),
+                ) {
+                    rowChildren.forEach { child ->
+                        ChildAccountCard(
+                            child = child,
+                            modifier = Modifier
+                                .weight(1f)
+                                .aspectRatio(1f),
+                            onEdit = { onEditChild(child) },
+                        )
+                    }
+
+                    repeat(columns - rowChildren.size) {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+        }
     }
 }
 
 @Composable
-private fun ChildAccountCard(child: ProfileChild) {
+private fun ChildAccountCard(
+    child: ProfileChild,
+    modifier: Modifier = Modifier,
+    onEdit: (() -> Unit)? = null,
+) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         ),
     ) {
         Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
         ) {
-            Text(
-                text = child.fullName,
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Text(
-                text = "Age: ${child.age ?: "Unknown"}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                text = "Status: ${formatLinkStatus(child.linkStatus)}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            if (!child.hasEmail) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
                 Text(
-                    text = "Missing email. Consent links cannot be sent until an email is added.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
+                    text = child.fullName,
+                    style = MaterialTheme.typography.titleMedium,
                 )
+                Text(
+                    text = "Age: ${child.age ?: "Unknown"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = "Status: ${formatLinkStatus(child.linkStatus)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = "Relationship: ${formatRelationship(child.relationship)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (!child.hasEmail) {
+                    Text(
+                        text = "Missing email. Consent links cannot be sent until an email is added.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+
+            onEdit?.let { onEditClick ->
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onEditClick,
+                ) {
+                    Text("Edit")
+                }
             }
         }
     }
@@ -587,6 +757,24 @@ private fun formatLinkStatus(rawStatus: String?): String {
         if (char.isLowerCase()) char.titlecase() else char.toString()
     }
 }
+
+private fun formatRelationship(rawRelationship: String?): String {
+    if (rawRelationship.isNullOrBlank()) return "Unknown"
+    val normalized = rawRelationship.lowercase()
+    return normalized.replaceFirstChar { char ->
+        if (char.isLowerCase()) char.titlecase() else char.toString()
+    }
+}
+
+private fun normalizeDateInput(rawDate: String?): String {
+    if (rawDate.isNullOrBlank()) return ""
+    val trimmed = rawDate.trim()
+    if (DATE_INPUT_REGEX.matches(trimmed)) return trimmed
+    val datePrefix = trimmed.take(10)
+    return if (DATE_INPUT_REGEX.matches(datePrefix)) datePrefix else ""
+}
+
+private val DATE_INPUT_REGEX = Regex("""\d{4}-\d{2}-\d{2}""")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

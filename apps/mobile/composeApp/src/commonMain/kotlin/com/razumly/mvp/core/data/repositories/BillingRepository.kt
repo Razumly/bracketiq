@@ -28,12 +28,24 @@ import kotlinx.serialization.Serializable
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
+enum class SignerContext(val apiValue: String) {
+    PARTICIPANT("participant"),
+    PARENT_GUARDIAN("parent_guardian"),
+    CHILD("child"),
+}
+
 interface IBillingRepository : IMVPRepository {
     suspend fun createPurchaseIntent(
         event: Event,
         teamId: String? = null,
     ): Result<PurchaseIntent>
     suspend fun getRequiredSignLinks(eventId: String): Result<List<SignStep>>
+    suspend fun getRequiredSignLinks(
+        eventId: String,
+        signerContext: SignerContext,
+        childUserId: String? = null,
+        childUserEmail: String? = null,
+    ): Result<List<SignStep>> = getRequiredSignLinks(eventId)
     suspend fun recordSignature(
         eventId: String,
         templateId: String,
@@ -102,7 +114,21 @@ class BillingRepository(
         response
     }
 
-    override suspend fun getRequiredSignLinks(eventId: String): Result<List<SignStep>> = runCatching {
+    override suspend fun getRequiredSignLinks(eventId: String): Result<List<SignStep>> {
+        return getRequiredSignLinks(
+            eventId = eventId,
+            signerContext = SignerContext.PARTICIPANT,
+            childUserId = null,
+            childUserEmail = null,
+        )
+    }
+
+    override suspend fun getRequiredSignLinks(
+        eventId: String,
+        signerContext: SignerContext,
+        childUserId: String?,
+        childUserEmail: String?,
+    ): Result<List<SignStep>> = runCatching {
         val user = userRepository.currentUser.value.getOrThrow()
         val email = userRepository.currentAccount.value.getOrNull()?.email
         val response = api.post<EventSignLinksRequestDto, EventSignLinksResponseDto>(
@@ -110,6 +136,9 @@ class BillingRepository(
             body = EventSignLinksRequestDto(
                 userId = user.id,
                 userEmail = email,
+                signerContext = signerContext.apiValue,
+                childUserId = childUserId?.trim()?.takeIf(String::isNotBlank),
+                childEmail = childUserEmail?.trim()?.takeIf(String::isNotBlank),
             ),
         )
 
@@ -436,6 +465,9 @@ private data class StripeOnboardingLinkResponseDto(
 private data class EventSignLinksRequestDto(
     val userId: String? = null,
     val userEmail: String? = null,
+    val signerContext: String? = null,
+    val childUserId: String? = null,
+    val childEmail: String? = null,
     val redirectUrl: String? = null,
 )
 
@@ -742,6 +774,8 @@ data class SignStep(
     val title: String? = null,
     val content: String? = null,
     val signOnce: Boolean = false,
+    val requiredSignerType: String? = null,
+    val requiredSignerLabel: String? = null,
     val url: String? = null,
     val signingUrl: String? = null,
     val boldSignUrl: String? = null,

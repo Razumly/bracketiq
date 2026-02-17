@@ -222,6 +222,11 @@ data class EventParticipantsRequestDto(
 )
 
 @Serializable
+data class EventChildRegistrationRequestDto(
+    val childId: String,
+)
+
+@Serializable
 data class EventUpdateDto(
     val name: String? = null,
     val start: String? = null,

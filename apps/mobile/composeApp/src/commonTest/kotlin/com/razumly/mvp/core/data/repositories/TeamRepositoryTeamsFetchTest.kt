@@ -147,6 +147,15 @@ private class FakeUserRepository : IUserRepository {
         relationship: String?,
     ): Result<Unit> = error("unused")
 
+    override suspend fun updateChildAccount(
+        childUserId: String,
+        firstName: String,
+        lastName: String,
+        dateOfBirth: String,
+        email: String?,
+        relationship: String?,
+    ): Result<Unit> = error("unused")
+
     override suspend fun linkChildToParent(
         childEmail: String?,
         childUserId: String?,
@@ -159,6 +168,7 @@ private class FakeUserRepository : IUserRepository {
         firstName: String,
         lastName: String,
         userName: String,
+        dateOfBirth: String?,
     ): Result<UserData> = error("unused")
 
     override suspend fun updateUser(user: UserData): Result<UserData> = error("unused")

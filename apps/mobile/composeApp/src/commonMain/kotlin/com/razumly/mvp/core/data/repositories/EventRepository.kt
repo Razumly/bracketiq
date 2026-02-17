@@ -17,6 +17,7 @@ import dev.icerock.moko.geo.LatLng
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.dto.CreateEventRequestDto
 import com.razumly.mvp.core.network.dto.EventApiDto
+import com.razumly.mvp.core.network.dto.EventChildRegistrationRequestDto
 import com.razumly.mvp.core.network.dto.EventParticipantsRequestDto
 import com.razumly.mvp.core.network.dto.EventResponseDto
 import com.razumly.mvp.core.network.dto.EventSearchFiltersDto
@@ -60,6 +61,8 @@ interface IEventRepository : IMVPRepository {
     fun getEventsByHostFlow(hostId: String): Flow<Result<List<Event>>>
     suspend fun deleteEvent(eventId: String): Result<Unit>
     suspend fun addCurrentUserToEvent(event: Event): Result<Unit>
+    suspend fun registerChildForEvent(eventId: String, childUserId: String): Result<Unit> =
+        Result.failure(NotImplementedError("Child registration is not implemented for this repository."))
     suspend fun addTeamToEvent(event: Event, team: Team): Result<Unit>
     suspend fun removeTeamFromEvent(event: Event, teamWithPlayers: TeamWithPlayers): Result<Unit>
     suspend fun removeCurrentUserFromEvent(event: Event): Result<Unit>
@@ -330,6 +333,20 @@ class EventRepository(
 
             databaseService.getEventDao.upsertEvent(updated)
             persistEventRelations(updated)
+        }
+
+    override suspend fun registerChildForEvent(eventId: String, childUserId: String): Result<Unit> =
+        runCatching {
+            val normalizedEventId = eventId.trim()
+            val normalizedChildUserId = childUserId.trim()
+            if (normalizedEventId.isBlank() || normalizedChildUserId.isBlank()) {
+                error("Event id and child user id are required.")
+            }
+
+            api.post<EventChildRegistrationRequestDto, EventResponseDto>(
+                path = "api/events/$normalizedEventId/registrations/child",
+                body = EventChildRegistrationRequestDto(childId = normalizedChildUserId),
+            )
         }
 
     override suspend fun addTeamToEvent(event: Event, team: Team): Result<Unit> =

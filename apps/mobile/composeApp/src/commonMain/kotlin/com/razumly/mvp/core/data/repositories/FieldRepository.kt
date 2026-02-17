@@ -5,6 +5,7 @@ import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.TimeSlotDTO
+import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResponse
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.dto.FieldsResponseDto
@@ -128,11 +129,13 @@ class FieldRepository(
     }
 
     override suspend fun createTimeSlot(slot: TimeSlot): Result<TimeSlot> = runCatching {
+        val normalizedDays = slot.normalizedDaysOfWeek()
         api.post<CreateTimeSlotRequestDto, TimeSlot>(
             path = "api/time-slots",
             body = CreateTimeSlotRequestDto(
                 id = slot.id,
-                dayOfWeek = slot.dayOfWeek,
+                dayOfWeek = normalizedDays.firstOrNull() ?: slot.dayOfWeek,
+                daysOfWeek = normalizedDays.takeIf { it.isNotEmpty() },
                 startTimeMinutes = slot.startTimeMinutes,
                 endTimeMinutes = slot.endTimeMinutes,
                 startDate = slot.startDate.toString(),
@@ -152,6 +155,7 @@ class FieldRepository(
             body = UpdateTimeSlotRequestDto(
                 slot = UpdateTimeSlotPayload(
                     dayOfWeek = payload.dayOfWeek,
+                    daysOfWeek = payload.daysOfWeek,
                     startTimeMinutes = payload.startTimeMinutes,
                     endTimeMinutes = payload.endTimeMinutes,
                     startDate = payload.startDate,
@@ -170,7 +174,8 @@ class FieldRepository(
     }
 
     private fun TimeSlot.toTimeSlotDTO(): TimeSlotDTO = TimeSlotDTO(
-        dayOfWeek = dayOfWeek,
+        dayOfWeek = normalizedDaysOfWeek().firstOrNull() ?: dayOfWeek,
+        daysOfWeek = normalizedDaysOfWeek().takeIf { it.isNotEmpty() },
         startTimeMinutes = startTimeMinutes,
         endTimeMinutes = endTimeMinutes,
         startDate = startDate.toString(),
@@ -186,6 +191,7 @@ class FieldRepository(
 private data class CreateTimeSlotRequestDto(
     val id: String,
     val dayOfWeek: Int? = null,
+    val daysOfWeek: List<Int>? = null,
     val startTimeMinutes: Int? = null,
     val endTimeMinutes: Int? = null,
     val startDate: String,
@@ -204,6 +210,7 @@ private data class UpdateTimeSlotRequestDto(
 @Serializable
 private data class UpdateTimeSlotPayload(
     val dayOfWeek: Int? = null,
+    val daysOfWeek: List<Int>? = null,
     val startTimeMinutes: Int? = null,
     val endTimeMinutes: Int? = null,
     val startDate: String,

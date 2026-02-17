@@ -19,6 +19,8 @@ import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
+import com.razumly.mvp.core.data.util.normalizeDivisionLabels
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
@@ -83,6 +85,7 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     fun addUserToEvent(add: Boolean)
     fun selectFieldCount(count: Int)
     fun updateLocalFieldName(index: Int, name: String)
+    fun updateLocalFieldDivisions(index: Int, divisions: List<String>)
     fun addLeagueTimeSlot()
     fun updateLeagueTimeSlot(index: Int, update: TimeSlot.() -> TimeSlot)
     fun removeLeagueTimeSlot(index: Int)
@@ -421,6 +424,9 @@ class DefaultCreateEventComponent(
                 field.copy(
                     id = if (field.id.isBlank()) newId() else field.id,
                     fieldNumber = index + 1,
+                    divisions = field.divisions
+                        .normalizeDivisionLabels()
+                        .ifEmpty { defaultFieldDivisions(currentEvent) },
                     type = currentEvent.fieldType.name,
                     organizationId = currentEvent.organizationId,
                 )
@@ -435,6 +441,7 @@ class DefaultCreateEventComponent(
                 id = newId(),
             ).copy(
                 name = "Field $fieldNumber",
+                divisions = defaultFieldDivisions(currentEvent),
                 type = currentEvent.fieldType.name,
             )
         }
@@ -454,6 +461,17 @@ class DefaultCreateEventComponent(
         val fields = _localFields.value.toMutableList()
         if (index !in fields.indices) return
         fields[index] = fields[index].copy(name = name)
+        _localFields.value = fields
+    }
+
+    override fun updateLocalFieldDivisions(index: Int, divisions: List<String>) {
+        val fields = _localFields.value.toMutableList()
+        if (index !in fields.indices) return
+        fields[index] = fields[index].copy(
+            // Keep explicit empties so fallback resolves against the latest event divisions
+            // when fields are synchronized or finalized for creation.
+            divisions = divisions.normalizeDivisionLabels()
+        )
         _localFields.value = fields
     }
 
@@ -733,6 +751,9 @@ class DefaultCreateEventComponent(
                     id = if (field.id.isBlank()) newId() else field.id,
                     fieldNumber = index + 1,
                     name = field.name?.takeIf { it.isNotBlank() } ?: "Field ${index + 1}",
+                    divisions = field.divisions
+                        .normalizeDivisionLabels()
+                        .ifEmpty { defaultFieldDivisions(event) },
                     type = event.fieldType.name,
                     organizationId = event.organizationId,
                 )
@@ -747,6 +768,7 @@ class DefaultCreateEventComponent(
                 id = newId(),
             ).copy(
                 name = "Field $number",
+                divisions = defaultFieldDivisions(event),
                 type = event.fieldType.name,
             )
         }
@@ -758,27 +780,36 @@ class DefaultCreateEventComponent(
         event: Event,
         fieldIdReplacements: Map<String, String>,
     ): List<TimeSlot> {
-        return _leagueSlots.value.mapNotNull { slot ->
+        return _leagueSlots.value.flatMap { slot ->
             val mappedFieldId = slot.scheduledFieldId
                 ?.let { fieldIdReplacements[it] ?: it }
                 ?.takeIf { it.isNotBlank() }
-            val day = slot.dayOfWeek
+            val normalizedDays = slot.normalizedDaysOfWeek()
             val startMinutes = slot.startTimeMinutes
             val endMinutes = slot.endTimeMinutes
 
-            if (mappedFieldId == null || day == null || startMinutes == null || endMinutes == null) {
-                return@mapNotNull null
+            if (mappedFieldId == null || normalizedDays.isEmpty() || startMinutes == null || endMinutes == null) {
+                return@flatMap emptyList()
             }
             if (endMinutes <= startMinutes) {
-                return@mapNotNull null
+                return@flatMap emptyList()
             }
 
-            slot.copy(
-                id = slot.id.ifBlank { newId() },
-                scheduledFieldId = mappedFieldId,
-                startDate = event.start,
-                endDate = event.end.takeIf { it > event.start },
-            )
+            val singleDay = normalizedDays.size == 1
+            normalizedDays.mapIndexed { index, day ->
+                slot.copy(
+                    id = if (singleDay && index == 0) {
+                        slot.id.ifBlank { newId() }
+                    } else {
+                        newId()
+                    },
+                    dayOfWeek = day,
+                    daysOfWeek = listOf(day),
+                    scheduledFieldId = mappedFieldId,
+                    startDate = event.start,
+                    endDate = event.end.takeIf { it > event.start },
+                )
+            }
         }
     }
 
@@ -789,6 +820,9 @@ class DefaultCreateEventComponent(
         _localFields.value = currentFields.mapIndexed { index, field ->
             field.copy(
                 fieldNumber = index + 1,
+                divisions = field.divisions
+                    .normalizeDivisionLabels()
+                    .ifEmpty { defaultFieldDivisions(event) },
                 type = event.fieldType.name,
                 organizationId = event.organizationId,
             )
@@ -886,6 +920,7 @@ class DefaultCreateEventComponent(
         return TimeSlot(
             id = newId(),
             dayOfWeek = null,
+            daysOfWeek = emptyList(),
             startTimeMinutes = null,
             endTimeMinutes = null,
             startDate = startDate,
@@ -894,6 +929,11 @@ class DefaultCreateEventComponent(
             scheduledFieldId = null,
             price = null,
         )
+    }
+
+    private fun defaultFieldDivisions(event: Event): List<String> {
+        val eventDivisions = event.divisions.normalizeDivisionLabels()
+        return eventDivisions.ifEmpty { listOf("Open") }
     }
 
     private fun reserveRentalCheckoutLocks(eventDraft: Event): Boolean {

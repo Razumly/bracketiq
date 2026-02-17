@@ -2,8 +2,10 @@ package com.razumly.mvp.core.network
 
 import com.razumly.mvp.core.util.AppSecrets
 import io.github.aakira.napier.Napier
+import platform.Foundation.NSProcessInfo
 
 private const val DEFAULT_IOS_API_BASE_URL = "http://localhost:3000"
+private const val SIMULATOR_ENV_KEY = "SIMULATOR_DEVICE_NAME"
 
 private fun rewriteLegacyLocalhost3001To3010(baseUrl: String): String {
     val localhostPrefixes = listOf(
@@ -16,8 +18,21 @@ private fun rewriteLegacyLocalhost3001To3010(baseUrl: String): String {
     return baseUrl.replaceFirst(matchingPrefix, matchingPrefix.replace(":3001", ":3010"))
 }
 
+private fun isIosSimulator(): Boolean {
+    val env = NSProcessInfo.processInfo.environment
+    return env[SIMULATOR_ENV_KEY] != null
+}
+
 private fun resolveIosApiBaseUrl(): String {
     val configured = AppSecrets.mvpApiBaseUrl.trim().trimEnd('/')
+    val remoteConfigured = AppSecrets.mvpApiBaseUrlRemote.trim().trimEnd('/')
+    val runningOnSimulator = isIosSimulator()
+
+    if (!runningOnSimulator && remoteConfigured.isNotBlank()) {
+        Napier.i("apiBaseUrl(iOS): using remote endpoint $remoteConfigured")
+        return remoteConfigured
+    }
+
     if (configured.isBlank()) {
         Napier.w("apiBaseUrl(iOS): mvpApiBaseUrl missing; defaulting to $DEFAULT_IOS_API_BASE_URL")
         return DEFAULT_IOS_API_BASE_URL

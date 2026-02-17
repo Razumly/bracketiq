@@ -117,7 +117,7 @@ actual fun PlatformTextField(
                             else MaterialTheme.colorScheme.outline,
                             RoundedCornerShape(8.dp)
                         )
-                        .clickable(onClick = onTap)
+                        .clickable(enabled = enabled, onClick = onTap)
                         .padding(horizontal = 12.dp),
                     contentAlignment = Alignment.CenterStart
                 ) {

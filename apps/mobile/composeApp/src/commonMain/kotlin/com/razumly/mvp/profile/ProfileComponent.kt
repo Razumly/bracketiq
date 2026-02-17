@@ -83,6 +83,7 @@ data class ProfileChild(
     val dateOfBirth: String? = null,
     val age: Int? = null,
     val linkStatus: String? = null,
+    val relationship: String? = null,
     val email: String? = null,
     val hasEmail: Boolean = false,
 ) {
@@ -99,6 +100,8 @@ data class ProfileChildrenState(
     val error: String? = null,
     val isCreatingChild: Boolean = false,
     val createError: String? = null,
+    val isUpdatingChild: Boolean = false,
+    val updateError: String? = null,
     val isLinkingChild: Boolean = false,
     val linkError: String? = null,
 )
@@ -136,6 +139,15 @@ interface ProfileComponent : IPaymentProcessor {
     fun restartMembership(membership: ProfileMembership)
     fun refreshChildren()
     fun createChild(
+        firstName: String,
+        lastName: String,
+        dateOfBirth: String,
+        email: String? = null,
+        relationship: String = "parent",
+    )
+
+    fun updateChild(
+        childUserId: String,
         firstName: String,
         lastName: String,
         dateOfBirth: String,
@@ -618,6 +630,68 @@ class DefaultProfileComponent(
         }
     }
 
+    override fun updateChild(
+        childUserId: String,
+        firstName: String,
+        lastName: String,
+        dateOfBirth: String,
+        email: String?,
+        relationship: String,
+    ) {
+        val normalizedChildUserId = childUserId.trim()
+        val normalizedFirstName = firstName.trim()
+        val normalizedLastName = lastName.trim()
+        val normalizedDateOfBirth = dateOfBirth.trim()
+        val normalizedRelationship = relationship.trim().ifBlank { "parent" }
+        val normalizedEmail = email?.trim()?.takeIf(String::isNotBlank)
+
+        if (
+            normalizedChildUserId.isBlank() ||
+            normalizedFirstName.isBlank() ||
+            normalizedLastName.isBlank() ||
+            normalizedDateOfBirth.isBlank()
+        ) {
+            _childrenState.value = _childrenState.value.copy(
+                updateError = "First name, last name, and date of birth are required.",
+            )
+            return
+        }
+
+        if (!normalizedDateOfBirth.matches(DATE_OF_BIRTH_REGEX)) {
+            _childrenState.value = _childrenState.value.copy(
+                updateError = "Date of birth must use YYYY-MM-DD format.",
+            )
+            return
+        }
+
+        scope.launch {
+            _childrenState.value = _childrenState.value.copy(
+                isUpdatingChild = true,
+                updateError = null,
+            )
+
+            userRepository.updateChildAccount(
+                childUserId = normalizedChildUserId,
+                firstName = normalizedFirstName,
+                lastName = normalizedLastName,
+                dateOfBirth = normalizedDateOfBirth,
+                email = normalizedEmail,
+                relationship = normalizedRelationship,
+            ).onSuccess {
+                _childrenState.value = _childrenState.value.copy(
+                    isUpdatingChild = false,
+                    updateError = null,
+                )
+                refreshChildren()
+            }.onFailure {
+                _childrenState.value = _childrenState.value.copy(
+                    isUpdatingChild = false,
+                    updateError = it.message ?: "Failed to update child.",
+                )
+            }
+        }
+    }
+
     override fun linkChild(
         childEmail: String?,
         childUserId: String?,
@@ -686,6 +760,7 @@ private fun FamilyChild.toProfileChild(): ProfileChild {
         dateOfBirth = dateOfBirth,
         age = age,
         linkStatus = linkStatus,
+        relationship = relationship,
         email = email,
         hasEmail = hasEmail ?: email?.isNotBlank() == true,
     )

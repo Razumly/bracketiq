@@ -73,6 +73,7 @@ import com.razumly.mvp.core.data.dataTypes.toLeagueConfig
 import com.razumly.mvp.core.data.dataTypes.toTournamentConfig
 import com.razumly.mvp.core.data.dataTypes.withLeagueConfig
 import com.razumly.mvp.core.data.dataTypes.withTournamentConfig
+import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.enums.FieldType
 import com.razumly.mvp.core.data.util.normalizeDivisionLabels
@@ -154,6 +155,7 @@ fun EventDetails(
     onSportSelected: (String) -> Unit = {},
     onSelectFieldCount: (Int) -> Unit,
     onUpdateLocalFieldName: (Int, String) -> Unit = { _, _ -> },
+    onUpdateLocalFieldDivisions: (Int, List<String>) -> Unit = { _, _ -> },
     onAddLeagueTimeSlot: () -> Unit = {},
     onUpdateLeagueTimeSlot: (Int, TimeSlot) -> Unit = { _, _ -> },
     onRemoveLeagueTimeSlot: (Int) -> Unit = {},
@@ -1336,6 +1338,7 @@ fun EventDetails(
                                     onSelectFieldCount(count)
                                 },
                                 onFieldNameChange = onUpdateLocalFieldName,
+                                onFieldDivisionsChange = onUpdateLocalFieldDivisions,
                                 onAddSlot = onAddLeagueTimeSlot,
                                 onUpdateSlot = onUpdateLeagueTimeSlot,
                                 onRemoveSlot = onRemoveLeagueTimeSlot,
@@ -1623,13 +1626,14 @@ private fun computeLeagueSlotErrors(slots: List<TimeSlot>): Map<Int, String> {
     val errors = mutableMapOf<Int, String>()
     slots.forEachIndexed { index, slot ->
         val fieldId = slot.scheduledFieldId
-        val day = slot.dayOfWeek
+        val days = slot.normalizedDaysOfWeek()
+        val daySet = days.toSet()
         val start = slot.startTimeMinutes
         val end = slot.endTimeMinutes
 
         val requiredMissing = when {
             fieldId.isNullOrBlank() -> "Select a field."
-            day == null -> "Select a day."
+            days.isEmpty() -> "Select at least one day."
             start == null -> "Select a start time."
             end == null -> "Select an end time."
             end <= start -> "Timeslot must end after it starts."
@@ -1643,7 +1647,8 @@ private fun computeLeagueSlotErrors(slots: List<TimeSlot>): Map<Int, String> {
         val hasOverlap = slots.withIndex().any { (otherIndex, other) ->
             if (otherIndex == index) return@any false
             if (other.scheduledFieldId != fieldId) return@any false
-            if (other.dayOfWeek != day) return@any false
+            val otherDays = other.normalizedDaysOfWeek()
+            if (otherDays.isEmpty() || otherDays.none(daySet::contains)) return@any false
 
             val otherStart = other.startTimeMinutes
             val otherEnd = other.endTimeMinutes

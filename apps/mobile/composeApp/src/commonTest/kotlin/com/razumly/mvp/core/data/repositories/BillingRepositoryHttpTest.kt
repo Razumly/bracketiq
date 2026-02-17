@@ -25,6 +25,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import io.ktor.http.content.OutgoingContent
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -77,13 +78,22 @@ private class BillingRepositoryHttp_FakeUserRepository(
         relationship: String?,
     ): Result<Unit> = error("unused")
 
+    override suspend fun updateChildAccount(
+        childUserId: String,
+        firstName: String,
+        lastName: String,
+        dateOfBirth: String,
+        email: String?,
+        relationship: String?,
+    ): Result<Unit> = error("unused")
+
     override suspend fun linkChildToParent(
         childEmail: String?,
         childUserId: String?,
         relationship: String?,
     ): Result<Unit> = error("unused")
 
-    override suspend fun createNewUser(email: String, password: String, firstName: String, lastName: String, userName: String): Result<UserData> = error("unused")
+    override suspend fun createNewUser(email: String, password: String, firstName: String, lastName: String, userName: String, dateOfBirth: String?): Result<UserData> = error("unused")
     override suspend fun updateUser(user: UserData): Result<UserData> = error("unused")
     override suspend fun updateEmail(email: String, password: String): Result<Unit> = error("unused")
     override suspend fun updatePassword(currentPassword: String, newPassword: String): Result<Unit> = error("unused")
@@ -107,6 +117,7 @@ private object BillingRepositoryHttp_UnusedEventRepository : IEventRepository {
         requiredTemplateIds: List<String>,
         leagueScoringConfig: com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO?,
     ): Result<Event> = error("unused")
+    override suspend fun scheduleEvent(eventId: String, participantCount: Int?): Result<Event> = error("unused")
     override suspend fun updateEvent(newEvent: Event): Result<Event> = error("unused")
     override suspend fun updateLocalEvent(newEvent: Event): Result<Event> = error("unused")
     override fun getEventsInBoundsFlow(bounds: com.razumly.mvp.core.data.dataTypes.Bounds): Flow<Result<List<Event>>> = error("unused")
@@ -338,6 +349,48 @@ class BillingRepositoryHttpTest {
         assertTrue(signLinks[0].isTextStep())
         assertEquals("https://app.boldsign.com/sign/doc_123", signLinks[1].resolvedSigningUrl())
         assertEquals("doc_123", signLinks[1].resolvedDocumentId())
+    }
+
+    @Test
+    fun getRequiredSignLinks_with_signer_context_includes_child_fields() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+        var capturedBody = ""
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/events/event_1/sign", request.url.encodedPath)
+            assertEquals(HttpMethod.Post, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+
+            respond(
+                content = """{"signLinks": []}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = BillingRepository(api, userRepo, BillingRepositoryHttp_UnusedEventRepository, db)
+
+        repo.getRequiredSignLinks(
+            eventId = "event_1",
+            signerContext = SignerContext.PARENT_GUARDIAN,
+            childUserId = "child_1",
+            childUserEmail = "child@example.test",
+        ).getOrThrow()
+
+        assertTrue(capturedBody.contains("\"signerContext\":\"parent_guardian\""))
+        assertTrue(capturedBody.contains("\"childUserId\":\"child_1\""))
+        assertTrue(capturedBody.contains("\"childEmail\":\"child@example.test\""))
     }
 
     @Test

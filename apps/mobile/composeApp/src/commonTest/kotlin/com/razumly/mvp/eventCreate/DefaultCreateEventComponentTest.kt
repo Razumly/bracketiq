@@ -104,15 +104,19 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
             copy(
                 name = "League Create Test",
                 organizationId = "org-123",
+                divisions = listOf("B", "Open"),
                 start = instant(1_700_000_000_000),
                 end = instant(1_700_086_400_000),
             )
         }
+        harness.component.updateLocalFieldDivisions(0, listOf("A"))
+        harness.component.updateLocalFieldDivisions(1, emptyList())
         advance()
 
         harness.component.updateLeagueTimeSlot(0) {
             copy(
                 dayOfWeek = 1,
+                daysOfWeek = listOf(1, 3),
                 startTimeMinutes = 600,
                 endTimeMinutes = 660,
                 scheduledFieldId = localFieldIds[0],
@@ -141,17 +145,60 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         assertEquals(1, harness.eventRepository.createEventCalls.size)
         assertEquals(1, harness.onEventCreatedCount)
         assertEquals(2, harness.fieldRepository.createdFields.size)
-        assertEquals(1, harness.fieldRepository.createdTimeSlots.size)
+        assertEquals(2, harness.fieldRepository.createdTimeSlots.size)
 
         val createCall = harness.eventRepository.createEventCalls.single()
         val createdFieldIds = harness.fieldRepository.createdFields.map { it.id }
-        val createdSlot = harness.fieldRepository.createdTimeSlots.single()
+        val createdSlots = harness.fieldRepository.createdTimeSlots
 
         assertEquals(createdFieldIds, createCall.event.fieldIds)
-        assertEquals(listOf(createdSlot.id), createCall.event.timeSlotIds)
-        assertEquals(createdFieldIds.first(), createdSlot.scheduledFieldId)
+        assertEquals(createdSlots.map { it.id }, createCall.event.timeSlotIds)
+        assertEquals(listOf("A"), harness.fieldRepository.createdFields[0].divisions)
+        assertEquals(listOf("B", "Open"), harness.fieldRepository.createdFields[1].divisions)
+        assertEquals(createdFieldIds.first(), createdSlots[0].scheduledFieldId)
+        assertEquals(createdFieldIds.first(), createdSlots[1].scheduledFieldId)
+        assertEquals(listOf(1, 3), createdSlots.mapNotNull { it.dayOfWeek }.sorted())
         assertEquals(3, createCall.leagueScoringConfig?.pointsForWin)
         assertEquals(emptyList(), createCall.requiredTemplateIds)
+    }
+
+    @Test
+    fun given_league_creation_with_no_event_divisions_when_field_divisions_empty_then_open_is_used() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        harness.component.setLoadingHandler(harness.loadingHandler)
+        advance()
+
+        harness.component.onTypeSelected(EventType.LEAGUE)
+        advance()
+        harness.component.selectFieldCount(1)
+        advance()
+
+        harness.component.updateEventField {
+            copy(
+                name = "League Field Division Fallback",
+                organizationId = "org-open",
+                divisions = emptyList(),
+                start = instant(1_700_000_000_000),
+                end = instant(1_700_086_400_000),
+            )
+        }
+        harness.component.updateLocalFieldDivisions(0, emptyList())
+        harness.component.updateLeagueTimeSlot(0) {
+            copy(
+                dayOfWeek = 2,
+                daysOfWeek = listOf(2),
+                startTimeMinutes = 600,
+                endTimeMinutes = 660,
+                scheduledFieldId = harness.component.localFields.value.first().id,
+            )
+        }
+        advance()
+
+        harness.component.createEvent()
+        advance()
+
+        assertEquals(1, harness.fieldRepository.createdFields.size)
+        assertEquals(listOf("Open"), harness.fieldRepository.createdFields.first().divisions)
     }
 
     @Test

@@ -37,6 +37,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import io.ktor.http.content.OutgoingContent
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -221,6 +222,15 @@ private class EventRepositoryHttp_FakeUserRepository(
         relationship: String?,
     ): Result<Unit> = error("unused")
 
+    override suspend fun updateChildAccount(
+        childUserId: String,
+        firstName: String,
+        lastName: String,
+        dateOfBirth: String,
+        email: String?,
+        relationship: String?,
+    ): Result<Unit> = error("unused")
+
     override suspend fun linkChildToParent(
         childEmail: String?,
         childUserId: String?,
@@ -233,6 +243,7 @@ private class EventRepositoryHttp_FakeUserRepository(
         firstName: String,
         lastName: String,
         userName: String,
+        dateOfBirth: String?,
     ): Result<UserData> = error("unused")
     override suspend fun updateUser(user: UserData): Result<UserData> = error("unused")
     override suspend fun updateEmail(email: String, password: String): Result<Unit> = error("unused")
@@ -394,5 +405,56 @@ class EventRepositoryHttpTest {
         val requested = userRepo.requestedUserIds
         assertTrue("u1" in requested)
         assertTrue("h1" in requested)
+    }
+
+    @Test
+    fun registerChildForEvent_posts_child_registration_payload() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+        var capturedBody = ""
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/events/e1/registrations/child", request.url.encodedPath)
+            assertEquals(HttpMethod.Post, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+
+            respond(
+                content = """
+                    {
+                      "event": {
+                        "id": "e1",
+                        "name": "Event One",
+                        "hostId": "h1",
+                        "start": "2026-02-10T00:00:00Z",
+                        "end": "2026-02-10T01:00:00Z",
+                        "coordinates": [-80.0, 25.0],
+                        "userIds": ["child_1"],
+                        "teamIds": []
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        repo.registerChildForEvent(eventId = "e1", childUserId = "child_1").getOrThrow()
+
+        assertTrue(capturedBody.contains("\"childId\":\"child_1\""))
     }
 }

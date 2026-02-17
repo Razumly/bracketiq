@@ -7,12 +7,14 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.LeagueConfig
 import com.razumly.mvp.core.data.dataTypes.TournamentConfig
@@ -35,7 +37,6 @@ fun ColumnScope.LeagueConfigurationFields(
     val currentSets = normalizeSetCount(leagueConfig.setsPerMatch)
     val winnerSetCount = normalizeSetCount(playoffConfig.winnerSetCount)
     val loserSetCount = normalizeSetCount(playoffConfig.loserSetCount)
-    val scoringMode = if (leagueConfig.usesSets) "SETS" else "TIME"
 
     Text("League Configuration", style = MaterialTheme.typography.titleMedium)
 
@@ -85,7 +86,7 @@ fun ColumnScope.LeagueConfigurationFields(
                         leagueConfig.copy(
                             includePlayoffs = checked,
                             playoffTeamCount = if (checked) {
-                                leagueConfig.playoffTeamCount ?: 4
+                                leagueConfig.playoffTeamCount
                             } else {
                                 null
                             },
@@ -140,48 +141,20 @@ fun ColumnScope.LeagueConfigurationFields(
     }
 
     Text("League Scoring", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
+    Text(
+        text = if (leagueConfig.usesSets) "Set-based scoring enabled." else "Timed match scoring enabled.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(bottom = 4.dp),
+    )
 
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.Top,
     ) {
-        PlatformDropdown(
-            selectedValue = scoringMode,
-            onSelectionChange = { selected ->
-                if (selected == "SETS") {
-                    onLeagueConfigChange(
-                        leagueConfig.copy(
-                            usesSets = true,
-                            setsPerMatch = currentSets,
-                            setDurationMinutes = leagueConfig.setDurationMinutes ?: 20,
-                            pointsToVictory = normalizePoints(
-                                leagueConfig.pointsToVictory,
-                                currentSets
-                            ),
-                            matchDurationMinutes = 60,
-                        )
-                    )
-                } else {
-                    onLeagueConfigChange(
-                        leagueConfig.copy(
-                            usesSets = false,
-                            setDurationMinutes = null,
-                            setsPerMatch = null,
-                            pointsToVictory = emptyList(),
-                        )
-                    )
-                }
-            },
-            options = listOf(
-                DropdownOption("SETS", "Set-based"),
-                DropdownOption("TIME", "Timed match"),
-            ),
-            label = "Scoring format",
-            modifier = Modifier.weight(1f),
-        )
         NumberInputField(
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.fillMaxWidth(),
             value = leagueConfig.gamesPerOpponent.toString(),
             label = "Games per Opponent",
             onValueChange = { newValue ->
@@ -253,7 +226,7 @@ fun ColumnScope.LeagueConfigurationFields(
             if (leagueConfig.includePlayoffs) {
                 NumberInputField(
                     modifier = Modifier.weight(1f),
-                    value = (leagueConfig.playoffTeamCount ?: 4).toString(),
+                    value = leagueConfig.playoffTeamCount?.toString().orEmpty(),
                     label = "Playoff Team Count",
                     onValueChange = { newValue ->
                         if (newValue.all { it.isDigit() }) {
@@ -262,7 +235,8 @@ fun ColumnScope.LeagueConfigurationFields(
                             )
                         }
                     },
-                    isError = false,
+                    isError = (leagueConfig.playoffTeamCount ?: 0) < 2,
+                    errorMessage = "Required when playoffs are enabled",
                 )
             } else {
                 Box(modifier = Modifier.weight(1f))
@@ -338,7 +312,7 @@ fun ColumnScope.LeagueConfigurationFields(
             ) {
                 NumberInputField(
                     modifier = Modifier.weight(1f),
-                    value = (leagueConfig.playoffTeamCount ?: 4).toString(),
+                    value = leagueConfig.playoffTeamCount?.toString().orEmpty(),
                     label = "Playoff Team Count",
                     onValueChange = { newValue ->
                         if (newValue.all { it.isDigit() }) {
@@ -347,7 +321,8 @@ fun ColumnScope.LeagueConfigurationFields(
                             )
                         }
                     },
-                    isError = false,
+                    isError = (leagueConfig.playoffTeamCount ?: 0) < 2,
+                    errorMessage = "Required when playoffs are enabled",
                 )
                 Box(modifier = Modifier.weight(1f))
             }
@@ -477,13 +452,20 @@ private fun LabeledCheckbox(
     onCheckedChange: (Boolean) -> Unit,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .toggleable(
+                value = checked,
+                enabled = enabled,
+                role = Role.Checkbox,
+                onValueChange = onCheckedChange,
+            ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Checkbox(
             checked = checked,
             enabled = enabled,
-            onCheckedChange = onCheckedChange,
+            onCheckedChange = null,
         )
         Text(label)
     }

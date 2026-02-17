@@ -23,6 +23,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.http.content.OutgoingContent
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
@@ -230,6 +231,68 @@ class UserRepositoryAuthTest {
     }
 
     @Test
+    fun createNewUser_includes_date_of_birth_in_register_payload() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+        var capturedBody = ""
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/auth/register", request.url.encodedPath)
+            assertEquals(HttpMethod.Post, request.method)
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+            respond(
+                content = """
+                    {
+                      "user": { "id":"u_signup", "email":"signup@example.com", "name":"Signup User" },
+                      "session": { "userId":"u_signup", "isAdmin":false },
+                      "token":"signup_token",
+                      "profile": {
+                        "id":"u_signup",
+                        "firstName":"Sign",
+                        "lastName":"Up",
+                        "userName":"signup_user",
+                        "teamIds":[],
+                        "friendIds":[],
+                        "friendRequestIds":[],
+                        "friendRequestSentIds":[],
+                        "followingIds":[],
+                        "uploadedImages":[],
+                        "hasStripeAccount":false
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        val created = repo.createNewUser(
+            email = "signup@example.com",
+            password = "password123",
+            firstName = "Sign",
+            lastName = "Up",
+            userName = "signup_user",
+            dateOfBirth = "2008-05-02",
+        ).getOrThrow()
+
+        assertEquals("u_signup", created.id)
+        assertEquals("signup_token", tokenStore.get())
+        assertEquals(true, capturedBody.contains("\"dateOfBirth\":\"2008-05-02\""))
+    }
+
+    @Test
     fun ensureUserByEmail_returns_public_user_and_persists_to_cache() = runTest {
         val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("t123")
         val userDao = FakeUserDataDao()
@@ -349,6 +412,43 @@ class UserRepositoryAuthTest {
         val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
 
         val result = repo.createChildAccount(
+            firstName = "Kid",
+            lastName = "Two",
+            dateOfBirth = "2016-01-20",
+            email = "kid.two@example.com",
+            relationship = "parent",
+        )
+
+        assertEquals(true, result.isSuccess)
+    }
+
+    @Test
+    fun updateChildAccount_patches_family_child_endpoint() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("t123")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/family/children/child_2", request.url.encodedPath)
+            assertEquals(HttpMethod.Patch, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+            respond(
+                content = """{}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        val result = repo.updateChildAccount(
+            childUserId = "child_2",
             firstName = "Kid",
             lastName = "Two",
             dateOfBirth = "2016-01-20",
