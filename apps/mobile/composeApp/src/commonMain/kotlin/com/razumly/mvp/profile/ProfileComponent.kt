@@ -15,7 +15,11 @@ import com.razumly.mvp.core.data.dataTypes.Subscription
 import com.razumly.mvp.core.data.repositories.FamilyChild
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
+import com.razumly.mvp.core.data.repositories.ProfileDocumentCard
+import com.razumly.mvp.core.data.repositories.ProfileDocumentType
+import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.network.apiBaseUrl
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentResult
@@ -34,6 +38,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import org.koin.core.parameter.parametersOf
 import org.koin.mp.KoinPlatform.getKoin
+import kotlin.time.Clock
 
 data class ProfilePaymentPlan(
     val bill: Bill,
@@ -106,14 +111,29 @@ data class ProfileChildrenState(
     val linkError: String? = null,
 )
 
+data class ProfileDocumentsState(
+    val isLoading: Boolean = false,
+    val unsignedDocuments: List<ProfileDocumentCard> = emptyList(),
+    val signedDocuments: List<ProfileDocumentCard> = emptyList(),
+    val error: String? = null,
+)
+
+data class ProfileTextSignaturePromptState(
+    val document: ProfileDocumentCard,
+    val step: SignStep,
+)
+
 interface ProfileComponent : IPaymentProcessor {
     val childStack: Value<ChildStack<*, Child>>
     val errorState: StateFlow<ErrorMessage?>
     val paymentPlansState: StateFlow<ProfilePaymentPlansState>
     val membershipsState: StateFlow<ProfileMembershipsState>
     val childrenState: StateFlow<ProfileChildrenState>
+    val documentsState: StateFlow<ProfileDocumentsState>
     val activeBillPaymentId: StateFlow<String?>
     val activeMembershipActionId: StateFlow<String?>
+    val activeDocumentActionId: StateFlow<String?>
+    val textSignaturePrompt: StateFlow<ProfileTextSignaturePromptState?>
     val isStripeAccountConnected: StateFlow<Boolean>
 
     fun onBackClicked()
@@ -124,6 +144,7 @@ interface ProfileComponent : IPaymentProcessor {
     fun navigateToPaymentPlans()
     fun navigateToMemberships()
     fun navigateToChildren()
+    fun navigateToDocuments()
 
     fun onLogout()
     fun manageTeams()
@@ -138,6 +159,11 @@ interface ProfileComponent : IPaymentProcessor {
     fun cancelMembership(membership: ProfileMembership)
     fun restartMembership(membership: ProfileMembership)
     fun refreshChildren()
+    fun refreshDocuments()
+    fun signDocument(document: ProfileDocumentCard)
+    fun openSignedDocument(document: ProfileDocumentCard)
+    fun confirmTextSignature()
+    fun dismissTextSignature()
     fun createChild(
         firstName: String,
         lastName: String,
@@ -168,6 +194,7 @@ interface ProfileComponent : IPaymentProcessor {
         data class PaymentPlans(val component: ProfileComponent) : Child()
         data class Memberships(val component: ProfileComponent) : Child()
         data class Children(val component: ProfileComponent) : Child()
+        data class Documents(val component: ProfileComponent) : Child()
     }
 }
 
@@ -190,6 +217,9 @@ private sealed class ProfileConfig {
 
     @Serializable
     data object Children : ProfileConfig()
+
+    @Serializable
+    data object Documents : ProfileConfig()
 
 }
 
@@ -217,11 +247,20 @@ class DefaultProfileComponent(
     private val _childrenState = MutableStateFlow(ProfileChildrenState())
     override val childrenState = _childrenState.asStateFlow()
 
+    private val _documentsState = MutableStateFlow(ProfileDocumentsState())
+    override val documentsState = _documentsState.asStateFlow()
+
     private val _activeBillPaymentId = MutableStateFlow<String?>(null)
     override val activeBillPaymentId = _activeBillPaymentId.asStateFlow()
 
     private val _activeMembershipActionId = MutableStateFlow<String?>(null)
     override val activeMembershipActionId = _activeMembershipActionId.asStateFlow()
+
+    private val _activeDocumentActionId = MutableStateFlow<String?>(null)
+    override val activeDocumentActionId = _activeDocumentActionId.asStateFlow()
+
+    private val _textSignaturePrompt = MutableStateFlow<ProfileTextSignaturePromptState?>(null)
+    override val textSignaturePrompt = _textSignaturePrompt.asStateFlow()
 
     private val _isStripeAccountConnected = MutableStateFlow(false)
     override val isStripeAccountConnected = _isStripeAccountConnected.asStateFlow()
@@ -296,6 +335,10 @@ class DefaultProfileComponent(
 
     override fun navigateToChildren() {
         push(ProfileConfig.Children)
+    }
+
+    override fun navigateToDocuments() {
+        push(ProfileConfig.Documents)
     }
 
     override fun onLogout() {
@@ -576,6 +619,165 @@ class DefaultProfileComponent(
         }
     }
 
+    override fun refreshDocuments() {
+        scope.launch {
+            _documentsState.value = _documentsState.value.copy(
+                isLoading = true,
+                error = null,
+            )
+
+            billingRepository.listProfileDocuments()
+                .onSuccess { bundle ->
+                    _documentsState.value = ProfileDocumentsState(
+                        isLoading = false,
+                        unsignedDocuments = bundle.unsigned,
+                        signedDocuments = bundle.signed,
+                        error = null,
+                    )
+                }
+                .onFailure { throwable ->
+                    _documentsState.value = _documentsState.value.copy(
+                        isLoading = false,
+                        error = throwable.message ?: "Failed to load documents.",
+                    )
+                }
+        }
+    }
+
+    override fun signDocument(document: ProfileDocumentCard) {
+        val eventId = document.eventId?.trim().orEmpty()
+        if (eventId.isEmpty()) {
+            _errorState.value = ErrorMessage("This document is missing an event id.")
+            return
+        }
+
+        scope.launch {
+            _activeDocumentActionId.value = document.id
+            loadingHandler?.showLoading("Preparing document signing ...")
+
+            billingRepository.getRequiredSignLinks(
+                eventId = eventId,
+                signerContext = document.signerContext,
+                childUserId = document.childUserId,
+                childUserEmail = document.childEmail,
+            ).onSuccess { steps ->
+                val step = steps.firstOrNull { it.templateId == document.templateId }
+                    ?: steps.firstOrNull()
+                if (step == null) {
+                    _errorState.value = ErrorMessage("No signing step is available for this document.")
+                    return@onSuccess
+                }
+
+                if (step.isTextStep()) {
+                    _textSignaturePrompt.value = ProfileTextSignaturePromptState(
+                        document = document,
+                        step = step,
+                    )
+                    return@onSuccess
+                }
+
+                val signingUrl = step.resolvedSigningUrl()
+                if (signingUrl.isNullOrBlank()) {
+                    _errorState.value = ErrorMessage("Document is missing a signing URL.")
+                    return@onSuccess
+                }
+
+                val openResult = urlHandler?.openUrlInWebView(signingUrl)
+                    ?: Result.failure(IllegalStateException("Web view is unavailable."))
+                openResult.onFailure { throwable ->
+                    _errorState.value = ErrorMessage(
+                        throwable.message ?: "Unable to open signing document.",
+                    )
+                }.onSuccess {
+                    _errorState.value = ErrorMessage("Complete signing, then refresh documents.")
+                }
+            }.onFailure { throwable ->
+                _errorState.value = ErrorMessage(
+                    throwable.message ?: "Unable to load signing links.",
+                )
+            }
+
+            _activeDocumentActionId.value = null
+            loadingHandler?.hideLoading()
+        }
+    }
+
+    override fun openSignedDocument(document: ProfileDocumentCard) {
+        if (document.type == ProfileDocumentType.TEXT) {
+            return
+        }
+
+        val viewUrl = document.viewUrl?.trim().orEmpty()
+        if (viewUrl.isEmpty()) {
+            _errorState.value = ErrorMessage("This document is missing a view URL.")
+            return
+        }
+
+        scope.launch {
+            _activeDocumentActionId.value = document.id
+            loadingHandler?.showLoading("Opening document ...")
+
+            val resolvedUrl = if (
+                viewUrl.startsWith("http://", ignoreCase = true) ||
+                viewUrl.startsWith("https://", ignoreCase = true)
+            ) {
+                viewUrl
+            } else {
+                "${apiBaseUrl.trimEnd('/')}/${viewUrl.trimStart('/')}"
+            }
+
+            val openResult = urlHandler?.openUrlInWebView(resolvedUrl)
+                ?: Result.failure(IllegalStateException("Web view is unavailable."))
+            openResult.onFailure { throwable ->
+                _errorState.value = ErrorMessage(
+                    throwable.message ?: "Unable to open document.",
+                )
+            }
+
+            _activeDocumentActionId.value = null
+            loadingHandler?.hideLoading()
+        }
+    }
+
+    override fun confirmTextSignature() {
+        val prompt = _textSignaturePrompt.value ?: return
+        val eventId = prompt.document.eventId?.trim().orEmpty()
+        if (eventId.isEmpty()) {
+            _errorState.value = ErrorMessage("This document is missing an event id.")
+            return
+        }
+
+        scope.launch {
+            _activeDocumentActionId.value = prompt.document.id
+            loadingHandler?.showLoading("Recording signature ...")
+
+            val documentId = prompt.step.resolvedDocumentId()
+                ?: "mobile-profile-text-${prompt.step.templateId}-${Clock.System.now().toEpochMilliseconds()}"
+
+            billingRepository.recordSignature(
+                eventId = eventId,
+                templateId = prompt.step.templateId,
+                documentId = documentId,
+                type = prompt.step.type,
+            ).onSuccess {
+                _textSignaturePrompt.value = null
+                _errorState.value = ErrorMessage("Document signed.")
+                refreshDocuments()
+            }.onFailure { throwable ->
+                _errorState.value = ErrorMessage(
+                    throwable.message ?: "Failed to record signature.",
+                )
+            }
+
+            _activeDocumentActionId.value = null
+            loadingHandler?.hideLoading()
+        }
+    }
+
+    override fun dismissTextSignature() {
+        _textSignaturePrompt.value = null
+    }
+
     override fun createChild(
         firstName: String,
         lastName: String,
@@ -747,6 +949,7 @@ class DefaultProfileComponent(
         ProfileConfig.PaymentPlans -> ProfileComponent.Child.PaymentPlans(this@DefaultProfileComponent)
         ProfileConfig.Memberships -> ProfileComponent.Child.Memberships(this@DefaultProfileComponent)
         ProfileConfig.Children -> ProfileComponent.Child.Children(this@DefaultProfileComponent)
+        ProfileConfig.Documents -> ProfileComponent.Child.Documents(this@DefaultProfileComponent)
     }
 }
 

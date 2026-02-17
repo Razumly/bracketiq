@@ -3,7 +3,6 @@ package com.razumly.mvp.core.network.dto
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
-import com.razumly.mvp.core.data.dataTypes.enums.FieldType
 import com.razumly.mvp.core.data.util.normalizeDivisionLabels
 import com.razumly.mvp.core.presentation.Primary
 import androidx.compose.ui.graphics.toArgb
@@ -23,7 +22,6 @@ data class EventApiDto(
 
     val divisions: List<String>? = null,
     val location: String? = null,
-    val fieldType: String? = null,
 
     val start: String? = null,
     val end: String? = null,
@@ -36,6 +34,7 @@ data class EventApiDto(
     val hostId: String? = null,
     val teamSignup: Boolean? = null,
     val singleDivision: Boolean? = null,
+    val registrationByDivisionType: Boolean? = null,
 
     val freeAgentIds: List<String>? = null,
     val waitListIds: List<String>? = null,
@@ -54,6 +53,8 @@ data class EventApiDto(
 
     val autoCancellation: Boolean? = null,
     val maxParticipants: Int? = null,
+    val minAge: Int? = null,
+    val maxAge: Int? = null,
     val teamSizeLimit: Int? = null,
 
     val eventType: String? = null,
@@ -101,8 +102,6 @@ data class EventApiDto(
 
         val resolvedEventType = runCatching { EventType.valueOf(eventType ?: EventType.EVENT.name) }
             .getOrDefault(EventType.EVENT)
-        val resolvedFieldType = runCatching { FieldType.valueOf(fieldType ?: FieldType.GRASS.name) }
-            .getOrDefault(FieldType.GRASS)
 
         return Event(
             id = resolvedId,
@@ -110,7 +109,6 @@ data class EventApiDto(
             description = description ?: "",
             divisions = (divisions ?: emptyList()).normalizeDivisionLabels(),
             location = location ?: "",
-            fieldType = resolvedFieldType,
             start = Instant.parse(resolvedStart),
             end = Instant.parse(resolvedEnd),
             priceCents = price ?: 0,
@@ -134,7 +132,10 @@ data class EventApiDto(
             organizationId = organizationId,
             autoCancellation = autoCancellation ?: false,
             maxParticipants = maxParticipants ?: 0,
+            minAge = minAge,
+            maxAge = maxAge,
             teamSizeLimit = (teamSizeLimit ?: 0).takeIf { it > 0 } ?: 2,
+            registrationByDivisionType = registrationByDivisionType ?: false,
             eventType = resolvedEventType,
             fieldCount = fieldCount,
             gamesPerOpponent = gamesPerOpponent,
@@ -160,6 +161,7 @@ data class EventApiDto(
             installmentDueDates = installmentDueDates ?: emptyList(),
             installmentAmounts = installmentAmounts ?: emptyList(),
             allowTeamSplitDefault = allowTeamSplitDefault,
+            requiredTemplateIds = requiredTemplateIds ?: emptyList(),
             lastUpdated = Clock.System.now(),
         )
     }
@@ -205,7 +207,6 @@ data class EventSearchFiltersDto(
     val eventTypes: List<String>? = null,
     val sports: List<String>? = null,
     val divisions: List<String>? = null,
-    val fieldType: String? = null,
 )
 
 @Serializable
@@ -240,9 +241,12 @@ data class EventUpdateDto(
     val rating: Double? = null,
     val teamSizeLimit: Int? = null,
     val maxParticipants: Int? = null,
+    val minAge: Int? = null,
+    val maxAge: Int? = null,
     val hostId: String? = null,
     val price: Int? = null,
     val singleDivision: Boolean? = null,
+    val registrationByDivisionType: Boolean? = null,
     val waitListIds: List<String>? = null,
     val freeAgentIds: List<String>? = null,
     val cancellationRefundHours: Int? = null,
@@ -275,7 +279,6 @@ data class EventUpdateDto(
     val organizationId: String? = null,
     val autoCancellation: Boolean? = null,
     val eventType: String? = null,
-    val fieldType: String? = null,
     val doTeamsRef: Boolean? = null,
     val refereeIds: List<String>? = null,
     val allowPaymentPlans: Boolean? = null,
@@ -301,7 +304,8 @@ fun Event.toUpdateDto(
     requiredTemplateIdsOverride: List<String>? = null,
     leagueScoringConfigOverride: LeagueScoringConfigDTO? = null,
 ): EventUpdateDto {
-    val resolvedRequiredTemplateIds = requiredTemplateIdsOverride
+    val sourceRequiredTemplateIds = requiredTemplateIdsOverride ?: requiredTemplateIds
+    val resolvedRequiredTemplateIds = sourceRequiredTemplateIds
         ?.map { templateId -> templateId.trim() }
         ?.filter { templateId -> templateId.isNotEmpty() }
         ?.distinct()
@@ -320,9 +324,12 @@ fun Event.toUpdateDto(
         rating = rating,
         teamSizeLimit = teamSizeLimit,
         maxParticipants = maxParticipants,
+        minAge = minAge,
+        maxAge = maxAge,
         hostId = hostId,
         price = priceCents,
         singleDivision = singleDivision,
+        registrationByDivisionType = registrationByDivisionType,
         waitListIds = waitListIds,
         freeAgentIds = freeAgentIds,
         cancellationRefundHours = cancellationRefundHours,
@@ -355,7 +362,6 @@ fun Event.toUpdateDto(
         organizationId = organizationId,
         autoCancellation = autoCancellation,
         eventType = eventType.name,
-        fieldType = fieldType.name,
         doTeamsRef = doTeamsRef,
         refereeIds = refereeIds,
         allowPaymentPlans = allowPaymentPlans,

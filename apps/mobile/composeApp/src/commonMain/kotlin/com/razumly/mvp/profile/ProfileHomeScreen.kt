@@ -85,6 +85,12 @@ fun ProfileHomeScreen(component: ProfileComponent) {
                 onClick = component::navigateToChildren,
             ),
             ProfileAction(
+                title = "Documents",
+                description = "Sign and review documents",
+                icon = MVPIcons.ProfileActionDetails,
+                onClick = component::navigateToDocuments,
+            ),
+            ProfileAction(
                 title = "Teams",
                 description = "Team management",
                 icon = MVPIcons.ProfileActionTeams,

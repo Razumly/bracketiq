@@ -27,18 +27,19 @@ class EventDtosTest {
     }
 
     @Test
-    fun to_update_dto_uses_empty_required_template_ids_when_override_is_not_provided() {
+    fun to_update_dto_uses_event_required_template_ids_when_override_is_not_provided() {
         val event = Event(
             name = "Regular Event",
             eventType = EventType.EVENT,
             hostId = "host-2",
             start = Instant.fromEpochMilliseconds(1_700_000_000_000),
             end = Instant.fromEpochMilliseconds(1_700_003_600_000),
+            requiredTemplateIds = listOf(" template-c ", "", "template-c", "template-d "),
         )
 
         val dto = event.toUpdateDto()
 
-        assertEquals(emptyList(), dto.requiredTemplateIds)
+        assertEquals(listOf("template-c", "template-d"), dto.requiredTemplateIds)
     }
 
     @Test

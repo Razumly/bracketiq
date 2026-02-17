@@ -6,7 +6,6 @@ import androidx.room.PrimaryKey
 import androidx.room.TypeConverters
 import com.razumly.mvp.core.data.dataTypes.dtos.EventDTO
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
-import com.razumly.mvp.core.data.dataTypes.enums.FieldType
 import com.razumly.mvp.core.data.util.DivisionConverters
 import com.razumly.mvp.core.data.util.normalizeDivisionLabels
 import com.razumly.mvp.core.presentation.Primary
@@ -34,7 +33,6 @@ data class Event(
     @field:TypeConverters(DivisionConverters::class)
     val divisions: List<String> = emptyList(),
     val location: String = "",
-    val fieldType: FieldType = FieldType.GRASS,
     @Contextual val start: Instant = Instant.DISTANT_PAST,
     @Contextual val end: Instant = Instant.DISTANT_PAST,
     val priceCents: Int = 0,
@@ -58,7 +56,10 @@ data class Event(
     val organizationId: String? = null,
     val autoCancellation: Boolean = false,
     val maxParticipants: Int = 0,
+    val minAge: Int? = null,
+    val maxAge: Int? = null,
     val teamSizeLimit: Int = 2,
+    val registrationByDivisionType: Boolean = false,
     val eventType: EventType = EventType.EVENT,
     val fieldCount: Int? = null,
     val gamesPerOpponent: Int? = null,
@@ -78,6 +79,7 @@ data class Event(
     val installmentDueDates: List<String> = emptyList(),
     val installmentAmounts: List<Int> = emptyList(),
     val allowTeamSplitDefault: Boolean? = null,
+    val requiredTemplateIds: List<String> = emptyList(),
     @Transient val lastUpdated: Instant = Clock.System.now(),
 ) : MVPDocument {
     val price: Double get() = priceCents.toDouble() / 100.0
@@ -104,7 +106,6 @@ fun Event.toEventDTO(): EventDTO =
         loserBracketPointsToVictory = loserBracketPointsToVictory,
         prize = prize,
         location = location,
-        fieldType = fieldType.name,
         start = start.toString(),
         end = end.toString(),
         priceCents = priceCents,
@@ -130,6 +131,9 @@ fun Event.toEventDTO(): EventDTO =
         organizationId = organizationId,
         autoCancellation = autoCancellation,
         eventType = eventType.name,
+        minAge = minAge,
+        maxAge = maxAge,
+        registrationByDivisionType = registrationByDivisionType,
         fieldCount = fieldCount,
         gamesPerOpponent = gamesPerOpponent,
         includePlayoffs = includePlayoffs,
@@ -147,5 +151,6 @@ fun Event.toEventDTO(): EventDTO =
         installmentCount = installmentCount,
         installmentDueDates = installmentDueDates,
         installmentAmounts = installmentAmounts,
-        allowTeamSplitDefault = allowTeamSplitDefault
+        allowTeamSplitDefault = allowTeamSplitDefault,
+        requiredTemplateIds = requiredTemplateIds,
     )

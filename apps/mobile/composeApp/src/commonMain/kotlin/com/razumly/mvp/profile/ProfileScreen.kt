@@ -56,6 +56,10 @@ fun ProfileScreen(component: ProfileComponent) {
             is ProfileComponent.Child.Children -> {
                 ProfileChildrenScreen(component = instance.component)
             }
+
+            is ProfileComponent.Child.Documents -> {
+                ProfileDocumentsScreen(component = instance.component)
+            }
         }
     }
 }

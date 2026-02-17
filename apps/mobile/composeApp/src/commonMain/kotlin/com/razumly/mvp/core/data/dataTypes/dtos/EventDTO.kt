@@ -2,7 +2,6 @@ package com.razumly.mvp.core.data.dataTypes.dtos
 
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
-import com.razumly.mvp.core.data.dataTypes.enums.FieldType
 import com.razumly.mvp.core.data.util.normalizeDivisionLabels
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
@@ -24,7 +23,6 @@ data class EventDTO(
     val prize: String = "",
     @Transient val id: String = "",
     val location: String = "",
-    val fieldType: String = FieldType.GRASS.name,
     val start: String,
     val end: String,
     val priceCents: Int = 0,
@@ -33,9 +31,12 @@ data class EventDTO(
     val coordinates: List<Double> = listOf(0.0, 0.0),
     val hostId: String = "",
     val maxParticipants: Int = 0,
+    val minAge: Int? = null,
+    val maxAge: Int? = null,
     val teamSizeLimit: Int = 2,
     val teamSignup: Boolean = true,
     val singleDivision: Boolean = true,
+    val registrationByDivisionType: Boolean = false,
     val waitListIds: List<String> = emptyList(),
     val freeAgentIds: List<String> = emptyList(),
     val userIds: List<String> = emptyList(),
@@ -68,6 +69,7 @@ data class EventDTO(
     val installmentDueDates: List<String> = emptyList(),
     val installmentAmounts: List<Int> = emptyList(),
     val allowTeamSplitDefault: Boolean? = null,
+    val requiredTemplateIds: List<String> = emptyList(),
 ) {
     fun toEvent(id: String): Event =
         Event(
@@ -82,7 +84,6 @@ data class EventDTO(
             description = description,
             divisions = divisions.normalizeDivisionLabels(),
             location = location,
-            fieldType = FieldType.valueOf(fieldType),
             start = Instant.parse(start),
             end = Instant.parse(end),
             priceCents = priceCents,
@@ -106,7 +107,10 @@ data class EventDTO(
             organizationId = organizationId,
             autoCancellation = autoCancellation,
             maxParticipants = maxParticipants,
+            minAge = minAge,
+            maxAge = maxAge,
             teamSizeLimit = teamSizeLimit,
+            registrationByDivisionType = registrationByDivisionType,
             eventType = EventType.valueOf(eventType),
             fieldCount = fieldCount,
             gamesPerOpponent = gamesPerOpponent,
@@ -126,6 +130,7 @@ data class EventDTO(
             installmentCount = installmentCount,
             installmentDueDates = installmentDueDates,
             installmentAmounts = installmentAmounts,
-            allowTeamSplitDefault = allowTeamSplitDefault
+            allowTeamSplitDefault = allowTeamSplitDefault,
+            requiredTemplateIds = requiredTemplateIds,
         )
 }

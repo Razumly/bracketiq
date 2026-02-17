@@ -34,6 +34,43 @@ enum class SignerContext(val apiValue: String) {
     CHILD("child"),
 }
 
+enum class ProfileDocumentStatus {
+    UNSIGNED,
+    SIGNED,
+}
+
+enum class ProfileDocumentType {
+    PDF,
+    TEXT,
+}
+
+data class ProfileDocumentCard(
+    val id: String,
+    val status: ProfileDocumentStatus,
+    val eventId: String? = null,
+    val eventName: String? = null,
+    val organizationId: String? = null,
+    val organizationName: String,
+    val templateId: String,
+    val title: String,
+    val type: ProfileDocumentType,
+    val requiredSignerType: String,
+    val requiredSignerLabel: String,
+    val signerContext: SignerContext,
+    val signerContextLabel: String,
+    val childUserId: String? = null,
+    val childEmail: String? = null,
+    val signedAt: String? = null,
+    val signedDocumentRecordId: String? = null,
+    val viewUrl: String? = null,
+    val content: String? = null,
+)
+
+data class ProfileDocumentsBundle(
+    val unsigned: List<ProfileDocumentCard> = emptyList(),
+    val signed: List<ProfileDocumentCard> = emptyList(),
+)
+
 interface IBillingRepository : IMVPRepository {
     suspend fun createPurchaseIntent(
         event: Event,
@@ -74,6 +111,7 @@ interface IBillingRepository : IMVPRepository {
     suspend fun getOrganizationsByIds(organizationIds: List<String>): Result<List<Organization>>
     suspend fun leaveAndRefundEvent(event: Event, reason: String): Result<Unit>
     suspend fun deleteAndRefundEvent(event: Event): Result<Unit>
+    suspend fun listProfileDocuments(): Result<ProfileDocumentsBundle>
 
     suspend fun getRefundsWithRelations(): Result<List<RefundRequestWithRelations>>
     suspend fun getRefunds(): Result<List<RefundRequest>>
@@ -174,6 +212,22 @@ class BillingRepository(
         if (response.ok == false) {
             throw Exception("Failed to record signature.")
         }
+    }
+
+    override suspend fun listProfileDocuments(): Result<ProfileDocumentsBundle> = runCatching {
+        val response = api.get<ProfileDocumentsResponseDto>("api/profile/documents")
+        response.error?.takeIf(String::isNotBlank)?.let { errorMessage ->
+            throw Exception(errorMessage)
+        }
+
+        ProfileDocumentsBundle(
+            unsigned = response.unsigned.mapNotNull { document ->
+                document.toProfileDocumentCardOrNull(defaultStatus = ProfileDocumentStatus.UNSIGNED)
+            },
+            signed = response.signed.mapNotNull { document ->
+                document.toProfileDocumentCardOrNull(defaultStatus = ProfileDocumentStatus.SIGNED)
+            },
+        )
     }
 
     override suspend fun createAccount(): Result<String> = runCatching {
@@ -476,6 +530,93 @@ private data class EventSignLinksResponseDto(
     val signLinks: List<SignStep> = emptyList(),
     val error: String? = null,
 )
+
+@Serializable
+private data class ProfileDocumentsResponseDto(
+    val unsigned: List<ProfileDocumentCardDto> = emptyList(),
+    val signed: List<ProfileDocumentCardDto> = emptyList(),
+    val error: String? = null,
+)
+
+@Serializable
+private data class ProfileDocumentCardDto(
+    val id: String? = null,
+    val status: String? = null,
+    val eventId: String? = null,
+    val eventName: String? = null,
+    val organizationId: String? = null,
+    val organizationName: String? = null,
+    val templateId: String? = null,
+    val title: String? = null,
+    val type: String? = null,
+    val requiredSignerType: String? = null,
+    val requiredSignerLabel: String? = null,
+    val signerContext: String? = null,
+    val signerContextLabel: String? = null,
+    val childUserId: String? = null,
+    val childEmail: String? = null,
+    val signedAt: String? = null,
+    val signedDocumentRecordId: String? = null,
+    val viewUrl: String? = null,
+    val content: String? = null,
+)
+
+private fun ProfileDocumentCardDto.toProfileDocumentCardOrNull(
+    defaultStatus: ProfileDocumentStatus,
+): ProfileDocumentCard? {
+    val resolvedId = id?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val resolvedTemplateId = templateId?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val resolvedSignerType = requiredSignerType?.trim()?.takeIf(String::isNotBlank) ?: "PARTICIPANT"
+    val resolvedSignerLabel = requiredSignerLabel?.trim()?.takeIf(String::isNotBlank) ?: resolvedSignerType
+
+    return ProfileDocumentCard(
+        id = resolvedId,
+        status = parseProfileDocumentStatus(status, defaultStatus),
+        eventId = eventId?.trim()?.takeIf(String::isNotBlank),
+        eventName = eventName?.trim()?.takeIf(String::isNotBlank),
+        organizationId = organizationId?.trim()?.takeIf(String::isNotBlank),
+        organizationName = organizationName?.trim()?.takeIf(String::isNotBlank) ?: "Organization",
+        templateId = resolvedTemplateId,
+        title = title?.trim()?.takeIf(String::isNotBlank) ?: "Document",
+        type = parseProfileDocumentType(type),
+        requiredSignerType = resolvedSignerType,
+        requiredSignerLabel = resolvedSignerLabel,
+        signerContext = parseSignerContext(signerContext),
+        signerContextLabel = signerContextLabel?.trim()?.takeIf(String::isNotBlank) ?: resolvedSignerLabel,
+        childUserId = childUserId?.trim()?.takeIf(String::isNotBlank),
+        childEmail = childEmail?.trim()?.takeIf(String::isNotBlank),
+        signedAt = signedAt?.trim()?.takeIf(String::isNotBlank),
+        signedDocumentRecordId = signedDocumentRecordId?.trim()?.takeIf(String::isNotBlank),
+        viewUrl = viewUrl?.trim()?.takeIf(String::isNotBlank),
+        content = content?.trim()?.takeIf(String::isNotBlank),
+    )
+}
+
+private fun parseProfileDocumentStatus(
+    raw: String?,
+    defaultStatus: ProfileDocumentStatus,
+): ProfileDocumentStatus {
+    return when (raw?.trim()?.uppercase()) {
+        "UNSIGNED" -> ProfileDocumentStatus.UNSIGNED
+        "SIGNED" -> ProfileDocumentStatus.SIGNED
+        else -> defaultStatus
+    }
+}
+
+private fun parseProfileDocumentType(raw: String?): ProfileDocumentType {
+    return when (raw?.trim()?.uppercase()) {
+        "TEXT" -> ProfileDocumentType.TEXT
+        else -> ProfileDocumentType.PDF
+    }
+}
+
+private fun parseSignerContext(raw: String?): SignerContext {
+    return when (raw?.trim()?.lowercase()) {
+        "parent_guardian" -> SignerContext.PARENT_GUARDIAN
+        "child" -> SignerContext.CHILD
+        else -> SignerContext.PARTICIPANT
+    }
+}
 
 @Serializable
 private data class RecordSignatureRequestDto(

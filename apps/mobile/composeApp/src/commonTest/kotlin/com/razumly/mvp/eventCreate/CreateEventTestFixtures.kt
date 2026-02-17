@@ -34,6 +34,7 @@ import com.razumly.mvp.core.data.repositories.IFieldRepository
 import com.razumly.mvp.core.data.repositories.IImagesRepository
 import com.razumly.mvp.core.data.repositories.ISportsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.data.repositories.ProfileDocumentsBundle
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.network.MvpUploadFile
@@ -431,6 +432,8 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
         Result.success(emptyList())
     override suspend fun leaveAndRefundEvent(event: Event, reason: String): Result<Unit> = Result.success(Unit)
     override suspend fun deleteAndRefundEvent(event: Event): Result<Unit> = Result.success(Unit)
+    override suspend fun listProfileDocuments(): Result<ProfileDocumentsBundle> =
+        Result.success(ProfileDocumentsBundle())
     override suspend fun getRefundsWithRelations(): Result<List<RefundRequestWithRelations>> = Result.success(emptyList())
     override suspend fun getRefunds(): Result<List<RefundRequest>> = Result.success(emptyList())
     override suspend fun approveRefund(refundRequest: RefundRequest): Result<Unit> = Result.success(Unit)

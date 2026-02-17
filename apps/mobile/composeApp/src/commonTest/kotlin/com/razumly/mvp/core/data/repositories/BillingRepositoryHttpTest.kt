@@ -394,6 +394,91 @@ class BillingRepositoryHttpTest {
     }
 
     @Test
+    fun listProfileDocuments_gets_and_maps_response() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/profile/documents", request.url.encodedPath)
+            assertEquals(HttpMethod.Get, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+
+            respond(
+                content = """
+                    {
+                      "unsigned": [
+                        {
+                          "id": "event_1:tpl_pdf:parent_guardian:child_1",
+                          "status": "UNSIGNED",
+                          "eventId": "event_1",
+                          "eventName": "Spring League",
+                          "organizationId": "org_1",
+                          "organizationName": "City League",
+                          "templateId": "tpl_pdf",
+                          "title": "Parent Consent",
+                          "type": "PDF",
+                          "requiredSignerType": "PARENT_GUARDIAN",
+                          "requiredSignerLabel": "Parent/Guardian",
+                          "signerContext": "parent_guardian",
+                          "signerContextLabel": "Parent/Guardian",
+                          "childUserId": "child_1",
+                          "childEmail": "child@example.test"
+                        }
+                      ],
+                      "signed": [
+                        {
+                          "id": "signed_1",
+                          "status": "SIGNED",
+                          "eventId": "event_1",
+                          "eventName": "Spring League",
+                          "organizationId": "org_1",
+                          "organizationName": "City League",
+                          "templateId": "tpl_text",
+                          "title": "Code of Conduct",
+                          "type": "TEXT",
+                          "requiredSignerType": "PARTICIPANT",
+                          "requiredSignerLabel": "Participant",
+                          "signerContext": "participant",
+                          "signerContextLabel": "Participant",
+                          "signedAt": "2026-02-15T12:30:00.000Z",
+                          "signedDocumentRecordId": "signed_1",
+                          "content": "I agree."
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = BillingRepository(api, userRepo, BillingRepositoryHttp_UnusedEventRepository, db)
+
+        val documents = repo.listProfileDocuments().getOrThrow()
+
+        assertEquals(1, documents.unsigned.size)
+        assertEquals(1, documents.signed.size)
+
+        val unsigned = documents.unsigned.first()
+        assertEquals(ProfileDocumentStatus.UNSIGNED, unsigned.status)
+        assertEquals(ProfileDocumentType.PDF, unsigned.type)
+        assertEquals(SignerContext.PARENT_GUARDIAN, unsigned.signerContext)
+        assertEquals("child_1", unsigned.childUserId)
+
+        val signed = documents.signed.first()
+        assertEquals(ProfileDocumentStatus.SIGNED, signed.status)
+        assertEquals(ProfileDocumentType.TEXT, signed.type)
+        assertEquals(SignerContext.PARTICIPANT, signed.signerContext)
+        assertEquals("I agree.", signed.content)
+    }
+
+    @Test
     fun recordSignature_posts_expected_payload() = runTest {
         val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
         val userRepo = BillingRepositoryHttp_FakeUserRepository(

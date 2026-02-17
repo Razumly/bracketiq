@@ -14,6 +14,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -34,6 +35,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.razumly.mvp.core.data.repositories.ProfileDocumentCard
+import com.razumly.mvp.core.data.repositories.ProfileDocumentType
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
@@ -503,6 +506,239 @@ fun ProfileChildrenScreen(component: ProfileComponent) {
         getTime = false,
         canSelectPast = true,
     )
+}
+
+@Composable
+fun ProfileDocumentsScreen(component: ProfileComponent) {
+    val documentsState by component.documentsState.collectAsState()
+    val activeDocumentActionId by component.activeDocumentActionId.collectAsState()
+    val textSignaturePrompt by component.textSignaturePrompt.collectAsState()
+    var textPreviewDocument by remember { mutableStateOf<ProfileDocumentCard?>(null) }
+
+    LaunchedEffect(component) {
+        component.refreshDocuments()
+    }
+
+    ProfileSectionScaffold(
+        title = "Documents",
+        description = "Sign required documents and review completed signatures.",
+        onBack = component::onBackClicked,
+        onRefresh = component::refreshDocuments,
+        isRefreshing = documentsState.isLoading,
+    ) {
+        SectionHeaderRow(title = "Unsigned documents")
+
+        documentsState.error?.let { message ->
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
+        when {
+            documentsState.isLoading &&
+                documentsState.unsignedDocuments.isEmpty() &&
+                documentsState.signedDocuments.isEmpty() -> {
+                Text(
+                    text = "Loading documents...",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            documentsState.unsignedDocuments.isEmpty() -> {
+                Text(
+                    text = "No unsigned documents.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            else -> {
+                documentsState.unsignedDocuments.forEach { document ->
+                    val isProcessing = activeDocumentActionId == document.id
+                    DocumentCard(
+                        document = document,
+                        actionLabel = if (document.type == ProfileDocumentType.TEXT) "Sign text" else "Sign document",
+                        isProcessing = isProcessing,
+                        processingLabel = "Opening...",
+                        onAction = { component.signDocument(document) },
+                    )
+                }
+            }
+        }
+
+        SectionHeaderRow(title = "Signed documents")
+
+        if (documentsState.signedDocuments.isEmpty()) {
+            Text(
+                text = "No signed documents.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            documentsState.signedDocuments.forEach { document ->
+                val isProcessing = activeDocumentActionId == document.id
+                val actionLabel = if (document.type == ProfileDocumentType.TEXT) "Preview text" else "View document"
+                val onAction = {
+                    if (document.type == ProfileDocumentType.TEXT) {
+                        textPreviewDocument = document
+                    } else {
+                        component.openSignedDocument(document)
+                    }
+                }
+                DocumentCard(
+                    document = document,
+                    actionLabel = actionLabel,
+                    isProcessing = isProcessing,
+                    processingLabel = "Opening...",
+                    onAction = onAction,
+                )
+            }
+        }
+    }
+
+    textSignaturePrompt?.let { prompt ->
+        val isSigning = activeDocumentActionId == prompt.document.id
+        AlertDialog(
+            onDismissRequest = component::dismissTextSignature,
+            title = { Text("Sign document") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = prompt.document.title,
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        text = "Signer: ${prompt.document.signerContextLabel}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    val body = prompt.step.content
+                        ?.trim()
+                        ?.takeIf(String::isNotBlank)
+                        ?: prompt.document.content
+                            ?.trim()
+                            ?.takeIf(String::isNotBlank)
+                        ?: "Tap confirm to sign this text document."
+                    Text(
+                        text = body,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = component::confirmTextSignature,
+                    enabled = !isSigning,
+                ) {
+                    Text(if (isSigning) "Signing..." else "Confirm signature")
+                }
+            },
+            dismissButton = {
+                Button(
+                    onClick = component::dismissTextSignature,
+                    enabled = !isSigning,
+                ) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+
+    textPreviewDocument?.let { document ->
+        AlertDialog(
+            onDismissRequest = { textPreviewDocument = null },
+            title = { Text(document.title) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = document.content?.trim()?.takeIf(String::isNotBlank)
+                            ?: "No text content available for this document.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    document.signedAt?.let { signedAt ->
+                        Text(
+                            text = "Signed: ${formatDateForDisplay(signedAt)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = { textPreviewDocument = null }) {
+                    Text("Close")
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun DocumentCard(
+    document: ProfileDocumentCard,
+    actionLabel: String,
+    isProcessing: Boolean,
+    processingLabel: String,
+    onAction: () -> Unit,
+) {
+    val eventName = document.eventName?.trim()?.takeIf(String::isNotBlank) ?: "Event document"
+    val signedLabel = document.signedAt?.let { "Signed: ${formatDateForDisplay(it)}" }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                text = document.title,
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = eventName,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = document.organizationName,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = "Type: ${if (document.type == ProfileDocumentType.TEXT) "Text" else "PDF"}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = "Signer: ${document.signerContextLabel}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            signedLabel?.let { label ->
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = onAction,
+                enabled = !isProcessing,
+            ) {
+                Text(if (isProcessing) processingLabel else actionLabel)
+            }
+        }
+    }
 }
 
 @Composable
