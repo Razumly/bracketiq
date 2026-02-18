@@ -5,9 +5,25 @@ import com.razumly.mvp.core.presentation.RentalCreateContext
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class DefaultCreateEventComponentTest : MainDispatcherTest() {
+    @Test
+    fun selecting_league_or_tournament_enables_open_ended_end_flag() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        advance()
+
+        harness.component.onTypeSelected(EventType.LEAGUE)
+        advance()
+        assertTrue(harness.component.newEventState.value.noFixedEndDateTime)
+
+        harness.component.onTypeSelected(EventType.EVENT)
+        advance()
+        assertFalse(harness.component.newEventState.value.noFixedEndDateTime)
+    }
+
     @Test
     fun given_rental_context_when_updating_event_then_rental_constraints_lock_type_schedule_and_pricing() = runTest(testDispatcher) {
         val rentalContext = RentalCreateContext(
@@ -86,6 +102,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
 
         assertEquals(1, harness.component.localFields.value.size)
         assertNull(harness.component.leagueSlots.value.first().scheduledFieldId)
+        assertEquals(emptyList(), harness.component.leagueSlots.value.first().scheduledFieldIds)
     }
 
     @Test
@@ -153,8 +170,8 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
 
         assertEquals(createdFieldIds, createCall.event.fieldIds)
         assertEquals(createdSlots.map { it.id }, createCall.event.timeSlotIds)
-        assertEquals(listOf("A"), harness.fieldRepository.createdFields[0].divisions)
-        assertEquals(listOf("B", "Open"), harness.fieldRepository.createdFields[1].divisions)
+        assertEquals(listOf("a"), harness.fieldRepository.createdFields[0].divisions)
+        assertEquals(listOf("b", "open"), harness.fieldRepository.createdFields[1].divisions)
         assertEquals(createdFieldIds.first(), createdSlots[0].scheduledFieldId)
         assertEquals(createdFieldIds.first(), createdSlots[1].scheduledFieldId)
         assertEquals(listOf(1, 3), createdSlots.mapNotNull { it.dayOfWeek }.sorted())
@@ -198,7 +215,57 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         advance()
 
         assertEquals(1, harness.fieldRepository.createdFields.size)
-        assertEquals(listOf("Open"), harness.fieldRepository.createdFields.first().divisions)
+        assertEquals(listOf("open"), harness.fieldRepository.createdFields.first().divisions)
+    }
+
+    @Test
+    fun given_league_creation_with_multi_field_slot_selection_when_submitted_then_slot_expands_for_each_day_and_field() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        harness.component.setLoadingHandler(harness.loadingHandler)
+        advance()
+
+        harness.component.onTypeSelected(EventType.LEAGUE)
+        advance()
+        harness.component.selectFieldCount(2)
+        advance()
+        val localFieldIds = harness.component.localFields.value.map { it.id }
+
+        harness.component.updateEventField {
+            copy(
+                name = "League Multi-Field Slot",
+                organizationId = "org-multi",
+                divisions = listOf("Open"),
+                start = instant(1_700_000_000_000),
+                end = instant(1_700_086_400_000),
+            )
+        }
+        harness.component.updateLeagueTimeSlot(0) {
+            copy(
+                dayOfWeek = 1,
+                daysOfWeek = listOf(1, 3),
+                startTimeMinutes = 600,
+                endTimeMinutes = 660,
+                scheduledFieldId = localFieldIds.first(),
+                scheduledFieldIds = localFieldIds,
+            )
+        }
+        advance()
+
+        harness.component.createEvent()
+        advance()
+
+        val createdSlots = harness.fieldRepository.createdTimeSlots
+        val createdFieldIds = harness.fieldRepository.createdFields.map { field -> field.id }
+        assertEquals(4, createdSlots.size)
+        assertEquals(
+            setOf(
+                Pair(1, createdFieldIds[0]),
+                Pair(3, createdFieldIds[0]),
+                Pair(1, createdFieldIds[1]),
+                Pair(3, createdFieldIds[1]),
+            ),
+            createdSlots.map { slot -> Pair(slot.dayOfWeek, slot.scheduledFieldId) }.toSet(),
+        )
     }
 
     @Test

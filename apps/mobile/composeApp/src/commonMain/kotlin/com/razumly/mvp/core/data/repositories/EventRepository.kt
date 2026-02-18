@@ -19,6 +19,7 @@ import com.razumly.mvp.core.network.dto.CreateEventRequestDto
 import com.razumly.mvp.core.network.dto.EventApiDto
 import com.razumly.mvp.core.network.dto.EventChildRegistrationRequestDto
 import com.razumly.mvp.core.network.dto.EventParticipantsRequestDto
+import com.razumly.mvp.core.network.dto.EventParticipantsResponseDto
 import com.razumly.mvp.core.network.dto.EventResponseDto
 import com.razumly.mvp.core.network.dto.EventSearchFiltersDto
 import com.razumly.mvp.core.network.dto.EventSearchRequestDto
@@ -326,13 +327,22 @@ class EventRepository(
     override suspend fun addCurrentUserToEvent(event: Event): Result<Unit> =
         runCatching {
             val currentUser = userRepository.currentUser.value.getOrThrow()
-            val updated = api.post<EventParticipantsRequestDto, EventResponseDto>(
+            val response = api.post<EventParticipantsRequestDto, EventParticipantsResponseDto>(
                 path = "api/events/${event.id}/participants",
                 body = EventParticipantsRequestDto(userId = currentUser.id),
-            ).event?.toEventOrNull() ?: error("Participant update response missing event")
+            )
 
-            databaseService.getEventDao.upsertEvent(updated)
-            persistEventRelations(updated)
+            response.error?.takeIf(String::isNotBlank)?.let { errorMessage ->
+                error(errorMessage)
+            }
+            if (response.requiresParentApproval == true) {
+                error("Join request sent. A parent/guardian must approve before registration can continue.")
+            }
+
+            response.event?.toEventOrNull()?.let { updated ->
+                databaseService.getEventDao.upsertEvent(updated)
+                persistEventRelations(updated)
+            }
         }
 
     override suspend fun registerChildForEvent(eventId: String, childUserId: String): Result<Unit> =

@@ -1,8 +1,10 @@
 package com.razumly.mvp.core.data.dataTypes.dtos
 
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
-import com.razumly.mvp.core.data.util.normalizeDivisionLabels
+import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
+import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 import kotlin.time.Clock
@@ -16,6 +18,7 @@ data class EventDTO(
     val description: String = "",
     val doubleElimination: Boolean = false,
     val divisions: List<String> = emptyList(),
+    val divisionDetails: List<DivisionDetail> = emptyList(),
     val winnerSetCount: Int = 1,
     val loserSetCount: Int = 0,
     val winnerBracketPointsToVictory: List<Int> = emptyList(),
@@ -30,6 +33,7 @@ data class EventDTO(
     val imageId: String = "",
     val coordinates: List<Double> = listOf(0.0, 0.0),
     val hostId: String = "",
+    val noFixedEndDateTime: Boolean = false,
     val maxParticipants: Int = 0,
     val minAge: Int? = null,
     val maxAge: Int? = null,
@@ -82,7 +86,12 @@ data class EventDTO(
             id = id,
             name = name,
             description = description,
-            divisions = divisions.normalizeDivisionLabels(),
+            divisions = divisions.normalizeDivisionIdentifiers(),
+            divisionDetails = mergeDivisionDetailsForDivisions(
+                divisions = divisions,
+                existingDetails = divisionDetails,
+                eventId = id,
+            ),
             location = location,
             start = Instant.parse(start),
             end = Instant.parse(end),
@@ -91,6 +100,7 @@ data class EventDTO(
             imageId = imageId,
             coordinates = coordinates,
             hostId = hostId,
+            noFixedEndDateTime = noFixedEndDateTime,
             teamSignup = teamSignup,
             singleDivision = singleDivision,
             freeAgentIds = freeAgentIds,

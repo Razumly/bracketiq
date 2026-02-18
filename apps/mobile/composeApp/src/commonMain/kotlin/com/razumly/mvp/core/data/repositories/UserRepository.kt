@@ -35,6 +35,8 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
+private const val USER_REPOSITORY_LOG_TAG = "UserRepository"
+
 data class FamilyChild(
     val userId: String,
     val firstName: String,
@@ -45,6 +47,40 @@ data class FamilyChild(
     val relationship: String? = null,
     val email: String? = null,
     val hasEmail: Boolean? = null,
+)
+
+data class FamilyJoinRequest(
+    val registrationId: String,
+    val eventId: String,
+    val eventName: String? = null,
+    val eventStart: String? = null,
+    val childUserId: String,
+    val childFirstName: String? = null,
+    val childLastName: String? = null,
+    val childFullName: String? = null,
+    val childDateOfBirth: String? = null,
+    val childEmail: String? = null,
+    val childHasEmail: Boolean = false,
+    val consentStatus: String? = null,
+    val divisionId: String? = null,
+    val divisionTypeId: String? = null,
+    val divisionTypeKey: String? = null,
+    val requestedAt: String? = null,
+    val updatedAt: String? = null,
+)
+
+enum class FamilyJoinRequestAction(val apiValue: String) {
+    APPROVE("approve"),
+    DECLINE("decline"),
+}
+
+data class FamilyJoinRequestResolution(
+    val action: String? = null,
+    val registrationStatus: String? = null,
+    val consentStatus: String? = null,
+    val childEmail: String? = null,
+    val requiresChildEmail: Boolean = false,
+    val warnings: List<String> = emptyList(),
 )
 
 interface IUserRepository : IMVPRepository {
@@ -67,6 +103,12 @@ interface IUserRepository : IMVPRepository {
      */
     suspend fun ensureUserByEmail(email: String): Result<UserData>
     suspend fun listChildren(): Result<List<FamilyChild>>
+    suspend fun listPendingChildJoinRequests(): Result<List<FamilyJoinRequest>> =
+        Result.failure(NotImplementedError("Pending child join requests are not implemented for this repository."))
+    suspend fun resolveChildJoinRequest(
+        registrationId: String,
+        action: FamilyJoinRequestAction,
+    ): Result<FamilyJoinRequestResolution>
     suspend fun createChildAccount(
         firstName: String,
         lastName: String,
@@ -143,6 +185,7 @@ class UserRepository(
     }
 
     override suspend fun login(email: String, password: String): Result<UserData> = runCatching {
+        Napier.d(tag = USER_REPOSITORY_LOG_TAG) { "Email login started for ${maskEmail(email)}" }
         val res = api.post<LoginRequestDto, AuthResponseDto>(
             path = "api/auth/login",
             body = LoginRequestDto(email = email, password = password),
@@ -159,13 +202,17 @@ class UserRepository(
         val profile = res.profile?.toUserDataOrNull() ?: fetchUserProfile(account.id)
             ?: error("Login response missing profile")
 
-        databaseService.getUserDataDao.upsertUserData(profile)
-        currentUserDataSource.saveUserId(profile.id)
-        _currentUser.value = Result.success(profile)
+        cacheCurrentUserProfile(profile)
+        Napier.i(tag = USER_REPOSITORY_LOG_TAG) { "Email login succeeded for userId=${profile.id}" }
         profile
+    }.onFailure { throwable ->
+        Napier.e(tag = USER_REPOSITORY_LOG_TAG, throwable = throwable) {
+            "Email login failed for ${maskEmail(email)}: ${throwable.message}"
+        }
     }
 
     suspend fun loginWithGoogleIdToken(idToken: String): Result<UserData> = runCatching {
+        Napier.d(tag = USER_REPOSITORY_LOG_TAG) { "Google login started" }
         val res = api.post<GoogleMobileLoginRequestDto, AuthResponseDto>(
             path = "api/auth/google/mobile",
             body = GoogleMobileLoginRequestDto(idToken = idToken),
@@ -182,10 +229,13 @@ class UserRepository(
         val profile = res.profile?.toUserDataOrNull() ?: fetchUserProfile(account.id)
             ?: error("Google login response missing profile")
 
-        databaseService.getUserDataDao.upsertUserData(profile)
-        currentUserDataSource.saveUserId(profile.id)
-        _currentUser.value = Result.success(profile)
+        cacheCurrentUserProfile(profile)
+        Napier.i(tag = USER_REPOSITORY_LOG_TAG) { "Google login succeeded for userId=${profile.id}" }
         profile
+    }.onFailure { throwable ->
+        Napier.e(tag = USER_REPOSITORY_LOG_TAG, throwable = throwable) {
+            "Google login failed: ${throwable.message}"
+        }
     }
 
     override suspend fun createNewUser(
@@ -196,6 +246,7 @@ class UserRepository(
         userName: String,
         dateOfBirth: String?,
     ): Result<UserData> = runCatching {
+        Napier.d(tag = USER_REPOSITORY_LOG_TAG) { "Signup started for ${maskEmail(email)}" }
         val res = api.post<RegisterRequestDto, AuthResponseDto>(
             path = "api/auth/register",
             body = RegisterRequestDto(
@@ -220,10 +271,13 @@ class UserRepository(
         val profile = res.profile?.toUserDataOrNull()
             ?: error("Register response missing profile")
 
-        databaseService.getUserDataDao.upsertUserData(profile)
-        currentUserDataSource.saveUserId(profile.id)
-        _currentUser.value = Result.success(profile)
+        cacheCurrentUserProfile(profile)
+        Napier.i(tag = USER_REPOSITORY_LOG_TAG) { "Signup succeeded for userId=${profile.id}" }
         profile
+    }.onFailure { throwable ->
+        Napier.e(tag = USER_REPOSITORY_LOG_TAG, throwable = throwable) {
+            "Signup failed for ${maskEmail(email)}: ${throwable.message}"
+        }
     }
 
     override suspend fun logout(): Result<Unit> = runCatching {
@@ -249,10 +303,14 @@ class UserRepository(
         }.getOrNull()
 
         if (!savedId.isNullOrBlank()) {
-            val local = databaseService.getUserDataDao.getUserDataById(savedId)
-            if (local != null) {
-                _currentUser.value = Result.success(local)
-            }
+            val local = runCatching {
+                databaseService.getUserDataDao.getUserDataById(savedId)
+            }.onFailure { throwable ->
+                Napier.e(tag = USER_REPOSITORY_LOG_TAG, throwable = throwable) {
+                    "Failed reading local cached user for id=$savedId"
+                }
+            }.getOrNull()
+            if (local != null) _currentUser.value = Result.success(local)
         }
 
         val me = api.get<AuthResponseDto>("api/auth/me")
@@ -271,10 +329,20 @@ class UserRepository(
 
         val remoteProfile = me.profile?.toUserDataOrNull() ?: fetchUserProfile(account.id)
         if (remoteProfile != null) {
-            databaseService.getUserDataDao.upsertUserData(remoteProfile)
-            currentUserDataSource.saveUserId(remoteProfile.id)
-            _currentUser.value = Result.success(remoteProfile)
+            cacheCurrentUserProfile(remoteProfile)
         }
+    }
+
+    private suspend fun cacheCurrentUserProfile(profile: UserData) {
+        runCatching {
+            databaseService.getUserDataDao.upsertUserData(profile)
+            currentUserDataSource.saveUserId(profile.id)
+        }.onFailure { throwable ->
+            Napier.e(tag = USER_REPOSITORY_LOG_TAG, throwable = throwable) {
+                "Failed caching user profile locally for userId=${profile.id}"
+            }
+        }
+        _currentUser.value = Result.success(profile)
     }
 
     private suspend fun clearLoginState() {
@@ -289,6 +357,12 @@ class UserRepository(
             val res = api.get<UserResponseDto>("api/users/$userId")
             res.user?.toUserDataOrNull()
         }.getOrNull()
+    }
+
+    private fun maskEmail(email: String): String {
+        val atIndex = email.indexOf('@')
+        if (atIndex <= 1) return "***"
+        return "${email.first()}***${email.substring(atIndex)}"
     }
 
     override suspend fun searchPlayers(search: String): Result<List<UserData>> = runCatching {
@@ -317,6 +391,29 @@ class UserRepository(
         val response = api.get<FamilyChildrenResponseDto>(path = "api/family/children")
         response.error?.takeIf(String::isNotBlank)?.let { error(it) }
         response.children.mapNotNull { it.toFamilyChildOrNull() }
+    }
+
+    override suspend fun listPendingChildJoinRequests(): Result<List<FamilyJoinRequest>> = runCatching {
+        val response = api.get<FamilyJoinRequestsResponseDto>(path = "api/family/join-requests")
+        response.error?.takeIf(String::isNotBlank)?.let { error(it) }
+        response.requests.mapNotNull { it.toFamilyJoinRequestOrNull() }
+    }
+
+    override suspend fun resolveChildJoinRequest(
+        registrationId: String,
+        action: FamilyJoinRequestAction,
+    ): Result<FamilyJoinRequestResolution> = runCatching {
+        val normalizedRegistrationId = registrationId.trim()
+        if (normalizedRegistrationId.isBlank()) {
+            error("Registration id is required.")
+        }
+
+        val response = api.patch<JoinRequestActionRequestDto, JoinRequestActionResponseDto>(
+            path = "api/family/join-requests/${normalizedRegistrationId.encodeURLQueryComponent()}",
+            body = JoinRequestActionRequestDto(action = action.apiValue),
+        )
+        response.error?.takeIf(String::isNotBlank)?.let { error(it) }
+        response.toResolution()
     }
 
     override suspend fun createChildAccount(
@@ -559,6 +656,12 @@ private data class FamilyChildrenResponseDto(
 )
 
 @Serializable
+private data class FamilyJoinRequestsResponseDto(
+    val requests: List<FamilyJoinRequestDto> = emptyList(),
+    val error: String? = null,
+)
+
+@Serializable
 private data class FamilyChildDto(
     val userId: String? = null,
     @SerialName("\$id") val legacyUserId: String? = null,
@@ -588,6 +691,92 @@ private data class FamilyChildDto(
         )
     }
 }
+
+@Serializable
+private data class FamilyJoinRequestDto(
+    val registrationId: String? = null,
+    val eventId: String? = null,
+    val eventName: String? = null,
+    val eventStart: String? = null,
+    val childUserId: String? = null,
+    val childFirstName: String? = null,
+    val childLastName: String? = null,
+    val childFullName: String? = null,
+    val childDateOfBirth: String? = null,
+    val childEmail: String? = null,
+    val childHasEmail: Boolean? = null,
+    val consentStatus: String? = null,
+    val divisionId: String? = null,
+    val divisionTypeId: String? = null,
+    val divisionTypeKey: String? = null,
+    val requestedAt: String? = null,
+    val updatedAt: String? = null,
+) {
+    fun toFamilyJoinRequestOrNull(): FamilyJoinRequest? {
+        val normalizedRegistrationId = registrationId?.trim()?.takeIf(String::isNotBlank) ?: return null
+        val normalizedEventId = eventId?.trim()?.takeIf(String::isNotBlank) ?: return null
+        val normalizedChildUserId = childUserId?.trim()?.takeIf(String::isNotBlank) ?: return null
+
+        return FamilyJoinRequest(
+            registrationId = normalizedRegistrationId,
+            eventId = normalizedEventId,
+            eventName = eventName?.trim()?.takeIf(String::isNotBlank),
+            eventStart = eventStart?.trim()?.takeIf(String::isNotBlank),
+            childUserId = normalizedChildUserId,
+            childFirstName = childFirstName?.trim()?.takeIf(String::isNotBlank),
+            childLastName = childLastName?.trim()?.takeIf(String::isNotBlank),
+            childFullName = childFullName?.trim()?.takeIf(String::isNotBlank),
+            childDateOfBirth = childDateOfBirth?.trim()?.takeIf(String::isNotBlank),
+            childEmail = childEmail?.trim()?.takeIf(String::isNotBlank),
+            childHasEmail = childHasEmail ?: childEmail?.isNotBlank() == true,
+            consentStatus = consentStatus?.trim()?.takeIf(String::isNotBlank),
+            divisionId = divisionId?.trim()?.takeIf(String::isNotBlank),
+            divisionTypeId = divisionTypeId?.trim()?.takeIf(String::isNotBlank),
+            divisionTypeKey = divisionTypeKey?.trim()?.takeIf(String::isNotBlank),
+            requestedAt = requestedAt?.trim()?.takeIf(String::isNotBlank),
+            updatedAt = updatedAt?.trim()?.takeIf(String::isNotBlank),
+        )
+    }
+}
+
+@Serializable
+private data class JoinRequestActionRequestDto(
+    val action: String,
+)
+
+@Serializable
+private data class JoinRequestActionResponseDto(
+    val action: String? = null,
+    val registration: JoinRequestRegistrationDto? = null,
+    val consent: JoinRequestConsentDto? = null,
+    val warnings: List<String> = emptyList(),
+    val error: String? = null,
+) {
+    fun toResolution(): FamilyJoinRequestResolution {
+        return FamilyJoinRequestResolution(
+            action = action?.trim()?.takeIf(String::isNotBlank),
+            registrationStatus = registration?.status?.trim()?.takeIf(String::isNotBlank),
+            consentStatus = consent?.status?.trim()?.takeIf(String::isNotBlank)
+                ?: registration?.consentStatus?.trim()?.takeIf(String::isNotBlank),
+            childEmail = consent?.childEmail?.trim()?.takeIf(String::isNotBlank),
+            requiresChildEmail = consent?.requiresChildEmail ?: false,
+            warnings = warnings,
+        )
+    }
+}
+
+@Serializable
+private data class JoinRequestRegistrationDto(
+    val status: String? = null,
+    val consentStatus: String? = null,
+)
+
+@Serializable
+private data class JoinRequestConsentDto(
+    val status: String? = null,
+    val childEmail: String? = null,
+    val requiresChildEmail: Boolean? = null,
+)
 
 @Serializable
 private data class CreateChildAccountRequestDto(

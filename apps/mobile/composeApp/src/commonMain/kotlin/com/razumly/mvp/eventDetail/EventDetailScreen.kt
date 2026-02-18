@@ -779,14 +779,14 @@ private fun ChildJoinSelectionDialog(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable(enabled = child.hasEmail) { onChildSelected(child.userId) }
+                            .clickable { onChildSelected(child.userId) }
                             .padding(vertical = 8.dp),
                     ) {
                         Text(text = child.fullName, style = MaterialTheme.typography.bodyLarge)
                         val subtitle = if (child.hasEmail) {
                             child.email ?: "Email available"
                         } else {
-                            "Missing email. Add an email before registration."
+                            "Missing email. Registration can start, but child signature stays pending until email is added."
                         }
                         Text(
                             text = subtitle,

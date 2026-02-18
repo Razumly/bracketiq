@@ -20,7 +20,10 @@ import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
-import com.razumly.mvp.core.data.util.normalizeDivisionLabels
+import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
+import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
+import com.razumly.mvp.core.data.util.DEFAULT_DIVISION
+import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
@@ -332,11 +335,12 @@ class DefaultCreateEventComponent(
                     eventType = type,
                     teamSignup = true,
                     singleDivision = true,
-                    end = start,
+                    noFixedEndDateTime = true,
                 )
 
                 EventType.EVENT -> copy(
                     eventType = type,
+                    noFixedEndDateTime = false,
                     end = end.takeIf { it > start } ?: defaultEventEnd(start),
                 )
             }
@@ -391,7 +395,7 @@ class DefaultCreateEventComponent(
 
     override fun validateAndUpdateTeamSize(input: String, onError: (Boolean) -> Unit) {
         val teamSize = input.toIntOrNull()
-        if (teamSize == null || teamSize !in 2..6) {
+        if (teamSize == null || teamSize < 1) {
             onError(true)
         } else {
             updateEventField { copy(teamSizeLimit = teamSize) }
@@ -425,7 +429,7 @@ class DefaultCreateEventComponent(
                     id = if (field.id.isBlank()) newId() else field.id,
                     fieldNumber = index + 1,
                     divisions = field.divisions
-                        .normalizeDivisionLabels()
+                        .normalizeDivisionIdentifiers()
                         .ifEmpty { defaultFieldDivisions(currentEvent) },
                     organizationId = currentEvent.organizationId,
                 )
@@ -447,11 +451,11 @@ class DefaultCreateEventComponent(
 
         val validFieldIds = resized.map { it.id }.toSet()
         _leagueSlots.value = _leagueSlots.value.map { slot ->
-            if (slot.scheduledFieldId != null && !validFieldIds.contains(slot.scheduledFieldId)) {
-                slot.copy(scheduledFieldId = null)
-            } else {
-                slot
-            }
+            val remainingFieldIds = slot.normalizedScheduledFieldIds().filter(validFieldIds::contains)
+            slot.copy(
+                scheduledFieldId = remainingFieldIds.firstOrNull(),
+                scheduledFieldIds = remainingFieldIds,
+            )
         }
     }
 
@@ -468,7 +472,7 @@ class DefaultCreateEventComponent(
         fields[index] = fields[index].copy(
             // Keep explicit empties so fallback resolves against the latest event divisions
             // when fields are synchronized or finalized for creation.
-            divisions = divisions.normalizeDivisionLabels()
+            divisions = divisions.normalizeDivisionIdentifiers()
         )
         _localFields.value = fields
     }
@@ -570,6 +574,7 @@ class DefaultCreateEventComponent(
 
         var next = event.copy(
             eventType = EventType.EVENT,
+            noFixedEndDateTime = false,
             organizationId = context.organizationId,
             start = normalizedStart,
             end = normalizedEnd,
@@ -750,7 +755,7 @@ class DefaultCreateEventComponent(
                     fieldNumber = index + 1,
                     name = field.name?.takeIf { it.isNotBlank() } ?: "Field ${index + 1}",
                     divisions = field.divisions
-                        .normalizeDivisionLabels()
+                        .normalizeDivisionIdentifiers()
                         .ifEmpty { defaultFieldDivisions(event) },
                     organizationId = event.organizationId,
                 )
@@ -776,36 +781,55 @@ class DefaultCreateEventComponent(
         event: Event,
         fieldIdReplacements: Map<String, String>,
     ): List<TimeSlot> {
+        val selectedDivisionIds = event.divisions.normalizeDivisionIdentifiers()
+            .ifEmpty { listOf(DEFAULT_DIVISION) }
         return _leagueSlots.value.flatMap { slot ->
-            val mappedFieldId = slot.scheduledFieldId
-                ?.let { fieldIdReplacements[it] ?: it }
-                ?.takeIf { it.isNotBlank() }
+            val mappedFieldIds = slot.normalizedScheduledFieldIds()
+                .mapNotNull { fieldId ->
+                    (fieldIdReplacements[fieldId] ?: fieldId).takeIf { it.isNotBlank() }
+                }
+                .distinct()
+            val mappedDivisionIds = slot.normalizedDivisionIds()
+                .mapNotNull { divisionId ->
+                    divisionId.takeIf { it.isNotBlank() }
+                }
+                .distinct()
+            val effectiveDivisionIds = if (event.singleDivision) {
+                selectedDivisionIds
+            } else {
+                mappedDivisionIds.ifEmpty { selectedDivisionIds }
+            }
             val normalizedDays = slot.normalizedDaysOfWeek()
             val startMinutes = slot.startTimeMinutes
             val endMinutes = slot.endTimeMinutes
 
-            if (mappedFieldId == null || normalizedDays.isEmpty() || startMinutes == null || endMinutes == null) {
+            if (mappedFieldIds.isEmpty() || normalizedDays.isEmpty() || startMinutes == null || endMinutes == null) {
                 return@flatMap emptyList()
             }
             if (endMinutes <= startMinutes) {
                 return@flatMap emptyList()
             }
 
-            val singleDay = normalizedDays.size == 1
-            normalizedDays.mapIndexed { index, day ->
-                slot.copy(
-                    id = if (singleDay && index == 0) {
-                        slot.id.ifBlank { newId() }
-                    } else {
-                        newId()
-                    },
-                    dayOfWeek = day,
-                    daysOfWeek = listOf(day),
-                    scheduledFieldId = mappedFieldId,
-                    startDate = event.start,
-                    endDate = event.end.takeIf { it > event.start },
-                )
+            val expandedSlots = mutableListOf<TimeSlot>()
+            normalizedDays.forEachIndexed { dayIndex, day ->
+                mappedFieldIds.forEachIndexed { fieldIndex, fieldId ->
+                    expandedSlots += slot.copy(
+                        id = if (normalizedDays.size == 1 && mappedFieldIds.size == 1 && dayIndex == 0 && fieldIndex == 0) {
+                            slot.id.ifBlank { newId() }
+                        } else {
+                            newId()
+                        },
+                        dayOfWeek = day,
+                        daysOfWeek = listOf(day),
+                        divisions = effectiveDivisionIds,
+                        scheduledFieldId = fieldId,
+                        scheduledFieldIds = listOf(fieldId),
+                        startDate = event.start,
+                        endDate = event.end.takeIf { it > event.start },
+                    )
+                }
             }
+            expandedSlots
         }
     }
 
@@ -817,7 +841,7 @@ class DefaultCreateEventComponent(
             field.copy(
                 fieldNumber = index + 1,
                 divisions = field.divisions
-                    .normalizeDivisionLabels()
+                    .normalizeDivisionIdentifiers()
                     .ifEmpty { defaultFieldDivisions(event) },
                 organizationId = event.organizationId,
             )
@@ -916,19 +940,21 @@ class DefaultCreateEventComponent(
             id = newId(),
             dayOfWeek = null,
             daysOfWeek = emptyList(),
+            divisions = defaultFieldDivisions(event),
             startTimeMinutes = null,
             endTimeMinutes = null,
             startDate = startDate,
             repeating = true,
             endDate = endDate,
             scheduledFieldId = null,
+            scheduledFieldIds = emptyList(),
             price = null,
         )
     }
 
     private fun defaultFieldDivisions(event: Event): List<String> {
-        val eventDivisions = event.divisions.normalizeDivisionLabels()
-        return eventDivisions.ifEmpty { listOf("Open") }
+        val eventDivisions = event.divisions.normalizeDivisionIdentifiers()
+        return eventDivisions.ifEmpty { listOf(DEFAULT_DIVISION) }
     }
 
     private fun reserveRentalCheckoutLocks(eventDraft: Event): Boolean {

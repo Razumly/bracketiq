@@ -151,6 +151,7 @@ private fun FloatingBox(modifier: Modifier, color: Color, content: @Composable (
 
 @Composable
 private fun MatchInfoSection(match: MatchWithRelations, fields: List<FieldWithMatches>) {
+    val fieldLabel = resolveFieldLabel(match, fields)
     Column(
         modifier = Modifier.padding(8.dp).width(IntrinsicSize.Max),
         verticalArrangement = Arrangement.SpaceEvenly
@@ -158,10 +159,37 @@ private fun MatchInfoSection(match: MatchWithRelations, fields: List<FieldWithMa
         Text("M: ${match.match.matchId}", color = localColors.current.onPrimary)
         HorizontalDivider(color = localColors.current.onPrimary)
         Text(
-            "F: ${fields.find { it.field.id == match.match.fieldId }?.field?.fieldNumber}",
-            color = localColors.current.onPrimary
+            "Field: $fieldLabel",
+            color = localColors.current.onPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
+}
+
+private fun resolveFieldLabel(match: MatchWithRelations, fields: List<FieldWithMatches>): String {
+    val relationName = match.field?.name?.trim().orEmpty()
+    if (relationName.isNotEmpty()) {
+        return relationName
+    }
+
+    val relationNumber = match.field?.fieldNumber
+    if (relationNumber != null && relationNumber > 0) {
+        return "Field $relationNumber"
+    }
+
+    val mappedField = fields.firstOrNull { it.field.id == match.match.fieldId }?.field
+    val mappedName = mappedField?.name?.trim().orEmpty()
+    if (mappedName.isNotEmpty()) {
+        return mappedName
+    }
+
+    val mappedNumber = mappedField?.fieldNumber
+    if (mappedNumber != null && mappedNumber > 0) {
+        return "Field $mappedNumber"
+    }
+
+    return "Field TBD"
 }
 
 @Composable

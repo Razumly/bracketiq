@@ -13,6 +13,8 @@ import com.razumly.mvp.core.data.dataTypes.Bill
 import com.razumly.mvp.core.data.dataTypes.BillPayment
 import com.razumly.mvp.core.data.dataTypes.Subscription
 import com.razumly.mvp.core.data.repositories.FamilyChild
+import com.razumly.mvp.core.data.repositories.FamilyJoinRequest
+import com.razumly.mvp.core.data.repositories.FamilyJoinRequestAction
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.ProfileDocumentCard
@@ -99,10 +101,26 @@ data class ProfileChild(
             .ifBlank { "Child" }
 }
 
+data class ProfileJoinRequest(
+    val registrationId: String,
+    val eventId: String,
+    val eventName: String,
+    val childUserId: String,
+    val childFullName: String,
+    val childEmail: String? = null,
+    val childHasEmail: Boolean = false,
+    val consentStatus: String? = null,
+    val requestedAt: String? = null,
+)
+
 data class ProfileChildrenState(
     val isLoading: Boolean = false,
     val children: List<ProfileChild> = emptyList(),
     val error: String? = null,
+    val isLoadingJoinRequests: Boolean = false,
+    val joinRequests: List<ProfileJoinRequest> = emptyList(),
+    val joinRequestsError: String? = null,
+    val activeJoinRequestId: String? = null,
     val isCreatingChild: Boolean = false,
     val createError: String? = null,
     val isUpdatingChild: Boolean = false,
@@ -159,6 +177,9 @@ interface ProfileComponent : IPaymentProcessor {
     fun cancelMembership(membership: ProfileMembership)
     fun restartMembership(membership: ProfileMembership)
     fun refreshChildren()
+    fun refreshChildJoinRequests()
+    fun approveChildJoinRequest(registrationId: String)
+    fun declineChildJoinRequest(registrationId: String)
     fun refreshDocuments()
     fun signDocument(document: ProfileDocumentCard)
     fun openSignedDocument(document: ProfileDocumentCard)
@@ -595,6 +616,7 @@ class DefaultProfileComponent(
     }
 
     override fun refreshChildren() {
+        refreshChildJoinRequests()
         scope.launch {
             _childrenState.value = _childrenState.value.copy(
                 isLoading = true,
@@ -616,6 +638,90 @@ class DefaultProfileComponent(
                         error = it.message ?: "Failed to load children.",
                     )
                 }
+        }
+    }
+
+    override fun refreshChildJoinRequests() {
+        scope.launch {
+            _childrenState.value = _childrenState.value.copy(
+                isLoadingJoinRequests = true,
+                joinRequestsError = null,
+            )
+
+            userRepository.listPendingChildJoinRequests()
+                .onSuccess { requests ->
+                    _childrenState.value = _childrenState.value.copy(
+                        isLoadingJoinRequests = false,
+                        joinRequests = requests.map { it.toProfileJoinRequest() },
+                        joinRequestsError = null,
+                    )
+                }
+                .onFailure {
+                    _childrenState.value = _childrenState.value.copy(
+                        isLoadingJoinRequests = false,
+                        joinRequests = emptyList(),
+                        joinRequestsError = it.message ?: "Failed to load child join requests.",
+                    )
+                }
+        }
+    }
+
+    override fun approveChildJoinRequest(registrationId: String) {
+        resolveChildJoinRequest(
+            registrationId = registrationId,
+            action = FamilyJoinRequestAction.APPROVE,
+        )
+    }
+
+    override fun declineChildJoinRequest(registrationId: String) {
+        resolveChildJoinRequest(
+            registrationId = registrationId,
+            action = FamilyJoinRequestAction.DECLINE,
+        )
+    }
+
+    private fun resolveChildJoinRequest(
+        registrationId: String,
+        action: FamilyJoinRequestAction,
+    ) {
+        val normalizedRegistrationId = registrationId.trim()
+        if (normalizedRegistrationId.isEmpty()) {
+            _errorState.value = ErrorMessage("Registration id is required.")
+            return
+        }
+
+        scope.launch {
+            _childrenState.value = _childrenState.value.copy(
+                activeJoinRequestId = normalizedRegistrationId,
+                joinRequestsError = null,
+            )
+
+            userRepository.resolveChildJoinRequest(
+                registrationId = normalizedRegistrationId,
+                action = action,
+            ).onSuccess { resolution ->
+                resolution.warnings.firstOrNull()?.let { warning ->
+                    _errorState.value = ErrorMessage(warning)
+                } ?: run {
+                    _errorState.value = ErrorMessage(
+                        if (action == FamilyJoinRequestAction.APPROVE) {
+                            "Join request approved."
+                        } else {
+                            "Join request declined."
+                        },
+                    )
+                }
+                refreshChildren()
+                refreshDocuments()
+            }.onFailure {
+                _childrenState.value = _childrenState.value.copy(
+                    joinRequestsError = it.message ?: "Failed to update join request.",
+                )
+            }
+
+            _childrenState.value = _childrenState.value.copy(
+                activeJoinRequestId = null,
+            )
         }
     }
 
@@ -645,6 +751,13 @@ class DefaultProfileComponent(
     }
 
     override fun signDocument(document: ProfileDocumentCard) {
+        if (document.requiresChildEmail) {
+            _errorState.value = ErrorMessage(
+                document.statusNote ?: "Add child email before requesting child-signature documents.",
+            )
+            return
+        }
+
         val eventId = document.eventId?.trim().orEmpty()
         if (eventId.isEmpty()) {
             _errorState.value = ErrorMessage("This document is missing an event id.")
@@ -966,5 +1079,23 @@ private fun FamilyChild.toProfileChild(): ProfileChild {
         relationship = relationship,
         email = email,
         hasEmail = hasEmail ?: email?.isNotBlank() == true,
+    )
+}
+
+private fun FamilyJoinRequest.toProfileJoinRequest(): ProfileJoinRequest {
+    return ProfileJoinRequest(
+        registrationId = registrationId,
+        eventId = eventId,
+        eventName = eventName?.trim()?.takeIf(String::isNotBlank) ?: "Event",
+        childUserId = childUserId,
+        childFullName = childFullName?.trim()?.takeIf(String::isNotBlank)
+            ?: listOf(
+                childFirstName?.trim().orEmpty(),
+                childLastName?.trim().orEmpty(),
+            ).filter { it.isNotBlank() }.joinToString(" ").ifBlank { "Child" },
+        childEmail = childEmail?.trim()?.takeIf(String::isNotBlank),
+        childHasEmail = childHasEmail,
+        consentStatus = consentStatus?.trim()?.takeIf(String::isNotBlank),
+        requestedAt = requestedAt?.trim()?.takeIf(String::isNotBlank),
     )
 }

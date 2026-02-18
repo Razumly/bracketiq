@@ -1,8 +1,10 @@
 package com.razumly.mvp.core.data.util
 
 import androidx.room.TypeConverter
+import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
-import com.razumly.mvp.core.data.util.normalizeDivisionLabels
+import com.razumly.mvp.core.data.util.normalizeDivisionDetails
+import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -63,7 +65,7 @@ class Converters {
 class DivisionConverters {
     @TypeConverter
     fun fromDivisionsList(divisions: List<String>?): String {
-        return divisions?.normalizeDivisionLabels()?.joinToString(separator = ",") ?: ""
+        return divisions?.normalizeDivisionIdentifiers()?.joinToString(separator = ",") ?: ""
     }
 
     @TypeConverter
@@ -76,6 +78,22 @@ class DivisionConverters {
         } else {
             trimmed.split(",")
         }
-        return rawValues.normalizeDivisionLabels()
+        return rawValues.normalizeDivisionIdentifiers()
+    }
+}
+
+class DivisionDetailConverters {
+    @TypeConverter
+    fun fromDivisionDetails(details: List<DivisionDetail>?): String {
+        if (details.isNullOrEmpty()) return "[]"
+        return Json.encodeToString(details.normalizeDivisionDetails())
+    }
+
+    @TypeConverter
+    fun toDivisionDetails(data: String?): List<DivisionDetail> {
+        if (data.isNullOrBlank()) return emptyList()
+        return runCatching {
+            Json.decodeFromString<List<DivisionDetail>>(data)
+        }.getOrDefault(emptyList()).normalizeDivisionDetails()
     }
 }

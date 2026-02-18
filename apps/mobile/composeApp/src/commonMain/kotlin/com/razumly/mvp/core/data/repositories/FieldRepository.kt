@@ -5,7 +5,9 @@ import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.TimeSlotDTO
+import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
 import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
+import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResponse
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.dto.FieldsResponseDto
@@ -129,18 +131,22 @@ class FieldRepository(
 
     override suspend fun createTimeSlot(slot: TimeSlot): Result<TimeSlot> = runCatching {
         val normalizedDays = slot.normalizedDaysOfWeek()
+        val normalizedFieldIds = slot.normalizedScheduledFieldIds()
+        val normalizedDivisionIds = slot.normalizedDivisionIds()
         api.post<CreateTimeSlotRequestDto, TimeSlot>(
             path = "api/time-slots",
             body = CreateTimeSlotRequestDto(
                 id = slot.id,
                 dayOfWeek = normalizedDays.firstOrNull() ?: slot.dayOfWeek,
                 daysOfWeek = normalizedDays.takeIf { it.isNotEmpty() },
+                divisions = normalizedDivisionIds.takeIf { it.isNotEmpty() },
                 startTimeMinutes = slot.startTimeMinutes,
                 endTimeMinutes = slot.endTimeMinutes,
                 startDate = slot.startDate.toString(),
                 repeating = slot.repeating,
                 endDate = slot.endDate?.toString(),
-                scheduledFieldId = slot.scheduledFieldId,
+                scheduledFieldId = normalizedFieldIds.firstOrNull() ?: slot.scheduledFieldId,
+                scheduledFieldIds = normalizedFieldIds.takeIf { it.isNotEmpty() },
                 price = slot.price,
                 requiredTemplateIds = slot.requiredTemplateIds,
             )
@@ -155,12 +161,14 @@ class FieldRepository(
                 slot = UpdateTimeSlotPayload(
                     dayOfWeek = payload.dayOfWeek,
                     daysOfWeek = payload.daysOfWeek,
+                    divisions = payload.divisions,
                     startTimeMinutes = payload.startTimeMinutes,
                     endTimeMinutes = payload.endTimeMinutes,
                     startDate = payload.startDate,
                     repeating = payload.repeating,
                     endDate = payload.endDate,
                     scheduledFieldId = payload.scheduledFieldId,
+                    scheduledFieldIds = payload.scheduledFieldIds,
                     price = payload.price,
                     requiredTemplateIds = payload.requiredTemplateIds,
                 )
@@ -175,12 +183,14 @@ class FieldRepository(
     private fun TimeSlot.toTimeSlotDTO(): TimeSlotDTO = TimeSlotDTO(
         dayOfWeek = normalizedDaysOfWeek().firstOrNull() ?: dayOfWeek,
         daysOfWeek = normalizedDaysOfWeek().takeIf { it.isNotEmpty() },
+        divisions = normalizedDivisionIds().takeIf { it.isNotEmpty() },
         startTimeMinutes = startTimeMinutes,
         endTimeMinutes = endTimeMinutes,
         startDate = startDate.toString(),
         repeating = repeating,
         endDate = endDate?.toString(),
-        scheduledFieldId = scheduledFieldId,
+        scheduledFieldId = normalizedScheduledFieldIds().firstOrNull() ?: scheduledFieldId,
+        scheduledFieldIds = normalizedScheduledFieldIds().takeIf { it.isNotEmpty() },
         price = price,
         requiredTemplateIds = requiredTemplateIds,
     )
@@ -191,12 +201,14 @@ private data class CreateTimeSlotRequestDto(
     val id: String,
     val dayOfWeek: Int? = null,
     val daysOfWeek: List<Int>? = null,
+    val divisions: List<String>? = null,
     val startTimeMinutes: Int? = null,
     val endTimeMinutes: Int? = null,
     val startDate: String,
     val repeating: Boolean = false,
     val endDate: String? = null,
     val scheduledFieldId: String? = null,
+    val scheduledFieldIds: List<String>? = null,
     val price: Int? = null,
     val requiredTemplateIds: List<String> = emptyList(),
 )
@@ -210,12 +222,14 @@ private data class UpdateTimeSlotRequestDto(
 private data class UpdateTimeSlotPayload(
     val dayOfWeek: Int? = null,
     val daysOfWeek: List<Int>? = null,
+    val divisions: List<String>? = null,
     val startTimeMinutes: Int? = null,
     val endTimeMinutes: Int? = null,
     val startDate: String,
     val repeating: Boolean = false,
     val endDate: String? = null,
     val scheduledFieldId: String? = null,
+    val scheduledFieldIds: List<String>? = null,
     val price: Int? = null,
     val requiredTemplateIds: List<String> = emptyList(),
 )

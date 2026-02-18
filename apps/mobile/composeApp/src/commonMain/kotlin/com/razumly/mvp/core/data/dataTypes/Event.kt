@@ -7,7 +7,9 @@ import androidx.room.TypeConverters
 import com.razumly.mvp.core.data.dataTypes.dtos.EventDTO
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.DivisionConverters
-import com.razumly.mvp.core.data.util.normalizeDivisionLabels
+import com.razumly.mvp.core.data.util.DivisionDetailConverters
+import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
+import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.presentation.Primary
 import com.razumly.mvp.core.util.newId
 import kotlinx.serialization.Contextual
@@ -32,6 +34,8 @@ data class Event(
     val description: String = "",
     @field:TypeConverters(DivisionConverters::class)
     val divisions: List<String> = emptyList(),
+    @field:TypeConverters(DivisionDetailConverters::class)
+    val divisionDetails: List<DivisionDetail> = emptyList(),
     val location: String = "",
     @Contextual val start: Instant = Instant.DISTANT_PAST,
     @Contextual val end: Instant = Instant.DISTANT_PAST,
@@ -40,6 +44,7 @@ data class Event(
     val imageId: String = "",
     val coordinates: List<Double> = listOf(0.0, 0.0),
     val hostId: String = "",
+    val noFixedEndDateTime: Boolean = false,
     val teamSignup: Boolean = true,
     val singleDivision: Boolean = true,
     val freeAgentIds: List<String> = emptyList(),
@@ -99,7 +104,12 @@ fun Event.toEventDTO(): EventDTO =
         name = name,
         description = description,
         doubleElimination = doubleElimination,
-        divisions = divisions.normalizeDivisionLabels(),
+        divisions = divisions.normalizeDivisionIdentifiers(),
+        divisionDetails = mergeDivisionDetailsForDivisions(
+            divisions = divisions,
+            existingDetails = divisionDetails,
+            eventId = id,
+        ),
         winnerSetCount = winnerSetCount,
         loserSetCount = loserSetCount,
         winnerBracketPointsToVictory = winnerBracketPointsToVictory,
@@ -112,6 +122,7 @@ fun Event.toEventDTO(): EventDTO =
         rating = rating,
         imageId = imageId,
         hostId = hostId,
+        noFixedEndDateTime = noFixedEndDateTime,
         coordinates = coordinates,
         maxParticipants = maxParticipants,
         teamSizeLimit = teamSizeLimit,

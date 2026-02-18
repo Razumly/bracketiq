@@ -1,11 +1,14 @@
 package com.razumly.mvp.core.network.dto
 
+import androidx.compose.ui.graphics.toArgb
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
-import com.razumly.mvp.core.data.util.normalizeDivisionLabels
+import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
+import com.razumly.mvp.core.data.util.normalizeDivisionDetails
+import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.presentation.Primary
-import androidx.compose.ui.graphics.toArgb
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlin.time.Clock
@@ -21,6 +24,7 @@ data class EventApiDto(
     val description: String? = null,
 
     val divisions: List<String>? = null,
+    val divisionDetails: List<DivisionDetail>? = null,
     val location: String? = null,
 
     val start: String? = null,
@@ -32,6 +36,7 @@ data class EventApiDto(
     val coordinates: List<Double>? = null,
 
     val hostId: String? = null,
+    val noFixedEndDateTime: Boolean? = null,
     val teamSignup: Boolean? = null,
     val singleDivision: Boolean? = null,
     val registrationByDivisionType: Boolean? = null,
@@ -102,12 +107,29 @@ data class EventApiDto(
 
         val resolvedEventType = runCatching { EventType.valueOf(eventType ?: EventType.EVENT.name) }
             .getOrDefault(EventType.EVENT)
+        val resolvedNoFixedEndDateTime = when {
+            noFixedEndDateTime != null -> noFixedEndDateTime
+            resolvedEventType == EventType.LEAGUE || resolvedEventType == EventType.TOURNAMENT ->
+                resolvedStart == resolvedEnd
+            else -> false
+        }
+        val normalizedDetails = (divisionDetails ?: emptyList()).normalizeDivisionDetails(resolvedId)
+        val normalizedDivisions = (
+            (divisions ?: emptyList()).normalizeDivisionIdentifiers() +
+                normalizedDetails.map { detail -> detail.id }.normalizeDivisionIdentifiers()
+            ).normalizeDivisionIdentifiers()
+        val mergedDetails = mergeDivisionDetailsForDivisions(
+            divisions = normalizedDivisions,
+            existingDetails = normalizedDetails,
+            eventId = resolvedId,
+        )
 
         return Event(
             id = resolvedId,
             name = resolvedName,
             description = description ?: "",
-            divisions = (divisions ?: emptyList()).normalizeDivisionLabels(),
+            divisions = normalizedDivisions,
+            divisionDetails = mergedDetails,
             location = location ?: "",
             start = Instant.parse(resolvedStart),
             end = Instant.parse(resolvedEnd),
@@ -116,6 +138,7 @@ data class EventApiDto(
             imageId = imageId ?: "",
             coordinates = coordinates ?: listOf(0.0, 0.0),
             hostId = resolvedHostId,
+            noFixedEndDateTime = resolvedNoFixedEndDateTime,
             teamSignup = teamSignup ?: true,
             singleDivision = singleDivision ?: true,
             freeAgentIds = freeAgentIds ?: emptyList(),
@@ -223,6 +246,13 @@ data class EventParticipantsRequestDto(
 )
 
 @Serializable
+data class EventParticipantsResponseDto(
+    val event: EventApiDto? = null,
+    val requiresParentApproval: Boolean? = null,
+    val error: String? = null,
+)
+
+@Serializable
 data class EventChildRegistrationRequestDto(
     val childId: String,
 )
@@ -234,6 +264,7 @@ data class EventUpdateDto(
     val end: String? = null,
     val description: String? = null,
     val divisions: List<String>? = null,
+    val divisionDetails: List<DivisionDetail> = emptyList(),
     val winnerSetCount: Int? = null,
     val loserSetCount: Int? = null,
     val doubleElimination: Boolean? = null,
@@ -244,6 +275,7 @@ data class EventUpdateDto(
     val minAge: Int? = null,
     val maxAge: Int? = null,
     val hostId: String? = null,
+    val noFixedEndDateTime: Boolean? = null,
     val price: Int? = null,
     val singleDivision: Boolean? = null,
     val registrationByDivisionType: Boolean? = null,
@@ -310,13 +342,20 @@ fun Event.toUpdateDto(
         ?.filter { templateId -> templateId.isNotEmpty() }
         ?.distinct()
         ?: emptyList()
+    val normalizedDivisions = divisions.normalizeDivisionIdentifiers()
+    val normalizedDivisionDetails = mergeDivisionDetailsForDivisions(
+        divisions = normalizedDivisions,
+        existingDetails = divisionDetails,
+        eventId = id,
+    )
 
     return EventUpdateDto(
         name = name,
         start = start.toString(),
         end = end.toString(),
         description = description,
-        divisions = divisions.normalizeDivisionLabels(),
+        divisions = normalizedDivisions,
+        divisionDetails = normalizedDivisionDetails,
         winnerSetCount = winnerSetCount,
         loserSetCount = loserSetCount,
         doubleElimination = doubleElimination,
@@ -327,6 +366,7 @@ fun Event.toUpdateDto(
         minAge = minAge,
         maxAge = maxAge,
         hostId = hostId,
+        noFixedEndDateTime = noFixedEndDateTime,
         price = priceCents,
         singleDivision = singleDivision,
         registrationByDivisionType = registrationByDivisionType,

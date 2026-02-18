@@ -11,13 +11,14 @@ import kotlin.time.Instant
 class CreateEventSelectionRulesTest {
 
     @Test
-    fun league_selection_enforces_team_and_single_division_and_aligns_end_date() {
+    fun league_selection_enforces_team_single_division_and_open_ended_flag() {
         val start = Instant.fromEpochMilliseconds(1_000L)
         val end = Instant.fromEpochMilliseconds(2_000L)
         val draft = Event(
             eventType = EventType.LEAGUE,
             teamSignup = false,
             singleDivision = false,
+            noFixedEndDateTime = true,
             start = start,
             end = end,
         )
@@ -27,17 +28,19 @@ class CreateEventSelectionRulesTest {
         assertEquals(EventType.LEAGUE, updated.eventType)
         assertTrue(updated.teamSignup)
         assertTrue(updated.singleDivision)
-        assertEquals(start, updated.end)
+        assertTrue(updated.noFixedEndDateTime)
+        assertEquals(end, updated.end)
     }
 
     @Test
-    fun tournament_selection_enforces_team_and_single_division_and_aligns_end_date() {
+    fun tournament_selection_enforces_team_single_division_and_open_ended_flag() {
         val start = Instant.fromEpochMilliseconds(5_000L)
         val end = Instant.fromEpochMilliseconds(8_000L)
         val draft = Event(
             eventType = EventType.TOURNAMENT,
             teamSignup = false,
             singleDivision = false,
+            noFixedEndDateTime = true,
             start = start,
             end = end,
         )
@@ -47,7 +50,8 @@ class CreateEventSelectionRulesTest {
         assertEquals(EventType.TOURNAMENT, updated.eventType)
         assertTrue(updated.teamSignup)
         assertTrue(updated.singleDivision)
-        assertEquals(start, updated.end)
+        assertTrue(updated.noFixedEndDateTime)
+        assertEquals(end, updated.end)
     }
 
     @Test
@@ -67,6 +71,7 @@ class CreateEventSelectionRulesTest {
         assertEquals(EventType.EVENT, updated.eventType)
         assertFalse(updated.teamSignup)
         assertFalse(updated.singleDivision)
+        assertFalse(updated.noFixedEndDateTime)
         assertEquals(end, updated.end)
     }
 
@@ -96,6 +101,7 @@ class CreateEventSelectionRulesTest {
         assertEquals(EventType.EVENT, updated.eventType)
         assertFalse(updated.teamSignup)
         assertFalse(updated.singleDivision)
+        assertFalse(updated.noFixedEndDateTime)
         assertEquals(end, updated.end)
     }
 }

@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -24,6 +26,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -34,6 +37,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -51,6 +55,7 @@ import com.kizitonwose.calendar.compose.rememberCalendarState
 import com.kizitonwose.calendar.core.CalendarDay
 import com.kizitonwose.calendar.core.DayPosition
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
+import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.util.isScrollingUp
 import com.razumly.mvp.core.presentation.util.timeFormat
@@ -62,6 +67,19 @@ import kotlinx.datetime.YearMonth
 import kotlinx.datetime.number
 import kotlinx.datetime.toLocalDateTime
 import kotlin.time.Clock
+
+private enum class ScheduleGroupingMode {
+    TIME,
+    FIELD,
+}
+
+private data class FieldScheduleGroup(
+    val key: String,
+    val label: String,
+    val matches: List<MatchWithRelations>,
+)
+
+private const val UNASSIGNED_FIELD_KEY = "__unassigned_field__"
 
 @Composable
 fun ScheduleView(
@@ -94,6 +112,7 @@ fun ScheduleView(
         sortedDates.firstOrNull { it >= today } ?: sortedDates.first()
     }
     var selectedDate by remember(defaultDate) { mutableStateOf(defaultDate) }
+    var groupingMode by rememberSaveable { mutableStateOf(ScheduleGroupingMode.TIME) }
     LaunchedEffect(sortedDates) {
         if (selectedDate !in matchesByDate.keys) {
             selectedDate = sortedDates.first()
@@ -157,7 +176,16 @@ fun ScheduleView(
         Spacer(modifier = Modifier.height(16.dp))
 
         val dayMatches = matchesByDate[selectedDate].orEmpty()
+        val fieldGroups = remember(dayMatches) {
+            buildFieldScheduleGroups(dayMatches)
+        }
         DaySummaryHeader(selectedDate, dayMatches.size)
+
+        Spacer(modifier = Modifier.height(8.dp))
+        ScheduleGroupingToggle(
+            selectedMode = groupingMode,
+            onModeSelected = { groupingMode = it }
+        )
 
         Spacer(modifier = Modifier.height(8.dp))
 
@@ -179,12 +207,35 @@ fun ScheduleView(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 contentPadding = navPadding
             ) {
-                items(dayMatches, key = { it.match.id }) { match ->
-                    ScheduleMatchCard(
-                        match = match,
-                        timeZone = timeZone,
-                        onClick = { onMatchClick(match) }
-                    )
+                if (groupingMode == ScheduleGroupingMode.TIME) {
+                    items(dayMatches, key = { it.match.id }) { match ->
+                        ScheduleMatchCard(
+                            match = match,
+                            timeZone = timeZone,
+                            onClick = { onMatchClick(match) }
+                        )
+                    }
+                } else {
+                    items(fieldGroups, key = { it.key }) { group ->
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "${group.label} (${group.matches.size})",
+                                modifier = Modifier.padding(horizontal = 16.dp),
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            group.matches.forEach { match ->
+                                ScheduleMatchCard(
+                                    match = match,
+                                    timeZone = timeZone,
+                                    onClick = { onMatchClick(match) }
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -253,6 +304,76 @@ private fun DaySummaryHeader(date: LocalDate, matchCount: Int) {
 }
 
 @Composable
+private fun ScheduleGroupingToggle(
+    selectedMode: ScheduleGroupingMode,
+    onModeSelected: (ScheduleGroupingMode) -> Unit,
+) {
+    val scrollState = rememberScrollState()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(scrollState)
+            .padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        FilterChip(
+            selected = selectedMode == ScheduleGroupingMode.TIME,
+            onClick = { onModeSelected(ScheduleGroupingMode.TIME) },
+            label = { Text("By Time") }
+        )
+        FilterChip(
+            selected = selectedMode == ScheduleGroupingMode.FIELD,
+            onClick = { onModeSelected(ScheduleGroupingMode.FIELD) },
+            label = { Text("By Field") }
+        )
+    }
+}
+
+private fun buildFieldScheduleGroups(dayMatches: List<MatchWithRelations>): List<FieldScheduleGroup> {
+    if (dayMatches.isEmpty()) return emptyList()
+
+    val grouped = dayMatches.groupBy { match ->
+        resolveFieldKey(match)
+    }
+
+    return grouped.map { (fieldKey, matchesForField) ->
+        FieldScheduleGroup(
+            key = fieldKey,
+            label = resolveFieldLabel(matchesForField.firstOrNull()),
+            matches = matchesForField.sortedBy { it.match.start }
+        )
+    }.sortedBy { group ->
+        if (group.key == UNASSIGNED_FIELD_KEY) {
+            "\uFFFF"
+        } else {
+            group.label.lowercase()
+        }
+    }
+}
+
+private fun resolveFieldKey(match: MatchWithRelations): String {
+    val fieldId = match.match.fieldId?.trim().takeUnless { it.isNullOrEmpty() }
+        ?: match.field?.id?.trim().takeUnless { it.isNullOrEmpty() }
+    return fieldId ?: UNASSIGNED_FIELD_KEY
+}
+
+private fun resolveFieldLabel(match: MatchWithRelations?): String {
+    if (match == null) return "Field TBD"
+
+    val fieldName = match.field?.name?.trim().orEmpty()
+    if (fieldName.isNotEmpty()) {
+        return fieldName
+    }
+
+    val fieldNumber = match.field?.fieldNumber
+    if (fieldNumber != null && fieldNumber > 0) {
+        return "Field $fieldNumber"
+    }
+
+    return "Field TBD"
+}
+
+@Composable
 private fun ScheduleMatchCard(
     match: MatchWithRelations,
     timeZone: TimeZone,
@@ -262,7 +383,9 @@ private fun ScheduleMatchCard(
         match.match.start.toLocalDateTime(timeZone)
     }
     val timeText = remember(localDateTime) { timeFormat.format(localDateTime.time) }
-    val fieldLabel = match.field?.fieldNumber?.toString() ?: "TBD"
+    val fieldLabel = remember(match.match.fieldId, match.field?.id, match.field?.name, match.field?.fieldNumber) {
+        resolveFieldLabel(match)
+    }
     val teamOne = match.team1?.displayName.orEmpty().ifBlank { "TBD" }
     val teamTwo = match.team2?.displayName.orEmpty().ifBlank { "TBD" }
     Card(
@@ -284,7 +407,7 @@ private fun ScheduleMatchCard(
                 overflow = TextOverflow.Ellipsis
             )
             Text(
-                text = "$timeText - Field $fieldLabel",
+                text = "$timeText - $fieldLabel",
                 style = MaterialTheme.typography.bodyMedium
             )
             Row(
@@ -292,7 +415,7 @@ private fun ScheduleMatchCard(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    text = "Division: ${match.match.division}",
+                    text = "Division: ${match.match.division?.toDivisionDisplayLabel().orEmpty().ifBlank { "TBD" }}",
                     style = MaterialTheme.typography.labelMedium
                 )
                 Text(

@@ -3,6 +3,10 @@ package com.razumly.mvp.eventMap
 import android.content.Context
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.backhandler.BackCallback
+import com.google.android.gms.common.ConnectionResult
+import com.google.android.gms.common.GoogleApiAvailability
+import com.google.android.gms.common.api.ApiException
+import com.google.android.gms.common.api.CommonStatusCodes
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.LatLngBounds
 import com.google.android.libraries.places.api.Places
@@ -37,6 +41,7 @@ actual class MapComponent(
     val locationTracker: LocationTracker
 ) : ComponentContext by componentContext {
 
+    private val logTag = "MapComponent"
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     private val _currentLocation = MutableStateFlow<dev.icerock.moko.geo.LatLng?>(null)
@@ -64,8 +69,18 @@ actual class MapComponent(
     private val _currentBounds = MutableStateFlow<LatLngBounds?>(null)
 
     private val placesClient: PlacesClient by lazy {
+        logMapsDiagnostics(context)
         if (!Places.isInitialized()) {
-            Places.initializeWithNewPlacesApiEnabled(context, BuildConfig.MAPS_API_KEY)
+            runCatching {
+                Places.initializeWithNewPlacesApiEnabled(context, BuildConfig.MAPS_API_KEY)
+            }.onFailure { throwable ->
+                Napier.e(
+                    message = "Failed to initialize Places SDK",
+                    throwable = throwable,
+                    tag = logTag
+                )
+                throw throwable
+            }
         }
         Places.createClient(context)
     }
@@ -75,6 +90,7 @@ actual class MapComponent(
     }
 
     init {
+        logMapsDiagnostics(context)
         backHandler.register(_backCallback)
         _backCallback.priority = BackCallback.PRIORITY_MAX
         scope.launch {
@@ -132,6 +148,7 @@ actual class MapComponent(
                     }
                 }
                 .addOnFailureListener { exception ->
+                    logPlacesFailure("fetchPlace", exception)
                     cont.resumeWithException(exception)
                 }
         }
@@ -163,6 +180,7 @@ actual class MapComponent(
                     }
                 }
                 .addOnFailureListener { exception ->
+                    logPlacesFailure("findAutocompletePredictions", exception)
                     cont.resumeWithException(exception)
                 }
         }
@@ -191,13 +209,52 @@ actual class MapComponent(
                 cont.resume(result) { cause, _, _ ->
                     Napier.d { "Cancelled search: $cause" }
                 }
-            }.addOnFailureListener { response ->
-                Napier.e("Failed to search: ${response.message}")
+            }.addOnFailureListener { exception ->
+                logPlacesFailure("searchByText", exception)
+                _error.value = "Failed to search places"
                 cont.resume(emptyList()) { cause, _, _ ->
                     Napier.d { "Cancelled search after failure: $cause" }
                 }
             }
         }
+
+    private fun logMapsDiagnostics(context: Context) {
+        val apiKey = BuildConfig.MAPS_API_KEY
+        val keyState = when {
+            apiKey.isBlank() -> "blank"
+            apiKey == "DEFAULT_API_KEY" -> "default-placeholder"
+            else -> "present(length=${apiKey.length})"
+        }
+        val availability = GoogleApiAvailability.getInstance()
+        val playServicesCode = availability.isGooglePlayServicesAvailable(context)
+        val playServicesStatus = availability.getErrorString(playServicesCode)
+        val playServicesAvailable = playServicesCode == ConnectionResult.SUCCESS
+        Napier.i(
+            message = "Maps diagnostics package=${context.packageName} key=$keyState " +
+                "playServices=$playServicesCode($playServicesStatus) available=$playServicesAvailable",
+            tag = logTag
+        )
+    }
+
+    private fun logPlacesFailure(operation: String, exception: Exception) {
+        val apiException = exception as? ApiException
+        if (apiException != null) {
+            val statusCode = apiException.statusCode
+            val statusName = CommonStatusCodes.getStatusCodeString(statusCode)
+            Napier.e(
+                message = "$operation failed statusCode=$statusCode($statusName): ${apiException.message}",
+                throwable = apiException,
+                tag = logTag
+            )
+            return
+        }
+
+        Napier.e(
+            message = "$operation failed: ${exception.message}",
+            throwable = exception,
+            tag = logTag
+        )
+    }
 
     suspend fun getEvents() {
         _isLoading.value = true

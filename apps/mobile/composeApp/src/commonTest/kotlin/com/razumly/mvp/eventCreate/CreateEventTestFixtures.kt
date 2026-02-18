@@ -28,6 +28,8 @@ import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.FamilyChild
+import com.razumly.mvp.core.data.repositories.FamilyJoinRequestAction
+import com.razumly.mvp.core.data.repositories.FamilyJoinRequestResolution
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
@@ -181,6 +183,10 @@ internal class CreateEvent_FakeUserRepository : IUserRepository {
     override suspend fun searchPlayers(search: String): Result<List<UserData>> = Result.success(emptyList())
     override suspend fun ensureUserByEmail(email: String): Result<UserData> = Result.success(user)
     override suspend fun listChildren(): Result<List<FamilyChild>> = Result.success(emptyList())
+    override suspend fun resolveChildJoinRequest(
+        registrationId: String,
+        action: FamilyJoinRequestAction,
+    ): Result<FamilyJoinRequestResolution> = Result.failure(NotImplementedError("unused"))
     override suspend fun createChildAccount(
         firstName: String,
         lastName: String,

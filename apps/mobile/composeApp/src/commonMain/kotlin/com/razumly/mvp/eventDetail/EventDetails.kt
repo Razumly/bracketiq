@@ -74,8 +74,13 @@ import com.razumly.mvp.core.data.dataTypes.toTournamentConfig
 import com.razumly.mvp.core.data.dataTypes.withLeagueConfig
 import com.razumly.mvp.core.data.dataTypes.withTournamentConfig
 import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
+import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
+import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
-import com.razumly.mvp.core.data.util.normalizeDivisionLabels
+import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
+import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
+import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
+import com.razumly.mvp.core.data.util.toDivisionDisplayLabels
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import com.razumly.mvp.core.presentation.composables.MoneyInputField
@@ -95,6 +100,7 @@ import com.razumly.mvp.eventDetail.composables.CancellationRefundOptions
 import com.razumly.mvp.eventDetail.composables.LeagueConfigurationFields
 import com.razumly.mvp.eventDetail.composables.LeagueScoringConfigFields
 import com.razumly.mvp.eventDetail.composables.LeagueScheduleFields
+import com.razumly.mvp.eventDetail.composables.DivisionOption
 import com.razumly.mvp.eventDetail.composables.MultiSelectDropdownField
 import com.razumly.mvp.eventDetail.composables.NumberInputField
 import com.razumly.mvp.eventDetail.composables.PointsTextField
@@ -178,7 +184,7 @@ fun EventDetails(
     var isNameValid by remember { mutableStateOf(editEvent.name.isNotBlank()) }
     var isPriceValid by remember { mutableStateOf(editEvent.priceCents >= 0) }
     var isMaxParticipantsValid by remember { mutableStateOf(editEvent.maxParticipants > 1) }
-    var isTeamSizeValid by remember { mutableStateOf(editEvent.teamSizeLimit >= 2) }
+    var isTeamSizeValid by remember { mutableStateOf(editEvent.teamSizeLimit >= 1) }
     var isWinnerSetCountValid by remember { mutableStateOf(true) }
     var isLoserSetCountValid by remember { mutableStateOf(true) }
     var isWinnerPointsValid by remember { mutableStateOf(true) }
@@ -192,16 +198,46 @@ fun EventDetails(
     var isLeagueSlotsValid by remember { mutableStateOf(true) }
     var isSkillLevelValid by remember { mutableStateOf(true) }
     var isSportValid by remember { mutableStateOf(true) }
+    var isFixedEndDateRangeValid by remember { mutableStateOf(true) }
     var isColorLoaded by remember { mutableStateOf(editEvent.imageId.isNotBlank()) }
 
     val lazyListState = rememberLazyListState()
 
     var fieldCount by remember { mutableStateOf(editEvent.fieldCount ?: editableFields.size) }
-    var selectedDivisions by remember { mutableStateOf(editEvent.divisions.normalizeDivisionLabels()) }
+    val selectedDivisions = remember(editEvent.divisions) {
+        editEvent.divisions.normalizeDivisionIdentifiers()
+    }
+    val divisionOptions = remember(editEvent.divisionDetails, selectedDivisions) {
+        (
+            selectedDivisions +
+                editEvent.divisionDetails.map { detail -> detail.id } +
+                editEvent.divisionDetails.map { detail -> detail.key }
+            ).normalizeDivisionIdentifiers().map { divisionId ->
+            DivisionOption(
+                value = divisionId,
+                label = divisionId.toDivisionDisplayLabel(editEvent.divisionDetails),
+            )
+        }
+    }
+    val slotDivisionOptions = remember(divisionOptions) {
+        divisionOptions.map { option ->
+            DropdownOption(value = option.value, label = option.label)
+        }
+    }
     var addSelfToEvent by remember { mutableStateOf(false) }
-    val leagueSlotErrors = remember(leagueTimeSlots, editEvent.eventType, isNewEvent) {
+    val leagueSlotErrors = remember(
+        leagueTimeSlots,
+        editEvent.eventType,
+        editEvent.singleDivision,
+        editEvent.divisions,
+        isNewEvent,
+    ) {
         if (isNewEvent && editEvent.eventType == EventType.LEAGUE) {
-            computeLeagueSlotErrors(leagueTimeSlots)
+            computeLeagueSlotErrors(
+                slots = leagueTimeSlots,
+                singleDivision = editEvent.singleDivision,
+                selectedDivisionIds = editEvent.divisions.normalizeDivisionIdentifiers(),
+            )
         } else {
             emptyMap()
         }
@@ -221,11 +257,15 @@ fun EventDetails(
         isNameValid = editEvent.name.isNotBlank()
         isPriceValid = editEvent.priceCents >= 0
         isMaxParticipantsValid = editEvent.maxParticipants > 1
-        isTeamSizeValid = editEvent.teamSizeLimit >= 2
+        isTeamSizeValid = editEvent.teamSizeLimit >= 1
         isLocationValid =
             editEvent.location.isNotBlank() && editEvent.lat != 0.0 && editEvent.long != 0.0
         isSkillLevelValid = editEvent.eventType == EventType.LEAGUE || editEvent.divisions.isNotEmpty()
         isSportValid = !isNewEvent || !editEvent.sportId.isNullOrBlank()
+        val requiresFixedEndValidation = (
+            editEvent.eventType == EventType.LEAGUE || editEvent.eventType == EventType.TOURNAMENT
+        ) && !editEvent.noFixedEndDateTime
+        isFixedEndDateRangeValid = !requiresFixedEndValidation || editEvent.end > editEvent.start
         isLeagueSlotsValid = if (isNewEvent && editEvent.eventType == EventType.LEAGUE) {
             leagueTimeSlots.isNotEmpty() && leagueSlotErrors.isEmpty()
         } else {
@@ -296,6 +336,7 @@ fun EventDetails(
                 isLeaguePointsValid &&
                 isLeaguePlayoffTeamsValid &&
                 isLeagueSlotsValid &&
+                isFixedEndDateRangeValid &&
                 isSportValid &&
                 isColorLoaded
     }
@@ -318,6 +359,7 @@ fun EventDetails(
         isLeaguePointsValid,
         isLeaguePlayoffTeamsValid,
         isLeagueSlotsValid,
+        isFixedEndDateRangeValid,
         leagueTimeSlots,
         editEvent.imageId,
         editEvent.doubleElimination,
@@ -331,6 +373,9 @@ fun EventDetails(
             if (!isSportValid) {
                 add("Select a sport to continue.")
             }
+            if (!isFixedEndDateRangeValid) {
+                add("End date/time must be after start date/time when no fixed end date/time is disabled.")
+            }
             if (!isPriceValid) {
                 add("Price must be 0 or higher.")
             }
@@ -338,7 +383,7 @@ fun EventDetails(
                 add("Max participants must be at least 2.")
             }
             if (!isTeamSizeValid) {
-                add("Team size must be at least 2.")
+                add("Team size must be at least 1.")
             }
             if (!isSkillLevelValid) {
                 add("Select at least one skill level.")
@@ -626,26 +671,28 @@ fun EventDetails(
                             )
                         }
 
-                        PlatformTextField(
-                            value = editEvent.start.toLocalDateTime(
-                                TimeZone.currentSystemDefault()
-                            ).format(dateTimeFormat),
-                            onValueChange = {},
-                            modifier = Modifier.fillMaxWidth(),
-                            label = "Start Date & Time",
-                            readOnly = true,
-                            onTap = {
-                                if (!rentalTimeLocked) {
-                                    showStartPicker = true
-                                }
-                            },
-                        )
+                        val supportsNoFixedEndDateTime =
+                            editEvent.eventType == EventType.LEAGUE || editEvent.eventType == EventType.TOURNAMENT
 
-                        if (editEvent.eventType == EventType.EVENT) {
+                        if (editEvent.eventType == EventType.EVENT || supportsNoFixedEndDateTime) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
+                                PlatformTextField(
+                                    value = editEvent.start.toLocalDateTime(
+                                        TimeZone.currentSystemDefault()
+                                    ).format(dateTimeFormat),
+                                    onValueChange = {},
+                                    modifier = Modifier.weight(1f),
+                                    label = "Start Date & Time",
+                                    readOnly = true,
+                                    onTap = {
+                                        if (!rentalTimeLocked) {
+                                            showStartPicker = true
+                                        }
+                                    },
+                                )
                                 PlatformTextField(
                                     value = editEvent.end.toLocalDateTime(
                                         TimeZone.currentSystemDefault()
@@ -655,25 +702,72 @@ fun EventDetails(
                                     label = "End Date & Time",
                                     readOnly = true,
                                     onTap = {
-                                        if (!rentalTimeLocked) {
+                                        if (!rentalTimeLocked && !(supportsNoFixedEndDateTime && editEvent.noFixedEndDateTime)) {
                                             showEndPicker = true
                                         }
                                     },
                                 )
-                                Box(modifier = Modifier.weight(1f))
+                            }
+                        } else {
+                            PlatformTextField(
+                                value = editEvent.start.toLocalDateTime(
+                                    TimeZone.currentSystemDefault()
+                                ).format(dateTimeFormat),
+                                onValueChange = {},
+                                modifier = Modifier.fillMaxWidth(),
+                                label = "Start Date & Time",
+                                readOnly = true,
+                                onTap = {
+                                    if (!rentalTimeLocked) {
+                                        showStartPicker = true
+                                    }
+                                },
+                            )
+                        }
+
+                        if (supportsNoFixedEndDateTime) {
+                            val minimumFixedEnd = kotlin.time.Instant.fromEpochMilliseconds(
+                                editEvent.start.toEpochMilliseconds() + 60L * 60L * 1000L
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Checkbox(
+                                    checked = editEvent.noFixedEndDateTime,
+                                    enabled = !rentalTimeLocked,
+                                    onCheckedChange = { checked ->
+                                        onEditEvent {
+                                            copy(
+                                                noFixedEndDateTime = checked,
+                                                end = if (!checked && end <= start) {
+                                                    minimumFixedEnd
+                                                } else {
+                                                    end
+                                                },
+                                            )
+                                        }
+                                    },
+                                )
+                                Text(
+                                    text = "No fixed end date/time",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Color(localImageScheme.current.onSurface),
+                                )
+                            }
+                            if (editEvent.noFixedEndDateTime) {
+                                Text(
+                                    text = "Open-ended scheduling is enabled. Turn this off to enforce a fixed end date/time.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(localImageScheme.current.onSurface),
+                                )
                             }
                         }
 
                         if (rentalTimeLocked) {
                             Text(
                                 text = "Rental-selected start and end times are fixed and cannot be changed.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color(localImageScheme.current.onSurface),
-                            )
-                        }
-                        if (editEvent.eventType != EventType.EVENT) {
-                            Text(
-                                text = "Leagues and tournaments use generated schedules. End date follows start date.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Color(localImageScheme.current.onSurface),
                             )
@@ -767,7 +861,7 @@ fun EventDetails(
                         color = Color(localImageScheme.current.onSurface)
                     )
                     Text(
-                        "Divisions: ${event.divisions.normalizeDivisionLabels().joinToString()}",
+                        "Divisions: ${event.divisions.toDivisionDisplayLabels(event.divisionDetails).joinToString()}",
                         style = MaterialTheme.typography.bodyMedium,
                         color = Color(localImageScheme.current.onSurface)
                     )
@@ -872,14 +966,6 @@ fun EventDetails(
                 }, editContent = {
                     val label = if (!editEvent.teamSignup) stringResource(Res.string.max_players)
                     else stringResource(Res.string.max_teams)
-                    val teamSizeOptions = listOf(
-                        DropdownOption("2", "2"),
-                        DropdownOption("3", "3"),
-                        DropdownOption("4", "4"),
-                        DropdownOption("5", "5"),
-                        DropdownOption("6", "6"),
-                        DropdownOption("7", "6+"),
-                    )
                     val setCountOptions = (1..5).map { count ->
                         DropdownOption(value = count.toString(), label = count.toString())
                     }
@@ -968,17 +1054,22 @@ fun EventDetails(
                                 Res.string.value_too_low, 2
                             )
                         )
-                        PlatformDropdown(
-                            selectedValue = editEvent.teamSizeLimit.toString(),
-                            onSelectionChange = { selected ->
-                                onEditEvent { copy(teamSizeLimit = selected.toInt()) }
-                            },
-                            options = teamSizeOptions,
-                            label = "Team Size Limit",
+                        NumberInputField(
                             modifier = Modifier.weight(1f),
+                            value = editEvent.teamSizeLimit.toString(),
+                            label = "Team Size Limit",
+                            onValueChange = { newValue ->
+                                if (newValue.all { it.isDigit() }) {
+                                    if (newValue.isBlank()) {
+                                        onEditEvent { copy(teamSizeLimit = 0) }
+                                    } else {
+                                        onEditEvent { copy(teamSizeLimit = newValue.toInt()) }
+                                    }
+                                }
+                            },
                             isError = !isTeamSizeValid,
                             supportingText = if (!isTeamSizeValid) {
-                                "Team size must be at least 2."
+                                "Team size must be at least 1."
                             } else {
                                 ""
                             },
@@ -988,11 +1079,37 @@ fun EventDetails(
                     MultiSelectDropdownField(
                         selectedItems = selectedDivisions,
                         label = "Skill Levels",
+                        options = divisionOptions,
                         isError = !isSkillLevelValid,
                         errorMessage = stringResource(Res.string.select_a_value),
                     ) { newSelection ->
-                        selectedDivisions = newSelection.normalizeDivisionLabels()
-                        onEditEvent { copy(divisions = selectedDivisions) }
+                        val normalizedSelection = newSelection.normalizeDivisionIdentifiers()
+                        val nextDivisionDetails = mergeDivisionDetailsForDivisions(
+                            divisions = normalizedSelection,
+                            existingDetails = editEvent.divisionDetails,
+                            eventId = editEvent.id,
+                        )
+                        onEditEvent {
+                            copy(
+                                divisions = normalizedSelection,
+                                divisionDetails = nextDivisionDetails,
+                            )
+                        }
+                        if (isNewEvent && editEvent.eventType == EventType.LEAGUE && leagueTimeSlots.isNotEmpty()) {
+                            val selectedDivisionSet = normalizedSelection.toSet()
+                            leagueTimeSlots.forEachIndexed { index, slot ->
+                                val currentDivisions = slot.normalizedDivisionIds()
+                                val filteredDivisions = currentDivisions.filter(selectedDivisionSet::contains)
+                                val nextSlotDivisions = if (editEvent.singleDivision) {
+                                    normalizedSelection
+                                } else {
+                                    filteredDivisions.ifEmpty { normalizedSelection }
+                                }
+                                if (nextSlotDivisions != currentDivisions) {
+                                    onUpdateLeagueTimeSlot(index, slot.copy(divisions = nextSlotDivisions))
+                                }
+                            }
+                        }
                     }
 
                     if (editEvent.eventType == EventType.LEAGUE) {
@@ -1321,6 +1438,9 @@ fun EventDetails(
                                 onRemoveSlot = onRemoveLeagueTimeSlot,
                                 slotErrors = leagueSlotErrors,
                                 showSlotEditor = editEvent.eventType == EventType.LEAGUE,
+                                slotDivisionOptions = slotDivisionOptions,
+                                lockSlotDivisions = editEvent.singleDivision,
+                                lockedDivisionIds = editEvent.divisions.normalizeDivisionIdentifiers(),
                                 fieldCountError = if (!isFieldCountValid) {
                                     "Field count must be at least 1."
                                 } else {
@@ -1343,11 +1463,13 @@ fun EventDetails(
         onDateSelected = { selectedInstant ->
             val selected = selectedInstant ?: Clock.System.now()
             onEditEvent {
-                if (eventType == EventType.EVENT) {
-                    copy(start = selected)
-                } else {
-                    copy(start = selected, end = selected)
-                }
+                val minimumEnd = kotlin.time.Instant.fromEpochMilliseconds(
+                    selected.toEpochMilliseconds() + 60L * 60L * 1000L
+                )
+                copy(
+                    start = selected,
+                    end = if (!noFixedEndDateTime && end <= selected) minimumEnd else end,
+                )
             }
             showStartPicker = false
         },
@@ -1363,7 +1485,7 @@ fun EventDetails(
             showEndPicker = false
         },
         onDismissRequest = { showEndPicker = false },
-        showPicker = showEndPicker && editEvent.eventType == EventType.EVENT && !rentalTimeLocked,
+        showPicker = showEndPicker && !rentalTimeLocked,
         getTime = true,
         canSelectPast = false,
     )
@@ -1597,19 +1719,28 @@ private fun LabeledCheckboxRow(
     }
 }
 
-private fun computeLeagueSlotErrors(slots: List<TimeSlot>): Map<Int, String> {
+private fun computeLeagueSlotErrors(
+    slots: List<TimeSlot>,
+    singleDivision: Boolean,
+    selectedDivisionIds: List<String>,
+): Map<Int, String> {
     if (slots.isEmpty()) return emptyMap()
 
     val errors = mutableMapOf<Int, String>()
+    val normalizedSelectedDivisions = selectedDivisionIds.normalizeDivisionIdentifiers()
+    val selectedDivisionSet = normalizedSelectedDivisions.toSet()
     slots.forEachIndexed { index, slot ->
-        val fieldId = slot.scheduledFieldId
+        val fieldIds = slot.normalizedScheduledFieldIds()
+        val fieldIdSet = fieldIds.toSet()
         val days = slot.normalizedDaysOfWeek()
         val daySet = days.toSet()
+        val slotDivisionIds = slot.normalizedDivisionIds().normalizeDivisionIdentifiers()
+        val slotDivisionSet = slotDivisionIds.toSet()
         val start = slot.startTimeMinutes
         val end = slot.endTimeMinutes
 
         val requiredMissing = when {
-            fieldId.isNullOrBlank() -> "Select a field."
+            fieldIds.isEmpty() -> "Select at least one field."
             days.isEmpty() -> "Select at least one day."
             start == null -> "Select a start time."
             end == null -> "Select an end time."
@@ -1621,9 +1752,15 @@ private fun computeLeagueSlotErrors(slots: List<TimeSlot>): Map<Int, String> {
             return@forEachIndexed
         }
 
+        if (singleDivision && selectedDivisionSet.isNotEmpty() && slotDivisionSet != selectedDivisionSet) {
+            errors[index] = "Single division requires every timeslot to include all selected divisions."
+            return@forEachIndexed
+        }
+
         val hasOverlap = slots.withIndex().any { (otherIndex, other) ->
             if (otherIndex == index) return@any false
-            if (other.scheduledFieldId != fieldId) return@any false
+            val otherFieldSet = other.normalizedScheduledFieldIds().toSet()
+            if (otherFieldSet.isEmpty() || otherFieldSet.intersect(fieldIdSet).isEmpty()) return@any false
             val otherDays = other.normalizedDaysOfWeek()
             if (otherDays.isEmpty() || otherDays.none(daySet::contains)) return@any false
 
@@ -1634,7 +1771,7 @@ private fun computeLeagueSlotErrors(slots: List<TimeSlot>): Map<Int, String> {
         }
 
         if (hasOverlap) {
-            errors[index] = "Overlaps with another timeslot for this field."
+            errors[index] = "Overlaps with another timeslot for one or more selected fields."
         }
     }
     return errors

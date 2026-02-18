@@ -31,7 +31,8 @@ import com.razumly.mvp.core.data.repositories.SignerContext
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
-import com.razumly.mvp.core.data.util.normalizeDivisionLabel
+import com.razumly.mvp.core.data.util.divisionsEquivalent
+import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentProcessor
@@ -332,7 +333,7 @@ class DefaultEventDetailComponent(
             fields.filter {
                 if (!selectedEvent.value.singleDivision && !activeDivision.isNullOrEmpty()) {
                     it.field.divisions.any { division ->
-                        division.normalizeDivisionLabel() == activeDivision
+                        divisionsEquivalent(division, activeDivision)
                     }
                 } else {
                     true
@@ -520,13 +521,13 @@ class DefaultEventDetailComponent(
     }
 
     override fun selectDivision(division: String) {
-        val normalizedDivision = division.normalizeDivisionLabel()
+        val normalizedDivision = division.normalizeDivisionIdentifier()
         _selectedDivision.value = normalizedDivision.ifEmpty { null }
         _divisionTeams.value = eventWithRelations.value.teams.associateBy { it.team.id }
         val divisionFilter = _selectedDivision.value
         _divisionMatches.value = if (!selectedEvent.value.singleDivision && !divisionFilter.isNullOrEmpty()) {
             eventWithRelations.value.matches.filter {
-                it.match.division?.normalizeDivisionLabel() == divisionFilter && !(
+                divisionsEquivalent(it.match.division, divisionFilter) && !(
                     it.previousRightMatch == null &&
                     it.previousLeftMatch == null &&
                     it.winnerNextMatch == null &&
@@ -636,12 +637,6 @@ class DefaultEventDetailComponent(
         val selectedChild = joinableChildren.firstOrNull { it.userId == childUserId }
         if (selectedChild == null) {
             _errorState.value = ErrorMessage("Unable to find that child profile.")
-            return
-        }
-        if (!selectedChild.hasEmail || selectedChild.email.isNullOrBlank()) {
-            _errorState.value = ErrorMessage(
-                "Child email is required before registration can continue."
-            )
             return
         }
 

@@ -39,7 +39,7 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import com.razumly.mvp.core.data.dataTypes.Event
-import com.razumly.mvp.core.data.util.normalizeDivisionLabels
+import com.razumly.mvp.core.data.util.toDivisionDisplayLabels
 import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.getImageUrl
 import com.razumly.mvp.core.presentation.util.moneyFormat
@@ -169,7 +169,7 @@ fun EventCard(
 
             StylizedText(event.eventType.name.toTitleCase(), patterns)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                val formattedDivisions = event.divisions.normalizeDivisionLabels().joinToString(", ")
+                val formattedDivisions = event.divisions.toDivisionDisplayLabels(event.divisionDetails).joinToString(", ")
                 StylizedText("Divisions: $formattedDivisions", patterns)
                 Text(
                     text = "Prize: " + event.prize,

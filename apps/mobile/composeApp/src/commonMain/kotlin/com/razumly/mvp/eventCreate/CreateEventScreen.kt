@@ -143,7 +143,7 @@ fun CreateEventScreen(
             component.onTypeSelected(normalizedType)
             if (normalizedType == EventType.LEAGUE || normalizedType == EventType.TOURNAMENT) {
                 component.updateEventField {
-                    copy(teamSignup = true, singleDivision = true, end = start)
+                    copy(teamSignup = true, singleDivision = true, noFixedEndDateTime = true)
                 }
             }
         }

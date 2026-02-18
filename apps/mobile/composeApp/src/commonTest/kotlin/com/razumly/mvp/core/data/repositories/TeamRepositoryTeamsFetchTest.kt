@@ -139,6 +139,10 @@ private class FakeUserRepository : IUserRepository {
     override suspend fun searchPlayers(search: String): Result<List<UserData>> = error("unused")
     override suspend fun ensureUserByEmail(email: String): Result<UserData> = error("unused")
     override suspend fun listChildren(): Result<List<FamilyChild>> = error("unused")
+    override suspend fun resolveChildJoinRequest(
+        registrationId: String,
+        action: FamilyJoinRequestAction,
+    ): Result<FamilyJoinRequestResolution> = error("unused")
     override suspend fun createChildAccount(
         firstName: String,
         lastName: String,

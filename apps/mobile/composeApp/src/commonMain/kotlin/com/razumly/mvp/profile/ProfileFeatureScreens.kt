@@ -256,7 +256,7 @@ fun ProfileChildrenScreen(component: ProfileComponent) {
         description = "Manage linked child accounts and guardian relationships.",
         onBack = component::onBackClicked,
         onRefresh = component::refreshChildren,
-        isRefreshing = childrenState.isLoading,
+        isRefreshing = childrenState.isLoading || childrenState.isLoadingJoinRequests,
     ) {
         SectionHeaderRow(title = "Child details")
         Button(
@@ -445,6 +445,97 @@ fun ProfileChildrenScreen(component: ProfileComponent) {
             }
         }
 
+        SectionHeaderRow(title = "Pending join requests")
+
+        childrenState.joinRequestsError?.let { message ->
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
+        when {
+            childrenState.isLoadingJoinRequests -> {
+                Text(
+                    text = "Loading join requests...",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            childrenState.joinRequests.isEmpty() -> {
+                Text(
+                    text = "No pending join requests.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            else -> {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    childrenState.joinRequests.forEach { request ->
+                        val isResolving = childrenState.activeJoinRequestId == request.registrationId
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                            ),
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                Text(
+                                    text = "${request.childFullName} requested to join ${request.eventName}",
+                                    style = MaterialTheme.typography.titleMedium,
+                                )
+                                Text(
+                                    text = "Consent status: ${request.consentStatus ?: "guardian_approval_required"}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                request.requestedAt?.let { requestedAt ->
+                                    Text(
+                                        text = "Requested: ${formatDateForDisplay(requestedAt)}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                if (!request.childHasEmail) {
+                                    Text(
+                                        text = "Child email is missing. Approval can proceed, but child-signature links stay pending.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error,
+                                    )
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Button(
+                                        modifier = Modifier.weight(1f),
+                                        onClick = { component.approveChildJoinRequest(request.registrationId) },
+                                        enabled = !isResolving,
+                                    ) {
+                                        Text(if (isResolving) "Working..." else "Approve")
+                                    }
+                                    Button(
+                                        modifier = Modifier.weight(1f),
+                                        onClick = { component.declineChildJoinRequest(request.registrationId) },
+                                        enabled = !isResolving,
+                                    ) {
+                                        Text(if (isResolving) "Working..." else "Decline")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         SectionHeaderRow(title = "Children")
 
         childrenState.error?.let { message ->
@@ -558,11 +649,17 @@ fun ProfileDocumentsScreen(component: ProfileComponent) {
             else -> {
                 documentsState.unsignedDocuments.forEach { document ->
                     val isProcessing = activeDocumentActionId == document.id
+                    val actionEnabled = !document.requiresChildEmail
                     DocumentCard(
                         document = document,
-                        actionLabel = if (document.type == ProfileDocumentType.TEXT) "Sign text" else "Sign document",
+                        actionLabel = if (actionEnabled) {
+                            if (document.type == ProfileDocumentType.TEXT) "Sign text" else "Sign document"
+                        } else {
+                            "Add child email first"
+                        },
                         isProcessing = isProcessing,
                         processingLabel = "Opening...",
+                        actionEnabled = actionEnabled,
                         onAction = { component.signDocument(document) },
                     )
                 }
@@ -682,6 +779,7 @@ private fun DocumentCard(
     actionLabel: String,
     isProcessing: Boolean,
     processingLabel: String,
+    actionEnabled: Boolean = true,
     onAction: () -> Unit,
 ) {
     val eventName = document.eventName?.trim()?.takeIf(String::isNotBlank) ?: "Event document"
@@ -722,6 +820,20 @@ private fun DocumentCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            document.consentStatus?.let { consentStatus ->
+                Text(
+                    text = "Consent status: $consentStatus",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            document.statusNote?.let { statusNote ->
+                Text(
+                    text = statusNote,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
             signedLabel?.let { label ->
                 Text(
                     text = label,
@@ -733,7 +845,7 @@ private fun DocumentCard(
             Button(
                 modifier = Modifier.fillMaxWidth(),
                 onClick = onAction,
-                enabled = !isProcessing,
+                enabled = !isProcessing && actionEnabled,
             ) {
                 Text(if (isProcessing) processingLabel else actionLabel)
             }

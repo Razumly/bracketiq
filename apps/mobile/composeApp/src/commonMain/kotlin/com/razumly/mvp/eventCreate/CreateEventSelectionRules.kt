@@ -10,9 +10,11 @@ internal fun Event.applyCreateSelectionRules(isRentalFlow: Boolean): Event {
             eventType = normalizedType,
             teamSignup = true,
             singleDivision = true,
-            end = start,
         )
 
-        EventType.EVENT -> copy(eventType = normalizedType)
+        EventType.EVENT -> copy(
+            eventType = normalizedType,
+            noFixedEndDateTime = false,
+        )
     }
 }
