@@ -53,8 +53,16 @@ fun ProfileScreen(component: ProfileComponent) {
                 ProfileMembershipsScreen(component = instance.component)
             }
 
+            is ProfileComponent.Child.EventTemplates -> {
+                ProfileEventTemplatesScreen(component = instance.component)
+            }
+
             is ProfileComponent.Child.Children -> {
                 ProfileChildrenScreen(component = instance.component)
+            }
+
+            is ProfileComponent.Child.Connections -> {
+                ProfileConnectionsScreen(component = instance.component)
             }
 
             is ProfileComponent.Child.Documents -> {

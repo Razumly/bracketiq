@@ -23,6 +23,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,6 +42,7 @@ import com.razumly.mvp.icons.ProfileActionPaymentPlans
 import com.razumly.mvp.icons.ProfileActionPayments
 import com.razumly.mvp.icons.ProfileActionRefunds
 import com.razumly.mvp.icons.ProfileActionTeams
+import com.razumly.mvp.icons.Groups
 
 private data class ProfileAction(
     val title: String,
@@ -52,69 +55,108 @@ private data class ProfileAction(
 @Composable
 fun ProfileHomeScreen(component: ProfileComponent) {
     val navPadding = LocalNavBarPadding.current
-    val actions = remember(component) {
-        listOf(
-            ProfileAction(
-                title = "Profile Details",
-                description = "Update profile and password",
-                icon = MVPIcons.ProfileActionDetails,
-                onClick = component::navigateToProfileDetails,
-            ),
-            ProfileAction(
-                title = "Payments",
-                description = "Stripe account actions",
-                icon = MVPIcons.ProfileActionPayments,
-                onClick = component::navigateToPayments,
-            ),
-            ProfileAction(
-                title = "Payment Plans",
-                description = "Installment plan section",
-                icon = MVPIcons.ProfileActionPaymentPlans,
-                onClick = component::navigateToPaymentPlans,
-            ),
-            ProfileAction(
-                title = "Memberships",
-                description = "Recurring membership section",
-                icon = MVPIcons.ProfileActionMemberships,
-                onClick = component::navigateToMemberships,
-            ),
-            ProfileAction(
-                title = "Children",
-                description = "Linked child profiles",
-                icon = MVPIcons.ProfileActionChildren,
-                onClick = component::navigateToChildren,
-            ),
-            ProfileAction(
-                title = "Documents",
-                description = "Sign and review documents",
-                icon = MVPIcons.ProfileActionDetails,
-                onClick = component::navigateToDocuments,
-            ),
-            ProfileAction(
-                title = "Teams",
-                description = "Team management",
-                icon = MVPIcons.ProfileActionTeams,
-                onClick = component::manageTeams,
-            ),
-            ProfileAction(
-                title = "Events",
-                description = "Event management",
-                icon = MVPIcons.ProfileActionEvents,
-                onClick = component::manageEvents,
-            ),
-            ProfileAction(
-                title = "Refund Requests",
-                description = "Refund moderation",
-                icon = MVPIcons.ProfileActionRefunds,
-                onClick = component::manageRefunds,
-            ),
-            ProfileAction(
-                title = "Clear Cache",
-                description = "Reset local cached data",
-                icon = MVPIcons.ProfileActionClearCache,
-                onClick = component::clearCache,
-            ),
-        )
+    val showChildrenTab by component.showChildrenTab.collectAsState()
+    val actions = remember(component, showChildrenTab) {
+        buildList {
+            add(
+                ProfileAction(
+                    title = "Profile Details",
+                    description = "Update profile and password",
+                    icon = MVPIcons.ProfileActionDetails,
+                    onClick = component::navigateToProfileDetails,
+                ),
+            )
+            add(
+                ProfileAction(
+                    title = "Payments",
+                    description = "Stripe account actions",
+                    icon = MVPIcons.ProfileActionPayments,
+                    onClick = component::navigateToPayments,
+                ),
+            )
+            add(
+                ProfileAction(
+                    title = "Payment Plans",
+                    description = "Installment plan section",
+                    icon = MVPIcons.ProfileActionPaymentPlans,
+                    onClick = component::navigateToPaymentPlans,
+                ),
+            )
+            add(
+                ProfileAction(
+                    title = "Memberships",
+                    description = "Recurring membership section",
+                    icon = MVPIcons.ProfileActionMemberships,
+                    onClick = component::navigateToMemberships,
+                ),
+            )
+            add(
+                ProfileAction(
+                    title = "Event Templates",
+                    description = "Reusable event templates",
+                    icon = MVPIcons.ProfileActionEvents,
+                    onClick = component::navigateToEventTemplates,
+                ),
+            )
+            if (showChildrenTab) {
+                add(
+                    ProfileAction(
+                        title = "Children",
+                        description = "Linked child profiles",
+                        icon = MVPIcons.ProfileActionChildren,
+                        onClick = component::navigateToChildren,
+                    ),
+                )
+            }
+            add(
+                ProfileAction(
+                    title = "Connections",
+                    description = "Friends and following",
+                    icon = MVPIcons.Groups,
+                    onClick = component::navigateToConnections,
+                ),
+            )
+            add(
+                ProfileAction(
+                    title = "Documents",
+                    description = "Sign and review documents",
+                    icon = MVPIcons.ProfileActionDetails,
+                    onClick = component::navigateToDocuments,
+                ),
+            )
+            add(
+                ProfileAction(
+                    title = "Teams",
+                    description = "Team management",
+                    icon = MVPIcons.ProfileActionTeams,
+                    onClick = component::manageTeams,
+                ),
+            )
+            add(
+                ProfileAction(
+                    title = "Events",
+                    description = "Event management",
+                    icon = MVPIcons.ProfileActionEvents,
+                    onClick = component::manageEvents,
+                ),
+            )
+            add(
+                ProfileAction(
+                    title = "Refund Requests",
+                    description = "Refund moderation",
+                    icon = MVPIcons.ProfileActionRefunds,
+                    onClick = component::manageRefunds,
+                ),
+            )
+            add(
+                ProfileAction(
+                    title = "Clear Cache",
+                    description = "Reset local cached data",
+                    icon = MVPIcons.ProfileActionClearCache,
+                    onClick = component::clearCache,
+                ),
+            )
+        }
     }
 
     Scaffold(

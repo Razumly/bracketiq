@@ -11,16 +11,20 @@ import com.arkivanov.decompose.value.Value
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.Bill
 import com.razumly.mvp.core.data.dataTypes.BillPayment
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Subscription
+import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.FamilyChild
 import com.razumly.mvp.core.data.repositories.FamilyJoinRequest
 import com.razumly.mvp.core.data.repositories.FamilyJoinRequestAction
 import com.razumly.mvp.core.data.repositories.IBillingRepository
+import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.ProfileDocumentCard
 import com.razumly.mvp.core.data.repositories.ProfileDocumentType
 import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.apiBaseUrl
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.IPaymentProcessor
@@ -31,11 +35,13 @@ import com.razumly.mvp.core.util.LoadingHandler
 import io.github.aakira.napier.Napier
 import com.razumly.mvp.profile.profileDetails.ProfileDetailsComponent
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import org.koin.core.parameter.parametersOf
@@ -80,6 +86,12 @@ data class ProfileMembership(
 data class ProfileMembershipsState(
     val isLoading: Boolean = false,
     val memberships: List<ProfileMembership> = emptyList(),
+    val error: String? = null,
+)
+
+data class ProfileEventTemplatesState(
+    val isLoading: Boolean = false,
+    val templates: List<Event> = emptyList(),
     val error: String? = null,
 )
 
@@ -129,6 +141,20 @@ data class ProfileChildrenState(
     val linkError: String? = null,
 )
 
+data class ProfileConnectionsState(
+    val isLoading: Boolean = false,
+    val currentUser: UserData? = null,
+    val friends: List<UserData> = emptyList(),
+    val following: List<UserData> = emptyList(),
+    val incomingFriendRequests: List<UserData> = emptyList(),
+    val outgoingFriendRequests: List<UserData> = emptyList(),
+    val searchQuery: String = "",
+    val searchResults: List<UserData> = emptyList(),
+    val isSearching: Boolean = false,
+    val activeUserId: String? = null,
+    val error: String? = null,
+)
+
 data class ProfileDocumentsState(
     val isLoading: Boolean = false,
     val unsignedDocuments: List<ProfileDocumentCard> = emptyList(),
@@ -144,9 +170,12 @@ data class ProfileTextSignaturePromptState(
 interface ProfileComponent : IPaymentProcessor {
     val childStack: Value<ChildStack<*, Child>>
     val errorState: StateFlow<ErrorMessage?>
+    val showChildrenTab: StateFlow<Boolean>
+    val eventTemplatesState: StateFlow<ProfileEventTemplatesState>
     val paymentPlansState: StateFlow<ProfilePaymentPlansState>
     val membershipsState: StateFlow<ProfileMembershipsState>
     val childrenState: StateFlow<ProfileChildrenState>
+    val connectionsState: StateFlow<ProfileConnectionsState>
     val documentsState: StateFlow<ProfileDocumentsState>
     val activeBillPaymentId: StateFlow<String?>
     val activeMembershipActionId: StateFlow<String?>
@@ -161,7 +190,9 @@ interface ProfileComponent : IPaymentProcessor {
     fun navigateToPayments()
     fun navigateToPaymentPlans()
     fun navigateToMemberships()
+    fun navigateToEventTemplates()
     fun navigateToChildren()
+    fun navigateToConnections()
     fun navigateToDocuments()
 
     fun onLogout()
@@ -169,6 +200,8 @@ interface ProfileComponent : IPaymentProcessor {
     fun manageEvents()
     fun manageRefunds()
     fun clearCache()
+    fun refreshEventTemplates()
+    fun openEventTemplate(event: Event)
     fun manageStripeAccountOnboarding()
     fun manageStripeAccount()
     fun refreshPaymentPlans()
@@ -180,6 +213,14 @@ interface ProfileComponent : IPaymentProcessor {
     fun refreshChildJoinRequests()
     fun approveChildJoinRequest(registrationId: String)
     fun declineChildJoinRequest(registrationId: String)
+    fun refreshConnections()
+    fun searchConnections(query: String)
+    fun sendFriendRequest(user: UserData)
+    fun acceptFriendRequest(user: UserData)
+    fun declineFriendRequest(user: UserData)
+    fun followUser(user: UserData)
+    fun unfollowUser(user: UserData)
+    fun removeFriend(user: UserData)
     fun refreshDocuments()
     fun signDocument(document: ProfileDocumentCard)
     fun openSignedDocument(document: ProfileDocumentCard)
@@ -214,7 +255,9 @@ interface ProfileComponent : IPaymentProcessor {
         data class Payments(val component: ProfileComponent) : Child()
         data class PaymentPlans(val component: ProfileComponent) : Child()
         data class Memberships(val component: ProfileComponent) : Child()
+        data class EventTemplates(val component: ProfileComponent) : Child()
         data class Children(val component: ProfileComponent) : Child()
+        data class Connections(val component: ProfileComponent) : Child()
         data class Documents(val component: ProfileComponent) : Child()
     }
 }
@@ -237,7 +280,13 @@ private sealed class ProfileConfig {
     data object Memberships : ProfileConfig()
 
     @Serializable
+    data object EventTemplates : ProfileConfig()
+
+    @Serializable
     data object Children : ProfileConfig()
+
+    @Serializable
+    data object Connections : ProfileConfig()
 
     @Serializable
     data object Documents : ProfileConfig()
@@ -248,6 +297,7 @@ class DefaultProfileComponent(
     componentContext: ComponentContext,
     private val userRepository: IUserRepository,
     private val billingRepository: IBillingRepository,
+    private val eventRepository: IEventRepository,
     private val teamRepository: ITeamRepository,
     private val navigationHandler: INavigationHandler,
 ) : ProfileComponent, PaymentProcessor(), ComponentContext by componentContext {
@@ -259,14 +309,23 @@ class DefaultProfileComponent(
     private val _errorState = MutableStateFlow<ErrorMessage?>(null)
     override val errorState = _errorState.asStateFlow()
 
+    private val _showChildrenTab = MutableStateFlow(true)
+    override val showChildrenTab = _showChildrenTab.asStateFlow()
+
     private val _paymentPlansState = MutableStateFlow(ProfilePaymentPlansState())
     override val paymentPlansState = _paymentPlansState.asStateFlow()
 
     private val _membershipsState = MutableStateFlow(ProfileMembershipsState())
     override val membershipsState = _membershipsState.asStateFlow()
 
+    private val _eventTemplatesState = MutableStateFlow(ProfileEventTemplatesState())
+    override val eventTemplatesState = _eventTemplatesState.asStateFlow()
+
     private val _childrenState = MutableStateFlow(ProfileChildrenState())
     override val childrenState = _childrenState.asStateFlow()
+
+    private val _connectionsState = MutableStateFlow(ProfileConnectionsState())
+    override val connectionsState = _connectionsState.asStateFlow()
 
     private val _documentsState = MutableStateFlow(ProfileDocumentsState())
     override val documentsState = _documentsState.asStateFlow()
@@ -287,6 +346,8 @@ class DefaultProfileComponent(
     override val isStripeAccountConnected = _isStripeAccountConnected.asStateFlow()
 
     private var loadingHandler: LoadingHandler? = null
+    private var eventTemplatesJob: Job? = null
+    private var childrenTabVisibilityUserId: String? = null
 
     override val childStack: Value<ChildStack<*, ProfileComponent.Child>> = childStack(
         source = navigation,
@@ -299,7 +360,15 @@ class DefaultProfileComponent(
     init {
         scope.launch {
             userRepository.currentUser.collect { userResult ->
-                _isStripeAccountConnected.value = userResult.getOrNull()?.hasStripeAccount == true
+                val currentUser = userResult.getOrNull()
+                _isStripeAccountConnected.value = currentUser?.hasStripeAccount == true
+                if (currentUser == null) {
+                    childrenTabVisibilityUserId = null
+                    _showChildrenTab.value = true
+                } else if (childrenTabVisibilityUserId != currentUser.id) {
+                    childrenTabVisibilityUserId = currentUser.id
+                    resolveChildrenTabVisibility()
+                }
             }
         }
 
@@ -354,8 +423,16 @@ class DefaultProfileComponent(
         push(ProfileConfig.Memberships)
     }
 
+    override fun navigateToEventTemplates() {
+        push(ProfileConfig.EventTemplates)
+    }
+
     override fun navigateToChildren() {
         push(ProfileConfig.Children)
+    }
+
+    override fun navigateToConnections() {
+        push(ProfileConfig.Connections)
     }
 
     override fun navigateToDocuments() {
@@ -387,6 +464,69 @@ class DefaultProfileComponent(
         scope.launch {
             // TODO: Wire cache clearing behavior once the cache strategy is finalized.
         }
+    }
+
+    private fun resolveChildrenTabVisibility() {
+        scope.launch {
+            val isChildUser = userRepository.isCurrentUserChild().getOrNull() == true
+            if (isChildUser) {
+                _showChildrenTab.value = false
+                return@launch
+            }
+
+            val shouldShow = runCatching {
+                userRepository.listChildren().getOrThrow()
+                true
+            }.getOrElse { throwable ->
+                when ((throwable as? ApiException)?.statusCode) {
+                    403 -> false
+                    else -> true
+                }
+            }
+            _showChildrenTab.value = shouldShow
+        }
+    }
+
+    override fun refreshEventTemplates() {
+        eventTemplatesJob?.cancel()
+        _eventTemplatesState.value = _eventTemplatesState.value.copy(
+            isLoading = true,
+            error = null,
+        )
+
+        eventTemplatesJob = scope.launch {
+            val currentUser = userRepository.currentUser
+                .firstOrNull { it.isSuccess }
+                ?.getOrNull()
+
+            if (currentUser == null) {
+                _eventTemplatesState.value = ProfileEventTemplatesState(
+                    isLoading = false,
+                    templates = emptyList(),
+                    error = "Unable to load templates for the current user.",
+                )
+                return@launch
+            }
+
+            eventRepository.getEventTemplatesByHostFlow(currentUser.id).collect { result ->
+                result.onSuccess { templates ->
+                    _eventTemplatesState.value = ProfileEventTemplatesState(
+                        isLoading = false,
+                        templates = templates.sortedByDescending { it.start },
+                        error = null,
+                    )
+                }.onFailure { throwable ->
+                    _eventTemplatesState.value = _eventTemplatesState.value.copy(
+                        isLoading = false,
+                        error = throwable.message ?: "Failed to load event templates.",
+                    )
+                }
+            }
+        }
+    }
+
+    override fun openEventTemplate(event: Event) {
+        navigationHandler.navigateToEvent(event)
     }
 
     override fun manageStripeAccountOnboarding() {
@@ -722,6 +862,195 @@ class DefaultProfileComponent(
             _childrenState.value = _childrenState.value.copy(
                 activeJoinRequestId = null,
             )
+        }
+    }
+
+    override fun refreshConnections() {
+        scope.launch {
+            val currentUser = userRepository.currentUser.value.getOrNull()
+            if (currentUser == null) {
+                _connectionsState.value = ProfileConnectionsState(
+                    isLoading = false,
+                    error = "Unable to load connections for the current user.",
+                )
+                return@launch
+            }
+
+            _connectionsState.value = _connectionsState.value.copy(
+                isLoading = true,
+                currentUser = currentUser,
+                error = null,
+            )
+
+            var failureMessage: String? = null
+            val friends = userRepository.getUsers(currentUser.friendIds).getOrElse { throwable ->
+                if (failureMessage == null) failureMessage = throwable.message ?: "Failed to load friends."
+                emptyList()
+            }
+            val following = userRepository.getUsers(currentUser.followingIds).getOrElse { throwable ->
+                if (failureMessage == null) failureMessage = throwable.message ?: "Failed to load following users."
+                emptyList()
+            }
+            val incomingFriendRequests = userRepository.getUsers(currentUser.friendRequestIds).getOrElse { throwable ->
+                if (failureMessage == null) failureMessage = throwable.message ?: "Failed to load incoming friend requests."
+                emptyList()
+            }
+            val outgoingFriendRequests = userRepository.getUsers(currentUser.friendRequestSentIds).getOrElse { throwable ->
+                if (failureMessage == null) failureMessage = throwable.message ?: "Failed to load outgoing friend requests."
+                emptyList()
+            }
+
+            val existingState = _connectionsState.value
+            val refreshedQuery = existingState.searchQuery
+            val searchResults = if (refreshedQuery.trim().length >= 2) {
+                userRepository.searchPlayers(refreshedQuery)
+                    .getOrElse { emptyList() }
+                    .filter { it.id != currentUser.id }
+                    .distinctBy { it.id }
+            } else {
+                emptyList()
+            }
+
+            _connectionsState.value = existingState.copy(
+                isLoading = false,
+                currentUser = currentUser,
+                friends = friends,
+                following = following,
+                incomingFriendRequests = incomingFriendRequests,
+                outgoingFriendRequests = outgoingFriendRequests,
+                searchResults = searchResults,
+                error = failureMessage,
+            )
+        }
+    }
+
+    override fun searchConnections(query: String) {
+        val normalizedQuery = query
+        _connectionsState.value = _connectionsState.value.copy(
+            searchQuery = normalizedQuery,
+        )
+
+        if (normalizedQuery.trim().length < 2) {
+            _connectionsState.value = _connectionsState.value.copy(
+                isSearching = false,
+                searchResults = emptyList(),
+                error = null,
+            )
+            return
+        }
+
+        scope.launch {
+            val currentUserId = userRepository.currentUser.value.getOrNull()?.id
+            _connectionsState.value = _connectionsState.value.copy(
+                isSearching = true,
+                error = null,
+            )
+
+            userRepository.searchPlayers(normalizedQuery)
+                .onSuccess { users ->
+                    _connectionsState.value = _connectionsState.value.copy(
+                        isSearching = false,
+                        searchResults = users
+                            .filter { it.id != currentUserId }
+                            .distinctBy { it.id },
+                    )
+                }
+                .onFailure { throwable ->
+                    _connectionsState.value = _connectionsState.value.copy(
+                        isSearching = false,
+                        searchResults = emptyList(),
+                        error = throwable.message ?: "Failed to search users.",
+                    )
+                }
+        }
+    }
+
+    override fun sendFriendRequest(user: UserData) {
+        performConnectionAction(
+            user = user,
+            successMessage = "Friend request sent.",
+        ) {
+            userRepository.sendFriendRequest(user)
+        }
+    }
+
+    override fun acceptFriendRequest(user: UserData) {
+        performConnectionAction(
+            user = user,
+            successMessage = "Friend request accepted.",
+        ) {
+            userRepository.acceptFriendRequest(user)
+        }
+    }
+
+    override fun declineFriendRequest(user: UserData) {
+        performConnectionAction(
+            user = user,
+            successMessage = "Friend request declined.",
+        ) {
+            userRepository.declineFriendRequest(user.id)
+        }
+    }
+
+    override fun followUser(user: UserData) {
+        performConnectionAction(
+            user = user,
+            successMessage = "Following user.",
+        ) {
+            userRepository.followUser(user.id)
+        }
+    }
+
+    override fun unfollowUser(user: UserData) {
+        performConnectionAction(
+            user = user,
+            successMessage = "Unfollowed user.",
+        ) {
+            userRepository.unfollowUser(user.id)
+        }
+    }
+
+    override fun removeFriend(user: UserData) {
+        performConnectionAction(
+            user = user,
+            successMessage = "Friend removed.",
+        ) {
+            userRepository.removeFriend(user.id)
+        }
+    }
+
+    private fun performConnectionAction(
+        user: UserData,
+        successMessage: String,
+        action: suspend () -> Result<Unit>,
+    ) {
+        val targetUserId = user.id.trim()
+        if (targetUserId.isBlank()) {
+            _connectionsState.value = _connectionsState.value.copy(
+                error = "Invalid user id.",
+            )
+            return
+        }
+
+        scope.launch {
+            _connectionsState.value = _connectionsState.value.copy(
+                activeUserId = targetUserId,
+                error = null,
+            )
+
+            action().onSuccess {
+                _connectionsState.value = _connectionsState.value.copy(
+                    activeUserId = null,
+                    error = null,
+                )
+                _errorState.value = ErrorMessage(successMessage)
+                refreshConnections()
+            }.onFailure { throwable ->
+                _connectionsState.value = _connectionsState.value.copy(
+                    activeUserId = null,
+                    error = throwable.message ?: "Failed to update connection.",
+                )
+            }
         }
     }
 
@@ -1061,7 +1390,9 @@ class DefaultProfileComponent(
         ProfileConfig.Payments -> ProfileComponent.Child.Payments(this@DefaultProfileComponent)
         ProfileConfig.PaymentPlans -> ProfileComponent.Child.PaymentPlans(this@DefaultProfileComponent)
         ProfileConfig.Memberships -> ProfileComponent.Child.Memberships(this@DefaultProfileComponent)
+        ProfileConfig.EventTemplates -> ProfileComponent.Child.EventTemplates(this@DefaultProfileComponent)
         ProfileConfig.Children -> ProfileComponent.Child.Children(this@DefaultProfileComponent)
+        ProfileConfig.Connections -> ProfileComponent.Child.Connections(this@DefaultProfileComponent)
         ProfileConfig.Documents -> ProfileComponent.Child.Documents(this@DefaultProfileComponent)
     }
 }

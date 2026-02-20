@@ -79,6 +79,7 @@ val componentModule = module {
             userRepository = get(),
             matchRepository = get(),
             teamRepository = get(),
+            sportsRepository = get(),
             fieldRepository = get(),
             billingRepository = get(),
             imageRepository = get(),
@@ -141,6 +142,7 @@ val componentModule = module {
             componentContext = componentContext,
             userRepository = get(),
             billingRepository = get(),
+            eventRepository = get(),
             teamRepository = get(),
             navigationHandler = navHandler,
         )

@@ -35,15 +35,18 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.ProfileDocumentCard
 import com.razumly.mvp.core.data.repositories.ProfileDocumentType
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
-import com.razumly.mvp.core.presentation.composables.PullToRefreshContainer
 import com.razumly.mvp.core.presentation.composables.PlatformDropdown
 import com.razumly.mvp.core.presentation.composables.PlatformTextField
+import com.razumly.mvp.core.presentation.composables.PullToRefreshContainer
 import com.razumly.mvp.core.presentation.util.MoneyInputUtils
+import com.razumly.mvp.core.presentation.util.dateTimeFormat
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 
@@ -176,6 +179,58 @@ fun ProfileMembershipsScreen(component: ProfileComponent) {
                         isProcessing = activeMembershipActionId == membership.subscription.id,
                         onCancel = { component.cancelMembership(membership) },
                         onRestart = { component.restartMembership(membership) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ProfileEventTemplatesScreen(component: ProfileComponent) {
+    val templatesState by component.eventTemplatesState.collectAsState()
+
+    LaunchedEffect(component) {
+        component.refreshEventTemplates()
+    }
+
+    ProfileSectionScaffold(
+        title = "Event Templates",
+        description = "Reusable templates for personal (non-organization) events.",
+        onBack = component::onBackClicked,
+        onRefresh = component::refreshEventTemplates,
+        isRefreshing = templatesState.isLoading,
+    ) {
+        templatesState.error?.let { message ->
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
+        when {
+            templatesState.isLoading && templatesState.templates.isEmpty() -> {
+                Text(
+                    text = "Loading event templates...",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            templatesState.templates.isEmpty() -> {
+                Text(
+                    text = "No event templates yet.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            else -> {
+                templatesState.templates.forEach { template ->
+                    EventTemplateCard(
+                        template = template,
+                        onOpenTemplate = { component.openEventTemplate(template) },
                     )
                 }
             }
@@ -600,6 +655,262 @@ fun ProfileChildrenScreen(component: ProfileComponent) {
 }
 
 @Composable
+fun ProfileConnectionsScreen(component: ProfileComponent) {
+    val state by component.connectionsState.collectAsState()
+    val currentUser = state.currentUser
+
+    LaunchedEffect(component) {
+        component.refreshConnections()
+    }
+
+    ProfileSectionScaffold(
+        title = "Connections",
+        description = "Manage friend requests, friends, and following.",
+        onBack = component::onBackClicked,
+        onRefresh = component::refreshConnections,
+        isRefreshing = state.isLoading,
+    ) {
+        SectionHeaderRow(title = "Find users")
+        PlatformTextField(
+            modifier = Modifier.fillMaxWidth(),
+            value = state.searchQuery,
+            onValueChange = component::searchConnections,
+            label = "Search by name or username",
+        )
+
+        when {
+            state.isSearching -> {
+                Text(
+                    text = "Searching...",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            state.searchQuery.trim().length < 2 -> {
+                Text(
+                    text = "Enter at least 2 characters to search.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            state.searchResults.isEmpty() -> {
+                Text(
+                    text = "No users found.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            else -> {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    state.searchResults.forEach { candidate ->
+                        val candidateId = candidate.id
+                        val isFriend = currentUser?.friendIds?.contains(candidateId) == true
+                        val isFollowing = currentUser?.followingIds?.contains(candidateId) == true
+                        val hasIncomingRequest = currentUser?.friendRequestIds?.contains(candidateId) == true
+                        val hasOutgoingRequest = currentUser?.friendRequestSentIds?.contains(candidateId) == true
+                        val isActionInProgress = state.activeUserId == candidateId
+
+                        ConnectionUserCard(
+                            user = candidate,
+                            isActionInProgress = isActionInProgress,
+                            primaryActions = {
+                                when {
+                                    isFriend -> {
+                                        Button(
+                                            modifier = Modifier.weight(1f),
+                                            onClick = { component.removeFriend(candidate) },
+                                            enabled = !isActionInProgress,
+                                        ) {
+                                            Text(if (isActionInProgress) "Working..." else "Remove friend")
+                                        }
+                                    }
+
+                                    hasIncomingRequest -> {
+                                        Button(
+                                            modifier = Modifier.weight(1f),
+                                            onClick = { component.acceptFriendRequest(candidate) },
+                                            enabled = !isActionInProgress,
+                                        ) {
+                                            Text(if (isActionInProgress) "Working..." else "Accept")
+                                        }
+                                        Button(
+                                            modifier = Modifier.weight(1f),
+                                            onClick = { component.declineFriendRequest(candidate) },
+                                            enabled = !isActionInProgress,
+                                        ) {
+                                            Text(if (isActionInProgress) "Working..." else "Decline")
+                                        }
+                                    }
+
+                                    hasOutgoingRequest -> {
+                                        Button(
+                                            modifier = Modifier.weight(1f),
+                                            onClick = {},
+                                            enabled = false,
+                                        ) {
+                                            Text("Request sent")
+                                        }
+                                    }
+
+                                    else -> {
+                                        Button(
+                                            modifier = Modifier.weight(1f),
+                                            onClick = { component.sendFriendRequest(candidate) },
+                                            enabled = !isActionInProgress,
+                                        ) {
+                                            Text(if (isActionInProgress) "Working..." else "Add friend")
+                                        }
+                                    }
+                                }
+                            },
+                            secondaryActions = {
+                                Button(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    onClick = {
+                                        if (isFollowing) {
+                                            component.unfollowUser(candidate)
+                                        } else {
+                                            component.followUser(candidate)
+                                        }
+                                    },
+                                    enabled = !isActionInProgress,
+                                ) {
+                                    when {
+                                        isActionInProgress -> Text("Working...")
+                                        isFollowing -> Text("Unfollow")
+                                        else -> Text("Follow")
+                                    }
+                                }
+                            },
+                        )
+                    }
+                }
+            }
+        }
+
+        state.error?.let { message ->
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
+        SectionHeaderRow(title = "Incoming friend requests")
+        if (state.isLoading) {
+            Text(
+                text = "Loading friend requests...",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else if (state.incomingFriendRequests.isEmpty()) {
+            Text(
+                text = "No pending friend requests.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                state.incomingFriendRequests.forEach { requester ->
+                    val isActionInProgress = state.activeUserId == requester.id
+                    ConnectionUserCard(
+                        user = requester,
+                        isActionInProgress = isActionInProgress,
+                        primaryActions = {
+                            Button(
+                                modifier = Modifier.weight(1f),
+                                onClick = { component.acceptFriendRequest(requester) },
+                                enabled = !isActionInProgress,
+                            ) {
+                                Text(if (isActionInProgress) "Working..." else "Accept")
+                            }
+                            Button(
+                                modifier = Modifier.weight(1f),
+                                onClick = { component.declineFriendRequest(requester) },
+                                enabled = !isActionInProgress,
+                            ) {
+                                Text(if (isActionInProgress) "Working..." else "Decline")
+                            }
+                        },
+                    )
+                }
+            }
+        }
+
+        SectionHeaderRow(title = "Friends")
+        if (state.isLoading) {
+            Text(
+                text = "Loading friends...",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else if (state.friends.isEmpty()) {
+            Text(
+                text = "No friends yet.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                state.friends.forEach { friend ->
+                    val isActionInProgress = state.activeUserId == friend.id
+                    ConnectionUserCard(
+                        user = friend,
+                        isActionInProgress = isActionInProgress,
+                        primaryActions = {
+                            Button(
+                                modifier = Modifier.fillMaxWidth(),
+                                onClick = { component.removeFriend(friend) },
+                                enabled = !isActionInProgress,
+                            ) {
+                                Text(if (isActionInProgress) "Working..." else "Remove friend")
+                            }
+                        },
+                    )
+                }
+            }
+        }
+
+        SectionHeaderRow(title = "Following")
+        if (state.isLoading) {
+            Text(
+                text = "Loading following users...",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else if (state.following.isEmpty()) {
+            Text(
+                text = "Not following anyone yet.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                state.following.forEach { followedUser ->
+                    val isActionInProgress = state.activeUserId == followedUser.id
+                    ConnectionUserCard(
+                        user = followedUser,
+                        isActionInProgress = isActionInProgress,
+                        primaryActions = {
+                            Button(
+                                modifier = Modifier.fillMaxWidth(),
+                                onClick = { component.unfollowUser(followedUser) },
+                                enabled = !isActionInProgress,
+                            ) {
+                                Text(if (isActionInProgress) "Working..." else "Unfollow")
+                            }
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun ProfileDocumentsScreen(component: ProfileComponent) {
     val documentsState by component.documentsState.collectAsState()
     val activeDocumentActionId by component.activeDocumentActionId.collectAsState()
@@ -854,6 +1165,56 @@ private fun DocumentCard(
 }
 
 @Composable
+private fun ConnectionUserCard(
+    user: UserData,
+    isActionInProgress: Boolean,
+    primaryActions: @Composable () -> Unit,
+    secondaryActions: (@Composable () -> Unit)? = null,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = user.fullName.ifBlank { "User" },
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = "@${user.userName.ifBlank { "user" }}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                primaryActions()
+            }
+
+            if (secondaryActions != null) {
+                secondaryActions()
+            }
+
+            if (isActionInProgress) {
+                Text(
+                    text = "Updating connection...",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun ChildrenGrid(
     children: List<ProfileChild>,
     onEditChild: (ProfileChild) -> Unit,
@@ -1098,6 +1459,14 @@ private fun formatDateForDisplay(rawDate: String?): String {
     return rawDate.substringBefore("T")
 }
 
+private fun formatTemplateDateTime(instant: kotlin.time.Instant): String {
+    return runCatching {
+        dateTimeFormat.format(
+            instant.toLocalDateTime(TimeZone.currentSystemDefault()),
+        )
+    }.getOrElse { "TBD" }
+}
+
 private fun formatLinkStatus(rawStatus: String?): String {
     if (rawStatus.isNullOrBlank()) return "Unknown"
     val normalized = rawStatus.lowercase()
@@ -1111,6 +1480,51 @@ private fun formatRelationship(rawRelationship: String?): String {
     val normalized = rawRelationship.lowercase()
     return normalized.replaceFirstChar { char ->
         if (char.isLowerCase()) char.titlecase() else char.toString()
+    }
+}
+
+@Composable
+private fun EventTemplateCard(
+    template: Event,
+    onOpenTemplate: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                text = "Event Template",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                text = template.name.ifBlank { "Untitled Template" },
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = "Starts: ${formatTemplateDateTime(template.start)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = "Ends: ${formatTemplateDateTime(template.end)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = onOpenTemplate,
+            ) {
+                Text("Open template")
+            }
+        }
     }
 }
 

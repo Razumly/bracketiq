@@ -17,6 +17,7 @@ import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Organization
+import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
 import com.razumly.mvp.core.data.dataTypes.Product
 import com.razumly.mvp.core.data.dataTypes.RefundRequest
 import com.razumly.mvp.core.data.dataTypes.RefundRequestWithRelations
@@ -38,7 +39,9 @@ import com.razumly.mvp.core.data.repositories.ISportsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.ProfileDocumentsBundle
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
+import com.razumly.mvp.core.data.repositories.SelfRegistrationResult
 import com.razumly.mvp.core.data.repositories.SignStep
+import com.razumly.mvp.core.data.repositories.SignupProfileSelection
 import com.razumly.mvp.core.network.MvpUploadFile
 import com.razumly.mvp.core.presentation.RentalCreateContext
 import com.razumly.mvp.core.util.LoadingHandler
@@ -182,7 +185,10 @@ internal class CreateEvent_FakeUserRepository : IUserRepository {
         flowOf(Result.success(emptyList()))
     override suspend fun searchPlayers(search: String): Result<List<UserData>> = Result.success(emptyList())
     override suspend fun ensureUserByEmail(email: String): Result<UserData> = Result.success(user)
+    override suspend fun isCurrentUserChild(minorAgeThreshold: Int): Result<Boolean> = Result.success(false)
     override suspend fun listChildren(): Result<List<FamilyChild>> = Result.success(emptyList())
+    override suspend fun listPendingChildJoinRequests(): Result<List<FamilyJoinRequest>> =
+        Result.success(emptyList())
     override suspend fun resolveChildJoinRequest(
         registrationId: String,
         action: FamilyJoinRequestAction,
@@ -217,6 +223,7 @@ internal class CreateEvent_FakeUserRepository : IUserRepository {
         lastName: String,
         userName: String,
         dateOfBirth: String?,
+        profileSelection: SignupProfileSelection?,
     ): Result<UserData> = Result.success(user)
 
     override suspend fun updateUser(user: UserData): Result<UserData> = Result.success(user)
@@ -285,6 +292,11 @@ internal class CreateEvent_FakeEventRepository(
         flowOf(Result.success(emptyList()))
     override suspend fun getEventsInBounds(bounds: Bounds): Result<Pair<List<Event>, Boolean>> =
         Result.success(Pair(emptyList(), true))
+    override suspend fun getEventsInBounds(
+        bounds: Bounds,
+        dateFrom: Instant?,
+        dateTo: Instant?,
+    ): Result<Pair<List<Event>, Boolean>> = getEventsInBounds(bounds)
 
     override suspend fun searchEvents(
         searchQuery: String,
@@ -295,7 +307,14 @@ internal class CreateEvent_FakeEventRepository(
         flowOf(Result.success(emptyList()))
 
     override suspend fun deleteEvent(eventId: String): Result<Unit> = Result.success(Unit)
-    override suspend fun addCurrentUserToEvent(event: Event): Result<Unit> = Result.success(Unit)
+    override suspend fun addCurrentUserToEvent(
+        event: Event,
+        preferredDivisionId: String?,
+    ): Result<SelfRegistrationResult> = Result.success(SelfRegistrationResult())
+    override suspend fun registerChildForEvent(
+        eventId: String,
+        childUserId: String,
+    ): Result<ChildRegistrationResult> = Result.failure(NotImplementedError("unused"))
     override suspend fun addTeamToEvent(event: Event, team: Team): Result<Unit> = Result.success(Unit)
     override suspend fun removeTeamFromEvent(event: Event, teamWithPlayers: TeamWithPlayers): Result<Unit> =
         Result.success(Unit)
@@ -376,6 +395,9 @@ internal class CreateEvent_FakeMatchRepository : IMatchRepository {
     override fun getMatchFlow(matchId: String): Flow<Result<MatchWithRelations>> =
         flowOf(Result.failure(IllegalStateException("unused")))
     override suspend fun updateMatch(match: MatchMVP): Result<Unit> = Result.success(Unit)
+
+    override suspend fun updateMatchesBulk(matches: List<MatchMVP>): Result<List<MatchMVP>> =
+        Result.success(matches)
     override fun getMatchesOfTournamentFlow(tournamentId: String): Flow<Result<List<MatchWithRelations>>> =
         flowOf(Result.success(emptyList()))
     override suspend fun updateMatchFinished(match: MatchMVP, time: Instant): Result<Unit> = Result.success(Unit)
@@ -435,6 +457,8 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
     )
     override suspend fun listOrganizations(limit: Int): Result<List<Organization>> = Result.success(emptyList())
     override suspend fun getOrganizationsByIds(organizationIds: List<String>): Result<List<Organization>> =
+        Result.success(emptyList())
+    override suspend fun listOrganizationTemplates(organizationId: String): Result<List<OrganizationTemplateDocument>> =
         Result.success(emptyList())
     override suspend fun leaveAndRefundEvent(event: Event, reason: String): Result<Unit> = Result.success(Unit)
     override suspend fun deleteAndRefundEvent(event: Event): Result<Unit> = Result.success(Unit)

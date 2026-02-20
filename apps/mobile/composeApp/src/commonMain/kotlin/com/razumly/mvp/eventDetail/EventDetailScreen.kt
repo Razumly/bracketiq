@@ -17,13 +17,17 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Announcement
 import androidx.compose.material.icons.filled.Check
@@ -31,22 +35,29 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonColors
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuDefaults
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -59,9 +70,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
@@ -69,13 +84,16 @@ import com.materialkolor.ktx.DynamicScheme
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfig
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
+import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.FeeBreakdown
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.composables.PlatformTextField
+import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
 import com.razumly.mvp.core.presentation.composables.StripeButton
 import com.razumly.mvp.core.presentation.composables.TeamCard
 import com.razumly.mvp.core.presentation.util.buttonTransitionSpec
+import com.razumly.mvp.core.presentation.util.toTitleCase
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
 import com.razumly.mvp.eventDetail.composables.CollapsableHeader
@@ -105,11 +123,367 @@ private enum class DetailTab(val label: String) {
     LEAGUES("Leagues")
 }
 
+private data class JoinOption(
+    val label: String,
+    val requiresPayment: Boolean,
+    val onClick: () -> Unit
+)
+
 @Composable
-@OptIn(ExperimentalTime::class)
+private fun EventOverviewSections(
+    eventWithRelations: EventWithFullRelations,
+    onOpenDetails: () -> Unit,
+) {
+    val event = eventWithRelations.event
+    val capacity = event.maxParticipants.coerceAtLeast(0)
+    val filled = if (event.teamSignup) event.teamIds.size else event.playerIds.size
+    val spotsLeft = (capacity - filled).coerceAtLeast(0)
+    val progress = if (capacity > 0) filled.toFloat() / capacity.toFloat() else 0f
+    val freeAgentIds = remember(event.freeAgentIds) { event.freeAgentIds.distinct() }
+    val playersById = remember(eventWithRelations.players) {
+        eventWithRelations.players.associateBy { it.id }
+    }
+    val freeAgentUsers = remember(freeAgentIds, playersById) {
+        freeAgentIds.mapNotNull(playersById::get)
+    }
+    val unresolvedFreeAgentCount = (freeAgentIds.size - freeAgentUsers.size).coerceAtLeast(0)
+    val teamsNeedingPlayers = remember(eventWithRelations.teams, event.teamSizeLimit) {
+        eventWithRelations.teams.mapNotNull { team ->
+            val missing = (event.teamSizeLimit - team.team.playerIds.size).coerceAtLeast(0)
+            missing.takeIf { it > 0 }
+        }
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        HorizontalDivider()
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    CapacityStat(title = if (event.teamSignup) "Teams" else "Spots", value = "$filled/$capacity")
+                    CapacityStat(title = "Free Agents", value = freeAgentIds.size.toString())
+                    CapacityStat(title = "Left", value = spotsLeft.toString())
+                }
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = "${(progress * 100).toInt()}% full • $spotsLeft left",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (event.teamSignup && teamsNeedingPlayers.isNotEmpty()) {
+                    val minMissing = teamsNeedingPlayers.minOrNull() ?: 0
+                    val maxMissing = teamsNeedingPlayers.maxOrNull() ?: 0
+                    Text(
+                        text = "${teamsNeedingPlayers.size} teams need $minMissing-$maxMissing players",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        }
+        SectionHeader(
+            title = "Teams (${eventWithRelations.teams.size})",
+            action = "See all",
+            onAction = onOpenDetails
+        )
+        if (eventWithRelations.teams.isEmpty()) {
+            Text(
+                text = "No teams yet.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(
+                    eventWithRelations.teams.take(4),
+                    key = { teamWithPlayers -> teamWithPlayers.team.id }
+                ) { team ->
+                    TeamPreviewChip(
+                        team = team,
+                        teamSizeLimit = event.teamSizeLimit,
+                        onClick = onOpenDetails
+                    )
+                }
+            }
+        }
+        SectionHeader(
+            title = "Free Agents (${freeAgentIds.size})",
+            action = "See all",
+            onAction = onOpenDetails
+        )
+        if (freeAgentIds.isEmpty()) {
+            Text(
+                text = "No free agents yet.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(freeAgentUsers.take(8), key = { user -> user.id }) { user ->
+                    FreeAgentPreview(user = user, onClick = onOpenDetails)
+                }
+                if (unresolvedFreeAgentCount > 0) {
+                    item {
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                            modifier = Modifier.clickable(onClick = onOpenDetails)
+                        ) {
+                            Text(
+                                text = "+$unresolvedFreeAgentCount",
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        TextButton(onClick = onOpenDetails, modifier = Modifier.align(Alignment.End)) {
+            Text("View participants & schedule")
+        }
+    }
+}
+
+@Composable
+private fun CapacityStat(
+    title: String,
+    value: String,
+) {
+    Column(horizontalAlignment = Alignment.Start) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+    }
+}
+
+@Composable
+private fun SectionHeader(
+    title: String,
+    action: String,
+    onAction: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold
+        )
+        TextButton(onClick = onAction) {
+            Text(action)
+        }
+    }
+}
+
+@Composable
+private fun TeamPreviewChip(
+    team: TeamWithPlayers,
+    teamSizeLimit: Int,
+    onClick: () -> Unit
+) {
+    val teamName = team.team.name?.takeIf { it.isNotBlank() } ?: "Team ${team.team.seed + 1}"
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        modifier = Modifier.clickable(onClick = onClick)
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                text = teamName.toTitleCase(),
+                style = MaterialTheme.typography.labelLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = "${team.team.playerIds.size}/$teamSizeLimit",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun FreeAgentPreview(
+    user: UserData,
+    onClick: () -> Unit
+) {
+    val initials = remember(user.firstName, user.lastName, user.userName) {
+        buildString {
+            user.firstName.firstOrNull()?.let { append(it.uppercaseChar()) }
+            user.lastName.firstOrNull()?.let { append(it.uppercaseChar()) }
+        }.ifBlank {
+            user.userName.firstOrNull()?.uppercaseChar()?.toString() ?: "?"
+        }
+    }
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        modifier = Modifier.clickable(onClick = onClick)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .background(MaterialTheme.colorScheme.primary, CircleShape)
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                Text(
+                    text = initials,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onPrimary
+                )
+            }
+            Text(
+                text = user.firstName.toTitleCase(),
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun StickyActionBar(
+    primaryLabel: String,
+    primaryEnabled: Boolean,
+    onPrimaryClick: () -> Unit,
+    onMapClick: () -> Unit,
+    onMapButtonPositioned: (Offset) -> Unit,
+    onShareClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        tonalElevation = 3.dp,
+        shadowElevation = 6.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(
+                onClick = onPrimaryClick,
+                enabled = primaryEnabled,
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Text(
+                    text = primaryLabel,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            IconButton(
+                onClick = onMapClick,
+                modifier = Modifier.onGloballyPositioned {
+                    onMapButtonPositioned(it.boundsInWindow().center)
+                }
+            ) {
+                Icon(Icons.Default.Place, contentDescription = "Map")
+            }
+            IconButton(onClick = onShareClick) {
+                Icon(Icons.Default.Share, contentDescription = "Share")
+            }
+        }
+    }
+}
+
+@Composable
+private fun JoinOptionsSheet(
+    options: List<JoinOption>,
+    paymentProcessor: EventDetailComponent,
+    onDismiss: () -> Unit,
+    onSelectOption: (JoinOption) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text(
+            text = "Join options",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold
+        )
+        options.forEach { option ->
+            if (option.requiresPayment) {
+                StripeButton(
+                    onClick = { onSelectOption(option) },
+                    paymentProcessor = paymentProcessor,
+                    text = option.label,
+                    colors = ButtonDefaults.buttonColors()
+                )
+            } else {
+                Button(
+                    onClick = { onSelectOption(option) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(option.label)
+                }
+            }
+        }
+        TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) {
+            Text("Close")
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+    }
+}
+
+@Composable
+@OptIn(ExperimentalTime::class, ExperimentalMaterial3Api::class)
 fun EventDetailScreen(
     component: EventDetailComponent, mapComponent: MapComponent
 ) {
+    PreparePaymentProcessor(component)
+
     val popupHandler = LocalPopupHandler.current
     val loadingHandler = LocalLoadingHandler.current
     val selectedEvent by component.eventWithRelations.collectAsState()
@@ -121,12 +495,17 @@ fun EventDetailScreen(
     val showFeeBreakdown by component.showFeeBreakdown.collectAsState()
     val currentFeeBreakdown by component.currentFeeBreakdown.collectAsState()
     val editableMatches by component.editableMatches.collectAsState()
+    val eventFields by component.eventFields.collectAsState()
+    val divisionFields by component.divisionFields.collectAsState()
     val showTeamDialog by component.showTeamSelectionDialog.collectAsState()
     val showMatchEditDialog by component.showMatchEditDialog.collectAsState()
     val joinChoiceDialog by component.joinChoiceDialog.collectAsState()
     val childJoinSelectionDialog by component.childJoinSelectionDialog.collectAsState()
     val textSignaturePrompt by component.textSignaturePrompt.collectAsState()
     val eventImageIds by component.eventImageIds.collectAsState()
+    val organizationTemplates by component.organizationTemplates.collectAsState()
+    val organizationTemplatesLoading by component.organizationTemplatesLoading.collectAsState()
+    val organizationTemplatesError by component.organizationTemplatesError.collectAsState()
 
     var isRefundAutomatic by remember { mutableStateOf(false) }
     val isHost by component.isHost.collectAsState()
@@ -163,6 +542,9 @@ fun EventDetailScreen(
     var showRefundReasonDialog by remember { mutableStateOf(false) }
     var refundReason by remember { mutableStateOf("") }
     var showNotifyDialog by remember { mutableStateOf(false) }
+    var showJoinOptionsSheet by remember { mutableStateOf(false) }
+    var showStickyDockByScroll by remember { mutableStateOf(true) }
+    var mapRevealCenter by remember { mutableStateOf(Offset.Zero) }
 
     var imageScheme by remember {
         mutableStateOf(
@@ -193,6 +575,82 @@ fun EventDetailScreen(
     val timeDiff = selectedEvent.event.start.minus(Clock.System.now())
     isRefundAutomatic = (cutoffHours != null && timeDiff <= cutoffHours.hours)
     val teamSignup = selectedEvent.event.teamSignup
+    val canLeaveEvent = isUserInEvent && (!teamSignup || isCaptain || isFreeAgent)
+    val leaveMessage = when {
+        isFreeAgent -> "Leave as Free Agent"
+        isWaitListed -> "Leave Waitlist"
+        selectedEvent.event.price > 0 && isRefundAutomatic -> "Leave and Request Refund"
+        selectedEvent.event.price > 0 -> "Leave and Get Refund"
+        else -> "Leave Event"
+    }
+    val showStickyActions = !showDetails && !isEditing && !showMap && showStickyDockByScroll
+    val joinOptions = remember(
+        isUserInEvent,
+        isEventFull,
+        teamSignup,
+        selectedEvent.event.price
+    ) {
+        if (isUserInEvent) {
+            emptyList()
+        } else {
+            buildList {
+                if (isEventFull) {
+                    if (teamSignup) {
+                        add(
+                            JoinOption(
+                                label = if (selectedEvent.event.price > 0) {
+                                    "Join Waitlist as Team (No Payment Yet)"
+                                } else {
+                                    "Join Waitlist as Team"
+                                },
+                                requiresPayment = selectedEvent.event.price > 0,
+                                onClick = { showTeamSelectionDialog = true }
+                            )
+                        )
+                    } else {
+                        add(
+                            JoinOption(
+                                label = if (selectedEvent.event.price > 0) {
+                                    "Join Waitlist (No Payment Yet)"
+                                } else {
+                                    "Join Waitlist"
+                                },
+                                requiresPayment = selectedEvent.event.price > 0,
+                                onClick = component::joinEvent
+                            )
+                        )
+                    }
+                } else if (teamSignup) {
+                    add(
+                        JoinOption(
+                            label = "Join as Free Agent",
+                            requiresPayment = false,
+                            onClick = component::joinEvent
+                        )
+                    )
+                    add(
+                        JoinOption(
+                            label = if (selectedEvent.event.price > 0) {
+                                "Purchase Ticket for Team"
+                            } else {
+                                "Join as Team"
+                            },
+                            requiresPayment = selectedEvent.event.price > 0,
+                            onClick = { showTeamSelectionDialog = true }
+                        )
+                    )
+                } else {
+                    add(
+                        JoinOption(
+                            label = if (selectedEvent.event.price > 0) "Purchase Ticket" else "Join Event",
+                            requiresPayment = selectedEvent.event.price > 0,
+                            onClick = component::joinEvent
+                        )
+                    )
+                }
+            }
+        }
+    }
 
     LaunchedEffect(Unit) {
         component.setLoadingHandler(loadingHandler)
@@ -203,11 +661,19 @@ fun EventDetailScreen(
         }
     }
 
+    LaunchedEffect(showDetails, isEditing, showMap) {
+        if (showDetails || isEditing || showMap) {
+            showJoinOptionsSheet = false
+            showStickyDockByScroll = true
+        }
+    }
+
     CompositionLocalProvider(LocalTournamentComponent provides component) {
         Scaffold(Modifier.fillMaxSize()) { innerPadding ->
-            Column(
+            Box(
                 Modifier.background(MaterialTheme.colorScheme.background).fillMaxSize()
             ) {
+                Column(Modifier.fillMaxSize()) {
                 AnimatedVisibility(
                     !showDetails, enter = expandVertically(), exit = shrinkVertically()
                 ) {
@@ -224,6 +690,7 @@ fun EventDetailScreen(
                             onAddCurrentUser = {},
                             imageScheme = imageScheme,
                             imageIds = eventImageIds,
+                            mapRevealCenter = mapRevealCenter,
                             onHostCreateAccount = component::onHostCreateAccount,
                             onPlaceSelected = component::selectPlace,
                             onEditEvent = component::editEventField,
@@ -232,6 +699,15 @@ fun EventDetailScreen(
                             onSelectFieldCount = component::selectFieldCount,
                             onUploadSelected = component::onUploadSelected,
                             onDeleteImage = component::deleteImage,
+                            onMapRevealCenterChange = { center ->
+                                mapRevealCenter = center
+                            },
+                            onFloatingDockVisibilityChange = { shouldShow ->
+                                showStickyDockByScroll = shouldShow
+                            },
+                            organizationTemplates = organizationTemplates,
+                            organizationTemplatesLoading = organizationTemplatesLoading,
+                            organizationTemplatesError = organizationTemplatesError,
                         ) { isValid ->
                             val buttonColors = ButtonColors(
                                 containerColor = Color(imageScheme.primary),
@@ -244,11 +720,11 @@ fun EventDetailScreen(
                                 transitionSpec = { buttonTransitionSpec() },
                                 label = "buttonTransition"
                             ) { editMode ->
-                                Column(
-                                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    if (editMode) {
+                                if (editMode) {
+                                    Column(
+                                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
                                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                             Button(
                                                 onClick = {
@@ -265,124 +741,19 @@ fun EventDetailScreen(
                                                 Text("Cancel")
                                             }
                                         }
-                                    } else {
                                         Button(
-                                            onClick = {
-                                                component.viewEvent()
-                                            }, colors = buttonColors
-                                        ) { Text("View") }
-                                        // In your EventDetailScreen composable, update the button section
-                                        if (!isUserInEvent) {
-                                            if (isEventFull) {
-                                                // Show waitlist options when event is full
-                                                if (teamSignup) {
-                                                    if (selectedEvent.event.price > 0) {
-                                                        StripeButton(
-                                                            onClick = {
-                                                                showTeamSelectionDialog = true
-                                                            },
-                                                            component,
-                                                            "Join Waitlist as Team (Payment Not Required)",
-                                                            colors = buttonColors
-                                                        )
-                                                    } else {
-                                                        Button(
-                                                            onClick = {
-                                                                showTeamSelectionDialog = true
-                                                            }, colors = buttonColors
-                                                        ) {
-                                                            Text("Join Waitlist as Team")
-                                                        }
-                                                    }
-                                                } else {
-                                                    if (selectedEvent.event.price > 0) {
-                                                        StripeButton(
-                                                            {
-                                                                component.joinEvent()
-                                                            },
-                                                            component,
-                                                            "Join Waitlist (Payment Not Required)",
-                                                            colors = buttonColors
-                                                        )
-                                                    } else {
-                                                        Button(
-                                                            onClick = {
-                                                                component.joinEvent()
-                                                            }, colors = buttonColors
-                                                        ) {
-                                                            Text("Join Waitlist")
-                                                        }
-                                                    }
-                                                }
-                                            } else {
-                                                if (teamSignup) {
-                                                    Button(onClick = {
-                                                        component.joinEvent()
-                                                    }, colors = buttonColors) {
-                                                        Text("Join as free agent")
-                                                    }
-                                                    if (selectedEvent.event.price > 0) {
-                                                        StripeButton(
-                                                            onClick = {
-                                                                showTeamSelectionDialog = true
-                                                            },
-                                                            component,
-                                                            "Purchase Ticket for Team",
-                                                            colors = buttonColors
-                                                        )
-                                                    } else {
-                                                        Button(
-                                                            onClick = {
-                                                                showTeamSelectionDialog = true
-                                                            }, colors = buttonColors
-                                                        ) { Text("Join as Team") }
-                                                    }
-                                                } else {
-                                                    if (selectedEvent.event.price > 0) {
-                                                        StripeButton(
-                                                            {
-                                                                component.joinEvent()
-                                                            },
-                                                            component,
-                                                            "Purchase Ticket",
-                                                            colors = buttonColors
-                                                        )
-                                                    } else {
-                                                        Button(
-                                                            onClick = {
-                                                                component.joinEvent()
-                                                            }, colors = buttonColors
-                                                        ) { Text("Join") }
-                                                    }
-                                                }
-                                            }
-                                        } else if (!teamSignup || isCaptain || isFreeAgent) {
-                                            val leaveMessage = if (isFreeAgent) {
-                                                "Leave as Free Agent"
-                                            } else if (isWaitListed) {
-                                                "Leave Waitlist"
-                                            } else if (selectedEvent.event.price > 0) {
-                                                if (isRefundAutomatic) {
-                                                    "Leave and Request Refund (Not Automatic)"
-                                                } else {
-                                                    "Leave and Get Refund"
-                                                }
-                                            } else {
-                                                "Leave Event"
-                                            }
-                                            Button(
-                                                onClick = {
-                                                    if (selectedEvent.event.price > 0 && !isFreeAgent && !isWaitListed) {
-                                                        showRefundReasonDialog = true
-                                                    } else {
-                                                        component.leaveEvent()
-                                                    }
-                                                }, colors = buttonColors
-                                            ) {
-                                                Text(leaveMessage)
-                                            }
+                                            onClick = { component.createTemplateFromCurrentEvent() },
+                                            enabled = !editedEvent.state.equals("TEMPLATE", ignoreCase = true),
+                                            colors = buttonColors,
+                                        ) {
+                                            Text("Create Template")
                                         }
                                     }
+                                } else {
+                                    EventOverviewSections(
+                                        eventWithRelations = selectedEvent,
+                                        onOpenDetails = component::viewEvent
+                                    )
                                 }
                             }
                         }
@@ -444,6 +815,25 @@ fun EventDetailScreen(
                                             text = { Text("Publish") },
                                             onClick = {
                                                 component.publishEvent()
+                                                showOptionsDropdown = false
+                                            },
+                                            leadingIcon = {
+                                                Icon(Icons.Default.Check, contentDescription = null)
+                                            },
+                                        )
+                                    }
+
+                                    if (
+                                        selectedEvent.event.state != "TEMPLATE" &&
+                                        (
+                                            selectedEvent.event.organizationId.isNullOrBlank() ||
+                                                isHost
+                                            )
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = { Text("Create Template") },
+                                            onClick = {
+                                                component.createTemplateFromCurrentEvent()
                                                 showOptionsDropdown = false
                                             },
                                             leadingIcon = {
@@ -559,6 +949,7 @@ fun EventDetailScreen(
                                 DetailTab.SCHEDULE -> {
                                     ScheduleView(
                                         matches = selectedEvent.matches,
+                                        fields = eventFields,
                                         showFab = { showFab = it },
                                         onMatchClick = { match ->
                                             if (!isEditingMatches) {
@@ -597,6 +988,59 @@ fun EventDetailScreen(
                             }
                         }
                     }
+                }
+            }
+            AnimatedVisibility(
+                visible = showStickyActions,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(LocalNavBarPadding.current)
+                    .padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+                enter = slideInVertically(initialOffsetY = { fullHeight -> fullHeight / 2 }) + fadeIn(),
+                exit = slideOutVertically(targetOffsetY = { fullHeight -> fullHeight / 2 }) + fadeOut(),
+            ) {
+                StickyActionBar(
+                    primaryLabel = when {
+                        canLeaveEvent -> leaveMessage
+                        !isUserInEvent -> "Join options"
+                        else -> "Joined with Team"
+                    },
+                    primaryEnabled = canLeaveEvent || !isUserInEvent,
+                    onPrimaryClick = {
+                        when {
+                            canLeaveEvent -> {
+                                if (selectedEvent.event.price > 0 && !isFreeAgent && !isWaitListed) {
+                                    showRefundReasonDialog = true
+                                } else {
+                                    component.leaveEvent()
+                                }
+                            }
+
+                            !isUserInEvent -> showJoinOptionsSheet = true
+                        }
+                    },
+                    onMapClick = mapComponent::toggleMap,
+                    onMapButtonPositioned = { center ->
+                        mapRevealCenter = center
+                    },
+                    onShareClick = component::shareEvent,
+                )
+            }
+            }
+
+            if (showJoinOptionsSheet && joinOptions.isNotEmpty()) {
+                ModalBottomSheet(
+                    onDismissRequest = { showJoinOptionsSheet = false }
+                ) {
+                    JoinOptionsSheet(
+                        options = joinOptions,
+                        paymentProcessor = component,
+                        onDismiss = { showJoinOptionsSheet = false },
+                        onSelectOption = { action ->
+                            showJoinOptionsSheet = false
+                            action.onClick()
+                        }
+                    )
                 }
             }
 
@@ -733,8 +1177,6 @@ fun EventDetailScreen(
         }
     }
 }
-
-
 @Composable
 fun TeamSelectionDialog(
     sizeLimit: Int,

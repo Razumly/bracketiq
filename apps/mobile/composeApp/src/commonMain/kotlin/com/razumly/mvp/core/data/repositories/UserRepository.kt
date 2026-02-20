@@ -5,6 +5,7 @@ import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.AuthAccount
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResponse
+import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.AuthTokenStore
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.dto.AuthResponseDto
@@ -13,13 +14,18 @@ import com.razumly.mvp.core.network.dto.GoogleMobileLoginRequestDto
 import com.razumly.mvp.core.network.dto.LoginRequestDto
 import com.razumly.mvp.core.network.dto.OkResponseDto
 import com.razumly.mvp.core.network.dto.PasswordRequestDto
+import com.razumly.mvp.core.network.dto.RegisterConflictResponseDto
+import com.razumly.mvp.core.network.dto.RegisterProfileSelectionDto
+import com.razumly.mvp.core.network.dto.RegisterProfileSnapshotDto
 import com.razumly.mvp.core.network.dto.RegisterRequestDto
 import com.razumly.mvp.core.network.dto.UpdateUserRequestDto
 import com.razumly.mvp.core.network.dto.UserResponseDto
+import com.razumly.mvp.core.network.dto.UserProfileDto
 import com.razumly.mvp.core.network.dto.UserUpdateDto
 import com.razumly.mvp.core.network.dto.UsersResponseDto
 import com.razumly.mvp.core.network.dto.toAuthAccountOrNull
 import com.razumly.mvp.core.network.dto.toUserDataOrNull
+import com.razumly.mvp.core.util.jsonMVP
 import io.github.aakira.napier.Napier
 import io.ktor.http.encodeURLQueryComponent
 import kotlinx.coroutines.CoroutineScope
@@ -32,8 +38,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
+import kotlin.time.Clock
 
 private const val USER_REPOSITORY_LOG_TAG = "UserRepository"
 
@@ -83,6 +94,57 @@ data class FamilyJoinRequestResolution(
     val warnings: List<String> = emptyList(),
 )
 
+enum class SignupProfileField(
+    val apiName: String,
+    val label: String,
+) {
+    FIRST_NAME(apiName = "firstName", label = "First Name"),
+    LAST_NAME(apiName = "lastName", label = "Last Name"),
+    USER_NAME(apiName = "userName", label = "Username"),
+    DATE_OF_BIRTH(apiName = "dateOfBirth", label = "Birthday"),
+    ;
+
+    companion object {
+        fun fromApiName(value: String): SignupProfileField? = entries.firstOrNull { it.apiName == value }
+    }
+}
+
+data class SignupProfileSnapshot(
+    val firstName: String? = null,
+    val lastName: String? = null,
+    val userName: String? = null,
+    val dateOfBirth: String? = null,
+) {
+    fun valueFor(field: SignupProfileField): String? = when (field) {
+        SignupProfileField.FIRST_NAME -> firstName
+        SignupProfileField.LAST_NAME -> lastName
+        SignupProfileField.USER_NAME -> userName
+        SignupProfileField.DATE_OF_BIRTH -> dateOfBirth
+    }
+}
+
+data class SignupProfileSelection(
+    val firstName: String? = null,
+    val lastName: String? = null,
+    val userName: String? = null,
+    val dateOfBirth: String? = null,
+)
+
+data class SignupProfileConflict(
+    val fields: Set<SignupProfileField>,
+    val existing: SignupProfileSnapshot,
+    val incoming: SignupProfileSnapshot,
+)
+
+class SignupProfileConflictException(
+    val conflict: SignupProfileConflict,
+) : Exception(
+    buildString {
+        append("Signup profile conflict. Selection required for: ")
+        append(conflict.fields.joinToString { it.apiName })
+    },
+)
+
 interface IUserRepository : IMVPRepository {
     val currentUser: StateFlow<Result<UserData>>
     val currentAccount: StateFlow<Result<AuthAccount>>
@@ -102,9 +164,9 @@ interface IUserRepository : IMVPRepository {
      * The returned [UserData] must not contain sensitive information (email/password/etc).
      */
     suspend fun ensureUserByEmail(email: String): Result<UserData>
+    suspend fun isCurrentUserChild(minorAgeThreshold: Int = 18): Result<Boolean>
     suspend fun listChildren(): Result<List<FamilyChild>>
-    suspend fun listPendingChildJoinRequests(): Result<List<FamilyJoinRequest>> =
-        Result.failure(NotImplementedError("Pending child join requests are not implemented for this repository."))
+    suspend fun listPendingChildJoinRequests(): Result<List<FamilyJoinRequest>>
     suspend fun resolveChildJoinRequest(
         registrationId: String,
         action: FamilyJoinRequestAction,
@@ -139,6 +201,7 @@ interface IUserRepository : IMVPRepository {
         lastName: String,
         userName: String,
         dateOfBirth: String? = null,
+        profileSelection: SignupProfileSelection? = null,
     ): Result<UserData>
 
     suspend fun updateUser(user: UserData): Result<UserData>
@@ -245,20 +308,29 @@ class UserRepository(
         lastName: String,
         userName: String,
         dateOfBirth: String?,
+        profileSelection: SignupProfileSelection?,
     ): Result<UserData> = runCatching {
         Napier.d(tag = USER_REPOSITORY_LOG_TAG) { "Signup started for ${maskEmail(email)}" }
-        val res = api.post<RegisterRequestDto, AuthResponseDto>(
-            path = "api/auth/register",
-            body = RegisterRequestDto(
-                email = email,
-                password = password,
-                name = userName,
-                firstName = firstName,
-                lastName = lastName,
-                userName = userName,
-                dateOfBirth = dateOfBirth,
-            ),
-        )
+        val res = try {
+            api.post<RegisterRequestDto, AuthResponseDto>(
+                path = "api/auth/register",
+                body = RegisterRequestDto(
+                    email = email,
+                    password = password,
+                    name = userName,
+                    firstName = firstName,
+                    lastName = lastName,
+                    userName = userName,
+                    dateOfBirth = dateOfBirth,
+                    enforceProfileConflictSelection = true,
+                    profileSelection = profileSelection?.toDto(),
+                ),
+            )
+        } catch (apiException: ApiException) {
+            val conflict = apiException.toSignupConflictOrNull()
+            if (conflict != null) throw SignupProfileConflictException(conflict)
+            throw apiException
+        }
 
         val token = res.token?.takeIf(String::isNotBlank)
             ?: error("Register response missing token")
@@ -359,10 +431,97 @@ class UserRepository(
         }.getOrNull()
     }
 
+    private suspend fun fetchUsersByIds(userIds: List<String>): List<UserData> {
+        if (userIds.isEmpty()) return emptyList()
+
+        val orderedIds = userIds.distinct().filter(String::isNotBlank)
+        if (orderedIds.isEmpty()) return emptyList()
+
+        val byId = LinkedHashMap<String, UserData>()
+        orderedIds.chunked(100).forEach { chunk ->
+            val encodedIds = chunk.joinToString(",") { it.encodeURLQueryComponent() }
+            val response = api.get<UsersResponseDto>("api/users?ids=$encodedIds")
+            response.users.mapNotNull { it.toUserDataOrNull() }.forEach { user ->
+                byId[user.id] = user
+            }
+        }
+
+        return orderedIds.mapNotNull { byId[it] }
+    }
+
     private fun maskEmail(email: String): String {
         val atIndex = email.indexOf('@')
         if (atIndex <= 1) return "***"
         return "${email.first()}***${email.substring(atIndex)}"
+    }
+
+    private fun ApiException.toSignupConflictOrNull(): SignupProfileConflict? {
+        if (statusCode != 409 || responseBody.isNullOrBlank()) return null
+        val body = responseBody ?: return null
+        val payload = runCatching {
+            jsonMVP.decodeFromString<RegisterConflictResponseDto>(body)
+        }.getOrNull() ?: return null
+
+        val conflictDto = payload.conflict ?: return null
+        val existing = conflictDto.existing.toSignupProfileSnapshot()
+        val incoming = conflictDto.incoming.toSignupProfileSnapshot()
+
+        val parsedFields = conflictDto.fields.mapNotNull(SignupProfileField::fromApiName).toSet()
+        val fields = if (parsedFields.isNotEmpty()) parsedFields else inferDifferingFields(existing, incoming)
+        if (fields.isEmpty()) return null
+
+        return SignupProfileConflict(
+            fields = fields,
+            existing = existing,
+            incoming = incoming,
+        )
+    }
+
+    private fun inferDifferingFields(
+        existing: SignupProfileSnapshot,
+        incoming: SignupProfileSnapshot,
+    ): Set<SignupProfileField> {
+        return SignupProfileField.entries
+            .filter { field -> existing.valueFor(field) != incoming.valueFor(field) }
+            .toSet()
+    }
+
+    private fun RegisterProfileSnapshotDto?.toSignupProfileSnapshot(): SignupProfileSnapshot {
+        return SignupProfileSnapshot(
+            firstName = this?.firstName?.trim()?.takeIf(String::isNotBlank),
+            lastName = this?.lastName?.trim()?.takeIf(String::isNotBlank),
+            userName = this?.userName?.trim()?.takeIf(String::isNotBlank),
+            dateOfBirth = normalizeDateOnly(this?.dateOfBirth),
+        )
+    }
+
+    private fun SignupProfileSelection.toDto(): RegisterProfileSelectionDto {
+        return RegisterProfileSelectionDto(
+            firstName = firstName?.trim()?.takeIf(String::isNotBlank),
+            lastName = lastName?.trim()?.takeIf(String::isNotBlank),
+            userName = userName?.trim()?.takeIf(String::isNotBlank),
+            dateOfBirth = normalizeDateOnly(dateOfBirth),
+        )
+    }
+
+    private fun normalizeDateOnly(value: String?): String? {
+        val trimmed = value?.trim()?.takeIf(String::isNotBlank) ?: return null
+        return trimmed.substringBefore('T')
+    }
+
+    private fun isMinorDateOfBirth(dateOfBirth: String, ageThreshold: Int): Boolean {
+        val normalizedDatePart = dateOfBirth.substringBefore('T').trim()
+        val birthDate = runCatching { LocalDate.parse(normalizedDatePart) }.getOrNull() ?: return false
+        val today = Clock.System.now().toLocalDateTime(TimeZone.UTC).date
+
+        var age = today.year - birthDate.year
+        if (today.monthNumber < birthDate.monthNumber ||
+            (today.monthNumber == birthDate.monthNumber && today.dayOfMonth < birthDate.dayOfMonth)
+        ) {
+            age -= 1
+        }
+
+        return age in 0 until ageThreshold
     }
 
     override suspend fun searchPlayers(search: String): Result<List<UserData>> = runCatching {
@@ -385,6 +544,18 @@ class UserRepository(
         val user = res.user?.toUserDataOrNull() ?: error("Ensure user response missing user")
         databaseService.getUserDataDao.upsertUserData(user)
         user
+    }
+
+    override suspend fun isCurrentUserChild(minorAgeThreshold: Int): Result<Boolean> = runCatching {
+        val currentUserId = currentUser.value.getOrNull()?.id?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?: return@runCatching false
+
+        val response = api.get<UserResponseDto>("api/users/${currentUserId.encodeURLQueryComponent()}")
+        val dateOfBirth = response.user?.dateOfBirth?.trim()?.takeIf(String::isNotBlank)
+            ?: return@runCatching false
+
+        isMinorDateOfBirth(dateOfBirth = dateOfBirth, ageThreshold = minorAgeThreshold)
     }
 
     override suspend fun listChildren(): Result<List<FamilyChild>> = runCatching {
@@ -507,7 +678,7 @@ class UserRepository(
 
         return multiResponse(
             getRemoteData = {
-                ids.mapNotNull { fetchUserProfile(it) }
+                fetchUsersByIds(ids)
             },
             getLocalData = { databaseService.getUserDataDao.getUserDatasById(ids) },
             saveData = { usersData -> databaseService.getUserDataDao.upsertUsersData(usersData) },
@@ -625,29 +796,100 @@ class UserRepository(
     }
 
     override suspend fun sendFriendRequest(user: UserData): Result<Unit> {
-        return Result.failure(NotImplementedError("Friend requests are not implemented in the Next.js API yet."))
+        return runCatching {
+            val targetUserId = user.id.trim()
+            if (targetUserId.isBlank()) error("Target user id is required.")
+
+            val response = api.post<SocialTargetRequestDto, UserResponseDto>(
+                path = "api/users/social/friend-requests",
+                body = SocialTargetRequestDto(targetUserId = targetUserId),
+            )
+            refreshCurrentUserFromSocialResponse(response.user)
+        }
     }
 
     override suspend fun acceptFriendRequest(user: UserData): Result<Unit> {
-        return Result.failure(NotImplementedError("Friend requests are not implemented in the Next.js API yet."))
+        return runCatching {
+            val requesterId = user.id.trim()
+            if (requesterId.isBlank()) error("Requester id is required.")
+
+            val response = api.post<SocialEmptyRequestDto, UserResponseDto>(
+                path = "api/users/social/friend-requests/${requesterId.encodeURLQueryComponent()}/accept",
+                body = SocialEmptyRequestDto(),
+            )
+            refreshCurrentUserFromSocialResponse(response.user)
+        }
     }
 
     override suspend fun declineFriendRequest(userId: String): Result<Unit> {
-        return Result.failure(NotImplementedError("Friend requests are not implemented in the Next.js API yet."))
+        return runCatching {
+            val requesterId = userId.trim()
+            if (requesterId.isBlank()) error("Requester id is required.")
+
+            val response = api.delete<SocialEmptyRequestDto, UserResponseDto>(
+                path = "api/users/social/friend-requests/${requesterId.encodeURLQueryComponent()}",
+                body = SocialEmptyRequestDto(),
+            )
+            refreshCurrentUserFromSocialResponse(response.user)
+        }
     }
 
     override suspend fun followUser(userId: String): Result<Unit> {
-        return Result.failure(NotImplementedError("Following is not implemented in the Next.js API yet."))
+        return runCatching {
+            val targetUserId = userId.trim()
+            if (targetUserId.isBlank()) error("Target user id is required.")
+
+            val response = api.post<SocialTargetRequestDto, UserResponseDto>(
+                path = "api/users/social/following",
+                body = SocialTargetRequestDto(targetUserId = targetUserId),
+            )
+            refreshCurrentUserFromSocialResponse(response.user)
+        }
     }
 
     override suspend fun unfollowUser(userId: String): Result<Unit> {
-        return Result.failure(NotImplementedError("Following is not implemented in the Next.js API yet."))
+        return runCatching {
+            val targetUserId = userId.trim()
+            if (targetUserId.isBlank()) error("Target user id is required.")
+
+            val response = api.delete<SocialEmptyRequestDto, UserResponseDto>(
+                path = "api/users/social/following/${targetUserId.encodeURLQueryComponent()}",
+                body = SocialEmptyRequestDto(),
+            )
+            refreshCurrentUserFromSocialResponse(response.user)
+        }
     }
 
     override suspend fun removeFriend(userId: String): Result<Unit> {
-        return Result.failure(NotImplementedError("Friend management is not implemented in the Next.js API yet."))
+        return runCatching {
+            val friendUserId = userId.trim()
+            if (friendUserId.isBlank()) error("Friend user id is required.")
+
+            val response = api.delete<SocialEmptyRequestDto, UserResponseDto>(
+                path = "api/users/social/friends/${friendUserId.encodeURLQueryComponent()}",
+                body = SocialEmptyRequestDto(),
+            )
+            refreshCurrentUserFromSocialResponse(response.user)
+        }
+    }
+
+    private suspend fun refreshCurrentUserFromSocialResponse(responseUser: UserProfileDto?) {
+        val updated = responseUser?.toUserDataOrNull()
+            ?: currentUser.value.getOrNull()?.id?.let { fetchUserProfile(it) }
+            ?: error("Failed to refresh current user after social update.")
+        cacheCurrentUserProfile(updated)
     }
 }
+
+@Serializable
+private data class SocialEmptyRequestDto(
+    val placeholder: String = "",
+)
+
+@Serializable
+private data class SocialTargetRequestDto(
+    val targetUserId: String,
+)
 
 @Serializable
 private data class FamilyChildrenResponseDto(

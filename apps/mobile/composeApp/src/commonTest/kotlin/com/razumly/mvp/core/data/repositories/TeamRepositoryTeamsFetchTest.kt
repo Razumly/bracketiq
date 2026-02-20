@@ -138,7 +138,9 @@ private class FakeUserRepository : IUserRepository {
     override fun getUsersFlow(userIds: List<String>): Flow<Result<List<UserData>>> = error("unused")
     override suspend fun searchPlayers(search: String): Result<List<UserData>> = error("unused")
     override suspend fun ensureUserByEmail(email: String): Result<UserData> = error("unused")
+    override suspend fun isCurrentUserChild(minorAgeThreshold: Int): Result<Boolean> = error("unused")
     override suspend fun listChildren(): Result<List<FamilyChild>> = error("unused")
+    override suspend fun listPendingChildJoinRequests(): Result<List<FamilyJoinRequest>> = error("unused")
     override suspend fun resolveChildJoinRequest(
         registrationId: String,
         action: FamilyJoinRequestAction,
@@ -173,6 +175,7 @@ private class FakeUserRepository : IUserRepository {
         lastName: String,
         userName: String,
         dateOfBirth: String?,
+        profileSelection: SignupProfileSelection?,
     ): Result<UserData> = error("unused")
 
     override suspend fun updateUser(user: UserData): Result<UserData> = error("unused")

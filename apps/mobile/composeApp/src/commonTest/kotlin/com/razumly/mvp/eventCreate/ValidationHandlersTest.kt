@@ -44,7 +44,7 @@ class ValidationHandlersTest : MainDispatcherTest() {
         advance()
 
         var teamSizeError: Boolean? = null
-        harness.component.validateAndUpdateTeamSize("1") { teamSizeError = it }
+        harness.component.validateAndUpdateTeamSize("0") { teamSizeError = it }
         advance()
 
         assertTrue(teamSizeError == true)

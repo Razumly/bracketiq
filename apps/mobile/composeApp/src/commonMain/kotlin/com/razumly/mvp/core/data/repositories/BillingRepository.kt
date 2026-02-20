@@ -4,6 +4,7 @@ import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.Bill
 import com.razumly.mvp.core.data.dataTypes.BillPayment
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.Product
 import com.razumly.mvp.core.data.dataTypes.RefundRequest
@@ -112,6 +113,7 @@ interface IBillingRepository : IMVPRepository {
     ): Result<Subscription>
     suspend fun listOrganizations(limit: Int = 100): Result<List<Organization>>
     suspend fun getOrganizationsByIds(organizationIds: List<String>): Result<List<Organization>>
+    suspend fun listOrganizationTemplates(organizationId: String): Result<List<OrganizationTemplateDocument>>
     suspend fun leaveAndRefundEvent(event: Event, reason: String): Result<Unit>
     suspend fun deleteAndRefundEvent(event: Event): Result<Unit>
     suspend fun listProfileDocuments(): Result<ProfileDocumentsBundle>
@@ -432,6 +434,22 @@ class BillingRepository(
         response.organizations.mapNotNull { it.toOrganizationOrNull() }
     }
 
+    override suspend fun listOrganizationTemplates(
+        organizationId: String,
+    ): Result<List<OrganizationTemplateDocument>> = runCatching {
+        val normalizedId = organizationId.trim()
+        if (normalizedId.isEmpty()) return@runCatching emptyList()
+
+        val encodedId = normalizedId.encodeURLQueryComponent()
+        val response = api.get<OrganizationTemplatesResponseDto>(
+            path = "api/organizations/$encodedId/templates",
+        )
+        response.error?.takeIf(String::isNotBlank)?.let { errorMessage ->
+            throw Exception(errorMessage)
+        }
+        response.templates.mapNotNull { row -> row.toOrganizationTemplateOrNull() }
+    }
+
     override suspend fun leaveAndRefundEvent(event: Event, reason: String): Result<Unit> =
         runCatching {
             val response = api.post<BillingRefundRequestDto, RefundResponse>(
@@ -670,6 +688,12 @@ private data class ProductsResponseDto(
 @Serializable
 private data class OrganizationsResponseDto(
     val organizations: List<OrganizationApiDto> = emptyList(),
+)
+
+@Serializable
+private data class OrganizationTemplatesResponseDto(
+    val templates: List<OrganizationTemplateApiDto> = emptyList(),
+    val error: String? = null,
 )
 
 @Serializable
@@ -913,6 +937,39 @@ private data class OrganizationApiDto(
             fieldIds = fieldIds ?: emptyList(),
             productIds = productIds ?: emptyList(),
             teamIds = teamIds ?: emptyList(),
+        )
+    }
+}
+
+@Serializable
+private data class OrganizationTemplateApiDto(
+    val id: String? = null,
+    @SerialName("\$id") val legacyId: String? = null,
+    val title: String? = null,
+    val type: String? = null,
+    val requiredSignerType: String? = null,
+) {
+    fun toOrganizationTemplateOrNull(): OrganizationTemplateDocument? {
+        val resolvedId = (legacyId ?: id)?.trim()?.takeIf(String::isNotBlank) ?: return null
+        val resolvedTitle = title?.trim()?.takeIf(String::isNotBlank) ?: "Untitled Template"
+        val resolvedType = when (type?.trim()?.uppercase()) {
+            "TEXT" -> "TEXT"
+            else -> "PDF"
+        }
+        val resolvedSignerType = when (
+            requiredSignerType?.trim()?.uppercase()?.replace('-', '_')?.replace(' ', '_')
+                ?.replace('/', '_')
+        ) {
+            "PARENT_GUARDIAN" -> "PARENT_GUARDIAN"
+            "CHILD" -> "CHILD"
+            "PARENT_GUARDIAN_CHILD", "PARENT_GUARDIAN_AND_CHILD" -> "PARENT_GUARDIAN_CHILD"
+            else -> "PARTICIPANT"
+        }
+        return OrganizationTemplateDocument(
+            id = resolvedId,
+            title = resolvedTitle,
+            type = resolvedType,
+            requiredSignerType = resolvedSignerType,
         )
     }
 }

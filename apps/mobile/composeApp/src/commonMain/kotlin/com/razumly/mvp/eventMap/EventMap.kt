@@ -12,6 +12,7 @@ expect fun EventMap(
     component: MapComponent,
     onEventSelected: (event: Event) -> Unit,
     onPlaceSelected: (place: MVPPlace) -> Unit,
+    onPlaceSelectionPoint: (x: Float, y: Float) -> Unit = { _, _ -> },
     canClickPOI: Boolean,
     modifier: Modifier = Modifier,
     focusedLocation: LatLng,

@@ -243,6 +243,9 @@ data class EventSearchRequestDto(
 data class EventParticipantsRequestDto(
     val userId: String? = null,
     val teamId: String? = null,
+    val divisionId: String? = null,
+    val divisionTypeId: String? = null,
+    val divisionTypeKey: String? = null,
 )
 
 @Serializable
@@ -255,6 +258,29 @@ data class EventParticipantsResponseDto(
 @Serializable
 data class EventChildRegistrationRequestDto(
     val childId: String,
+)
+
+@Serializable
+data class EventRegistrationStatusDto(
+    val id: String? = null,
+    val status: String? = null,
+    val consentStatus: String? = null,
+)
+
+@Serializable
+data class EventConsentStatusDto(
+    val documentId: String? = null,
+    val status: String? = null,
+    val requiresChildEmail: Boolean? = null,
+)
+
+@Serializable
+data class EventChildRegistrationResponseDto(
+    val registration: EventRegistrationStatusDto? = null,
+    val consent: EventConsentStatusDto? = null,
+    val requiresParentApproval: Boolean? = null,
+    val warnings: List<String> = emptyList(),
+    val error: String? = null,
 )
 
 @Serializable

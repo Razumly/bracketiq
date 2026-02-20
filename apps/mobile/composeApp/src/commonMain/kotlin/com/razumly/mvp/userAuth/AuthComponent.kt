@@ -3,6 +3,9 @@ package com.razumly.mvp.userAuth
 import com.arkivanov.decompose.ComponentContext
 import com.razumly.mvp.core.data.dataTypes.LoginState
 import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.data.repositories.SignupProfileConflict
+import com.razumly.mvp.core.data.repositories.SignupProfileConflictException
+import com.razumly.mvp.core.data.repositories.SignupProfileSelection
 import com.razumly.mvp.core.presentation.INavigationHandler
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -22,6 +25,7 @@ interface AuthComponent {
     val loginState: StateFlow<LoginState>
     val isSignup: StateFlow<Boolean>
     val passwordError: StateFlow<String>
+    val signupConflict: StateFlow<SignupProfileConflict?>
 
     fun onLogin(email: String, password: String)
     fun onLogout()
@@ -35,6 +39,8 @@ interface AuthComponent {
         userName: String,
         dateOfBirth: String?,
     )
+    fun resolveSignupConflict(selection: SignupProfileSelection)
+    fun dismissSignupConflict()
 }
 
 class DefaultAuthComponent(
@@ -59,6 +65,11 @@ class DefaultAuthComponent(
 
     private val _passwordError = MutableStateFlow("")
     override val passwordError = _passwordError.asStateFlow()
+
+    private val _signupConflict = MutableStateFlow<SignupProfileConflict?>(null)
+    override val signupConflict: StateFlow<SignupProfileConflict?> = _signupConflict.asStateFlow()
+
+    private var pendingSignupRequest: PendingSignupRequest? = null
 
     init {
         // Don't automatically navigate - RootComponent handles this now
@@ -111,6 +122,7 @@ class DefaultAuthComponent(
 
     override fun toggleIsSignup() {
         _isSignup.value = !_isSignup.value
+        clearSignupConflict()
     }
 
     override fun onSignup(
@@ -118,29 +130,70 @@ class DefaultAuthComponent(
         firstName: String, lastName: String, userName: String, dateOfBirth: String?
     ) {
         if (password != confirmPassword) {
+            _passwordError.value = "Passwords do not match"
             return
         }
+        _passwordError.value = ""
 
+        val request = PendingSignupRequest(
+            email = email,
+            password = password,
+            firstName = firstName,
+            lastName = lastName,
+            userName = userName,
+            dateOfBirth = dateOfBirth,
+        )
+        pendingSignupRequest = request
+        _signupConflict.value = null
+        submitSignup(request = request, profileSelection = null)
+    }
+
+    override fun resolveSignupConflict(selection: SignupProfileSelection) {
+        val request = pendingSignupRequest ?: return
+        submitSignup(request = request, profileSelection = selection)
+    }
+
+    override fun dismissSignupConflict() {
+        clearSignupConflict()
+    }
+
+    private fun submitSignup(
+        request: PendingSignupRequest,
+        profileSelection: SignupProfileSelection?,
+    ) {
         scope.launch {
-            val maskedEmail = maskEmail(email)
+            val maskedEmail = maskEmail(request.email)
             Napier.d("Auth: signup started for $maskedEmail")
             _loginState.value = LoginState.Loading
             userRepository.createNewUser(
-                email = email,
-                password = password,
-                firstName = firstName,
-                lastName = lastName,
-                userName = userName,
-                dateOfBirth = dateOfBirth,
+                email = request.email,
+                password = request.password,
+                firstName = request.firstName,
+                lastName = request.lastName,
+                userName = request.userName,
+                dateOfBirth = request.dateOfBirth,
+                profileSelection = profileSelection,
             )
                 .onSuccess {
                     Napier.i("Auth: signup succeeded for $maskedEmail")
+                    clearSignupConflict()
                     _loginState.value = LoginState.Success
                 }.onFailure { throwable ->
+                    if (throwable is SignupProfileConflictException) {
+                        Napier.i("Auth: signup profile conflict for $maskedEmail")
+                        _signupConflict.value = throwable.conflict
+                        _loginState.value = LoginState.Initial
+                        return@onFailure
+                    }
                     logAuthFailure("signup", throwable)
                     _loginState.value = LoginState.Error("Failed to signup")
                 }
         }
+    }
+
+    private fun clearSignupConflict() {
+        _signupConflict.value = null
+        pendingSignupRequest = null
     }
 
     private fun logAuthFailure(action: String, throwable: Throwable) {
@@ -153,3 +206,12 @@ class DefaultAuthComponent(
         return "${email.first()}***${email.substring(atIndex)}"
     }
 }
+
+private data class PendingSignupRequest(
+    val email: String,
+    val password: String,
+    val firstName: String,
+    val lastName: String,
+    val userName: String,
+    val dateOfBirth: String?,
+)

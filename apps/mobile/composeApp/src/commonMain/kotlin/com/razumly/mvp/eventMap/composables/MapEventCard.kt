@@ -66,6 +66,7 @@ fun MapEventCard(
 @Composable
 fun MapPOICard(
     name: String,
+    callToAction: String? = null,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -86,10 +87,23 @@ fun MapPOICard(
                 text = name,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                modifier = Modifier.padding(
+                    start = 12.dp,
+                    top = 8.dp,
+                    end = 12.dp,
+                    bottom = if (callToAction.isNullOrBlank()) 8.dp else 2.dp
+                ),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+            if (!callToAction.isNullOrBlank()) {
+                Text(
+                    text = callToAction,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 8.dp)
+                )
+            }
         }
     }
 }

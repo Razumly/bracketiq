@@ -102,3 +102,46 @@ data class MatchUpdateDto(
     val time: String? = null,
 )
 
+@Serializable
+data class BulkMatchUpdateEntryDto(
+    val id: String,
+    val matchId: Int? = null,
+    val team1Points: List<Int>? = null,
+    val team2Points: List<Int>? = null,
+    val setResults: List<Int>? = null,
+    val team1Id: String? = null,
+    val team2Id: String? = null,
+    val refereeId: String? = null,
+    val teamRefereeId: String? = null,
+    val fieldId: String? = null,
+    val previousLeftId: String? = null,
+    val previousRightId: String? = null,
+    val winnerNextMatchId: String? = null,
+    val loserNextMatchId: String? = null,
+    val side: String? = null,
+    val refereeCheckedIn: Boolean? = null,
+)
+
+@Serializable
+data class BulkMatchUpdateRequestDto(
+    val matches: List<BulkMatchUpdateEntryDto>,
+)
+
+fun MatchMVP.toBulkMatchUpdateEntryDto(): BulkMatchUpdateEntryDto = BulkMatchUpdateEntryDto(
+    id = id,
+    matchId = matchId,
+    team1Points = team1Points,
+    team2Points = team2Points,
+    setResults = setResults,
+    team1Id = team1Id,
+    team2Id = team2Id,
+    refereeId = refereeId,
+    teamRefereeId = teamRefereeId,
+    fieldId = fieldId,
+    previousLeftId = previousLeftId,
+    previousRightId = previousRightId,
+    winnerNextMatchId = winnerNextMatchId,
+    loserNextMatchId = loserNextMatchId,
+    side = side,
+    refereeCheckedIn = refereeCheckedIn,
+)

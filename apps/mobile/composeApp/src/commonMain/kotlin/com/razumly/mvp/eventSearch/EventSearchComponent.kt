@@ -298,8 +298,13 @@ class DefaultEventSearchComponent(
             val currentLocation = _currentLocation.value ?: return@launch
             val currentBounds =
                 getBounds(radius, currentLocation.latitude, currentLocation.longitude)
+            val activeFilter = _filter.value
 
-            eventRepository.getEventsInBounds(currentBounds)
+            eventRepository.getEventsInBounds(
+                bounds = currentBounds,
+                dateFrom = activeFilter.date.first,
+                dateTo = activeFilter.date.second,
+            )
                 .onSuccess { (_, hasMore) ->
                     _hasMoreEvents.value = hasMore
                 }
@@ -311,7 +316,16 @@ class DefaultEventSearchComponent(
     }
 
     override fun updateFilter(update: EventFilter.() -> EventFilter) {
-        _filter.value = _filter.value.update()
+        val previous = _filter.value
+        val updated = previous.update()
+        _filter.value = updated
+
+        val dateRangeChanged = previous.date != updated.date
+        if (dateRangeChanged && _locationStateFlow.value != null) {
+            _hasMoreEvents.value = true
+            eventRepository.resetCursor()
+            loadMoreEvents()
+        }
     }
 
     override fun refreshOrganizations(force: Boolean) {

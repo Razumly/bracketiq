@@ -14,6 +14,7 @@ import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Organization
+import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
@@ -26,6 +27,7 @@ import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
 import com.razumly.mvp.core.data.repositories.IImagesRepository
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
+import com.razumly.mvp.core.data.repositories.ISportsRepository
 import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.SignerContext
 import com.razumly.mvp.core.data.repositories.ITeamRepository
@@ -42,6 +44,7 @@ import com.razumly.mvp.core.presentation.util.convertPhotoResultToUploadFile
 import com.razumly.mvp.core.presentation.util.createEventUrl
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
+import com.razumly.mvp.core.util.newId
 import com.razumly.mvp.eventDetail.data.IMatchRepository
 import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
 import io.github.aakira.napier.Napier
@@ -55,8 +58,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -72,6 +77,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val divisionMatches: StateFlow<Map<String, MatchWithRelations>>
     val divisionTeams: StateFlow<Map<String, TeamWithPlayers>>
     val selectedDivision: StateFlow<String?>
+    val eventFields: StateFlow<List<FieldWithMatches>>
     val divisionFields: StateFlow<List<FieldWithMatches>>
     val rounds: StateFlow<List<List<MatchWithRelations?>>>
     val losersBracket: StateFlow<Boolean>
@@ -101,6 +107,9 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val childJoinSelectionDialog: StateFlow<ChildJoinSelectionDialogState?>
     val textSignaturePrompt: StateFlow<TextSignaturePromptState?>
     val eventImageIds: StateFlow<List<String>>
+    val organizationTemplates: StateFlow<List<OrganizationTemplateDocument>>
+    val organizationTemplatesLoading: StateFlow<Boolean>
+    val organizationTemplatesError: StateFlow<String?>
 
 
     fun onNavigateToChat(user: UserData)
@@ -126,6 +135,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun editEventField(update: Event.() -> Event)
     fun editTournamentField(update: Event.() -> Event)
     fun updateEvent()
+    fun createTemplateFromCurrentEvent()
     fun publishEvent()
     fun deleteEvent()
     fun shareEvent()
@@ -241,6 +251,7 @@ class DefaultEventDetailComponent(
     private val eventRepository: IEventRepository,
     private val matchRepository: IMatchRepository,
     private val teamRepository: ITeamRepository,
+    private val sportsRepository: ISportsRepository,
     private val imageRepository: IImagesRepository,
     private val navigationHandler: INavigationHandler,
 
@@ -268,7 +279,7 @@ class DefaultEventDetailComponent(
     private val _editedEvent = MutableStateFlow(event)
     override var editedEvent = _editedEvent.asStateFlow()
 
-    private val _isEditing = MutableStateFlow(false)
+    private val _isEditing = MutableStateFlow(event.state.equals("TEMPLATE", ignoreCase = true))
     override var isEditing = _isEditing.asStateFlow()
 
     private val _fieldCount = MutableStateFlow(0)
@@ -286,6 +297,15 @@ class DefaultEventDetailComponent(
     override val eventImageIds =
         imageRepository.getUserImageIdsFlow().stateIn(scope, SharingStarted.Eagerly, emptyList())
 
+    private val _organizationTemplates = MutableStateFlow<List<OrganizationTemplateDocument>>(emptyList())
+    override val organizationTemplates = _organizationTemplates.asStateFlow()
+
+    private val _organizationTemplatesLoading = MutableStateFlow(false)
+    override val organizationTemplatesLoading = _organizationTemplatesLoading.asStateFlow()
+
+    private val _organizationTemplatesError = MutableStateFlow<String?>(null)
+    override val organizationTemplatesError = _organizationTemplatesError.asStateFlow()
+
     private val eventRelations: StateFlow<EventWithRelations> =
         eventRepository.getEventWithRelationsFlow(event.id).map { result ->
             result.getOrElse {
@@ -298,6 +318,8 @@ class DefaultEventDetailComponent(
             EventWithRelations(event, null)
         )
 
+    private val _sports = MutableStateFlow<List<Sport>>(emptyList())
+
     override val selectedEvent: StateFlow<Event> =
         eventRelations.map { it.event }.stateIn(scope, SharingStarted.Eagerly, event)
 
@@ -305,6 +327,13 @@ class DefaultEventDetailComponent(
         .stateIn(scope, SharingStarted.Eagerly, false)
 
     override val eventWithRelations = eventRelations.flatMapLatest { relations ->
+        val hostFallbackFlow = if (relations.host != null || relations.event.hostId.isBlank()) {
+            flowOf(relations.host)
+        } else {
+            userRepository.getUsersFlow(listOf(relations.event.hostId)).map { result ->
+                result.getOrElse { emptyList() }.firstOrNull()
+            }
+        }
         combine(
             matchRepository.getMatchesOfTournamentFlow(relations.event.id).map { result ->
                 result.getOrElse {
@@ -318,28 +347,23 @@ class DefaultEventDetailComponent(
                     _errorState.value =
                         ErrorMessage("Failed to load teams: ${it.message}"); emptyList()
                 }
-            }) { matches, teams ->
-            relations.toEventWithFullRelations(matches, teams)
+            },
+            _sports,
+            hostFallbackFlow
+        ) { matches, teams, sports, hostFallback ->
+            val sport = relations.event.sportId
+                ?.takeIf(String::isNotBlank)
+                ?.let { sportId -> sports.firstOrNull { it.id == sportId } }
+            relations.toEventWithFullRelations(matches, teams).copy(
+                sport = sport,
+                host = relations.host ?: hostFallback
+            )
         }
     }.stateIn(
         scope, SharingStarted.Eagerly, EventWithFullRelations(
             event, emptyList(), emptyList(), emptyList()
         )
     )
-
-    override val divisionFields =
-        fieldRepository.getFieldsWithMatchesFlow(event.fieldIds).map { fields ->
-            val activeDivision = _selectedDivision.value
-            fields.filter {
-                if (!selectedEvent.value.singleDivision && !activeDivision.isNullOrEmpty()) {
-                    it.field.divisions.any { division ->
-                        divisionsEquivalent(division, activeDivision)
-                    }
-                } else {
-                    true
-                }
-            }
-        }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     private val _divisionMatches = MutableStateFlow<Map<String, MatchWithRelations>>(emptyMap())
     override val divisionMatches = _divisionMatches.asStateFlow()
@@ -349,6 +373,48 @@ class DefaultEventDetailComponent(
 
     private val _selectedDivision = MutableStateFlow<String?>(null)
     override val selectedDivision = _selectedDivision.asStateFlow()
+
+    private val eventFieldIds = combine(
+        selectedEvent,
+        eventWithRelations.map { relations ->
+            relations.matches
+                .mapNotNull { match -> match.match.fieldId?.trim()?.takeIf(String::isNotBlank) }
+        },
+    ) { selected, matchFieldIds ->
+        (selected.fieldIds + matchFieldIds)
+            .map { fieldId -> fieldId.trim() }
+            .filter(String::isNotBlank)
+            .distinct()
+    }.distinctUntilChanged()
+
+    override val eventFields: StateFlow<List<FieldWithMatches>> = eventFieldIds.flatMapLatest { fieldIds ->
+        if (fieldIds.isEmpty()) {
+            flowOf(emptyList())
+        } else {
+            flow {
+                fieldRepository.getFields(fieldIds).onFailure { error ->
+                    Napier.w("Failed to refresh fields for event ${selectedEvent.value.id}: ${error.message}")
+                }
+                emitAll(fieldRepository.getFieldsWithMatchesFlow(fieldIds))
+            }
+        }
+    }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    override val divisionFields: StateFlow<List<FieldWithMatches>> = combine(
+        eventFields,
+        selectedEvent,
+        selectedDivision
+    ) { fields, selected, activeDivision ->
+        fields.filter {
+            if (!selected.singleDivision && !activeDivision.isNullOrEmpty()) {
+                it.field.divisions.any { division ->
+                    divisionsEquivalent(division, activeDivision)
+                }
+            } else {
+                true
+            }
+        }
+    }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     private val _isBracketView = MutableStateFlow(false)
     override val isBracketView = _isBracketView.asStateFlow()
@@ -437,6 +503,15 @@ class DefaultEventDetailComponent(
 
     init {
         backHandler.register(backCallback)
+        loadSports()
+        scope.launch {
+            selectedEvent
+                .map { selected -> selected.organizationId?.trim().orEmpty() }
+                .distinctUntilChanged()
+                .collect { organizationId ->
+                    loadOrganizationTemplates(organizationId)
+                }
+        }
         scope.launch {
             _isEditing.collect { isEditing ->
                 backCallback.isEnabled = isEditing
@@ -507,6 +582,39 @@ class DefaultEventDetailComponent(
         scope.launch {
             _divisionMatches.collect { generateRounds() }
         }
+    }
+
+    private fun loadSports() {
+        scope.launch {
+            sportsRepository.getSports()
+                .onSuccess { _sports.value = it }
+                .onFailure {
+                    _errorState.value = ErrorMessage("Failed to load sports: ${it.message ?: ""}")
+                }
+        }
+    }
+
+    private suspend fun loadOrganizationTemplates(organizationId: String) {
+        if (organizationId.isBlank()) {
+            _organizationTemplates.value = emptyList()
+            _organizationTemplatesError.value = null
+            _organizationTemplatesLoading.value = false
+            return
+        }
+
+        _organizationTemplatesLoading.value = true
+        _organizationTemplatesError.value = null
+        billingRepository.listOrganizationTemplates(organizationId)
+            .onSuccess { templates ->
+                _organizationTemplates.value = templates
+            }
+            .onFailure { throwable ->
+                Napier.w("Failed to load templates for organization $organizationId.", throwable)
+                _organizationTemplates.value = emptyList()
+                _organizationTemplatesError.value =
+                    throwable.message?.takeIf(String::isNotBlank) ?: "Failed to load templates."
+            }
+        _organizationTemplatesLoading.value = false
     }
 
     override fun onNavigateToChat(user: UserData) {
@@ -690,11 +798,29 @@ class DefaultEventDetailComponent(
             eventRepository.registerChildForEvent(
                 eventId = selectedEvent.value.id,
                 childUserId = child.userId,
-            ).onSuccess {
+            ).onSuccess { registration ->
                 loadingHandler.showLoading("Refreshing Event ...")
                 eventRepository.getEvent(selectedEvent.value.id)
+                val status = registration.registrationStatus?.lowercase()
+                val message = when {
+                    status == "active" -> "${child.fullName} registration completed."
+                    registration.requiresParentApproval -> {
+                        "${child.fullName} request sent. A parent/guardian must approve before registration can continue."
+                    }
+                    registration.requiresChildEmail -> {
+                        "${child.fullName} registration started. Add child email to continue child-signature document steps."
+                    }
+                    !registration.consentStatus.isNullOrBlank() -> {
+                        "${child.fullName} registration is pending. Consent status: ${registration.consentStatus}."
+                    }
+                    !status.isNullOrBlank() -> {
+                        "${child.fullName} registration is pending. Status: $status."
+                    }
+                    else -> "${child.fullName} registration request submitted and is pending processing."
+                }
+                val warning = registration.warnings.firstOrNull()?.takeIf(String::isNotBlank)
                 _errorState.value = ErrorMessage(
-                    "${child.fullName} registration started."
+                    listOfNotNull(message, warning).joinToString(" ")
                 )
             }.onFailure { throwable ->
                 _errorState.value = ErrorMessage(throwable.message ?: "Failed to register child.")
@@ -708,9 +834,22 @@ class DefaultEventDetailComponent(
         try {
             if (selectedEvent.value.price == 0.0 || isEventFull.value || selectedEvent.value.teamSignup) {
                 loadingHandler.showLoading("Joining Event ...")
-                eventRepository.addCurrentUserToEvent(selectedEvent.value).onSuccess {
+                eventRepository.addCurrentUserToEvent(
+                    event = selectedEvent.value,
+                    preferredDivisionId = selectedDivision.value,
+                ).onSuccess { registration ->
                     loadingHandler.showLoading("Reloading Event")
                     eventRepository.getEvent(selectedEvent.value.id)
+                    when {
+                        registration.requiresParentApproval -> {
+                            _errorState.value = ErrorMessage(
+                                "Join request sent. A parent/guardian must approve before registration can continue."
+                            )
+                        }
+                        registration.joinedWaitlist -> {
+                            _errorState.value = ErrorMessage("Added to event waitlist.")
+                        }
+                    }
                 }.onFailure {
                     _errorState.value = ErrorMessage(it.message ?: "")
                 }
@@ -985,6 +1124,42 @@ class DefaultEventDetailComponent(
         }
     }
 
+    override fun createTemplateFromCurrentEvent() {
+        scope.launch {
+            val sourceEvent = if (_isEditing.value) _editedEvent.value else selectedEvent.value
+            if (sourceEvent.state.equals("TEMPLATE", ignoreCase = true)) {
+                _errorState.value = ErrorMessage("This event is already a template.")
+                return@launch
+            }
+
+            loadingHandler.showLoading("Creating template ...")
+
+            val templateId = newId()
+            val currentUserId = currentUser.value.id.trim().takeIf(String::isNotBlank)
+            val templateEvent = sourceEvent.copy(
+                id = templateId,
+                name = addTemplateSuffix(sourceEvent.name),
+                state = "TEMPLATE",
+                hostId = currentUserId ?: sourceEvent.hostId,
+                userIds = emptyList(),
+                teamIds = emptyList(),
+                waitListIds = emptyList(),
+                freeAgentIds = emptyList(),
+                refereeIds = emptyList(),
+            )
+
+            eventRepository.createEvent(templateEvent)
+                .onSuccess {
+                    _errorState.value = ErrorMessage("Template created and added to your templates.")
+                }
+                .onFailure {
+                    _errorState.value = ErrorMessage(it.message ?: "Failed to create template.")
+                }
+
+            loadingHandler.hideLoading()
+        }
+    }
+
     override fun publishEvent() {
         scope.launch {
             val currentEvent = selectedEvent.value
@@ -1248,12 +1423,7 @@ class DefaultEventDetailComponent(
             loadingHandler.showLoading("Updating matches...")
 
             try {
-                // Update all matches
-                matches.forEach { matchWithRelations ->
-                    matchRepository.updateMatch(matchWithRelations.match).onFailure { error ->
-                        throw Exception("Failed to update match: ${error.message}")
-                    }
-                }
+                matchRepository.updateMatchesBulk(matches.map { it.match }).getOrThrow()
 
                 _isEditingMatches.value = false
                 _editableMatches.value = emptyList()
@@ -1393,4 +1563,16 @@ class DefaultEventDetailComponent(
     data class ValidationResult(
         val isValid: Boolean, val errorMessage: String
     )
+}
+
+private fun addTemplateSuffix(name: String): String {
+    val trimmed = name.trim()
+    if (trimmed.isEmpty()) {
+        return "(TEMPLATE)"
+    }
+    return if (trimmed.endsWith("(TEMPLATE)", ignoreCase = true)) {
+        trimmed
+    } else {
+        "$trimmed (TEMPLATE)"
+    }
 }

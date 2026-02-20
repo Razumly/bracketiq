@@ -54,6 +54,7 @@ import com.kizitonwose.calendar.compose.HorizontalCalendar
 import com.kizitonwose.calendar.compose.rememberCalendarState
 import com.kizitonwose.calendar.core.CalendarDay
 import com.kizitonwose.calendar.core.DayPosition
+import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
@@ -84,6 +85,7 @@ private const val UNASSIGNED_FIELD_KEY = "__unassigned_field__"
 @Composable
 fun ScheduleView(
     matches: List<MatchWithRelations>,
+    fields: List<FieldWithMatches>,
     showFab: (Boolean) -> Unit,
     onMatchClick: (MatchWithRelations) -> Unit,
 ) {
@@ -105,6 +107,9 @@ fun ScheduleView(
     }
     val matchesByDate = remember(sortedMatches) {
         sortedMatches.groupBy { it.match.start.toLocalDateTime(timeZone).date }
+    }
+    val fieldsById = remember(fields) {
+        fields.associateBy { it.field.id }
     }
     val sortedDates = remember(matchesByDate) { matchesByDate.keys.sorted() }
     val today = remember { Clock.System.now().toLocalDateTime(timeZone).date }
@@ -176,8 +181,8 @@ fun ScheduleView(
         Spacer(modifier = Modifier.height(16.dp))
 
         val dayMatches = matchesByDate[selectedDate].orEmpty()
-        val fieldGroups = remember(dayMatches) {
-            buildFieldScheduleGroups(dayMatches)
+        val fieldGroups = remember(dayMatches, fieldsById) {
+            buildFieldScheduleGroups(dayMatches, fieldsById)
         }
         DaySummaryHeader(selectedDate, dayMatches.size)
 
@@ -211,6 +216,7 @@ fun ScheduleView(
                     items(dayMatches, key = { it.match.id }) { match ->
                         ScheduleMatchCard(
                             match = match,
+                            fieldsById = fieldsById,
                             timeZone = timeZone,
                             onClick = { onMatchClick(match) }
                         )
@@ -230,6 +236,7 @@ fun ScheduleView(
                             group.matches.forEach { match ->
                                 ScheduleMatchCard(
                                     match = match,
+                                    fieldsById = fieldsById,
                                     timeZone = timeZone,
                                     onClick = { onMatchClick(match) }
                                 )
@@ -329,7 +336,10 @@ private fun ScheduleGroupingToggle(
     }
 }
 
-private fun buildFieldScheduleGroups(dayMatches: List<MatchWithRelations>): List<FieldScheduleGroup> {
+private fun buildFieldScheduleGroups(
+    dayMatches: List<MatchWithRelations>,
+    fieldsById: Map<String, FieldWithMatches>,
+): List<FieldScheduleGroup> {
     if (dayMatches.isEmpty()) return emptyList()
 
     val grouped = dayMatches.groupBy { match ->
@@ -339,7 +349,7 @@ private fun buildFieldScheduleGroups(dayMatches: List<MatchWithRelations>): List
     return grouped.map { (fieldKey, matchesForField) ->
         FieldScheduleGroup(
             key = fieldKey,
-            label = resolveFieldLabel(matchesForField.firstOrNull()),
+            label = resolveFieldLabel(matchesForField.firstOrNull(), fieldsById),
             matches = matchesForField.sortedBy { it.match.start }
         )
     }.sortedBy { group ->
@@ -357,8 +367,25 @@ private fun resolveFieldKey(match: MatchWithRelations): String {
     return fieldId ?: UNASSIGNED_FIELD_KEY
 }
 
-private fun resolveFieldLabel(match: MatchWithRelations?): String {
+private fun resolveFieldLabel(
+    match: MatchWithRelations?,
+    fieldsById: Map<String, FieldWithMatches>,
+): String {
     if (match == null) return "Field TBD"
+
+    val fieldId = match.match.fieldId?.trim().takeUnless { it.isNullOrEmpty() }
+        ?: match.field?.id?.trim().takeUnless { it.isNullOrEmpty() }
+    if (fieldId != null) {
+        val mappedField = fieldsById[fieldId]?.field
+        val mappedName = mappedField?.name?.trim().orEmpty()
+        if (mappedName.isNotEmpty()) {
+            return mappedName
+        }
+        val mappedNumber = mappedField?.fieldNumber
+        if (mappedNumber != null && mappedNumber > 0) {
+            return "Field $mappedNumber"
+        }
+    }
 
     val fieldName = match.field?.name?.trim().orEmpty()
     if (fieldName.isNotEmpty()) {
@@ -376,6 +403,7 @@ private fun resolveFieldLabel(match: MatchWithRelations?): String {
 @Composable
 private fun ScheduleMatchCard(
     match: MatchWithRelations,
+    fieldsById: Map<String, FieldWithMatches>,
     timeZone: TimeZone,
     onClick: () -> Unit
 ) {
@@ -383,8 +411,8 @@ private fun ScheduleMatchCard(
         match.match.start.toLocalDateTime(timeZone)
     }
     val timeText = remember(localDateTime) { timeFormat.format(localDateTime.time) }
-    val fieldLabel = remember(match.match.fieldId, match.field?.id, match.field?.name, match.field?.fieldNumber) {
-        resolveFieldLabel(match)
+    val fieldLabel = remember(match, fieldsById) {
+        resolveFieldLabel(match, fieldsById)
     }
     val teamOne = match.team1?.displayName.orEmpty().ifBlank { "TBD" }
     val teamTwo = match.team2?.displayName.orEmpty().ifBlank { "TBD" }

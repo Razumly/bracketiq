@@ -25,6 +25,38 @@ data class RegisterRequestDto(
     val lastName: String? = null,
     val userName: String? = null,
     val dateOfBirth: String? = null,
+    val enforceProfileConflictSelection: Boolean? = null,
+    val profileSelection: RegisterProfileSelectionDto? = null,
+)
+
+@Serializable
+data class RegisterProfileSelectionDto(
+    val firstName: String? = null,
+    val lastName: String? = null,
+    val userName: String? = null,
+    val dateOfBirth: String? = null,
+)
+
+@Serializable
+data class RegisterProfileSnapshotDto(
+    val firstName: String? = null,
+    val lastName: String? = null,
+    val userName: String? = null,
+    val dateOfBirth: String? = null,
+)
+
+@Serializable
+data class RegisterProfileConflictDto(
+    val fields: List<String> = emptyList(),
+    val existing: RegisterProfileSnapshotDto? = null,
+    val incoming: RegisterProfileSnapshotDto? = null,
+)
+
+@Serializable
+data class RegisterConflictResponseDto(
+    val error: String? = null,
+    val code: String? = null,
+    val conflict: RegisterProfileConflictDto? = null,
 )
 
 @Serializable

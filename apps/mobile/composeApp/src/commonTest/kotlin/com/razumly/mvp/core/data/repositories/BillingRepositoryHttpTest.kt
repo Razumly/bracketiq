@@ -69,7 +69,9 @@ private class BillingRepositoryHttp_FakeUserRepository(
     override suspend fun logout(): Result<Unit> = error("unused")
     override suspend fun searchPlayers(search: String): Result<List<UserData>> = error("unused")
     override suspend fun ensureUserByEmail(email: String): Result<UserData> = error("unused")
+    override suspend fun isCurrentUserChild(minorAgeThreshold: Int): Result<Boolean> = error("unused")
     override suspend fun listChildren(): Result<List<FamilyChild>> = error("unused")
+    override suspend fun listPendingChildJoinRequests(): Result<List<FamilyJoinRequest>> = error("unused")
     override suspend fun resolveChildJoinRequest(
         registrationId: String,
         action: FamilyJoinRequestAction,
@@ -97,7 +99,15 @@ private class BillingRepositoryHttp_FakeUserRepository(
         relationship: String?,
     ): Result<Unit> = error("unused")
 
-    override suspend fun createNewUser(email: String, password: String, firstName: String, lastName: String, userName: String, dateOfBirth: String?): Result<UserData> = error("unused")
+    override suspend fun createNewUser(
+        email: String,
+        password: String,
+        firstName: String,
+        lastName: String,
+        userName: String,
+        dateOfBirth: String?,
+        profileSelection: SignupProfileSelection?,
+    ): Result<UserData> = error("unused")
     override suspend fun updateUser(user: UserData): Result<UserData> = error("unused")
     override suspend fun updateEmail(email: String, password: String): Result<Unit> = error("unused")
     override suspend fun updatePassword(currentPassword: String, newPassword: String): Result<Unit> = error("unused")
@@ -126,10 +136,19 @@ private object BillingRepositoryHttp_UnusedEventRepository : IEventRepository {
     override suspend fun updateLocalEvent(newEvent: Event): Result<Event> = error("unused")
     override fun getEventsInBoundsFlow(bounds: com.razumly.mvp.core.data.dataTypes.Bounds): Flow<Result<List<Event>>> = error("unused")
     override suspend fun getEventsInBounds(bounds: com.razumly.mvp.core.data.dataTypes.Bounds): Result<Pair<List<Event>, Boolean>> = error("unused")
+    override suspend fun getEventsInBounds(
+        bounds: com.razumly.mvp.core.data.dataTypes.Bounds,
+        dateFrom: kotlin.time.Instant?,
+        dateTo: kotlin.time.Instant?,
+    ): Result<Pair<List<Event>, Boolean>> = error("unused")
     override suspend fun searchEvents(searchQuery: String, userLocation: dev.icerock.moko.geo.LatLng): Result<Pair<List<Event>, Boolean>> = error("unused")
     override fun getEventsByHostFlow(hostId: String): Flow<Result<List<Event>>> = error("unused")
     override suspend fun deleteEvent(eventId: String): Result<Unit> = error("unused")
-    override suspend fun addCurrentUserToEvent(event: Event): Result<Unit> = error("unused")
+    override suspend fun addCurrentUserToEvent(
+        event: Event,
+        preferredDivisionId: String?,
+    ): Result<SelfRegistrationResult> = error("unused")
+    override suspend fun registerChildForEvent(eventId: String, childUserId: String): Result<ChildRegistrationResult> = error("unused")
     override suspend fun addTeamToEvent(event: Event, team: com.razumly.mvp.core.data.dataTypes.Team): Result<Unit> = error("unused")
     override suspend fun removeTeamFromEvent(event: Event, teamWithPlayers: com.razumly.mvp.core.data.dataTypes.TeamWithPlayers): Result<Unit> = error("unused")
     override suspend fun removeCurrentUserFromEvent(event: Event): Result<Unit> = error("unused")
@@ -202,6 +221,60 @@ class BillingRepositoryHttpTest {
         assertEquals(22000, bills.first().totalAmountCents)
         assertEquals(8500, bills.first().nextPaymentAmountCents)
         assertEquals("OPEN", bills.first().status)
+    }
+
+    @Test
+    fun listOrganizationTemplates_gets_and_maps_response() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/organizations/org_1/templates", request.url.encodedPath)
+            assertEquals(HttpMethod.Get, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+
+            respond(
+                content = """
+                    {
+                      "templates": [
+                        {
+                          "id": "tmpl_1",
+                          "title": "Waiver",
+                          "type": "PDF",
+                          "requiredSignerType": "participant"
+                        },
+                        {
+                          "${'$'}id": "tmpl_legacy",
+                          "title": "Minor Consent",
+                          "type": "TEXT",
+                          "requiredSignerType": "parent_guardian_and_child"
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = BillingRepository(api, userRepo, BillingRepositoryHttp_UnusedEventRepository, db)
+
+        val templates = repo.listOrganizationTemplates("org_1").getOrThrow()
+
+        assertEquals(2, templates.size)
+        assertEquals("tmpl_1", templates[0].id)
+        assertEquals("Waiver", templates[0].title)
+        assertEquals("PDF", templates[0].type)
+        assertEquals("PARTICIPANT", templates[0].requiredSignerType)
+        assertEquals("tmpl_legacy", templates[1].id)
+        assertEquals("TEXT", templates[1].type)
+        assertEquals("PARENT_GUARDIAN_CHILD", templates[1].requiredSignerType)
     }
 
     @Test

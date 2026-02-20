@@ -4,6 +4,7 @@ import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.AuthAccount
 import com.razumly.mvp.core.data.dataTypes.Bounds
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
+import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.Field
@@ -42,11 +43,13 @@ import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
@@ -170,6 +173,7 @@ private fun makeEvent(
         coordinates = listOf(-80.0, 25.0),
         start = Instant.parse("2026-02-10T00:00:00Z"),
         end = Instant.parse("2026-02-10T01:00:00Z"),
+        maxParticipants = 10,
         userIds = userIds,
         teamIds = emptyList(),
     )
@@ -213,7 +217,9 @@ private class EventRepositoryHttp_FakeUserRepository(
     override suspend fun logout(): Result<Unit> = error("unused")
     override suspend fun searchPlayers(search: String): Result<List<UserData>> = error("unused")
     override suspend fun ensureUserByEmail(email: String): Result<UserData> = error("unused")
+    override suspend fun isCurrentUserChild(minorAgeThreshold: Int): Result<Boolean> = error("unused")
     override suspend fun listChildren(): Result<List<FamilyChild>> = error("unused")
+    override suspend fun listPendingChildJoinRequests(): Result<List<FamilyJoinRequest>> = error("unused")
     override suspend fun resolveChildJoinRequest(
         registrationId: String,
         action: FamilyJoinRequestAction,
@@ -248,6 +254,7 @@ private class EventRepositoryHttp_FakeUserRepository(
         lastName: String,
         userName: String,
         dateOfBirth: String?,
+        profileSelection: SignupProfileSelection?,
     ): Result<UserData> = error("unused")
     override suspend fun updateUser(user: UserData): Result<UserData> = error("unused")
     override suspend fun updateEmail(email: String, password: String): Result<Unit> = error("unused")
@@ -287,6 +294,63 @@ private object EventRepositoryHttp_UnusedTeamRepository : ITeamRepository {
 }
 
 class EventRepositoryHttpTest {
+    @Test
+    fun getEventTemplatesByHostFlow_requests_template_state_and_returns_templates() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/events", request.url.encodedPath)
+            assertEquals(HttpMethod.Get, request.method)
+            assertEquals("h1", request.url.parameters["hostId"])
+            assertEquals("TEMPLATE", request.url.parameters["state"])
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+
+            respond(
+                content = """
+                    {
+                      "events": [
+                        {
+                          "id": "tmpl_1",
+                          "name": "Template One",
+                          "hostId": "h1",
+                          "state": "TEMPLATE",
+                          "start": "2026-02-10T00:00:00Z",
+                          "end": "2026-02-10T01:00:00Z",
+                          "coordinates": [-80.0, 25.0],
+                          "eventType": "EVENT",
+                          "userIds": [],
+                          "teamIds": []
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val templates = repo.getEventTemplatesByHostFlow("h1")
+            .first { flowResult ->
+                flowResult.getOrNull()?.any { event -> event.id == "tmpl_1" } == true
+            }
+            .getOrThrow()
+
+        assertEquals(1, templates.size)
+        assertEquals("tmpl_1", templates.first().id)
+        assertEquals("TEMPLATE", templates.first().state)
+    }
+
     @Test
     fun getEventsInBounds_posts_search_and_persists_to_cache() = runTest {
         val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
@@ -340,6 +404,54 @@ class EventRepositoryHttpTest {
         assertEquals(1, result.first.size)
         assertTrue(result.second)
         assertEquals("e1", eventDao.getEventById("e1")?.id)
+    }
+
+    @Test
+    fun getEventsInBounds_posts_search_with_date_filters_when_provided() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+        var capturedBody = ""
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/events/search", request.url.encodedPath)
+            assertEquals(HttpMethod.Post, request.method)
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+
+            respond(
+                content = """{ "events": [] }""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val bounds = Bounds(
+            north = 0.0,
+            east = 0.0,
+            south = 0.0,
+            west = 0.0,
+            center = LatLng(25.0, -80.0),
+            radiusMiles = 100.0,
+        )
+        val from = Instant.parse("2025-02-01T00:00:00Z")
+        val to = Instant.parse("2025-02-28T23:59:59Z")
+
+        repo.getEventsInBounds(bounds = bounds, dateFrom = from, dateTo = to).getOrThrow()
+
+        assertTrue(capturedBody.contains("\"dateFrom\":\"2025-02-01T00:00:00Z\""))
+        assertTrue(capturedBody.contains("\"dateTo\":\"2025-02-28T23:59:59Z\""))
     }
 
     @Test
@@ -411,6 +523,100 @@ class EventRepositoryHttpTest {
     }
 
     @Test
+    fun addCurrentUserToEvent_posts_selected_division_and_returns_parent_approval_state() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u_minor"))
+
+        val divisionAId = "e1__division__m_skill_b"
+        val divisionBId = "e1__division__f_skill_a"
+        var capturedBody = ""
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/events/e1/participants", request.url.encodedPath)
+            assertEquals(HttpMethod.Post, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+
+            respond(
+                content = """
+                    {
+                      "event": {
+                        "id": "e1",
+                        "name": "Event One",
+                        "hostId": "h1",
+                        "start": "2026-02-10T00:00:00Z",
+                        "end": "2026-02-10T01:00:00Z",
+                        "coordinates": [-80.0, 25.0],
+                        "userIds": [],
+                        "teamIds": []
+                      },
+                      "requiresParentApproval": true
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val event = Event(
+            id = "e1",
+            name = "Event One",
+            hostId = "h1",
+            coordinates = listOf(-80.0, 25.0),
+            start = Instant.parse("2026-02-10T00:00:00Z"),
+            end = Instant.parse("2026-02-10T01:00:00Z"),
+            maxParticipants = 16,
+            teamSignup = false,
+            registrationByDivisionType = true,
+            divisions = listOf(divisionAId, divisionBId),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = divisionAId,
+                    key = "m_skill_b",
+                    name = "Men B",
+                    divisionTypeId = "b",
+                    divisionTypeName = "B",
+                    ratingType = "SKILL",
+                    gender = "M",
+                ),
+                DivisionDetail(
+                    id = divisionBId,
+                    key = "f_skill_a",
+                    name = "Women A",
+                    divisionTypeId = "a",
+                    divisionTypeName = "A",
+                    ratingType = "SKILL",
+                    gender = "F",
+                ),
+            ),
+        )
+
+        val result = repo.addCurrentUserToEvent(
+            event = event,
+            preferredDivisionId = divisionBId,
+        ).getOrThrow()
+
+        assertTrue(capturedBody.contains("\"divisionId\":\"$divisionBId\""))
+        assertTrue(capturedBody.contains("\"divisionTypeId\":\"a\""))
+        assertTrue(capturedBody.contains("\"divisionTypeKey\":\"f_skill_a\""))
+        assertTrue(result.requiresParentApproval)
+        assertFalse(result.joinedWaitlist)
+    }
+
+    @Test
     fun registerChildForEvent_posts_child_registration_payload() = runTest {
         val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
         val eventDao = EventRepositoryHttp_FakeEventDao()
@@ -435,16 +641,18 @@ class EventRepositoryHttpTest {
             respond(
                 content = """
                     {
-                      "event": {
-                        "id": "e1",
-                        "name": "Event One",
-                        "hostId": "h1",
-                        "start": "2026-02-10T00:00:00Z",
-                        "end": "2026-02-10T01:00:00Z",
-                        "coordinates": [-80.0, 25.0],
-                        "userIds": ["child_1"],
-                        "teamIds": []
-                      }
+                      "registration": {
+                        "id": "reg_1",
+                        "status": "PENDINGCONSENT",
+                        "consentStatus": "child_email_required"
+                      },
+                      "consent": {
+                        "status": "child_email_required",
+                        "requiresChildEmail": true
+                      },
+                      "warnings": [
+                        "Under-13 child profile is missing email; child signature cannot be completed until email is added."
+                      ]
                     }
                 """.trimIndent(),
                 status = HttpStatusCode.OK,
@@ -456,8 +664,12 @@ class EventRepositoryHttpTest {
         val api = MvpApiClient(http, "http://example.test", tokenStore)
         val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
 
-        repo.registerChildForEvent(eventId = "e1", childUserId = "child_1").getOrThrow()
+        val result = repo.registerChildForEvent(eventId = "e1", childUserId = "child_1").getOrThrow()
 
         assertTrue(capturedBody.contains("\"childId\":\"child_1\""))
+        assertEquals("PENDINGCONSENT", result.registrationStatus)
+        assertEquals("child_email_required", result.consentStatus)
+        assertTrue(result.requiresChildEmail)
+        assertTrue(result.warnings.isNotEmpty())
     }
 }

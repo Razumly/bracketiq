@@ -12,12 +12,16 @@ import com.razumly.mvp.core.data.dataTypes.crossRef.EventTeamCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
+import com.razumly.mvp.core.data.util.divisionsEquivalent
+import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
+import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.util.calcDistance
 import dev.icerock.moko.geo.LatLng
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.dto.CreateEventRequestDto
 import com.razumly.mvp.core.network.dto.EventApiDto
 import com.razumly.mvp.core.network.dto.EventChildRegistrationRequestDto
+import com.razumly.mvp.core.network.dto.EventChildRegistrationResponseDto
 import com.razumly.mvp.core.network.dto.EventParticipantsRequestDto
 import com.razumly.mvp.core.network.dto.EventParticipantsResponseDto
 import com.razumly.mvp.core.network.dto.EventResponseDto
@@ -37,8 +41,10 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlin.time.Instant
 
 interface IEventRepository : IMVPRepository {
     fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>>
@@ -55,19 +61,47 @@ interface IEventRepository : IMVPRepository {
     suspend fun updateLocalEvent(newEvent: Event): Result<Event>
     fun getEventsInBoundsFlow(bounds: Bounds): Flow<Result<List<Event>>>
     suspend fun getEventsInBounds(bounds: Bounds): Result<Pair<List<Event>, Boolean>>
+    suspend fun getEventsInBounds(
+        bounds: Bounds,
+        dateFrom: Instant? = null,
+        dateTo: Instant? = null,
+    ): Result<Pair<List<Event>, Boolean>>
     suspend fun searchEvents(
         searchQuery: String,
         userLocation: LatLng
     ): Result<Pair<List<Event>, Boolean>>
     fun getEventsByHostFlow(hostId: String): Flow<Result<List<Event>>>
+    fun getEventTemplatesByHostFlow(hostId: String): Flow<Result<List<Event>>> =
+        flowOf(Result.success(emptyList()))
     suspend fun deleteEvent(eventId: String): Result<Unit>
-    suspend fun addCurrentUserToEvent(event: Event): Result<Unit>
-    suspend fun registerChildForEvent(eventId: String, childUserId: String): Result<Unit> =
-        Result.failure(NotImplementedError("Child registration is not implemented for this repository."))
+    suspend fun addCurrentUserToEvent(
+        event: Event,
+        preferredDivisionId: String? = null,
+    ): Result<SelfRegistrationResult>
+    suspend fun registerChildForEvent(eventId: String, childUserId: String): Result<ChildRegistrationResult>
     suspend fun addTeamToEvent(event: Event, team: Team): Result<Unit>
     suspend fun removeTeamFromEvent(event: Event, teamWithPlayers: TeamWithPlayers): Result<Unit>
     suspend fun removeCurrentUserFromEvent(event: Event): Result<Unit>
 }
+
+data class SelfRegistrationResult(
+    val requiresParentApproval: Boolean = false,
+    val joinedWaitlist: Boolean = false,
+)
+
+data class ChildRegistrationResult(
+    val registrationStatus: String? = null,
+    val consentStatus: String? = null,
+    val requiresParentApproval: Boolean = false,
+    val requiresChildEmail: Boolean = false,
+    val warnings: List<String> = emptyList(),
+)
+
+private data class RegistrationDivisionPayload(
+    val divisionId: String? = null,
+    val divisionTypeId: String? = null,
+    val divisionTypeKey: String? = null,
+)
 
 class EventRepository(
     private val databaseService: DatabaseService,
@@ -116,6 +150,14 @@ class EventRepository(
     private suspend fun fetchRemoteEventsByHost(hostId: String): List<Event> {
         val encodedHostId = hostId.encodeURLQueryComponent()
         val res = api.get<EventsResponseDto>("api/events?hostId=$encodedHostId&limit=200")
+        return res.events.mapNotNull { it.toEventOrNull() }
+    }
+
+    private suspend fun fetchRemoteEventTemplatesByHost(hostId: String): List<Event> {
+        val encodedHostId = hostId.encodeURLQueryComponent()
+        val res = api.get<EventsResponseDto>(
+            "api/events?hostId=$encodedHostId&state=TEMPLATE&limit=200"
+        )
         return res.events.mapNotNull { it.toEventOrNull() }
     }
 
@@ -245,6 +287,14 @@ class EventRepository(
     }
 
     override suspend fun getEventsInBounds(bounds: Bounds): Result<Pair<List<Event>, Boolean>> {
+        return getEventsInBounds(bounds = bounds, dateFrom = null, dateTo = null)
+    }
+
+    override suspend fun getEventsInBounds(
+        bounds: Bounds,
+        dateFrom: Instant?,
+        dateTo: Instant?,
+    ): Result<Pair<List<Event>, Boolean>> {
         return runCatching {
             val res = api.post<EventSearchRequestDto, EventsResponseDto>(
                 path = "api/events/search",
@@ -255,6 +305,8 @@ class EventRepository(
                             lat = bounds.center.latitude,
                             long = bounds.center.longitude,
                         ),
+                        dateFrom = dateFrom?.toString(),
+                        dateTo = dateTo?.toString(),
                     ),
                     limit = 200,
                     offset = 0,
@@ -324,28 +376,88 @@ class EventRepository(
             }
         }
 
-    override suspend fun addCurrentUserToEvent(event: Event): Result<Unit> =
+    override fun getEventTemplatesByHostFlow(hostId: String): Flow<Result<List<Event>>> =
+        callbackFlow {
+            val localJob = launch {
+                databaseService.getEventDao.getAllCachedEvents().collect { cached ->
+                    trySend(
+                        Result.success(
+                            cached.filter { event ->
+                                event.hostId == hostId && event.state.equals("TEMPLATE", ignoreCase = true)
+                            },
+                        ),
+                    )
+                }
+            }
+
+            val remoteJob = launch {
+                runCatching {
+                    val remote = fetchRemoteEventTemplatesByHost(hostId)
+
+                    val localTemplateEvents = databaseService.getEventDao.getAllCachedEvents().first()
+                        .filter { event ->
+                            event.hostId == hostId && event.state.equals("TEMPLATE", ignoreCase = true)
+                        }
+                    val staleIds = localTemplateEvents.map { it.id }.toSet() - remote.map { it.id }.toSet()
+                    if (staleIds.isNotEmpty()) {
+                        databaseService.getEventDao.deleteEventsById(staleIds.toList())
+                    }
+
+                    databaseService.getEventDao.upsertEvents(remote)
+                }.onFailure { error -> trySend(Result.failure(error)) }
+            }
+
+            awaitClose {
+                localJob.cancel()
+                remoteJob.cancel()
+            }
+        }
+
+    override suspend fun addCurrentUserToEvent(
+        event: Event,
+        preferredDivisionId: String?,
+    ): Result<SelfRegistrationResult> =
         runCatching {
             val currentUser = userRepository.currentUser.value.getOrThrow()
-            val response = api.post<EventParticipantsRequestDto, EventParticipantsResponseDto>(
-                path = "api/events/${event.id}/participants",
-                body = EventParticipantsRequestDto(userId = currentUser.id),
+            val eventAtCapacity = isEventAtCapacity(event)
+            val divisionPayload = resolveRegistrationDivisionPayload(
+                event = event,
+                preferredDivisionId = preferredDivisionId,
             )
+            val request = EventParticipantsRequestDto(
+                userId = currentUser.id,
+                divisionId = divisionPayload.divisionId,
+                divisionTypeId = divisionPayload.divisionTypeId,
+                divisionTypeKey = divisionPayload.divisionTypeKey,
+            )
+            val response = if (eventAtCapacity) {
+                api.post<EventParticipantsRequestDto, EventParticipantsResponseDto>(
+                    path = "api/events/${event.id}/waitlist",
+                    body = request,
+                )
+            } else {
+                api.post<EventParticipantsRequestDto, EventParticipantsResponseDto>(
+                    path = "api/events/${event.id}/participants",
+                    body = request,
+                )
+            }
 
             response.error?.takeIf(String::isNotBlank)?.let { errorMessage ->
                 error(errorMessage)
-            }
-            if (response.requiresParentApproval == true) {
-                error("Join request sent. A parent/guardian must approve before registration can continue.")
             }
 
             response.event?.toEventOrNull()?.let { updated ->
                 databaseService.getEventDao.upsertEvent(updated)
                 persistEventRelations(updated)
             }
+
+            SelfRegistrationResult(
+                requiresParentApproval = response.requiresParentApproval == true,
+                joinedWaitlist = eventAtCapacity,
+            )
         }
 
-    override suspend fun registerChildForEvent(eventId: String, childUserId: String): Result<Unit> =
+    override suspend fun registerChildForEvent(eventId: String, childUserId: String): Result<ChildRegistrationResult> =
         runCatching {
             val normalizedEventId = eventId.trim()
             val normalizedChildUserId = childUserId.trim()
@@ -353,9 +465,17 @@ class EventRepository(
                 error("Event id and child user id are required.")
             }
 
-            api.post<EventChildRegistrationRequestDto, EventResponseDto>(
+            val response = api.post<EventChildRegistrationRequestDto, EventChildRegistrationResponseDto>(
                 path = "api/events/$normalizedEventId/registrations/child",
                 body = EventChildRegistrationRequestDto(childId = normalizedChildUserId),
+            )
+            response.error?.takeIf(String::isNotBlank)?.let { error(it) }
+            ChildRegistrationResult(
+                registrationStatus = response.registration?.status,
+                consentStatus = response.consent?.status ?: response.registration?.consentStatus,
+                requiresParentApproval = response.requiresParentApproval == true,
+                requiresChildEmail = response.consent?.requiresChildEmail == true,
+                warnings = response.warnings,
             )
         }
 
@@ -364,10 +484,17 @@ class EventRepository(
             if (event.waitList.contains(team.id)) {
                 throw Exception("Team already in waitlist")
             }
-            val updated = api.post<EventParticipantsRequestDto, EventResponseDto>(
-                path = "api/events/${event.id}/participants",
-                body = EventParticipantsRequestDto(teamId = team.id),
-            ).event?.toEventOrNull() ?: error("Participant update response missing event")
+            val updated = if (isEventAtCapacity(event)) {
+                api.post<EventParticipantsRequestDto, EventResponseDto>(
+                    path = "api/events/${event.id}/waitlist",
+                    body = EventParticipantsRequestDto(teamId = team.id),
+                )
+            } else {
+                api.post<EventParticipantsRequestDto, EventResponseDto>(
+                    path = "api/events/${event.id}/participants",
+                    body = EventParticipantsRequestDto(teamId = team.id),
+                )
+            }.event?.toEventOrNull() ?: error("Participant update response missing event")
 
             databaseService.getEventDao.upsertEvent(updated)
             persistEventRelations(updated)
@@ -421,5 +548,56 @@ class EventRepository(
         val host = users.filter { it.id == event.hostId }
 
         insertEventCrossReferences(event.id, players, host, teams)
+    }
+
+    private fun resolveRegistrationDivisionPayload(
+        event: Event,
+        preferredDivisionId: String?,
+    ): RegistrationDivisionPayload {
+        if (event.divisions.isEmpty()) {
+            return RegistrationDivisionPayload()
+        }
+
+        val normalizedPreferredDivision = preferredDivisionId
+            ?.normalizeDivisionIdentifier()
+            ?.ifEmpty { null }
+
+        val divisionDetails = mergeDivisionDetailsForDivisions(
+            divisions = event.divisions,
+            existingDetails = event.divisionDetails,
+            eventId = event.id,
+        )
+        if (divisionDetails.isEmpty()) {
+            return RegistrationDivisionPayload()
+        }
+
+        val selectedDivision = if (!normalizedPreferredDivision.isNullOrBlank()) {
+            divisionDetails.firstOrNull { detail ->
+                divisionsEquivalent(detail.id, normalizedPreferredDivision) ||
+                    divisionsEquivalent(detail.key, normalizedPreferredDivision)
+            } ?: divisionDetails.firstOrNull()
+        } else {
+            divisionDetails.firstOrNull()
+        } ?: return RegistrationDivisionPayload()
+
+        val divisionId = selectedDivision.id.normalizeDivisionIdentifier().ifEmpty {
+            selectedDivision.key.normalizeDivisionIdentifier()
+        }.ifEmpty { null }
+        val divisionTypeId = selectedDivision.divisionTypeId.normalizeDivisionIdentifier().ifEmpty { null }
+        val divisionTypeKey = selectedDivision.key.normalizeDivisionIdentifier().ifEmpty { null }
+
+        return RegistrationDivisionPayload(
+            divisionId = divisionId,
+            divisionTypeId = divisionTypeId,
+            divisionTypeKey = divisionTypeKey,
+        )
+    }
+
+    private fun isEventAtCapacity(event: Event): Boolean {
+        return if (event.teamSignup) {
+            event.maxParticipants <= event.teamIds.size
+        } else {
+            event.maxParticipants <= event.playerIds.size
+        }
     }
 }

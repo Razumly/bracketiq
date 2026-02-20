@@ -2,6 +2,7 @@ package com.razumly.mvp.eventDetail
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -32,6 +34,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -44,20 +47,22 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import coil3.compose.AsyncImage
 import com.kmpalette.loader.rememberNetworkLoader
@@ -67,6 +72,7 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
+import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.toLeagueConfig
@@ -94,6 +100,7 @@ import com.razumly.mvp.core.presentation.util.getImageUrl
 import com.razumly.mvp.core.presentation.util.getScreenHeight
 import com.razumly.mvp.core.presentation.util.moneyFormat
 import com.razumly.mvp.core.presentation.util.teamSizeFormat
+import com.razumly.mvp.core.presentation.util.timeFormat
 import com.razumly.mvp.core.presentation.util.toTitleCase
 import com.razumly.mvp.core.presentation.util.transitionSpec
 import com.razumly.mvp.eventDetail.composables.CancellationRefundOptions
@@ -141,6 +148,7 @@ fun EventDetails(
     hostHasAccount: Boolean,
     imageScheme: DynamicScheme,
     imageIds: List<String>,
+    mapRevealCenter: Offset = Offset.Zero,
     eventWithRelations: EventWithFullRelations,
     editEvent: Event,
     editView: Boolean,
@@ -157,6 +165,9 @@ fun EventDetails(
     editableFields: List<Field> = emptyList(),
     leagueTimeSlots: List<TimeSlot> = emptyList(),
     leagueScoringConfig: LeagueScoringConfigDTO = LeagueScoringConfigDTO(),
+    organizationTemplates: List<OrganizationTemplateDocument> = emptyList(),
+    organizationTemplatesLoading: Boolean = false,
+    organizationTemplatesError: String? = null,
     onSportSelected: (String) -> Unit = {},
     onSelectFieldCount: (Int) -> Unit,
     onUpdateLocalFieldName: (Int, String) -> Unit = { _, _ -> },
@@ -167,6 +178,8 @@ fun EventDetails(
     onLeagueScoringConfigChange: (LeagueScoringConfigDTO) -> Unit = {},
     onUploadSelected: (GalleryPhotoResult) -> Unit,
     onDeleteImage: (String) -> Unit,
+    onMapRevealCenterChange: (Offset) -> Unit = {},
+    onFloatingDockVisibilityChange: (Boolean) -> Unit = {},
     onValidationChange: (Boolean, List<String>) -> Unit = { _, _ -> },
     joinButton: @Composable (isValid: Boolean) -> Unit
 ) {
@@ -175,7 +188,6 @@ fun EventDetails(
     var isValid by remember { mutableStateOf(false) }
     var showStartPicker by remember { mutableStateOf(false) }
     var showEndPicker by remember { mutableStateOf(false) }
-    var revealCenter by remember { mutableStateOf(Offset.Zero) }
     var showImageSelector by rememberSaveable { mutableStateOf(false) }
     var showUploadImagePicker by rememberSaveable { mutableStateOf(false) }
     var previousSelection by remember { mutableStateOf<LatLng?>(null) }
@@ -225,6 +237,42 @@ fun EventDetails(
         }
     }
     var addSelfToEvent by remember { mutableStateOf(false) }
+    val isOrganizationEvent = remember(editEvent.organizationId) {
+        !editEvent.organizationId.isNullOrBlank()
+    }
+    val selectedRequiredTemplateIds = remember(editEvent.requiredTemplateIds) {
+        editEvent.requiredTemplateIds.normalizeTemplateIds()
+    }
+    val requiredTemplateOptions = remember(organizationTemplates) {
+        organizationTemplates.map { template ->
+            DropdownOption(
+                value = template.id,
+                label = template.toRequiredTemplateLabel(),
+            )
+        }
+    }
+    val requiredTemplateOptionLookup = remember(requiredTemplateOptions) {
+        requiredTemplateOptions.associateBy { option -> option.value }
+    }
+    val requiredTemplateOptionsWithFallback = remember(
+        requiredTemplateOptions,
+        requiredTemplateOptionLookup,
+        selectedRequiredTemplateIds,
+    ) {
+        val options = mutableListOf<DropdownOption>()
+        options.addAll(requiredTemplateOptions)
+        selectedRequiredTemplateIds.forEach { templateId ->
+            if (!requiredTemplateOptionLookup.containsKey(templateId)) {
+                options.add(
+                    DropdownOption(
+                        value = templateId,
+                        label = "Template $templateId",
+                    ),
+                )
+            }
+        }
+        options
+    }
     val leagueSlotErrors = remember(
         leagueTimeSlots,
         editEvent.eventType,
@@ -448,6 +496,30 @@ fun EventDetails(
         onValidationChange(isValid, validationErrors)
     }
 
+    LaunchedEffect(lazyListState) {
+        var lastIndex = 0
+        var lastOffset = 0
+        snapshotFlow {
+            lazyListState.firstVisibleItemIndex to lazyListState.firstVisibleItemScrollOffset
+        }.collect { (index, offset) ->
+            val atTop = index == 0 && offset <= 4
+            val scrollDelta = when {
+                index > lastIndex -> Int.MAX_VALUE
+                index < lastIndex -> Int.MIN_VALUE
+                else -> offset - lastOffset
+            }
+            val movedDown = scrollDelta >= 12
+            val movedUp = scrollDelta <= -12
+            when {
+                atTop -> onFloatingDockVisibilityChange(true)
+                movedDown -> onFloatingDockVisibilityChange(false)
+                movedUp -> onFloatingDockVisibilityChange(true)
+            }
+            lastIndex = index
+            lastOffset = offset
+        }
+    }
+
     val dateRangeText = remember(event.start, event.end) {
         val startDate = event.start.toLocalDateTime(TimeZone.currentSystemDefault()).date
         val endDate = event.end.toLocalDateTime(TimeZone.currentSystemDefault()).date
@@ -459,16 +531,117 @@ fun EventDetails(
             startStr
         }
     }
+    val eventMetaLine = remember(event.location, event.start) {
+        val localDateTime = event.start.toLocalDateTime(TimeZone.currentSystemDefault())
+        val dateText = localDateTime.date.format(dateFormat)
+        val timeText = localDateTime.time.format(timeFormat)
+        listOf(event.location, "$dateText • $timeText").filter { it.isNotBlank() }.joinToString(" • ")
+    }
+    val eventSportName = remember(eventWithRelations.sport, sports, event.sportId) {
+        eventWithRelations.sport?.name
+            ?: sports.firstOrNull { it.id == event.sportId }?.name
+            ?: event.sportId
+                ?.takeIf(String::isNotBlank)
+                ?.replace('_', ' ')
+                ?.replace('-', ' ')
+                ?.toTitleCase()
+            ?: "Sport not set"
+    }
+    val summaryTags = remember(event.eventType, eventSportName, event.teamSizeLimit, event.singleDivision) {
+        buildList {
+            add(eventSportName)
+            add(event.eventType.name.toTitleCase())
+            add("Teams of ${event.teamSizeLimit}")
+            add(if (event.singleDivision) "Single division" else "Multi division")
+        }
+    }
+    val hostDisplayName = remember(host, eventWithRelations.organization) {
+        val hostName = buildString {
+            val firstName = host?.firstName?.toTitleCase().orEmpty()
+            val lastName = host?.lastName?.toTitleCase().orEmpty()
+            if (firstName.isNotBlank()) {
+                append(firstName)
+            }
+            if (lastName.isNotBlank()) {
+                if (isNotEmpty()) append(" ")
+                append(lastName)
+            }
+        }.trim()
+        when {
+            hostName.isNotBlank() -> hostName
+            !eventWithRelations.organization?.name.isNullOrBlank() -> eventWithRelations.organization?.name.orEmpty()
+            else -> "Hosted by organizer"
+        }
+    }
+    val freeAgentCount = remember(event.freeAgentIds) { event.freeAgentIds.size }
+    val teamsCount = remember(eventWithRelations.teams) { eventWithRelations.teams.size }
+    val registrationSummary = remember(editEvent.registrationCutoffHours) {
+        editEvent.registrationCutoffHours.toRegistrationCutoffSummary()
+    }
+    val refundSummary = remember(event.cancellationRefundHours) {
+        event.cancellationRefundHours.toRefundSummary()
+    }
+    val priceSummary = remember(event.teamSignup, event.price) {
+        if (event.teamSignup) "${event.price.moneyFormat()} / team" else "${event.price.moneyFormat()} / player"
+    }
+    val basicsSummaryLine = remember(event.location, dateRangeText, hostDisplayName) {
+        listOf(hostDisplayName, event.location, dateRangeText)
+            .filter { it.isNotBlank() }
+            .joinToString(" • ")
+    }
+    val pricingSummaryLine = remember(priceSummary, registrationSummary, refundSummary) {
+        listOf(priceSummary, registrationSummary, refundSummary)
+            .filter { it.isNotBlank() }
+            .joinToString(" • ")
+    }
+    val competitionSummaryLine = remember(
+        event.teamSignup,
+        event.singleDivision,
+        event.maxParticipants,
+        event.teamSizeLimit,
+        event.eventType,
+        event.gamesPerOpponent,
+    ) {
+        val maxLabel = if (event.teamSignup) "Max teams ${event.maxParticipants}" else "Max players ${event.maxParticipants}"
+        val leagueSummary = if (event.eventType == EventType.LEAGUE) {
+            "Games/opponent ${event.gamesPerOpponent ?: 1}"
+        } else {
+            null
+        }
+        listOf(
+            if (event.singleDivision) "Single division" else "Multi division",
+            maxLabel,
+            "Team size ${event.teamSizeLimit}",
+            leagueSummary,
+        ).filterNotNull().joinToString(" • ")
+    }
+    val facilitiesSummaryLine = remember(fieldCount, eventWithRelations.timeSlots, editEvent.eventType) {
+        val fieldSummary = "${fieldCount.coerceAtLeast(0)} fields"
+        val slotSummary = if (editEvent.eventType == EventType.LEAGUE) {
+            "${eventWithRelations.timeSlots.size} weekly slots"
+        } else {
+            null
+        }
+        listOf(fieldSummary, slotSummary).filterNotNull().joinToString(" • ")
+    }
+    val heroHeightFraction = if (editView) 0.6f else 0.32f
+    val heroSpacerFraction = if (editView) 0.5f else 0.24f
+    val heroHeight = (getScreenHeight() * heroHeightFraction).dp
+    val heroSpacerHeight = (getScreenHeight() * heroSpacerFraction).dp
+    val heroSpacerHeightPx = with(LocalDensity.current) { heroSpacerHeight.toPx() }
+    val heroParallaxOffset = if (lazyListState.firstVisibleItemIndex == 0) {
+        lazyListState.firstVisibleItemScrollOffset.toFloat().coerceAtMost(heroSpacerHeightPx)
+    } else {
+        heroSpacerHeightPx
+    }
 
     CompositionLocalProvider(localImageScheme provides imageScheme) {
         Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
-            val scrollOffset = lazyListState.firstVisibleItemScrollOffset
-
             BackgroundImage(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height((getScreenHeight() * 0.6f).dp)
-                    .graphicsLayer(translationY = -scrollOffset.toFloat()),
+                    .height(heroHeight)
+                    .graphicsLayer(translationY = -heroParallaxOffset),
                 imageUrl = if (!editView) getImageUrl(event.imageId) else getImageUrl(editEvent.imageId),
             )
             LazyColumn(
@@ -481,7 +654,7 @@ fun EventDetails(
             ) {
 
                 item {
-                    Box(modifier = Modifier.height((getScreenHeight() * 0.5f).dp)) {
+                    Box(modifier = Modifier.height(heroSpacerHeight)) {
                         if (editView) {
                             Button(
                                 onClick = { showImageSelector = true },
@@ -543,7 +716,7 @@ fun EventDetails(
                         Column(
                             modifier = Modifier.fillMaxWidth().padding(16.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
+                            horizontalAlignment = if (editView) Alignment.CenterHorizontally else Alignment.Start
                         ) {
                             // Event Title - Animated
                             AnimatedContent(
@@ -572,34 +745,49 @@ fun EventDetails(
                                 }
                             }
 
-                            // Location Display
-                            Text(
-                                text = if (!editView) event.location else editEvent.location,
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-
-                            // Map Button
-                            Button(
-                                onClick = { mapComponent.toggleMap() },
-                                modifier = Modifier.onGloballyPositioned {
-                                    revealCenter = it.boundsInWindow().center
-                                },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color.Black, contentColor = Color.White
-                                )
-                            ) {
-                                Icon(Icons.Default.Place, contentDescription = null)
-                                Text(if (!editView) "View on Map" else "Edit Location")
-                            }
-
-                            if (!isLocationValid) {
+                            if (editView) {
                                 Text(
-                                    text = "Select a Location",
-                                    color = MaterialTheme.colorScheme.error
+                                    text = editEvent.location,
+                                    style = MaterialTheme.typography.bodyMedium,
                                 )
+                                Button(
+                                    onClick = { mapComponent.toggleMap() },
+                                    modifier = Modifier.onGloballyPositioned {
+                                        onMapRevealCenterChange(it.boundsInWindow().center)
+                                    },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color.Black, contentColor = Color.White
+                                    )
+                                ) {
+                                    Icon(Icons.Default.Place, contentDescription = null)
+                                    Text("Edit Location")
+                                }
+                                if (!isLocationValid) {
+                                    Text(
+                                        text = "Select a Location",
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            } else {
+                                Text(
+                                    text = eventMetaLine,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Color(localImageScheme.current.onSurfaceVariant)
+                                )
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    summaryTags.forEach { tag ->
+                                        SummaryTagChip(label = tag)
+                                    }
+                                }
                             }
 
-                            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            Box(
+                                Modifier.fillMaxWidth(),
+                                contentAlignment = if (editView) Alignment.Center else Alignment.CenterStart
+                            ) {
                                 joinButton(isValid)
                             }
                         }
@@ -610,22 +798,36 @@ fun EventDetails(
                     sectionId = "event_basics",
                     sectionTitle = "Event Basics",
                     collapsibleInEditMode = true,
+                    collapsibleInViewMode = true,
+                    viewSummary = basicsSummaryLine,
+                    defaultExpandedInViewMode = false,
                     isEditMode = editView,
                     animationDelay = 100,
                     viewContent = {
-                        CardSection(
-                            title = "Hosted by ${host?.firstName?.toTitleCase()} ${host?.lastName?.toTitleCase()}",
-                            content = event.description,
+                        DetailKeyValueList(
+                            rows = listOf(
+                                DetailRowSpec(label = "Hosted by", value = hostDisplayName),
+                                DetailRowSpec(label = "Season dates", value = dateRangeText),
+                                DetailRowSpec(label = "Location", value = event.location),
+                                DetailRowSpec(label = "Type", value = event.eventType.name.toTitleCase()),
+                                DetailRowSpec(label = "Sport", value = eventSportName),
+                            ),
                         )
-                        CardSection(
-                            "Type",
-                            event.eventType.name.toTitleCase(),
-                        )
-                        val sportName = eventWithRelations.sport?.name
-                            ?: sports.firstOrNull { it.id == event.sportId }?.name
-                            ?: "Not selected"
-                        CardSection("Sport", sportName)
-                        CardSection("Date", dateRangeText)
+                        if (event.description.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "About",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                ),
+                            )
+                            Text(
+                                text = event.description,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
                     },
                     editContent = {
                         TextInputField(
@@ -779,25 +981,19 @@ fun EventDetails(
                     sectionId = "registration_pricing",
                     sectionTitle = "Registration & Pricing",
                     collapsibleInEditMode = true,
+                    collapsibleInViewMode = true,
+                    viewSummary = pricingSummaryLine,
+                    defaultExpandedInViewMode = false,
                     isEditMode = editView,
                     animationDelay = 200,
                     viewContent = {
-                        CardSection("Price", event.price.moneyFormat())
-                        CardSection(
-                            "Registration Cutoff", when (editEvent.registrationCutoffHours) {
-                                0 -> "No Cutoff"
-                                1 -> "24 hours before event"
-                                2 -> "48 hours before event"
-                                else -> "No cutoff"
-                            }
-                        )
-                        CardSection(
-                            "Refund Policy", when (event.cancellationRefundHours) {
-                                0 -> "Automatic Refund"
-                                1 -> "24 hours before event"
-                                2 -> "48 hours before event"
-                                else -> "No cutoff (always allow refunds)"
-                            }
+                        DetailKeyValueList(
+                            rows = listOf(
+                                DetailRowSpec("Entry fee", priceSummary),
+                                DetailRowSpec("Registration closes", "$registrationSummary \u203A"),
+                                DetailRowSpec("Refunds", "$refundSummary \u203A"),
+                                DetailRowSpec("Waitlist", "${event.waitListIds.size}"),
+                            ),
                         )
                     },
                     editContent = {
@@ -834,6 +1030,43 @@ fun EventDetails(
                             },
                             modifier = Modifier.fillMaxWidth(),
                         )
+                        if (isOrganizationEvent) {
+                            PlatformDropdown(
+                                selectedValue = "",
+                                onSelectionChange = {},
+                                options = requiredTemplateOptionsWithFallback,
+                                label = "Required Documents",
+                                placeholder = if (organizationTemplatesLoading) {
+                                    "Loading templates..."
+                                } else {
+                                    "Select templates"
+                                },
+                                enabled = !organizationTemplatesLoading,
+                                multiSelect = true,
+                                selectedValues = selectedRequiredTemplateIds,
+                                onMultiSelectionChange = { values ->
+                                    val normalizedTemplateIds = values.normalizeTemplateIds()
+                                    onEditEvent { copy(requiredTemplateIds = normalizedTemplateIds) }
+                                },
+                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                            )
+                            if (!organizationTemplatesError.isNullOrBlank()) {
+                                Text(
+                                    text = organizationTemplatesError,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            } else if (
+                                !organizationTemplatesLoading &&
+                                requiredTemplateOptions.isEmpty()
+                            ) {
+                                Text(
+                                    text = "No templates yet. Create one in your organization Document Templates tab.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(localImageScheme.current.onSurfaceVariant),
+                                )
+                            }
+                        }
                         if (editEvent.priceCents > 0) {
                             CancellationRefundOptions(
                                 selectedOption = editEvent.cancellationRefundHours,
@@ -851,119 +1084,114 @@ fun EventDetails(
                     sectionId = "specifics",
                     sectionTitle = "Competition Settings",
                     collapsibleInEditMode = true,
+                    collapsibleInViewMode = true,
+                    viewSummary = competitionSummaryLine,
+                    defaultExpandedInViewMode = false,
                     isEditMode = editView,
                     animationDelay = 400,
                     defaultExpandedInEditMode = true,
                     viewContent = {
-                    Text(
-                        "Specifics",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = Color(localImageScheme.current.onSurface)
-                    )
-                    Text(
-                        "Divisions: ${event.divisions.toDivisionDisplayLabels(event.divisionDetails).joinToString()}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Color(localImageScheme.current.onSurface)
-                    )
-                    Text(
-                        "Max Participants: ${event.maxParticipants}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Color(localImageScheme.current.onSurface)
-                    )
-                    Text(
-                        "Team Sizes: ${event.teamSizeLimit.teamSizeFormat()}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Color(localImageScheme.current.onSurface)
-                    )
-                    Text(
-                        "Team Event: ${if (event.teamSignup) "Yes" else "No"}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Color(localImageScheme.current.onSurface)
-                    )
-                    Text(
-                        "Single Division: ${if (event.singleDivision) "Yes" else "No"}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Color(localImageScheme.current.onSurface)
-                    )
-                    if (event.doTeamsRef != null) {
-                        Text(
-                            "Teams Provide Referees: ${if (event.doTeamsRef) "Yes" else "No"}",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color(localImageScheme.current.onSurface)
+                        val maxParticipantsLabel =
+                            if (event.teamSignup) "Max teams" else "Max players"
+                        val divisionsText =
+                            event.divisions.toDivisionDisplayLabels(event.divisionDetails).joinToString()
+                                .ifBlank { "Not set" }
+                        DetailStatsGrid(
+                            items = listOf(
+                                DetailGridItem(maxParticipantsLabel, event.maxParticipants.toString()),
+                                DetailGridItem("Team size", event.teamSizeLimit.teamSizeFormat()),
+                                DetailGridItem("Team event", if (event.teamSignup) "Yes" else "No"),
+                                DetailGridItem("Division mode", if (event.singleDivision) "Single" else "Multi"),
+                                DetailGridItem("Teams", teamsCount.toString()),
+                                DetailGridItem("Free agents", freeAgentCount.toString()),
+                            ),
                         )
-                    }
-                    if (event.eventType == EventType.LEAGUE) {
-                        Text(
-                            "Games per Opponent: ${event.gamesPerOpponent ?: 1}",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color(localImageScheme.current.onSurface)
+                        DetailKeyValueList(
+                            rows = buildList {
+                                add(DetailRowSpec("Divisions", divisionsText))
+                                event.doTeamsRef?.let { doTeamsRef ->
+                                    add(
+                                        DetailRowSpec(
+                                            "Teams provide referees",
+                                            if (doTeamsRef) "Yes" else "No",
+                                        ),
+                                    )
+                                }
+                                when (event.eventType) {
+                                    EventType.LEAGUE -> {
+                                        add(DetailRowSpec("Games per opponent", "${event.gamesPerOpponent ?: 1}"))
+                                        if (event.usesSets) {
+                                            add(DetailRowSpec("Sets per match", "${event.setsPerMatch ?: 1}"))
+                                            add(DetailRowSpec("Set duration", "${event.setDurationMinutes ?: 20} minutes"))
+                                            if (event.pointsToVictory.isNotEmpty()) {
+                                                add(
+                                                    DetailRowSpec(
+                                                        "Points to victory",
+                                                        event.pointsToVictory.joinToString(),
+                                                    ),
+                                                )
+                                            }
+                                        } else {
+                                            add(
+                                                DetailRowSpec(
+                                                    "Match duration",
+                                                    "${event.matchDurationMinutes ?: 60} minutes",
+                                                ),
+                                            )
+                                        }
+                                        add(DetailRowSpec("Rest time", "${event.restTimeMinutes ?: 0} minutes"))
+                                        if (event.includePlayoffs) {
+                                            add(
+                                                DetailRowSpec(
+                                                    "Playoffs",
+                                                    "${event.playoffTeamCount ?: 0} teams",
+                                                ),
+                                            )
+                                        }
+                                    }
+
+                                    EventType.TOURNAMENT -> {
+                                        add(
+                                            DetailRowSpec(
+                                                "Bracket",
+                                                if (event.doubleElimination) "Double elimination" else "Single elimination",
+                                            ),
+                                        )
+                                        add(DetailRowSpec("Winner set count", event.winnerSetCount.toString()))
+                                        if (event.winnerBracketPointsToVictory.isNotEmpty()) {
+                                            add(
+                                                DetailRowSpec(
+                                                    "Winner points",
+                                                    event.winnerBracketPointsToVictory.joinToString(),
+                                                ),
+                                            )
+                                        }
+                                        if (event.doubleElimination) {
+                                            add(
+                                                DetailRowSpec(
+                                                    "Loser set count",
+                                                    event.loserSetCount.toString(),
+                                                ),
+                                            )
+                                            if (event.loserBracketPointsToVictory.isNotEmpty()) {
+                                                add(
+                                                    DetailRowSpec(
+                                                        "Loser points",
+                                                        event.loserBracketPointsToVictory.joinToString(),
+                                                    ),
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    EventType.EVENT -> {
+                                        // No additional event-only rows for now.
+                                    }
+                                }
+                            },
                         )
-                        if (event.usesSets) {
-                            Text(
-                                "Sets per Match: ${event.setsPerMatch ?: 1}",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = Color(localImageScheme.current.onSurface)
-                            )
-                            Text(
-                                "Set Duration: ${(event.setDurationMinutes ?: 20)} minutes",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = Color(localImageScheme.current.onSurface)
-                            )
-                            Text(
-                                "Points to Victory: ${event.pointsToVictory.joinToString()}",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = Color(localImageScheme.current.onSurface)
-                            )
-                        } else {
-                            Text(
-                                "Match Duration: ${(event.matchDurationMinutes ?: 60)} minutes",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = Color(localImageScheme.current.onSurface)
-                            )
-                        }
-                        Text(
-                            "Rest Time: ${(event.restTimeMinutes ?: 0)} minutes",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color(localImageScheme.current.onSurface)
-                        )
-                        if (event.includePlayoffs) {
-                            Text(
-                                "Playoffs: Included (${event.playoffTeamCount ?: 0} teams)",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = Color(localImageScheme.current.onSurface)
-                            )
-                        }
-                    }
-                    if (event.eventType == EventType.TOURNAMENT) {
-                        Text(
-                            if (event.doubleElimination) "Double Elimination" else "Single Elimination",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color(localImageScheme.current.onSurface)
-                        )
-                        Text(
-                            "Winner Set Count: ${event.winnerSetCount}",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color(localImageScheme.current.onSurface)
-                        )
-                        Text(
-                            "Winner Points: ${event.winnerBracketPointsToVictory.joinToString()}",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color(localImageScheme.current.onSurface)
-                        )
-                        if (event.doubleElimination) {
-                            Text(
-                                "Loser Set Count: ${event.loserSetCount}",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = Color(localImageScheme.current.onSurface)
-                            )
-                            Text(
-                                "Loser Points: ${event.loserBracketPointsToVictory.joinToString()}",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = Color(localImageScheme.current.onSurface)
-                            )
-                        }
-                    }
-                }, editContent = {
+                    },
+                    editContent = {
                     val label = if (!editEvent.teamSignup) stringResource(Res.string.max_players)
                     else stringResource(Res.string.max_teams)
                     val setCountOptions = (1..5).map { count ->
@@ -1413,14 +1641,26 @@ fun EventDetails(
                         sectionId = "facility_schedule",
                         sectionTitle = "Facilities & Scheduling",
                         collapsibleInEditMode = true,
+                        collapsibleInViewMode = true,
+                        viewSummary = facilitiesSummaryLine,
+                        defaultExpandedInViewMode = false,
                         defaultExpandedInEditMode = false,
                         isEditMode = editView,
                         animationDelay = 450,
                         viewContent = {
-                            CardSection("Field Count", (editEvent.fieldCount ?: 0).toString())
-                            if (editEvent.eventType == EventType.LEAGUE) {
-                                CardSection("Weekly Timeslots", "${eventWithRelations.timeSlots.size}")
-                            }
+                            DetailKeyValueList(
+                                rows = buildList {
+                                    add(DetailRowSpec("Field count", (editEvent.fieldCount ?: 0).toString()))
+                                    if (editEvent.eventType == EventType.LEAGUE) {
+                                        add(
+                                            DetailRowSpec(
+                                                "Weekly timeslots",
+                                                "${eventWithRelations.timeSlots.size}",
+                                            ),
+                                        )
+                                    }
+                                },
+                            )
                         },
                         editContent = {
                             LeagueScheduleFields(
@@ -1496,8 +1736,12 @@ fun EventDetails(
         onPlaceSelected = { place ->
             if (editView) {
                 onPlaceSelected(place)
-                previousSelection = LatLng(place.coordinates[1], place.coordinates[0])
+                previousSelection = LatLng(place.latitude, place.longitude)
+                mapComponent.toggleMap()
             }
+        },
+        onPlaceSelectionPoint = { x, y ->
+            onMapRevealCenterChange(Offset(x, y))
         },
         canClickPOI = editView,
         focusedLocation = if (editEvent.location.isNotBlank()) {
@@ -1512,7 +1756,7 @@ fun EventDetails(
         } else {
             null
         },
-        revealCenter = revealCenter,
+        revealCenter = mapRevealCenter,
         onBackPressed = { mapComponent.toggleMap() },
     )
 
@@ -1536,18 +1780,29 @@ fun EventDetails(
 
     var showImageDelete by remember { mutableStateOf(false) }
     var deleteImage by remember { mutableStateOf("") }
-
     val loader = rememberNetworkLoader()
     val dominantColorState = rememberDominantColorState(loader)
 
     LaunchedEffect(editEvent.imageId) {
-        if (editEvent.imageId.isNotBlank()) {
+        val imageId = editEvent.imageId.trim()
+        if (imageId.isBlank()) {
             isColorLoaded = false
-            loader.load(Url(getImageUrl(editEvent.imageId)))
-            dominantColorState.updateFrom(Url(getImageUrl(editEvent.imageId)))
-            onEditEvent { copy(imageId = editEvent.imageId) }
-            isColorLoaded = true
+            return@LaunchedEffect
         }
+
+        isColorLoaded = false
+        onEditEvent { copy(imageId = imageId) }
+        val imageUrl = Url(getImageUrl(imageId))
+        runCatching {
+            loader.load(imageUrl)
+            dominantColorState.updateFrom(imageUrl)
+        }.onFailure { throwable ->
+            Napier.w(
+                message = "Failed to extract event image colors for imageId=$imageId",
+                throwable = throwable
+            )
+        }
+        isColorLoaded = true
     }
 
     if (showImageSelector) {
@@ -1597,61 +1852,107 @@ fun EventDetails(
     }
 }
 
+@Composable
+private fun SummaryTagChip(label: String) {
+    Box(
+        modifier = Modifier
+            .background(
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                shape = RoundedCornerShape(12.dp)
+            )
+            .padding(horizontal = 10.dp, vertical = 6.dp)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+    }
+}
+
 fun LazyListScope.animatedCardSection(
     sectionId: String,
     sectionTitle: String? = null,
     collapsibleInEditMode: Boolean = false,
+    collapsibleInViewMode: Boolean = false,
     defaultExpandedInEditMode: Boolean = true,
+    defaultExpandedInViewMode: Boolean = true,
+    viewSummary: String? = null,
+    editSummary: String? = null,
     isEditMode: Boolean,
     animationDelay: Int = 0,
     viewContent: @Composable() (ColumnScope.() -> Unit),
     editContent: @Composable() (ColumnScope.() -> Unit)
 ) {
     item(key = sectionId) {
+        val isCollapsible = if (isEditMode) collapsibleInEditMode else collapsibleInViewMode
+        val defaultExpanded = if (isEditMode) defaultExpandedInEditMode else defaultExpandedInViewMode
         var expanded by rememberSaveable(sectionId, isEditMode) {
-            mutableStateOf(if (isEditMode) defaultExpandedInEditMode else true)
+            mutableStateOf(defaultExpanded)
         }
         LaunchedEffect(isEditMode) {
-            if (!isEditMode) {
-                expanded = true
-            }
+            expanded = if (isEditMode) defaultExpandedInEditMode else defaultExpandedInViewMode
         }
 
-        Card(
-            modifier = Modifier.fillMaxSize(),
-            shape = RectangleShape,
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surface),
         ) {
             Card(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp, horizontal = 16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 6.dp, horizontal = 16.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
             ) {
                 Column(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    if (isEditMode && collapsibleInEditMode && sectionTitle != null) {
+                    if (sectionTitle != null) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text(
-                                text = sectionTitle,
-                                style = MaterialTheme.typography.titleMedium,
-                                color = Color(localImageScheme.current.onSurface),
-                            )
-                            TextButton(onClick = { expanded = !expanded }) {
-                                Icon(
-                                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                    contentDescription = if (expanded) "Collapse section" else "Expand section",
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                Text(
+                                    text = sectionTitle,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = Color(localImageScheme.current.onSurface),
                                 )
+                                if (isCollapsible && !expanded) {
+                                    val summaryText = if (isEditMode) editSummary else viewSummary
+                                    if (!summaryText.isNullOrBlank()) {
+                                        Text(
+                                            text = summaryText,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                }
+                            }
+                            if (isCollapsible) {
+                                TextButton(onClick = { expanded = !expanded }) {
+                                    Icon(
+                                        imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                        contentDescription = if (expanded) "Collapse section" else "Expand section",
+                                    )
+                                }
                             }
                         }
                     }
 
                     AnimatedVisibility(
-                        visible = !isEditMode || !collapsibleInEditMode || expanded,
+                        visible = !isCollapsible || expanded,
                     ) {
                         AnimatedContent(
                             targetState = isEditMode,
@@ -1660,7 +1961,7 @@ fun LazyListScope.animatedCardSection(
                         ) { editMode ->
                             Column(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalAlignment = Alignment.CenterHorizontally,
+                                horizontalAlignment = Alignment.Start,
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 if (editMode) {
@@ -1677,22 +1978,181 @@ fun LazyListScope.animatedCardSection(
     }
 }
 
+private data class DetailRowSpec(
+    val label: String,
+    val value: String?,
+)
+
+private data class DetailGridItem(
+    val label: String,
+    val value: String?,
+)
+
 @Composable
-fun ColumnScope.CardSection(
-    title: String, content: String
+private fun DetailKeyValueList(
+    rows: List<DetailRowSpec>,
+    modifier: Modifier = Modifier,
 ) {
-    Text(
-        text = title,
-        style = MaterialTheme.typography.titleMedium,
-        textAlign = TextAlign.Center,
-        color = Color(localImageScheme.current.onSurface)
-    )
-    Text(
-        text = content,
-        style = MaterialTheme.typography.bodyMedium,
-        textAlign = TextAlign.Center,
-        color = Color(localImageScheme.current.onSurface)
-    )
+    val normalizedRows = rows
+        .map { row -> row.copy(value = row.value?.trim()) }
+        .filter { !it.value.isNullOrBlank() }
+    if (normalizedRows.isEmpty()) return
+
+    Column(
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        normalizedRows.forEachIndexed { index, row ->
+            DetailKeyValueRow(
+                label = row.label,
+                value = row.value.orEmpty(),
+            )
+            if (index < normalizedRows.lastIndex) {
+                HorizontalDivider(
+                    color = MaterialTheme.colorScheme.outlineVariant,
+                    thickness = 1.dp,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetailKeyValueRow(
+    label: String,
+    value: String,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 44.dp)
+            .padding(vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.weight(0.44f),
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            ),
+        )
+        Text(
+            text = value,
+            modifier = Modifier.weight(0.56f),
+            style = MaterialTheme.typography.bodyMedium.copy(
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+            ),
+            color = MaterialTheme.colorScheme.onSurface,
+            textAlign = TextAlign.End,
+        )
+    }
+}
+
+@Composable
+private fun DetailStatsGrid(
+    items: List<DetailGridItem>,
+    modifier: Modifier = Modifier,
+) {
+    val normalizedItems = items
+        .map { item -> item.copy(value = item.value?.trim()) }
+        .filter { !it.value.isNullOrBlank() }
+    if (normalizedItems.isEmpty()) return
+
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        normalizedItems.chunked(2).forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                row.forEach { item ->
+                    Card(
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                        ),
+                        border = BorderStroke(
+                            1.dp,
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                        ),
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 9.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            Text(
+                                text = item.label,
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                ),
+                            )
+                            Text(
+                                text = item.value.orEmpty(),
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                ),
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                    }
+                }
+                if (row.size == 1) {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+private fun Int.toRegistrationCutoffSummary(): String {
+    return when (this) {
+        0 -> "No cutoff"
+        1 -> "24h before start"
+        2 -> "48h before start"
+        else -> "No cutoff"
+    }
+}
+
+private fun Int.toRefundSummary(): String {
+    return when (this) {
+        0 -> "Automatic refunds"
+        1 -> "24h before start"
+        2 -> "48h before start"
+        else -> "No cutoff"
+    }
+}
+
+private fun List<String>.normalizeTemplateIds(): List<String> {
+    return map { templateId -> templateId.trim() }
+        .filter(String::isNotBlank)
+        .distinct()
+}
+
+private fun OrganizationTemplateDocument.toRequiredTemplateLabel(): String {
+    val normalizedTitle = title.trim().ifBlank { "Untitled Template" }
+    val normalizedType = if (type.trim().equals("TEXT", ignoreCase = true)) "TEXT" else "PDF"
+    val signerLabel = templateSignerTypeLabel(requiredSignerType)
+    return "$normalizedTitle ($normalizedType, $signerLabel)"
+}
+
+private fun templateSignerTypeLabel(rawType: String?): String {
+    return when (
+        rawType?.trim()?.uppercase()?.replace('-', '_')?.replace(' ', '_')?.replace('/', '_')
+    ) {
+        "PARENT_GUARDIAN" -> "Parent/Guardian"
+        "CHILD" -> "Child"
+        "PARENT_GUARDIAN_CHILD", "PARENT_GUARDIAN_AND_CHILD" -> "Parent/Guardian + Child"
+        else -> "Participant"
+    }
 }
 
 @Composable

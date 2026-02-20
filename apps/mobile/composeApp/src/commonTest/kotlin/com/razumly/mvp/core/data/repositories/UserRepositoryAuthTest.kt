@@ -22,13 +22,16 @@ import com.razumly.mvp.core.util.jsonMVP
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
+import io.ktor.client.plugins.HttpResponseValidator
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.content.OutgoingContent
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -39,6 +42,8 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
+import kotlin.test.assertTrue
 
 private class UserRepositoryAuth_InMemoryAuthTokenStore(
     private var token: String = "",
@@ -290,6 +295,136 @@ class UserRepositoryAuthTest {
         assertEquals("u_signup", created.id)
         assertEquals("signup_token", tokenStore.get())
         assertEquals(true, capturedBody.contains("\"dateOfBirth\":\"2008-05-02\""))
+        assertEquals(true, capturedBody.contains("\"enforceProfileConflictSelection\":true"))
+    }
+
+    @Test
+    fun createNewUser_returns_profile_conflict_exception_for_conflicting_claim_signup() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+
+        val engine = MockEngine {
+            respond(
+                content = """
+                    {
+                      "error":"Profile selection required",
+                      "code":"PROFILE_CONFLICT",
+                      "conflict":{
+                        "fields":["firstName","dateOfBirth"],
+                        "existing":{"firstName":"Existing","dateOfBirth":"2010-01-01"},
+                        "incoming":{"firstName":"Incoming","dateOfBirth":"2011-02-02"}
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.Conflict,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+            HttpResponseValidator {
+                validateResponse { response ->
+                    if (!response.status.isSuccess()) {
+                        throw com.razumly.mvp.core.network.ApiException(
+                            statusCode = response.status.value,
+                            url = response.call.request.url.toString(),
+                            responseBody = response.bodyAsText(),
+                        )
+                    }
+                }
+            }
+        }
+
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        val result = repo.createNewUser(
+            email = "signup@example.com",
+            password = "password123",
+            firstName = "Incoming",
+            lastName = "User",
+            userName = "incoming_user",
+            dateOfBirth = "2011-02-02",
+        )
+
+        assertTrue(result.isFailure)
+        val conflictException = assertIs<SignupProfileConflictException>(result.exceptionOrNull())
+        assertEquals(
+            setOf(SignupProfileField.FIRST_NAME, SignupProfileField.DATE_OF_BIRTH),
+            conflictException.conflict.fields,
+        )
+        assertEquals("Existing", conflictException.conflict.existing.firstName)
+        assertEquals("Incoming", conflictException.conflict.incoming.firstName)
+    }
+
+    @Test
+    fun createNewUser_serializes_profile_selection_when_retrying_conflict() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+        var capturedBody = ""
+
+        val engine = MockEngine { request ->
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+            respond(
+                content = """
+                    {
+                      "user": { "id":"u_signup", "email":"signup@example.com", "name":"Signup User" },
+                      "session": { "userId":"u_signup", "isAdmin":false },
+                      "token":"signup_token",
+                      "profile": {
+                        "id":"u_signup",
+                        "firstName":"Existing",
+                        "lastName":"Up",
+                        "userName":"existing_user",
+                        "teamIds":[],
+                        "friendIds":[],
+                        "friendRequestIds":[],
+                        "friendRequestSentIds":[],
+                        "followingIds":[],
+                        "uploadedImages":[],
+                        "hasStripeAccount":false
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        repo.createNewUser(
+            email = "signup@example.com",
+            password = "password123",
+            firstName = "Incoming",
+            lastName = "Up",
+            userName = "incoming_user",
+            dateOfBirth = "2011-02-02",
+            profileSelection = SignupProfileSelection(
+                firstName = "Existing",
+                lastName = "Up",
+                userName = "existing_user",
+                dateOfBirth = "2010-01-01",
+            ),
+        ).getOrThrow()
+
+        assertEquals(true, capturedBody.contains("\"profileSelection\""))
+        assertEquals(true, capturedBody.contains("\"firstName\":\"Existing\""))
+        assertEquals(true, capturedBody.contains("\"userName\":\"existing_user\""))
     }
 
     @Test
@@ -484,5 +619,62 @@ class UserRepositoryAuthTest {
         )
 
         assertEquals(true, result.isFailure)
+    }
+
+    @Test
+    fun getUsers_requests_ids_in_batch_query() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+        var requestCount = 0
+
+        val engine = MockEngine { request ->
+            requestCount += 1
+            assertEquals("/api/users", request.url.encodedPath)
+            assertEquals(HttpMethod.Get, request.method)
+            val ids = request.url.parameters["ids"]
+            assertEquals("user_1,user_2,user_3", ids)
+            respond(
+                content = """
+                    {
+                      "users": [
+                        {
+                          "id":"user_1",
+                          "firstName":"One",
+                          "lastName":"User",
+                          "userName":"user_one"
+                        },
+                        {
+                          "id":"user_2",
+                          "firstName":"Two",
+                          "lastName":"User",
+                          "userName":"user_two"
+                        },
+                        {
+                          "id":"user_3",
+                          "firstName":"Three",
+                          "lastName":"User",
+                          "userName":"user_three"
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        val users = repo.getUsers(listOf("user_1", "user_2", "user_3")).getOrThrow()
+
+        assertEquals(1, requestCount)
+        assertEquals(listOf("user_1", "user_2", "user_3"), users.map { it.id })
     }
 }

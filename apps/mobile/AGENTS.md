@@ -9,6 +9,11 @@ When writing complex features or significant refactors, use an ExecPlan (as desc
 ## Backend & Data Contract Source of Truth
 The backend and database definitions live in `~/Projects/MVP/mvp-site/` (WSL path: `/home/camka/Projects/MVP/mvp-site/`, Windows UNC path: `\\wsl.localhost\Ubuntu\home\camka\Projects\MVP\mvp-site`). For all API endpoint usage and request/response data types in this repo, reference that project as the source of truth. Do not invent or drift endpoint paths, payloads, or shared data models without first aligning with `mvp-site`.
 
+## Batch & Atomic API Standards
+Any feature that loads collections of entities must expose and consume batch retrieval APIs (typically `ids` query params with chunking) instead of N per-item requests. This applies to users, organizations, events, teams, fields, and timeslots, especially on event load paths.
+When adding or editing list-fetching code, ensure both backend route support and client repository/service usage are updated together so the runtime path actually uses batching.
+Any save flow that updates multiple related records (for example event match edits) must use a bulk endpoint and execute inside a single database transaction. Partial success is not allowed: on any failure, rollback all changes and return a clear error response that clients can surface.
+
 ## Build, Test, and Development Commands
 - `./gradlew :composeApp:assembleDebug` builds the Android artifact with the shared Compose UI (PowerShell equivalent: `.\gradlew :composeApp:assembleDebug`).
 - `./gradlew :composeApp:run` launches the desktop runtime for Compose smoke testing.

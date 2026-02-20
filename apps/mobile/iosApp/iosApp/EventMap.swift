@@ -14,6 +14,7 @@ struct EventMap: View {
     var component: MapComponent
     var onEventSelected: (Event) -> Void
     var onPlaceSelected: (MVPPlace) -> Void
+    var onPlaceSelectionPoint: (Float, Float) -> Void
     var canClickPOI: Bool
     var focusedEvent: Event?
     var focusedLocation: LatLng?
@@ -31,6 +32,7 @@ struct EventMap: View {
         component: MapComponent,
         onEventSelected: @escaping (Event) -> Void,
         onPlaceSelected: @escaping (MVPPlace) -> Void,
+        onPlaceSelectionPoint: @escaping (Float, Float) -> Void,
         canClickPOI: Bool,
         focusedLocation: LatLng?,
         focusedEvent: Event?,
@@ -39,6 +41,7 @@ struct EventMap: View {
         self.component = component
         self.onEventSelected = onEventSelected
         self.onPlaceSelected = onPlaceSelected
+        self.onPlaceSelectionPoint = onPlaceSelectionPoint
         self.canClickPOI = canClickPOI
         self.focusedLocation = focusedLocation
         self.focusedEvent = focusedEvent
@@ -62,6 +65,7 @@ struct EventMap: View {
                     focusedEvent: focusedEvent,
                     onEventSelected: onEventSelected,
                     onPlaceSelected: onPlaceSelected,
+                    onPlaceSelectionPoint: onPlaceSelectionPoint,
                     places: mergedPlaces,
                     revealCenter: revealCenter
                 )
@@ -159,6 +163,7 @@ struct GoogleMapView: UIViewRepresentable {
     let focusedEvent: Event?
     let onEventSelected: (Event) -> Void
     let onPlaceSelected: (MVPPlace) -> Void
+    let onPlaceSelectionPoint: (Float, Float) -> Void
     let places: [MVPPlace]
     let revealCenter: CGPoint
     
@@ -241,7 +246,8 @@ struct GoogleMapView: UIViewRepresentable {
         Coordinator(
             parent: self,
             onEventSelected: onEventSelected,
-            onPlaceSelected: onPlaceSelected
+            onPlaceSelected: onPlaceSelected,
+            onPlaceSelectionPoint: onPlaceSelectionPoint
         )
     }
     
@@ -254,16 +260,19 @@ class Coordinator: NSObject, GMSMapViewDelegate {
     let parent: GoogleMapView
     let onEventSelected: (Event) -> Void
     let onPlaceSelected: (MVPPlace) -> Void
+    let onPlaceSelectionPoint: (Float, Float) -> Void
     
     var placeMarkers: [GMSMarker] = []
     var currentPOIMarker: GMSMarker?
     
     init(parent: GoogleMapView,
          onEventSelected: @escaping (Event) -> Void,
-         onPlaceSelected: @escaping (MVPPlace) -> Void) {
+         onPlaceSelected: @escaping (MVPPlace) -> Void,
+         onPlaceSelectionPoint: @escaping (Float, Float) -> Void) {
         self.parent = parent
         self.onEventSelected = onEventSelected
         self.onPlaceSelected = onPlaceSelected
+        self.onPlaceSelectionPoint = onPlaceSelectionPoint
     }
     
     func clearAllMarkers() {
@@ -288,6 +297,12 @@ class Coordinator: NSObject, GMSMapViewDelegate {
     // MARK: - Marker Click Handling
     
     func mapView(_ mapView: GMSMapView, didTap marker: GMSMarker) -> Bool {
+        if parent.canClickPOI,
+           let selectedMarker = mapView.selectedMarker,
+           selectedMarker === marker,
+           selectPlace(from: marker, mapView: mapView) {
+            return true
+        }
         // Show the custom info window
         mapView.selectedMarker = marker
         return true // Return true to prevent default behavior
@@ -297,22 +312,8 @@ class Coordinator: NSObject, GMSMapViewDelegate {
     func mapView(_ mapView: GMSMapView, didTapInfoWindowOf marker: GMSMarker) {
         if let eventData = marker.userData as? EventMarkerData {
             onEventSelected(eventData.event)
-        } else if let placeData = marker.userData as? PlaceMarkerData {
-            onPlaceSelected(placeData.place)
-        } else if let poiData = marker.userData as? POIMarkerData {
-            // Handle POI selection - convert to MVPPlace
-            Task {
-                do {
-                    let place = try await parent.component.getPlace(placeId: poiData.placeId)
-                    if let place = place {
-                        await MainActor.run {
-                            self.onPlaceSelected(place)
-                        }
-                    }
-                } catch {
-                    print("Error getting place details: \(error)")
-                }
-            }
+        } else {
+            _ = selectPlace(from: marker, mapView: mapView)
         }
     }
     
@@ -397,7 +398,9 @@ class Coordinator: NSObject, GMSMapViewDelegate {
     }
     
     private func createPlaceInfoWindow(for place: MVPPlace) -> UIView {
-        let containerView = UIView(frame: CGRect(x: 0, y: 0, width: 200, height: 60))
+        let hasSelectionHint = parent.canClickPOI
+        let containerHeight: CGFloat = hasSelectionHint ? 84 : 60
+        let containerView = UIView(frame: CGRect(x: 0, y: 0, width: 200, height: containerHeight))
         containerView.backgroundColor = UIColor.systemBackground
         containerView.layer.cornerRadius = 8
         containerView.layer.shadowColor = UIColor.black.cgColor
@@ -405,18 +408,28 @@ class Coordinator: NSObject, GMSMapViewDelegate {
         containerView.layer.shadowOpacity = 0.2
         containerView.layer.shadowRadius = 4
         
-        let nameLabel = UILabel(frame: CGRect(x: 12, y: 12, width: 176, height: 36))
+        let nameLabel = UILabel(frame: CGRect(x: 12, y: 12, width: 176, height: hasSelectionHint ? 28 : 36))
         nameLabel.text = place.name
         nameLabel.font = UIFont.systemFont(ofSize: 14)
         nameLabel.numberOfLines = 2
         nameLabel.textColor = UIColor.label
         containerView.addSubview(nameLabel)
+
+        if hasSelectionHint {
+            let hintLabel = UILabel(frame: CGRect(x: 12, y: 44, width: 176, height: 20))
+            hintLabel.text = "Click to select"
+            hintLabel.font = UIFont.systemFont(ofSize: 12, weight: .semibold)
+            hintLabel.textColor = UIColor.systemBlue
+            containerView.addSubview(hintLabel)
+        }
         
         return containerView
     }
     
     private func createPOIInfoWindow(for name: String) -> UIView {
-        let containerView = UIView(frame: CGRect(x: 0, y: 0, width: 200, height: 50))
+        let hasSelectionHint = parent.canClickPOI
+        let containerHeight: CGFloat = hasSelectionHint ? 74 : 50
+        let containerView = UIView(frame: CGRect(x: 0, y: 0, width: 200, height: containerHeight))
         containerView.backgroundColor = UIColor.systemBackground
         containerView.layer.cornerRadius = 8
         containerView.layer.shadowColor = UIColor.black.cgColor
@@ -424,13 +437,46 @@ class Coordinator: NSObject, GMSMapViewDelegate {
         containerView.layer.shadowOpacity = 0.2
         containerView.layer.shadowRadius = 4
         
-        let nameLabel = UILabel(frame: CGRect(x: 12, y: 12, width: 176, height: 26))
+        let nameLabel = UILabel(frame: CGRect(x: 12, y: 12, width: 176, height: hasSelectionHint ? 20 : 26))
         nameLabel.text = name
         nameLabel.font = UIFont.systemFont(ofSize: 14)
         nameLabel.textColor = UIColor.label
         containerView.addSubview(nameLabel)
+
+        if hasSelectionHint {
+            let hintLabel = UILabel(frame: CGRect(x: 12, y: 36, width: 176, height: 20))
+            hintLabel.text = "Click to select"
+            hintLabel.font = UIFont.systemFont(ofSize: 12, weight: .semibold)
+            hintLabel.textColor = UIColor.systemBlue
+            containerView.addSubview(hintLabel)
+        }
         
         return containerView
+    }
+
+    private func selectPlace(from marker: GMSMarker, mapView: GMSMapView) -> Bool {
+        let selectedPoint = mapView.projection.point(for: marker.position)
+        onPlaceSelectionPoint(Float(selectedPoint.x), Float(selectedPoint.y))
+
+        if let placeData = marker.userData as? PlaceMarkerData {
+            onPlaceSelected(placeData.place)
+            return true
+        } else if let poiData = marker.userData as? POIMarkerData {
+            Task {
+                do {
+                    let place = try await parent.component.getPlace(placeId: poiData.placeId)
+                    if let place = place {
+                        await MainActor.run {
+                            self.onPlaceSelected(place)
+                        }
+                    }
+                } catch {
+                    print("Error getting place details: \(error)")
+                }
+            }
+            return true
+        }
+        return false
     }
     
     private func createTransparentIcon() -> UIImage {

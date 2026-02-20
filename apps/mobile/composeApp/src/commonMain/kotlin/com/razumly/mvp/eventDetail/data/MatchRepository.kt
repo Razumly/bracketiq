@@ -7,9 +7,11 @@ import com.razumly.mvp.core.data.repositories.IMVPRepository
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResponse
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
 import com.razumly.mvp.core.network.MvpApiClient
+import com.razumly.mvp.core.network.dto.BulkMatchUpdateRequestDto
 import com.razumly.mvp.core.network.dto.MatchResponseDto
 import com.razumly.mvp.core.network.dto.MatchUpdateDto
 import com.razumly.mvp.core.network.dto.MatchesResponseDto
+import com.razumly.mvp.core.network.dto.toBulkMatchUpdateEntryDto
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -27,6 +29,7 @@ interface IMatchRepository : IMVPRepository {
     suspend fun getMatch(matchId: String): Result<MatchMVP>
     fun getMatchFlow(matchId: String): Flow<Result<MatchWithRelations>>
     suspend fun updateMatch(match: MatchMVP): Result<Unit>
+    suspend fun updateMatchesBulk(matches: List<MatchMVP>): Result<List<MatchMVP>>
     fun getMatchesOfTournamentFlow(tournamentId: String): Flow<Result<List<MatchWithRelations>>>
     suspend fun updateMatchFinished(match: MatchMVP, time: Instant): Result<Unit>
     suspend fun getMatchesOfTournament(tournamentId: String): Result<List<MatchMVP>>
@@ -92,6 +95,36 @@ class MatchRepository(
         saveCall = { updatedMatch -> databaseService.getMatchDao.upsertMatch(updatedMatch) },
         onReturn = {},
     )
+
+    override suspend fun updateMatchesBulk(matches: List<MatchMVP>): Result<List<MatchMVP>> {
+        val normalizedMatches = matches.filter { it.id.isNotBlank() }
+        if (normalizedMatches.isEmpty()) return Result.success(emptyList())
+
+        val eventIds = normalizedMatches.map { it.eventId }.distinct().filter(String::isNotBlank)
+        if (eventIds.size != 1) {
+            return Result.failure(IllegalArgumentException("Bulk match update requires matches from one event."))
+        }
+        val eventId = eventIds.first()
+
+        return multiResponse(
+            getRemoteData = {
+                val response = api.patch<BulkMatchUpdateRequestDto, MatchesResponseDto>(
+                    path = "api/events/$eventId/matches",
+                    body = BulkMatchUpdateRequestDto(
+                        matches = normalizedMatches.map { it.toBulkMatchUpdateEntryDto() },
+                    ),
+                )
+                response.matches.mapNotNull { it.toMatchOrNull() }
+            },
+            getLocalData = {
+                val requestedIds = normalizedMatches.map { it.id }.toSet()
+                databaseService.getMatchDao.getMatchesOfTournament(eventId)
+                    .filter { match -> requestedIds.contains(match.id) }
+            },
+            saveData = { updated -> databaseService.getMatchDao.upsertMatches(updated) },
+            deleteData = { ids -> databaseService.getMatchDao.deleteMatchesById(ids) },
+        )
+    }
 
     override fun getMatchesOfTournamentFlow(tournamentId: String): Flow<Result<List<MatchWithRelations>>> =
         callbackFlow {

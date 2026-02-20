@@ -57,6 +57,7 @@ actual fun EventMap(
     component: MapComponent,
     onEventSelected: (event: Event) -> Unit,
     onPlaceSelected: (place: MVPPlace) -> Unit,
+    onPlaceSelectionPoint: (x: Float, y: Float) -> Unit,
     canClickPOI: Boolean,
     modifier: Modifier,
     focusedLocation: dev.icerock.moko.geo.LatLng,
@@ -77,6 +78,57 @@ actual fun EventMap(
     var selectedPOI by remember { mutableStateOf<PointOfInterest?>(null) }
     var isAnimating by remember { mutableStateOf(false) }
     val poiMarkerState = remember { MarkerState() }
+    var armedPlaceId by remember { mutableStateOf<String?>(null) }
+    var armedSearchedPlaceId by remember { mutableStateOf<String?>(null) }
+    var armedPoiPlaceId by remember { mutableStateOf<String?>(null) }
+    val placeSelectionHint = "Click to select"
+    fun updateRevealCenterFor(latLng: LatLng) {
+        cameraPositionState.projection
+            ?.toScreenLocation(latLng)
+            ?.let { point ->
+                onPlaceSelectionPoint(point.x.toFloat(), point.y.toFloat())
+            }
+    }
+
+    suspend fun selectSearchedPlace(searchResult: Place) {
+        val markerLatLng = searchResult.location
+        val selectedPlace = runCatching {
+            component.getMVPPlace(searchResult)
+        }.getOrElse { throwable ->
+            Napier.e(
+                message = "Failed to resolve searched place details. Falling back to marker data.",
+                throwable = throwable
+            )
+            val fallbackLatLng = markerLatLng ?: LatLng(0.0, 0.0)
+            MVPPlace(
+                name = searchResult.displayName ?: "Selected location",
+                id = searchResult.id ?: "",
+                coordinates = listOf(fallbackLatLng.longitude, fallbackLatLng.latitude)
+            )
+        }
+
+        markerLatLng?.let(::updateRevealCenterFor)
+        onPlaceSelected(selectedPlace)
+    }
+
+    suspend fun selectPoiPlace(poi: PointOfInterest) {
+        val selectedPlace = runCatching {
+            component.getPlace(poi.placeId)
+        }.getOrElse { throwable ->
+            Napier.e(
+                message = "Failed to fetch POI details. Falling back to marker coordinates.",
+                throwable = throwable
+            )
+            MVPPlace(
+                name = poi.name,
+                id = poi.placeId,
+                coordinates = listOf(poi.latLng.longitude, poi.latLng.latitude)
+            )
+        }
+
+        updateRevealCenterFor(poi.latLng)
+        onPlaceSelected(selectedPlace)
+    }
 
     LaunchedEffect(selectedPOI) {
         selectedPOI?.let { poi ->
@@ -84,6 +136,13 @@ actual fun EventMap(
             delay(100)
             poiMarkerState.showInfoWindow()
         }
+        if (selectedPOI == null) {
+            armedPoiPlaceId = null
+        }
+    }
+
+    LaunchedEffect(searchedPlaces) {
+        armedSearchedPlaceId = null
     }
 
     LaunchedEffect(cameraPositionState) {
@@ -137,6 +196,9 @@ actual fun EventMap(
                 onPOIClick = { poi ->
                     if (canClickPOI && !isAnimating) {
                         selectedPOI = poi
+                        armedPlaceId = null
+                        armedSearchedPlaceId = null
+                        armedPoiPlaceId = null
                         isAnimating = true
                         scope.launch {
                             cameraPositionState.animate(
@@ -179,11 +241,34 @@ actual fun EventMap(
                     MarkerInfoWindow(
                         state = markerState,
                         icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_ORANGE),
-                        onClick = { marker -> false },
-                        onInfoWindowClick = { marker -> onPlaceSelected(place) },
+                        onClick = {
+                            if (!canClickPOI) {
+                                false
+                            } else {
+                                val isSecondTap = armedPlaceId == place.id
+                                armedPlaceId = if (isSecondTap) null else place.id
+                                armedSearchedPlaceId = null
+                                armedPoiPlaceId = null
+                                if (isSecondTap) {
+                                    updateRevealCenterFor(newPosition)
+                                    onPlaceSelected(place)
+                                    true
+                                } else {
+                                    false
+                                }
+                            }
+                        },
+                        onInfoWindowClick = {
+                            armedPlaceId = null
+                            armedSearchedPlaceId = null
+                            armedPoiPlaceId = null
+                            updateRevealCenterFor(newPosition)
+                            onPlaceSelected(place)
+                        },
                     ) { marker ->
                         MapPOICard(
                             name = place.name,
+                            callToAction = if (canClickPOI) placeSelectionHint else null,
                             modifier = Modifier.wrapContentSize()
                         )
                     }
@@ -197,16 +282,37 @@ actual fun EventMap(
                     MarkerInfoWindow(
                         state = markerState,
                         icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE),
-                        onClick = { marker ->
-                            scope.launch {
-                                onPlaceSelected(component.getMVPPlace(place))
+                        onClick = {
+                            if (!canClickPOI) {
+                                false
+                            } else {
+                                val isSecondTap = armedSearchedPlaceId == place.id
+                                armedPlaceId = null
+                                armedPoiPlaceId = null
+                                armedSearchedPlaceId = if (isSecondTap) null else place.id
+                                if (isSecondTap) {
+                                    scope.launch {
+                                        selectSearchedPlace(place)
+                                    }
+                                    true
+                                } else {
+                                    false
+                                }
                             }
-                            false
+                        },
+                        onInfoWindowClick = {
+                            armedPlaceId = null
+                            armedSearchedPlaceId = null
+                            armedPoiPlaceId = null
+                            scope.launch {
+                                selectSearchedPlace(place)
+                            }
                         },
                     ) { marker ->
                         // Info window content for searched places
                         MapPOICard(
                             name = place.displayName ?: "Unknown Place",
+                            callToAction = placeSelectionHint,
                             modifier = Modifier.wrapContentSize()
                         )
                     }
@@ -216,15 +322,37 @@ actual fun EventMap(
                     MarkerInfoWindow(
                         state = poiMarkerState,
                         icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE),
-                        onClick = { marker ->
-                            scope.launch {
-                                onPlaceSelected(component.getPlace(poi.placeId))
+                        onClick = {
+                            if (!canClickPOI) {
+                                false
+                            } else {
+                                val isSecondTap = armedPoiPlaceId == poi.placeId
+                                armedPlaceId = null
+                                armedSearchedPlaceId = null
+                                armedPoiPlaceId = if (isSecondTap) null else poi.placeId
+                                if (isSecondTap) {
+                                    scope.launch {
+                                        selectPoiPlace(poi)
+                                    }
+                                    true
+                                } else {
+                                    false
+                                }
                             }
-                            false
+                        },
+                        onInfoWindowClick = {
+                            armedPlaceId = null
+                            armedSearchedPlaceId = null
+                            armedPoiPlaceId = null
+                            scope.launch {
+                                selectPoiPlace(poi)
+                            }
                         },
                     ) { marker ->
                         MapPOICard(
-                            name = poi.name, modifier = Modifier.wrapContentSize()
+                            name = poi.name,
+                            callToAction = placeSelectionHint,
+                            modifier = Modifier.wrapContentSize()
                         )
                     }
                 }
