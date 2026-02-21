@@ -87,6 +87,9 @@ fun ScheduleView(
     matches: List<MatchWithRelations>,
     fields: List<FieldWithMatches>,
     showFab: (Boolean) -> Unit,
+    trackedUserIds: Set<String> = emptySet(),
+    canManageMatches: Boolean = false,
+    onToggleLockAllMatches: ((Boolean, List<String>) -> Unit)? = null,
     onMatchClick: (MatchWithRelations) -> Unit,
 ) {
     if (matches.isEmpty()) {
@@ -105,8 +108,32 @@ fun ScheduleView(
     val sortedMatches = remember(matches, timeZone) {
         matches.sortedBy { it.match.start }
     }
-    val matchesByDate = remember(sortedMatches) {
-        sortedMatches.groupBy { it.match.start.toLocalDateTime(timeZone).date }
+    var showOnlyMyMatches by rememberSaveable { mutableStateOf(false) }
+    val hasTrackedMatches = remember(sortedMatches, trackedUserIds) {
+        trackedUserIds.isNotEmpty() && sortedMatches.any { match ->
+            matchIncludesTrackedUsers(match, trackedUserIds)
+        }
+    }
+    LaunchedEffect(hasTrackedMatches) {
+        if (!hasTrackedMatches && showOnlyMyMatches) {
+            showOnlyMyMatches = false
+        }
+    }
+    val displayedMatches = remember(sortedMatches, showOnlyMyMatches, trackedUserIds) {
+        if (showOnlyMyMatches && trackedUserIds.isNotEmpty()) {
+            sortedMatches.filter { match -> matchIncludesTrackedUsers(match, trackedUserIds) }
+        } else {
+            sortedMatches
+        }
+    }
+    val allVisibleLocked = remember(displayedMatches) {
+        displayedMatches.isNotEmpty() && displayedMatches.all { it.match.locked }
+    }
+    val visibleMatchIds = remember(displayedMatches) {
+        displayedMatches.map { it.match.id }.filter { id -> id.isNotBlank() }
+    }
+    val matchesByDate = remember(displayedMatches) {
+        displayedMatches.groupBy { it.match.start.toLocalDateTime(timeZone).date }
     }
     val fieldsById = remember(fields) {
         fields.associateBy { it.field.id }
@@ -187,6 +214,21 @@ fun ScheduleView(
         DaySummaryHeader(selectedDate, dayMatches.size)
 
         Spacer(modifier = Modifier.height(8.dp))
+        val canLockVisibleMatches =
+            canManageMatches && onToggleLockAllMatches != null && visibleMatchIds.isNotEmpty()
+        if (hasTrackedMatches || canLockVisibleMatches) {
+            ScheduleQuickActions(
+                hasTrackedMatches = hasTrackedMatches,
+                showOnlyMyMatches = showOnlyMyMatches,
+                onToggleShowOnlyMyMatches = { showOnlyMyMatches = !showOnlyMyMatches },
+                canLockVisibleMatches = canLockVisibleMatches,
+                allVisibleLocked = allVisibleLocked,
+                onToggleLockAllMatches = {
+                    onToggleLockAllMatches?.invoke(!allVisibleLocked, visibleMatchIds)
+                }
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+        }
         ScheduleGroupingToggle(
             selectedMode = groupingMode,
             onModeSelected = { groupingMode = it }
@@ -245,6 +287,46 @@ fun ScheduleView(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ScheduleQuickActions(
+    hasTrackedMatches: Boolean,
+    showOnlyMyMatches: Boolean,
+    onToggleShowOnlyMyMatches: () -> Unit,
+    canLockVisibleMatches: Boolean,
+    allVisibleLocked: Boolean,
+    onToggleLockAllMatches: () -> Unit,
+) {
+    val scrollState = rememberScrollState()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(scrollState)
+            .padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        if (hasTrackedMatches) {
+            FilterChip(
+                selected = showOnlyMyMatches,
+                onClick = onToggleShowOnlyMyMatches,
+                label = {
+                    Text(
+                        if (showOnlyMyMatches) "Showing my matches" else "Show only my matches"
+                    )
+                }
+            )
+        }
+        if (canLockVisibleMatches) {
+            FilterChip(
+                selected = allVisibleLocked,
+                onClick = onToggleLockAllMatches,
+                label = {
+                    Text(if (allVisibleLocked) "Unlock all matches" else "Lock all matches")
+                }
+            )
         }
     }
 }
@@ -463,6 +545,26 @@ private fun scoreLine(match: MatchWithRelations): String {
         "$team1Score : $team2Score"
     } else {
         "Score TBD"
+    }
+}
+
+private fun matchIncludesTrackedUsers(
+    match: MatchWithRelations,
+    trackedUserIds: Set<String>,
+): Boolean {
+    if (trackedUserIds.isEmpty()) return false
+
+    if (!match.match.refereeId.isNullOrBlank() && trackedUserIds.contains(match.match.refereeId)) {
+        return true
+    }
+
+    val teams = listOfNotNull(match.team1, match.team2, match.teamReferee)
+    return teams.any { team ->
+        trackedUserIds.contains(team.captainId) ||
+            (!team.managerId.isNullOrBlank() && trackedUserIds.contains(team.managerId)) ||
+            (!team.headCoachId.isNullOrBlank() && trackedUserIds.contains(team.headCoachId)) ||
+            team.playerIds.any { playerId -> trackedUserIds.contains(playerId) } ||
+            team.coachIds.any { coachId -> trackedUserIds.contains(coachId) }
     }
 }
 

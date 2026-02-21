@@ -168,13 +168,20 @@ val componentModule = module {
         )
     }
 
-    factory<TeamManagementComponent> { (componentContext: ComponentContext, freeAgents: List<String>, selectedEvent: Event?, navHandler: INavigationHandler) ->
+    factory<TeamManagementComponent> { (
+        componentContext: ComponentContext,
+        freeAgents: List<String>,
+        selectedEvent: Event?,
+        selectedFreeAgentId: String?,
+        navHandler: INavigationHandler,
+    ) ->
         DefaultTeamManagementComponent(
             componentContext = componentContext,
             teamRepository = get(),
             userRepository = get(),
             freeAgents = freeAgents,
             selectedEvent = selectedEvent,
+            selectedFreeAgentId = selectedFreeAgentId,
             eventRepository = get(),
             navigationHandler = navHandler,
         )

@@ -678,4 +678,66 @@ class EventRepositoryHttpTest {
         assertTrue(result.requiresChildEmail)
         assertTrue(result.warnings.isNotEmpty())
     }
+
+    @Test
+    fun registerChildForEvent_posts_waitlist_payload_when_join_waitlist_requested() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+        var capturedPath = ""
+        var capturedBody = ""
+
+        val engine = MockEngine { request ->
+            capturedPath = request.url.encodedPath
+            assertEquals(HttpMethod.Post, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+
+            respond(
+                content = """
+                    {
+                      "event": {
+                        "id": "e1",
+                        "name": "Event One",
+                        "hostId": "h1",
+                        "start": "2026-02-10T00:00:00Z",
+                        "end": "2026-02-10T01:00:00Z",
+                        "coordinates": [-80.0, 25.0],
+                        "userIds": [],
+                        "teamIds": [],
+                        "waitListIds": ["child_1"]
+                      },
+                      "requiresParentApproval": false
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val result = repo.registerChildForEvent(
+            eventId = "e1",
+            childUserId = "child_1",
+            joinWaitlist = true,
+        ).getOrThrow()
+
+        assertEquals("/api/events/e1/waitlist", capturedPath)
+        assertTrue(capturedBody.contains("\"userId\":\"child_1\""))
+        assertEquals("WAITLISTED", result.registrationStatus)
+        assertTrue(result.joinedWaitlist)
+        assertFalse(result.requiresParentApproval)
+        assertEquals(listOf("child_1"), eventDao.getEventById("e1")?.waitListIds)
+    }
 }

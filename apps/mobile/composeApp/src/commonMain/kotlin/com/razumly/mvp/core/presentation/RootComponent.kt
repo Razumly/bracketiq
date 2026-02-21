@@ -195,8 +195,12 @@ class RootComponent(
         navigation.pushNew(AppConfig.MatchDetail(match, event))
     }
 
-    override fun navigateToTeams(freeAgents: List<String>, event: Event?) {
-        navigation.pushNew(AppConfig.Teams(freeAgents, event))
+    override fun navigateToTeams(
+        freeAgents: List<String>,
+        event: Event?,
+        selectedFreeAgentId: String?,
+    ) {
+        navigation.pushNew(AppConfig.Teams(freeAgents, event, selectedFreeAgentId))
     }
 
     override fun navigateToChat(user: UserData?, chat: ChatGroupWithRelations?) {
@@ -289,7 +293,15 @@ class RootComponent(
         )
 
         is AppConfig.Teams -> Child.Teams(
-            _koin.get { parametersOf(componentContext, config.freeAgents, config.event, this@RootComponent) }
+            _koin.get {
+                parametersOf(
+                    componentContext,
+                    config.freeAgents,
+                    config.event,
+                    config.selectedFreeAgentId,
+                    this@RootComponent,
+                )
+            }
         )
 
         AppConfig.Events -> Child.EventManagement(

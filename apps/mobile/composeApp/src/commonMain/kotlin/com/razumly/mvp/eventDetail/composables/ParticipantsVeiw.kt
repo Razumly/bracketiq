@@ -45,6 +45,22 @@ fun ParticipantsView(
     val currentUser by component.currentUser.collectAsState()
     val participants = selectedEvent.players
     val teamSignup = selectedEvent.event.teamSignup
+    val freeAgentIds = remember(selectedEvent.event.freeAgentIds) {
+        selectedEvent.event.freeAgentIds
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .distinct()
+    }
+    val freeAgentUsers = remember(freeAgentIds, selectedEvent.players) {
+        val playersById = selectedEvent.players.associateBy(UserData::id)
+        freeAgentIds.mapNotNull(playersById::get)
+    }
+    val canInviteToTeam = remember(selectedEvent.teams, currentUser.id) {
+        selectedEvent.teams.any { teamWithPlayers ->
+            teamWithPlayers.team.captainId == currentUser.id ||
+                teamWithPlayers.team.managerId == currentUser.id
+        }
+    }
     val navPadding = LocalNavBarPadding.current
     val lazyColumnState = rememberLazyListState()
     val isScrollingUp by lazyColumnState.isScrollingUp()
@@ -84,6 +100,9 @@ fun ParticipantsView(
         }
 
         if (teamSignup) {
+            item(key = "teams-header") {
+                Text("Teams", style = MaterialTheme.typography.titleLarge)
+            }
             items(
                 divisionTeams.values.toList(),
                 key = { it.team.id },
@@ -95,6 +114,43 @@ fun ParticipantsView(
                         showTeamDialog = true
                     }
                 )
+            }
+
+            item(key = "free-agents-header") {
+                Text("Free Agents", style = MaterialTheme.typography.titleLarge)
+            }
+            if (freeAgentUsers.isEmpty()) {
+                item(key = "free-agents-empty") {
+                    Text(
+                        "No free agents yet.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else {
+                items(freeAgentUsers, key = { it.id }) { freeAgent ->
+                    PlayerCardWithActions(
+                        player = freeAgent,
+                        currentUser = currentUser,
+                        onMessage = { user ->
+                            onNavigateToChat(user)
+                        },
+                        onSendFriendRequest = { user ->
+                            playerInteractionComponent.sendFriendRequest(user)
+                        },
+                        onFollow = { user ->
+                            playerInteractionComponent.followUser(user)
+                        },
+                        onUnfollow = { user ->
+                            playerInteractionComponent.unfollowUser(user)
+                        },
+                        onInviteToTeam = if (canInviteToTeam) {
+                            { user -> component.inviteFreeAgentToTeam(user.id) }
+                        } else {
+                            null
+                        }
+                    )
+                }
             }
         } else {
             items(participants, key = { it.id }) { participant ->

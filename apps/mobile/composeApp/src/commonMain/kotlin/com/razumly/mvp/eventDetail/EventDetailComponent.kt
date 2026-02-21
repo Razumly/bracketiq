@@ -85,6 +85,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val errorState: StateFlow<ErrorMessage?>
     val eventWithRelations: StateFlow<EventWithFullRelations>
     val currentUser: StateFlow<UserData>
+    val scheduleTrackedUserIds: StateFlow<Set<String>>
     val validTeams: StateFlow<List<TeamWithPlayers>>
     val isHost: StateFlow<Boolean>
     val isEditing: StateFlow<Boolean>
@@ -141,6 +142,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun deleteEvent()
     fun shareEvent()
     fun createNewTeam()
+    fun inviteFreeAgentToTeam(userId: String)
     fun selectPlace(place: MVPPlace?)
     fun onTypeSelected(type: EventType)
     fun selectFieldCount(count: Int)
@@ -152,6 +154,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun cancelEditingMatches()
     fun commitMatchChanges()
     fun updateEditableMatch(matchId: String, updater: (MatchMVP) -> MatchMVP)
+    fun setLockForEditableMatches(matchIds: List<String>, locked: Boolean)
     fun showTeamSelection(matchId: String, position: TeamPosition)
     fun selectTeamForMatch(matchId: String, position: TeamPosition, teamId: String?)
     fun dismissTeamSelection()
@@ -458,6 +461,9 @@ class DefaultEventDetailComponent(
         }
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
+    private val _scheduleTrackedUserIds = MutableStateFlow<Set<String>>(emptySet())
+    override val scheduleTrackedUserIds = _scheduleTrackedUserIds.asStateFlow()
+
     private val _usersTeam = MutableStateFlow<TeamWithPlayers?>(null)
 
     override val validTeams = _userTeams.flatMapLatest { teams ->
@@ -529,6 +535,14 @@ class DefaultEventDetailComponent(
                 .distinctUntilChanged()
                 .collect { organizationId ->
                     loadOrganizationTemplates(organizationId)
+                }
+        }
+        scope.launch {
+            currentUser
+                .map { user -> user.id }
+                .distinctUntilChanged()
+                .collect {
+                    refreshScheduleTrackedUserIds()
                 }
         }
         scope.launch {
@@ -824,17 +838,33 @@ class DefaultEventDetailComponent(
             .toList()
     }
 
+    private suspend fun refreshScheduleTrackedUserIds() {
+        val ids = linkedSetOf<String>()
+        val currentUserId = currentUser.value.id.trim()
+        if (currentUserId.isNotEmpty()) {
+            ids += currentUserId
+        }
+        loadJoinableChildren()
+            .map { child -> child.userId.trim() }
+            .filter { childId -> childId.isNotEmpty() }
+            .forEach { childId -> ids += childId }
+        _scheduleTrackedUserIds.value = ids
+    }
+
     private suspend fun executeChildRegistration(child: JoinChildOption) {
         try {
+            val joiningWaitlist = !selectedEvent.value.teamSignup && isEventFull.value
             loadingHandler.showLoading("Registering Child ...")
             eventRepository.registerChildForEvent(
                 eventId = selectedEvent.value.id,
                 childUserId = child.userId,
+                joinWaitlist = joiningWaitlist,
             ).onSuccess { registration ->
                 loadingHandler.showLoading("Refreshing Event ...")
                 eventRepository.getEvent(selectedEvent.value.id)
                 val status = registration.registrationStatus?.lowercase()
                 val message = when {
+                    registration.joinedWaitlist -> "${child.fullName} added to waitlist."
                     status == "active" -> "${child.fullName} registration completed."
                     registration.requiresParentApproval -> {
                         "${child.fullName} request sent. A parent/guardian must approve before registration can continue."
@@ -1310,7 +1340,18 @@ class DefaultEventDetailComponent(
 
     override fun createNewTeam() {
         navigationHandler.navigateToTeams(
-            selectedEvent.value.freeAgents, selectedEvent.value
+            selectedEvent.value.freeAgents,
+            selectedEvent.value,
+            selectedFreeAgentId = null,
+        )
+    }
+
+    override fun inviteFreeAgentToTeam(userId: String) {
+        val normalizedUserId = userId.trim().takeIf(String::isNotBlank) ?: return
+        navigationHandler.navigateToTeams(
+            selectedEvent.value.freeAgents,
+            selectedEvent.value,
+            selectedFreeAgentId = normalizedUserId,
         )
     }
 
@@ -1630,6 +1671,21 @@ class DefaultEventDetailComponent(
             currentMatches[matchIndex] = updatedMatch
             _editableMatches.value = currentMatches
         }
+    }
+
+    override fun setLockForEditableMatches(matchIds: List<String>, locked: Boolean) {
+        if (matchIds.isEmpty()) return
+        val targetIds = matchIds.map(String::trim).filter(String::isNotBlank).toSet()
+        if (targetIds.isEmpty()) return
+
+        val nextMatches = _editableMatches.value.map { match ->
+            if (targetIds.contains(match.match.id)) {
+                match.copy(match = match.match.copy(locked = locked))
+            } else {
+                match
+            }
+        }
+        _editableMatches.value = nextMatches
     }
 
     override fun showTeamSelection(matchId: String, position: TeamPosition) {

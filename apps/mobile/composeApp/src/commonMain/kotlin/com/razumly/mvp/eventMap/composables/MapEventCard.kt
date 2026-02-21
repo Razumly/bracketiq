@@ -210,6 +210,12 @@ private fun EventCardContent(event: Event) {
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.fillMaxWidth()
         )
+        Text(
+            text = if (event.teamSignup) "Team registration" else "Individual registration",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.secondary,
+            modifier = Modifier.fillMaxWidth()
+        )
 
         // Price
         Text(

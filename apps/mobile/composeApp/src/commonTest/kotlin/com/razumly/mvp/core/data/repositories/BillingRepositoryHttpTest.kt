@@ -148,7 +148,11 @@ private object BillingRepositoryHttp_UnusedEventRepository : IEventRepository {
         event: Event,
         preferredDivisionId: String?,
     ): Result<SelfRegistrationResult> = error("unused")
-    override suspend fun registerChildForEvent(eventId: String, childUserId: String): Result<ChildRegistrationResult> = error("unused")
+    override suspend fun registerChildForEvent(
+        eventId: String,
+        childUserId: String,
+        joinWaitlist: Boolean,
+    ): Result<ChildRegistrationResult> = error("unused")
     override suspend fun addTeamToEvent(event: Event, team: com.razumly.mvp.core.data.dataTypes.Team): Result<Unit> = error("unused")
     override suspend fun removeTeamFromEvent(event: Event, teamWithPlayers: com.razumly.mvp.core.data.dataTypes.TeamWithPlayers): Result<Unit> = error("unused")
     override suspend fun removeCurrentUserFromEvent(event: Event, targetUserId: String?): Result<Unit> = error("unused")

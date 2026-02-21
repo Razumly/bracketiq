@@ -29,6 +29,8 @@ import kotlinx.coroutines.flow.update
 interface TeamManagementComponent {
     val selectedEvent: Event?
     val currentUser: UserData
+    val selectedFreeAgentId: String?
+    val selectedFreeAgent: StateFlow<UserData?>
     val friends: StateFlow<List<UserData>>
     val currentTeams: StateFlow<List<TeamWithPlayers>>
     val teamInvites: StateFlow<List<TeamInvite>>
@@ -64,6 +66,7 @@ class DefaultTeamManagementComponent(
     private val userRepository: IUserRepository,
     private val freeAgents: List<String>,
     override val selectedEvent: Event?,
+    override val selectedFreeAgentId: String?,
     private val navigationHandler: INavigationHandler
 ) : ComponentContext by componentContext, TeamManagementComponent {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -72,6 +75,9 @@ class DefaultTeamManagementComponent(
     private val _errorState = MutableStateFlow<String?>(null)
 
     override val currentUser = userRepository.currentUser.value.getOrThrow()
+    private val normalizedSelectedFreeAgentId = selectedFreeAgentId
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
 
     private val _friends = MutableStateFlow<List<UserData>>(listOf())
     override val friends = _friends.asStateFlow()
@@ -101,7 +107,15 @@ class DefaultTeamManagementComponent(
             }
 
             flow {
-                val result = userRepository.getUsers(freeAgents.filterNot { it in playerIdsToExclude })
+                val filteredFreeAgents = freeAgents.filterNot { it in playerIdsToExclude }
+                val orderedFreeAgents = normalizedSelectedFreeAgentId?.let { selectedId ->
+                    if (filteredFreeAgents.contains(selectedId)) {
+                        listOf(selectedId) + filteredFreeAgents.filterNot { it == selectedId }
+                    } else {
+                        filteredFreeAgents
+                    }
+                } ?: filteredFreeAgents
+                val result = userRepository.getUsers(orderedFreeAgents)
                 emit(result.getOrElse {
                     _errorState.value = it.message
                     emptyList()
@@ -109,6 +123,14 @@ class DefaultTeamManagementComponent(
             }
         }
         .stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    override val selectedFreeAgent = freeAgentsFiltered
+        .map { users ->
+            normalizedSelectedFreeAgentId?.let { selectedId ->
+                users.firstOrNull { it.id == selectedId }
+            }
+        }
+        .stateIn(scope, SharingStarted.Eagerly, null)
 
     private val hostEventsFlow =
         eventRepository.getEventsByHostFlow(currentUser.id)

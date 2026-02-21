@@ -168,6 +168,10 @@ fun EventCard(
             }
 
             StylizedText(event.eventType.name.toTitleCase(), patterns)
+            StylizedText(
+                if (event.teamSignup) "Team registration" else "Individual registration",
+                patterns,
+            )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 val formattedDivisions = event.divisions.toDivisionDisplayLabels(event.divisionDetails).joinToString(", ")
                 StylizedText("Divisions: $formattedDivisions", patterns)

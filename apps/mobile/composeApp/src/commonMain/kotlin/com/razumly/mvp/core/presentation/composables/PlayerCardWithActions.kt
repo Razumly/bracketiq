@@ -40,7 +40,8 @@ fun PlayerCardWithActions(
     onMessage: (UserData) -> Unit,
     onSendFriendRequest: (UserData) -> Unit,
     onFollow: (UserData) -> Unit,
-    onUnfollow: (UserData) -> Unit
+    onUnfollow: (UserData) -> Unit,
+    onInviteToTeam: ((UserData) -> Unit)? = null,
 ) {
     var showPopup by remember { mutableStateOf(false) }
     val isFollowing = currentUser.followingIds.contains(player.id)
@@ -86,6 +87,12 @@ fun PlayerCardWithActions(
                         }
                         showPopup = false
                     },
+                    onInviteToTeam = onInviteToTeam?.let { invite ->
+                        {
+                            invite(player)
+                            showPopup = false
+                        }
+                    },
                     onDismiss = { showPopup = false }
                 )
             }
@@ -102,6 +109,7 @@ private fun PlayerActionPopup(
     onMessage: () -> Unit,
     onSendFriendRequest: () -> Unit,
     onFollow: () -> Unit,
+    onInviteToTeam: (() -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     Card(
@@ -134,6 +142,17 @@ private fun PlayerActionPopup(
                 Icon(Icons.AutoMirrored.Filled.Message, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
                 Text("Message")
+            }
+
+            onInviteToTeam?.let { inviteAction ->
+                OutlinedButton(
+                    onClick = inviteAction,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.PersonAdd, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Invite to Team")
+                }
             }
 
             if (!isFriend) {

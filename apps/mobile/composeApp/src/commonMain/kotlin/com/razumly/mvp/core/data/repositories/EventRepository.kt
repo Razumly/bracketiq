@@ -81,7 +81,11 @@ interface IEventRepository : IMVPRepository {
         event: Event,
         preferredDivisionId: String? = null,
     ): Result<SelfRegistrationResult>
-    suspend fun registerChildForEvent(eventId: String, childUserId: String): Result<ChildRegistrationResult>
+    suspend fun registerChildForEvent(
+        eventId: String,
+        childUserId: String,
+        joinWaitlist: Boolean = false,
+    ): Result<ChildRegistrationResult>
     suspend fun addTeamToEvent(event: Event, team: Team): Result<Unit>
     suspend fun removeTeamFromEvent(event: Event, teamWithPlayers: TeamWithPlayers): Result<Unit>
     suspend fun removeCurrentUserFromEvent(event: Event, targetUserId: String? = null): Result<Unit>
@@ -98,6 +102,7 @@ data class ChildRegistrationResult(
     val consentStatus: String? = null,
     val requiresParentApproval: Boolean = false,
     val requiresChildEmail: Boolean = false,
+    val joinedWaitlist: Boolean = false,
     val warnings: List<String> = emptyList(),
 )
 
@@ -464,16 +469,42 @@ class EventRepository(
 
             SelfRegistrationResult(
                 requiresParentApproval = response.requiresParentApproval == true,
-                joinedWaitlist = eventAtCapacity,
+                joinedWaitlist = eventAtCapacity && response.requiresParentApproval != true,
             )
         }
 
-    override suspend fun registerChildForEvent(eventId: String, childUserId: String): Result<ChildRegistrationResult> =
+    override suspend fun registerChildForEvent(
+        eventId: String,
+        childUserId: String,
+        joinWaitlist: Boolean,
+    ): Result<ChildRegistrationResult> =
         runCatching {
             val normalizedEventId = eventId.trim()
             val normalizedChildUserId = childUserId.trim()
             if (normalizedEventId.isBlank() || normalizedChildUserId.isBlank()) {
                 error("Event id and child user id are required.")
+            }
+
+            if (joinWaitlist) {
+                val waitlistResponse = api.post<EventParticipantsRequestDto, EventParticipantsResponseDto>(
+                    path = "api/events/$normalizedEventId/waitlist",
+                    body = EventParticipantsRequestDto(userId = normalizedChildUserId),
+                )
+                waitlistResponse.error?.takeIf(String::isNotBlank)?.let { error(it) }
+                waitlistResponse.event?.toEventOrNull()?.let { updated ->
+                    databaseService.getEventDao.upsertEvent(updated)
+                    persistEventRelations(updated)
+                }
+
+                return@runCatching ChildRegistrationResult(
+                    registrationStatus = if (waitlistResponse.requiresParentApproval == true) {
+                        "PENDINGCONSENT"
+                    } else {
+                        "WAITLISTED"
+                    },
+                    requiresParentApproval = waitlistResponse.requiresParentApproval == true,
+                    joinedWaitlist = waitlistResponse.requiresParentApproval != true,
+                )
             }
 
             val response = api.post<EventChildRegistrationRequestDto, EventChildRegistrationResponseDto>(
@@ -486,6 +517,7 @@ class EventRepository(
                 consentStatus = response.consent?.status ?: response.registration?.consentStatus,
                 requiresParentApproval = response.requiresParentApproval == true,
                 requiresChildEmail = response.consent?.requiresChildEmail == true,
+                joinedWaitlist = false,
                 warnings = response.warnings,
             )
         }

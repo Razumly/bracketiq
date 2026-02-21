@@ -33,6 +33,7 @@ data class MatchMVP (
     val previousRightId: String? = null,
     val refereeCheckedIn: Boolean? = null,
     val teamRefereeId: String? = null,
+    val locked: Boolean = false,
     @PrimaryKey override val id: String,
 ) : MVPDocument {
     fun toMatchDTO(): MatchDTO {
@@ -58,6 +59,7 @@ data class MatchMVP (
             previousRightId = previousRightId,
             refereeCheckedIn = refereeCheckedIn,
             teamRefereeId = teamRefereeId,
+            locked = locked,
         )
     }
 }

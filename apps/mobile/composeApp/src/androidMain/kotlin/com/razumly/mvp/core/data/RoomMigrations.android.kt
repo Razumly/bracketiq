@@ -47,6 +47,20 @@ val MIGRATION_82_83 = object : Migration(82, 83) {
     }
 }
 
+val MIGRATION_83_84 = object : Migration(83, 84) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        migrationSql83To84.forEach(db::execSQL)
+    }
+
+    override fun migrate(connection: SQLiteConnection) {
+        migrationSql83To84.forEach { sql ->
+            connection.prepare(sql).use { statement ->
+                statement.step()
+            }
+        }
+    }
+}
+
 private val migrationSql80To81 = listOf(
     "ALTER TABLE `Event` DROP COLUMN `fieldType`",
     "ALTER TABLE `Field` DROP COLUMN `type`",
@@ -64,4 +78,8 @@ private val migrationSql82To83 = listOf(
     WHERE UPPER(COALESCE(`eventType`, '')) IN ('LEAGUE', 'TOURNAMENT')
       AND `start` = `end`
     """.trimIndent(),
+)
+
+private val migrationSql83To84 = listOf(
+    "ALTER TABLE `MatchMVP` ADD COLUMN `locked` INTEGER NOT NULL DEFAULT 0",
 )

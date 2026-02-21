@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
@@ -249,6 +250,27 @@ private fun MatchEditDialogContent(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            }
+
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        text = "Lock match (prevent auto-rescheduling)",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Checkbox(
+                        checked = editedMatch.match.locked,
+                        onCheckedChange = { isLocked ->
+                            editedMatch = editedMatch.copy(
+                                match = editedMatch.match.copy(locked = isLocked)
+                            )
+                        }
+                    )
+                }
             }
 
             // Field Section

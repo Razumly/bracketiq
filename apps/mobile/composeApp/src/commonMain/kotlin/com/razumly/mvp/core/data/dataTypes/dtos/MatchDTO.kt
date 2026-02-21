@@ -33,6 +33,7 @@ data class MatchDTO(
     val previousRightId: String?,
     val refereeCheckedIn: Boolean?,
     val teamRefereeId: String? = null,
+    val locked: Boolean = false,
 )
 
 fun MatchDTO.toMatch(id: String): MatchMVP {
@@ -58,5 +59,6 @@ fun MatchDTO.toMatch(id: String): MatchMVP {
         previousLeftId = previousLeftId,
         previousRightId = previousRightId,
         teamRefereeId = teamRefereeId,
+        locked = locked,
     )
 }

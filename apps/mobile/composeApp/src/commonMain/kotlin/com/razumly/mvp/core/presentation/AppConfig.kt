@@ -61,7 +61,11 @@ sealed class AppConfig {
     ) : AppConfig()
 
     @Serializable
-    data class Teams(val freeAgents: List<String>, val event: Event?) : AppConfig()
+    data class Teams(
+        val freeAgents: List<String>,
+        val event: Event?,
+        val selectedFreeAgentId: String? = null,
+    ) : AppConfig()
 
     @Serializable
     data object Events : AppConfig()

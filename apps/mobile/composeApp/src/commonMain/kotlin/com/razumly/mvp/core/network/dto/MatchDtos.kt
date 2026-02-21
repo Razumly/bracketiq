@@ -32,6 +32,7 @@ data class MatchApiDto(
     val previousRightId: String? = null,
     val refereeCheckedIn: Boolean? = null,
     val teamRefereeId: String? = null,
+    val locked: Boolean? = null,
 
     // Legacy/alternate field; ignore if present.
     val refCheckedIn: Boolean? = null,
@@ -67,6 +68,7 @@ data class MatchApiDto(
             previousRightId = previousRightId,
             refereeCheckedIn = refereeCheckedIn ?: refCheckedIn,
             teamRefereeId = teamRefereeId,
+            locked = locked ?: false,
         )
     }
 }
@@ -100,6 +102,7 @@ data class MatchUpdateDto(
     val matchId: Int? = null,
     val finalize: Boolean? = null,
     val time: String? = null,
+    val locked: Boolean? = null,
 )
 
 @Serializable
@@ -120,6 +123,7 @@ data class BulkMatchUpdateEntryDto(
     val loserNextMatchId: String? = null,
     val side: String? = null,
     val refereeCheckedIn: Boolean? = null,
+    val locked: Boolean? = null,
 )
 
 @Serializable
@@ -144,4 +148,5 @@ fun MatchMVP.toBulkMatchUpdateEntryDto(): BulkMatchUpdateEntryDto = BulkMatchUpd
     loserNextMatchId = loserNextMatchId,
     side = side,
     refereeCheckedIn = refereeCheckedIn,
+    locked = locked,
 )

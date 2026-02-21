@@ -140,6 +140,7 @@ private fun EventOverviewSections(
     val spotsLeft = (capacity - filled).coerceAtLeast(0)
     val progress = if (capacity > 0) filled.toFloat() / capacity.toFloat() else 0f
     val freeAgentIds = remember(event.freeAgentIds) { event.freeAgentIds.distinct() }
+    val waitlistIds = remember(event.waitListIds) { event.waitListIds.distinct() }
     val playersById = remember(eventWithRelations.players) {
         eventWithRelations.players.associateBy { it.id }
     }
@@ -175,7 +176,10 @@ private fun EventOverviewSections(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     CapacityStat(title = if (event.teamSignup) "Teams" else "Spots", value = "$filled/$capacity")
-                    CapacityStat(title = "Free Agents", value = freeAgentIds.size.toString())
+                    CapacityStat(
+                        title = if (event.teamSignup) "Free Agents" else "Waitlist",
+                        value = if (event.teamSignup) freeAgentIds.size.toString() else waitlistIds.size.toString(),
+                    )
                     CapacityStat(title = "Left", value = spotsLeft.toString())
                 }
                 LinearProgressIndicator(
@@ -185,6 +189,11 @@ private fun EventOverviewSections(
                 )
                 Text(
                     text = "${(progress * 100).toInt()}% full • $spotsLeft left",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = if (event.teamSignup) "Registration: Team" else "Registration: Individual",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -199,64 +208,66 @@ private fun EventOverviewSections(
                 }
             }
         }
-        SectionHeader(
-            title = "Teams (${eventWithRelations.teams.size})",
-            action = "See all",
-            onAction = onOpenDetails
-        )
-        if (eventWithRelations.teams.isEmpty()) {
-            Text(
-                text = "No teams yet.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+        if (event.teamSignup) {
+            SectionHeader(
+                title = "Teams (${eventWithRelations.teams.size})",
+                action = "See all",
+                onAction = onOpenDetails
             )
-        } else {
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(
-                    eventWithRelations.teams.take(4),
-                    key = { teamWithPlayers -> teamWithPlayers.team.id }
-                ) { team ->
-                    TeamPreviewChip(
-                        team = team,
-                        teamSizeLimit = event.teamSizeLimit,
-                        onClick = onOpenDetails
-                    )
+            if (eventWithRelations.teams.isEmpty()) {
+                Text(
+                    text = "No teams yet.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(
+                        eventWithRelations.teams.take(4),
+                        key = { teamWithPlayers -> teamWithPlayers.team.id }
+                    ) { team ->
+                        TeamPreviewChip(
+                            team = team,
+                            teamSizeLimit = event.teamSizeLimit,
+                            onClick = onOpenDetails
+                        )
+                    }
                 }
             }
-        }
-        SectionHeader(
-            title = "Free Agents (${freeAgentIds.size})",
-            action = "See all",
-            onAction = onOpenDetails
-        )
-        if (freeAgentIds.isEmpty()) {
-            Text(
-                text = "No free agents yet.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+            SectionHeader(
+                title = "Free Agents (${freeAgentIds.size})",
+                action = "See all",
+                onAction = onOpenDetails
             )
-        } else {
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(freeAgentUsers.take(8), key = { user -> user.id }) { user ->
-                    FreeAgentPreview(user = user, onClick = onOpenDetails)
-                }
-                if (unresolvedFreeAgentCount > 0) {
-                    item {
-                        Surface(
-                            shape = RoundedCornerShape(16.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                            modifier = Modifier.clickable(onClick = onOpenDetails)
-                        ) {
-                            Text(
-                                text = "+$unresolvedFreeAgentCount",
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
+            if (freeAgentIds.isEmpty()) {
+                Text(
+                    text = "No free agents yet.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(freeAgentUsers.take(8), key = { user -> user.id }) { user ->
+                        FreeAgentPreview(user = user, onClick = onOpenDetails)
+                    }
+                    if (unresolvedFreeAgentCount > 0) {
+                        item {
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                modifier = Modifier.clickable(onClick = onOpenDetails)
+                            ) {
+                                Text(
+                                    text = "+$unresolvedFreeAgentCount",
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
                         }
                     }
                 }
@@ -488,6 +499,7 @@ fun EventDetailScreen(
     val loadingHandler = LocalLoadingHandler.current
     val selectedEvent by component.eventWithRelations.collectAsState()
     val currentUser by component.currentUser.collectAsState()
+    val scheduleTrackedUserIds by component.scheduleTrackedUserIds.collectAsState()
     val validTeams by component.validTeams.collectAsState()
     val showDetails by component.showDetails.collectAsState()
     val editedEvent by component.editedEvent.collectAsState()
@@ -989,12 +1001,24 @@ fun EventDetailScreen(
                                 }
 
                                 DetailTab.SCHEDULE -> {
+                                    val scheduleMatches = if (isEditingMatches) {
+                                        editableMatches
+                                    } else {
+                                        selectedEvent.matches
+                                    }
                                     ScheduleView(
-                                        matches = selectedEvent.matches,
+                                        matches = scheduleMatches,
                                         fields = eventFields,
                                         showFab = { showFab = it },
+                                        trackedUserIds = scheduleTrackedUserIds,
+                                        canManageMatches = isEditingMatches,
+                                        onToggleLockAllMatches = { locked, matchIds ->
+                                            component.setLockForEditableMatches(matchIds, locked)
+                                        },
                                         onMatchClick = { match ->
-                                            if (!isEditingMatches) {
+                                            if (isEditingMatches) {
+                                                component.showMatchEditDialog(match)
+                                            } else {
                                                 component.matchSelected(match)
                                             }
                                         }

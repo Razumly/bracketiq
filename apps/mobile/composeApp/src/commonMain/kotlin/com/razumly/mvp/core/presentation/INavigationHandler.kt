@@ -7,7 +7,11 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 
 interface INavigationHandler {
     fun navigateToMatch(match: MatchWithRelations, event: Event)
-    fun navigateToTeams(freeAgents: List<String> = listOf(), event: Event? = null)
+    fun navigateToTeams(
+        freeAgents: List<String> = listOf(),
+        event: Event? = null,
+        selectedFreeAgentId: String? = null,
+    )
     fun navigateToChat(user: UserData? = null, chat: ChatGroupWithRelations? = null)
     fun navigateToCreate(rentalContext: RentalCreateContext? = null)
     fun navigateToSearch()

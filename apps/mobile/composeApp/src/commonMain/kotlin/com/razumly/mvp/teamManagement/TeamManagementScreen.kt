@@ -10,8 +10,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -25,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.razumly.mvp.core.presentation.composables.PlatformBackButton
+import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.TeamCard
 import com.razumly.mvp.teamManagement.TeamInvite
 
@@ -36,6 +39,7 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
     val friends by component.friends.collectAsState()
     val suggestions by component.suggestedPlayers.collectAsState()
     val freeAgents by component.freeAgentsFiltered.collectAsState()
+    val selectedFreeAgent by component.selectedFreeAgent.collectAsState()
     val selectedEvent = component.selectedEvent
     val selectedTeam by component.selectedTeam.collectAsState()
     val currentUser = component.currentUser
@@ -69,6 +73,31 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            selectedFreeAgent?.let { freeAgent ->
+                item(key = "selected-free-agent-suggestion") {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp),
+                    ) {
+                        Text(
+                            text = "Suggested free agent from event",
+                            style = MaterialTheme.typography.titleSmall,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        )
+                        PlayerCard(
+                            player = freeAgent,
+                            modifier = Modifier.padding(horizontal = 12.dp),
+                        )
+                        Text(
+                            text = "Open a team and invite this player from the free-agent list.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        )
+                    }
+                }
+            }
             items(currentTeams) { team ->
                 TeamCard(
                     modifier = Modifier.clickable(onClick = {

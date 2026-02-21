@@ -317,6 +317,7 @@ internal class CreateEvent_FakeEventRepository(
     override suspend fun registerChildForEvent(
         eventId: String,
         childUserId: String,
+        joinWaitlist: Boolean,
     ): Result<ChildRegistrationResult> = Result.failure(NotImplementedError("unused"))
     override suspend fun addTeamToEvent(event: Event, team: Team): Result<Unit> = Result.success(Unit)
     override suspend fun removeTeamFromEvent(event: Event, teamWithPlayers: TeamWithPlayers): Result<Unit> =

@@ -74,6 +74,7 @@ private enum class ScheduleMode {
     MONTH,
     WEEK,
     DAY,
+    AGENDA,
 }
 
 private data class ScheduleEntry(
@@ -155,6 +156,8 @@ fun ProfileMyScheduleScreen(component: ProfileComponent) {
                     onSelectedDate = { selectedDate = it },
                 )
             }
+
+            ScheduleMode.AGENDA -> Unit
         }
 
         state.error?.let { error ->
@@ -165,29 +168,58 @@ fun ProfileMyScheduleScreen(component: ProfileComponent) {
             )
         }
 
-        val dayEntries = remember(entriesByDate, selectedDate) {
-            entriesByDate[selectedDate].orEmpty().sortedBy { it.start }
-        }
+        if (mode == ScheduleMode.AGENDA) {
+            val upcomingEntries = remember(entries) {
+                val now = Clock.System.now()
+                entries.filter { entry -> entry.end >= now }.sortedBy { it.start }
+            }
 
-        Text(
-            text = selectedDate.format(dateFormat),
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-
-        if (dayEntries.isEmpty()) {
             Text(
-                text = "No schedule entries for this day.",
-                style = MaterialTheme.typography.bodyMedium,
+                text = "Upcoming",
+                style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-        } else {
-            dayEntries.forEach { entry ->
-                ScheduleEntryCard(
-                    entry = entry,
-                    timeZone = timeZone,
-                    onOpenEvent = { component.openScheduleEvent(entry.eventId) },
+
+            if (upcomingEntries.isEmpty()) {
+                Text(
+                    text = "No upcoming schedule entries.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            } else {
+                upcomingEntries.forEach { entry ->
+                    ScheduleEntryCard(
+                        entry = entry,
+                        timeZone = timeZone,
+                        onOpenEvent = { component.openScheduleEvent(entry.eventId) },
+                    )
+                }
+            }
+        } else {
+            val dayEntries = remember(entriesByDate, selectedDate) {
+                entriesByDate[selectedDate].orEmpty().sortedBy { it.start }
+            }
+
+            Text(
+                text = selectedDate.format(dateFormat),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            if (dayEntries.isEmpty()) {
+                Text(
+                    text = "No schedule entries for this day.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                dayEntries.forEach { entry ->
+                    ScheduleEntryCard(
+                        entry = entry,
+                        timeZone = timeZone,
+                        onOpenEvent = { component.openScheduleEvent(entry.eventId) },
+                    )
+                }
             }
         }
     }
@@ -212,6 +244,7 @@ private fun ScheduleModeSelector(
                             ScheduleMode.MONTH -> "Month"
                             ScheduleMode.WEEK -> "Week"
                             ScheduleMode.DAY -> "Day"
+                            ScheduleMode.AGENDA -> "Agenda"
                         },
                     )
                 },

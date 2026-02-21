@@ -89,6 +89,7 @@ class MatchRepository(
                     side = match.side,
                     refereeCheckedIn = match.refereeCheckedIn,
                     matchId = match.matchId,
+                    locked = match.locked,
                 ),
             ).match?.toMatchOrNull() ?: error("Update match response missing match")
         },
@@ -178,6 +179,7 @@ class MatchRepository(
                         matchId = match.matchId,
                         finalize = true,
                         time = time.toString(),
+                        locked = match.locked,
                     ),
                 ).match?.toMatchOrNull() ?: error("Finalize match response missing match")
             },
