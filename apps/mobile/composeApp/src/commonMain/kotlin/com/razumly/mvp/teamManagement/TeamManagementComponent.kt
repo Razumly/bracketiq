@@ -45,6 +45,7 @@ interface TeamManagementComponent {
     fun deselectTeam()
     fun deleteTeam(team: TeamWithPlayers)
     fun searchPlayers(query: String)
+    fun inviteUserToRole(teamId: String, userId: String, roleInviteType: String)
     fun acceptTeamInvite(invite: TeamInvite)
     fun declineTeamInvite(invite: TeamInvite)
     suspend fun ensureUserByEmail(email: String): Result<UserData>
@@ -148,7 +149,12 @@ class DefaultTeamManagementComponent(
 
     override fun createTeam(team: Team) {
         scope.launch {
-            teamRepository.createTeam(team.copy(captainId = currentUser.id)).onFailure {
+            teamRepository.createTeam(
+                team.copy(
+                    captainId = currentUser.id,
+                    managerId = currentUser.id,
+                )
+            ).onFailure {
                 _errorState.value = it.message
             }
         }
@@ -192,6 +198,21 @@ class DefaultTeamManagementComponent(
             }.filterNot { user ->
                 currentUser.id == user.id
             }
+        }
+    }
+
+    override fun inviteUserToRole(teamId: String, userId: String, roleInviteType: String) {
+        scope.launch {
+            teamRepository.createTeamInvite(
+                teamId = teamId,
+                userId = userId,
+                createdBy = currentUser.id,
+                inviteType = roleInviteType,
+            ).onFailure {
+                _errorState.value = it.message
+                return@launch
+            }
+            refreshInvites()
         }
     }
 

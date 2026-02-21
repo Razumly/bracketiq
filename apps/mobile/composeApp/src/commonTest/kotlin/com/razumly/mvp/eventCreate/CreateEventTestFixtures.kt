@@ -29,6 +29,7 @@ import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.FamilyChild
+import com.razumly.mvp.core.data.repositories.FamilyJoinRequest
 import com.razumly.mvp.core.data.repositories.FamilyJoinRequestAction
 import com.razumly.mvp.core.data.repositories.FamilyJoinRequestResolution
 import com.razumly.mvp.core.data.repositories.IBillingRepository
@@ -39,7 +40,9 @@ import com.razumly.mvp.core.data.repositories.ISportsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.ProfileDocumentsBundle
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
+import com.razumly.mvp.core.data.repositories.ChildRegistrationResult
 import com.razumly.mvp.core.data.repositories.SelfRegistrationResult
+import com.razumly.mvp.core.data.repositories.SignerContext
 import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.SignupProfileSelection
 import com.razumly.mvp.core.network.MvpUploadFile
@@ -318,7 +321,8 @@ internal class CreateEvent_FakeEventRepository(
     override suspend fun addTeamToEvent(event: Event, team: Team): Result<Unit> = Result.success(Unit)
     override suspend fun removeTeamFromEvent(event: Event, teamWithPlayers: TeamWithPlayers): Result<Unit> =
         Result.success(Unit)
-    override suspend fun removeCurrentUserFromEvent(event: Event): Result<Unit> = Result.success(Unit)
+    override suspend fun removeCurrentUserFromEvent(event: Event, targetUserId: String?): Result<Unit> =
+        Result.success(Unit)
 }
 
 internal class CreateEvent_FakeFieldRepository : IFieldRepository {
@@ -420,6 +424,8 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
         templateId: String,
         documentId: String,
         type: String,
+        signerContext: SignerContext,
+        childUserId: String?,
     ): Result<Unit> = Result.success(Unit)
 
     override suspend fun createAccount(): Result<String> = Result.success("https://example.test/onboarding")
@@ -460,7 +466,8 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
         Result.success(emptyList())
     override suspend fun listOrganizationTemplates(organizationId: String): Result<List<OrganizationTemplateDocument>> =
         Result.success(emptyList())
-    override suspend fun leaveAndRefundEvent(event: Event, reason: String): Result<Unit> = Result.success(Unit)
+    override suspend fun leaveAndRefundEvent(event: Event, reason: String, targetUserId: String?): Result<Unit> =
+        Result.success(Unit)
     override suspend fun deleteAndRefundEvent(event: Event): Result<Unit> = Result.success(Unit)
     override suspend fun listProfileDocuments(): Result<ProfileDocumentsBundle> =
         Result.success(ProfileDocumentsBundle())

@@ -42,6 +42,21 @@ fun TeamDetailsDialog(
             Column(
                 modifier = Modifier.padding(24.dp)
             ) {
+                val knownUsers = (team.players + team.pendingPlayers + listOf(team.captain))
+                    .associateBy { it.id }
+                val managerId = team.team.managerId ?: team.team.captainId
+                val managerLabel = knownUsers[managerId]?.displayName ?: managerId
+                val headCoachLabel = team.team.headCoachId?.let { headCoachId ->
+                    knownUsers[headCoachId]?.displayName ?: headCoachId
+                } ?: "Unassigned"
+                val assistantCoachLabel = if (team.team.assistantCoachIds.isNotEmpty()) {
+                    team.team.assistantCoachIds.joinToString { assistantCoachId ->
+                        knownUsers[assistantCoachId]?.displayName ?: assistantCoachId
+                    }
+                } else {
+                    "Unassigned"
+                }
+
                 // Team Header
                 Text(
                     text = team.team.name ?: "Team ${
@@ -56,6 +71,24 @@ fun TeamDetailsDialog(
                 Text(
                     text = "${team.players.size}/${team.team.teamSize} Players",
                     style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = "Manager: $managerLabel",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "Head Coach: $headCoachLabel",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "Assistant Coaches: $assistantCoachLabel",
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 

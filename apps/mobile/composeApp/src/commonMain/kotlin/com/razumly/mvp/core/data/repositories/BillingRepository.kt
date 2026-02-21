@@ -92,6 +92,8 @@ interface IBillingRepository : IMVPRepository {
         templateId: String,
         documentId: String,
         type: String = "TEXT",
+        signerContext: SignerContext = SignerContext.PARTICIPANT,
+        childUserId: String? = null,
     ): Result<Unit>
 
     suspend fun createAccount(): Result<String>
@@ -114,7 +116,7 @@ interface IBillingRepository : IMVPRepository {
     suspend fun listOrganizations(limit: Int = 100): Result<List<Organization>>
     suspend fun getOrganizationsByIds(organizationIds: List<String>): Result<List<Organization>>
     suspend fun listOrganizationTemplates(organizationId: String): Result<List<OrganizationTemplateDocument>>
-    suspend fun leaveAndRefundEvent(event: Event, reason: String): Result<Unit>
+    suspend fun leaveAndRefundEvent(event: Event, reason: String, targetUserId: String? = null): Result<Unit>
     suspend fun deleteAndRefundEvent(event: Event): Result<Unit>
     suspend fun listProfileDocuments(): Result<ProfileDocumentsBundle>
 
@@ -197,6 +199,8 @@ class BillingRepository(
         templateId: String,
         documentId: String,
         type: String,
+        signerContext: SignerContext,
+        childUserId: String?,
     ): Result<Unit> = runCatching {
         val userId = userRepository.currentUser.value.getOrThrow().id
         val response = api.post<RecordSignatureRequestDto, RecordSignatureResponseDto>(
@@ -207,6 +211,8 @@ class BillingRepository(
                 eventId = eventId,
                 userId = userId,
                 type = type,
+                signerContext = signerContext.apiValue,
+                childUserId = childUserId?.trim()?.takeIf(String::isNotBlank),
             ),
         )
 
@@ -450,7 +456,7 @@ class BillingRepository(
         response.templates.mapNotNull { row -> row.toOrganizationTemplateOrNull() }
     }
 
-    override suspend fun leaveAndRefundEvent(event: Event, reason: String): Result<Unit> =
+    override suspend fun leaveAndRefundEvent(event: Event, reason: String, targetUserId: String?): Result<Unit> =
         runCatching {
             val response = api.post<BillingRefundRequestDto, RefundResponse>(
                 path = "api/billing/refund",
@@ -460,6 +466,7 @@ class BillingRepository(
                         hostId = event.hostId,
                         organizationId = event.organizationId,
                     ),
+                    userId = targetUserId,
                     reason = reason,
                 ),
             )
@@ -652,6 +659,8 @@ private data class RecordSignatureRequestDto(
     val eventId: String? = null,
     val userId: String? = null,
     val type: String? = null,
+    val signerContext: String? = null,
+    val childUserId: String? = null,
 )
 
 @Serializable

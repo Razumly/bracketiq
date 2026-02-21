@@ -41,6 +41,12 @@ interface ITeamRepository : IMVPRepository {
     fun getTeamsWithPlayersFlow(id: String): Flow<Result<List<TeamWithPlayers>>>
     fun getTeamWithPlayersFlow(id: String): Flow<Result<TeamWithRelations>>
     suspend fun listTeamInvites(userId: String): Result<List<Invite>>
+    suspend fun createTeamInvite(
+        teamId: String,
+        userId: String,
+        createdBy: String,
+        inviteType: String = "player",
+    ): Result<Unit>
     suspend fun deleteInvite(inviteId: String): Result<Unit>
     suspend fun acceptTeamInvite(inviteId: String, teamId: String): Result<Unit>
 }
@@ -51,6 +57,15 @@ class TeamRepository(
     private val userRepository: IUserRepository,
     private val pushNotificationRepository: IPushNotificationsRepository,
 ) : ITeamRepository {
+    private companion object {
+        val TEAM_INVITE_TYPES = listOf(
+            "player",
+            "team_manager",
+            "team_head_coach",
+            "team_assistant_coach",
+        )
+    }
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun getTeamsFlow(ids: List<String>): Flow<Result<List<TeamWithPlayers>>> =
@@ -252,9 +267,33 @@ class TeamRepository(
 
     override suspend fun listTeamInvites(userId: String): Result<List<Invite>> = runCatching {
         val encodedUserId = userId.encodeURLQueryComponent()
-        val res = api.get<InvitesResponseDto>("api/invites?userId=$encodedUserId&type=player")
-        res.invites.filter { it.teamId != null }
+        TEAM_INVITE_TYPES.flatMap { inviteType ->
+            val encodedInviteType = inviteType.encodeURLQueryComponent()
+            api.get<InvitesResponseDto>("api/invites?userId=$encodedUserId&type=$encodedInviteType").invites
+        }.filter { it.teamId != null }
     }
+
+    override suspend fun createTeamInvite(
+        teamId: String,
+        userId: String,
+        createdBy: String,
+        inviteType: String,
+    ): Result<Unit> = runCatching {
+        api.post<CreateInvitesRequestDto, InvitesResponseDto>(
+            path = "api/invites",
+            body = CreateInvitesRequestDto(
+                invites = listOf(
+                    InviteCreateDto(
+                        type = inviteType,
+                        status = "pending",
+                        teamId = teamId,
+                        userId = userId,
+                        createdBy = createdBy,
+                    )
+                )
+            ),
+        )
+    }.map { Unit }
 
     override suspend fun deleteInvite(inviteId: String): Result<Unit> = runCatching {
         api.deleteNoResponse("api/invites/$inviteId")
@@ -301,6 +340,9 @@ class TeamRepository(
         val userIds = buildSet {
             teams.forEach { team ->
                 add(team.captainId)
+                team.managerId?.let(::add)
+                team.headCoachId?.let(::add)
+                team.coachIds.forEach(::add)
                 team.playerIds.forEach(::add)
                 team.pending.forEach(::add)
             }
@@ -314,6 +356,9 @@ class TeamRepository(
     private suspend fun ensureUsersCachedForTeam(team: Team) {
         val userIds = buildList {
             add(team.captainId)
+            team.managerId?.let(::add)
+            team.headCoachId?.let(::add)
+            addAll(team.coachIds)
             addAll(team.playerIds)
             addAll(team.pending)
         }.distinct().filter(String::isNotBlank)

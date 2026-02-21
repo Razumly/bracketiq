@@ -4,7 +4,9 @@ import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.Bounds
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
+import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
+import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
@@ -29,6 +31,7 @@ import com.razumly.mvp.core.network.dto.EventSearchFiltersDto
 import com.razumly.mvp.core.network.dto.EventSearchRequestDto
 import com.razumly.mvp.core.network.dto.EventSearchUserLocationDto
 import com.razumly.mvp.core.network.dto.EventsResponseDto
+import com.razumly.mvp.core.network.dto.ProfileScheduleResponseDto
 import com.razumly.mvp.core.network.dto.ScheduleEventRequestDto
 import com.razumly.mvp.core.network.dto.ScheduleEventResponseDto
 import com.razumly.mvp.core.network.dto.UpdateEventRequestDto
@@ -81,7 +84,8 @@ interface IEventRepository : IMVPRepository {
     suspend fun registerChildForEvent(eventId: String, childUserId: String): Result<ChildRegistrationResult>
     suspend fun addTeamToEvent(event: Event, team: Team): Result<Unit>
     suspend fun removeTeamFromEvent(event: Event, teamWithPlayers: TeamWithPlayers): Result<Unit>
-    suspend fun removeCurrentUserFromEvent(event: Event): Result<Unit>
+    suspend fun removeCurrentUserFromEvent(event: Event, targetUserId: String? = null): Result<Unit>
+    suspend fun getMySchedule(): Result<UserScheduleSnapshot> = Result.success(UserScheduleSnapshot())
 }
 
 data class SelfRegistrationResult(
@@ -95,6 +99,13 @@ data class ChildRegistrationResult(
     val requiresParentApproval: Boolean = false,
     val requiresChildEmail: Boolean = false,
     val warnings: List<String> = emptyList(),
+)
+
+data class UserScheduleSnapshot(
+    val events: List<Event> = emptyList(),
+    val matches: List<MatchMVP> = emptyList(),
+    val teams: List<Team> = emptyList(),
+    val fields: List<Field> = emptyList(),
 )
 
 private data class RegistrationDivisionPayload(
@@ -514,17 +525,46 @@ class EventRepository(
             persistEventRelations(updated)
         }
 
-    override suspend fun removeCurrentUserFromEvent(event: Event): Result<Unit> {
+    override suspend fun removeCurrentUserFromEvent(event: Event, targetUserId: String?): Result<Unit> {
         val currentUser = userRepository.currentUser.value.getOrThrow()
+        val resolvedUserId = targetUserId?.trim()?.takeIf(String::isNotBlank) ?: currentUser.id
         return runCatching {
             val updated = api.delete<EventParticipantsRequestDto, EventResponseDto>(
                 path = "api/events/${event.id}/participants",
-                body = EventParticipantsRequestDto(userId = currentUser.id),
+                body = EventParticipantsRequestDto(userId = resolvedUserId),
             ).event?.toEventOrNull() ?: error("Participant update response missing event")
 
             databaseService.getEventDao.upsertEvent(updated)
             persistEventRelations(updated)
         }
+    }
+
+    override suspend fun getMySchedule(): Result<UserScheduleSnapshot> = runCatching {
+        val response = api.get<ProfileScheduleResponseDto>("api/profile/schedule")
+        val events = response.events.mapNotNull { it.toEventOrNull() }
+        val matches = response.matches.mapNotNull { it.toMatchOrNull() }
+        val teams = response.teams.mapNotNull { it.toTeamOrNull() }
+        val fields = response.fields
+
+        if (events.isNotEmpty()) {
+            databaseService.getEventDao.upsertEvents(events)
+        }
+        if (matches.isNotEmpty()) {
+            databaseService.getMatchDao.upsertMatches(matches)
+        }
+        if (teams.isNotEmpty()) {
+            databaseService.getTeamDao.upsertTeams(teams)
+        }
+        if (fields.isNotEmpty()) {
+            databaseService.getFieldDao.upsertFields(fields)
+        }
+
+        UserScheduleSnapshot(
+            events = events,
+            matches = matches,
+            teams = teams,
+            fields = fields,
+        )
     }
 
     override suspend fun deleteEvent(eventId: String): Result<Unit> = runCatching {

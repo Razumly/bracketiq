@@ -18,6 +18,7 @@ data class Team(
     val name: String?,
     val captainId: String,
     val managerId: String? = null,
+    val headCoachId: String? = null,
     val coachIds: List<String> = emptyList(),
     val parentTeamId: String? = null,
     val playerIds: List<String> = emptyList(),
@@ -29,6 +30,7 @@ data class Team(
 ) : MVPDocument, DisplayableEntity {
     override val displayName: String get() = name ?: "Team ${playerIds.size}"
     override val imageUrl: String? get() = profileImageId
+    val assistantCoachIds: List<String> get() = coachIds
 
     companion object {
         operator fun invoke(captainId: String): Team {
@@ -37,15 +39,18 @@ data class Team(
                 division = DEFAULT_DIVISION,
                 wins = 0,
                 losses = 0,
-            name = null,
-            playerIds = listOf(captainId),
-            teamSize = 2,
-            id = newId(),
-            captainId = "",
-            profileImageId = null,
-            sport = null
-        )
-    }
+                name = null,
+                playerIds = listOf(captainId),
+                teamSize = 2,
+                id = newId(),
+                captainId = captainId,
+                managerId = captainId,
+                headCoachId = null,
+                coachIds = emptyList(),
+                profileImageId = null,
+                sport = null
+            )
+        }
     }
 
     fun toTeamDTO(): TeamDTO {
@@ -58,6 +63,8 @@ data class Team(
             playerIds = playerIds,
             captainId = captainId,
             managerId = managerId,
+            headCoachId = headCoachId,
+            assistantCoachIds = assistantCoachIds,
             coachIds = coachIds,
             parentTeamId = parentTeamId,
             teamSize = teamSize,

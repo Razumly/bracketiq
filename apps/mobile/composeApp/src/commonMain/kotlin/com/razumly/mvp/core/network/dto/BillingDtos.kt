@@ -39,6 +39,7 @@ data class StripeHostLinkRequestDto(
 @Serializable
 data class BillingRefundRequestDto(
     val payloadEvent: BillingEventRefDto,
+    val userId: String? = null,
     val reason: String? = null,
 )
 

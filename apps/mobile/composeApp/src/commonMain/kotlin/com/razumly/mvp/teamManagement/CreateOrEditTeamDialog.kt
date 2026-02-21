@@ -46,6 +46,13 @@ import com.razumly.mvp.core.presentation.composables.SearchPlayerDialog
 import com.razumly.mvp.core.presentation.util.teamSizeFormat
 import kotlinx.coroutines.launch
 
+private enum class TeamInviteTarget(val label: String, val inviteType: String?) {
+    PLAYER("Player", "player"),
+    MANAGER("Manager", "team_manager"),
+    HEAD_COACH("Head Coach", "team_head_coach"),
+    ASSISTANT_COACH("Assistant Coach", "team_assistant_coach"),
+}
+
 @Composable
 fun CreateOrEditTeamDialog(
     team: TeamWithPlayers,
@@ -62,6 +69,7 @@ fun CreateOrEditTeamDialog(
     currentUser: UserData,
     isNewTeam: Boolean,
     onEnsureUserByEmail: (suspend (email: String) -> Result<UserData>)? = null,
+    onInviteTeamRole: ((teamId: String, userId: String, inviteType: String) -> Unit)? = null,
 ) {
     var teamName by remember { mutableStateOf(team.team.name ?: "") }
     var teamSize by remember { mutableStateOf(team.team.teamSize) }
@@ -71,6 +79,7 @@ fun CreateOrEditTeamDialog(
     var showLeaveTeamDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
     var inviteError by remember { mutableStateOf<String?>(null) }
+    var inviteTarget by remember { mutableStateOf(TeamInviteTarget.PLAYER) }
     val scope = rememberCoroutineScope()
     val showEditDetails = isCaptain || isNewTeam
 
@@ -148,10 +157,64 @@ fun CreateOrEditTeamDialog(
                 }
                 if (playersInTeam.size + invitedPlayers.size < teamSize || teamSize == 7 && showEditDetails) {
                     item {
-                        InvitePlayerCard { showSearchDialog = true }
+                        InvitePlayerCard {
+                            inviteTarget = TeamInviteTarget.PLAYER
+                            showSearchDialog = true
+                        }
                     }
                 }
             }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Text("Team Staff")
+            Text(
+                text = "Manager: ${team.team.managerId ?: team.team.captainId}",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                text = "Head Coach: ${team.team.headCoachId ?: "Unassigned"}",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                text = "Assistant Coaches: ${if (team.team.coachIds.isNotEmpty()) team.team.coachIds.joinToString() else "Unassigned"}",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            if (showEditDetails && !isNewTeam) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            inviteTarget = TeamInviteTarget.MANAGER
+                            showSearchDialog = true
+                        },
+                        modifier = Modifier.weight(1f),
+                    ) { Text("Invite Manager") }
+                    OutlinedButton(
+                        onClick = {
+                            inviteTarget = TeamInviteTarget.HEAD_COACH
+                            showSearchDialog = true
+                        },
+                        modifier = Modifier.weight(1f),
+                    ) { Text("Invite Head Coach") }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = {
+                        inviteTarget = TeamInviteTarget.ASSISTANT_COACH
+                        showSearchDialog = true
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Invite Assistant Coach") }
+            } else if (showEditDetails && isNewTeam) {
+                Text(
+                    text = "Save the team first to invite manager/coaches.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
             Spacer(modifier = Modifier.height(16.dp))
             Row(
                 Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween
@@ -242,10 +305,17 @@ fun CreateOrEditTeamDialog(
             },
             onSearch = onSearch,
             onPlayerSelected = {
-                if (team.players.contains(it)) {
-                    playersInTeam = playersInTeam + it
+                if (inviteTarget == TeamInviteTarget.PLAYER) {
+                    if (team.players.contains(it)) {
+                        playersInTeam = playersInTeam + it
+                    } else {
+                        invitedPlayers = invitedPlayers + it
+                    }
                 } else {
-                    invitedPlayers = invitedPlayers + it
+                    val inviteType = inviteTarget.inviteType
+                    if (inviteType != null) {
+                        onInviteTeamRole?.invoke(team.team.id, it.id, inviteType)
+                    }
                 }
                 showSearchDialog = false
             },
@@ -255,10 +325,17 @@ fun CreateOrEditTeamDialog(
                     scope.launch {
                         ensure(email)
                             .onSuccess { user ->
-                                val alreadySelected = playersInTeam.any { it.id == user.id } ||
-                                    invitedPlayers.any { it.id == user.id }
-                                if (!alreadySelected) {
-                                    invitedPlayers = invitedPlayers + user
+                                if (inviteTarget == TeamInviteTarget.PLAYER) {
+                                    val alreadySelected = playersInTeam.any { it.id == user.id } ||
+                                        invitedPlayers.any { it.id == user.id }
+                                    if (!alreadySelected) {
+                                        invitedPlayers = invitedPlayers + user
+                                    }
+                                } else {
+                                    val inviteType = inviteTarget.inviteType
+                                    if (inviteType != null) {
+                                        onInviteTeamRole?.invoke(team.team.id, user.id, inviteType)
+                                    }
                                 }
                             }
                             .onFailure { inviteError = it.message ?: "Invite failed" }
@@ -266,7 +343,8 @@ fun CreateOrEditTeamDialog(
                 }
             },
             onDismiss = { showSearchDialog = false },
-            eventName = selectedEvent?.name ?: ""
+            eventName = selectedEvent?.name ?: "",
+            entryLabel = inviteTarget.label,
         )
     }
 }

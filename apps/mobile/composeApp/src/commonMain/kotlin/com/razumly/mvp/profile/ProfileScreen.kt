@@ -68,6 +68,10 @@ fun ProfileScreen(component: ProfileComponent) {
             is ProfileComponent.Child.Documents -> {
                 ProfileDocumentsScreen(component = instance.component)
             }
+
+            is ProfileComponent.Child.MySchedule -> {
+                ProfileMyScheduleScreen(component = instance.component)
+            }
         }
     }
 }

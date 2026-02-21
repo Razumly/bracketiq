@@ -39,10 +39,18 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
     val selectedEvent = component.selectedEvent
     val selectedTeam by component.selectedTeam.collectAsState()
     val currentUser = component.currentUser
-    val isCaptain = selectedTeam?.team?.captainId == currentUser.id
+    val isCaptain = selectedTeam?.team?.captainId == currentUser.id || selectedTeam?.team?.managerId == currentUser.id
     var createTeam by remember { mutableStateOf(false) }
     val deleteEnabled by component.enableDeleteTeam.collectAsState()
     val teamInvites by component.teamInvites.collectAsState()
+    val inviteRoleLabel: (String) -> String = { inviteType ->
+        when (inviteType) {
+            "team_manager" -> "Manager"
+            "team_head_coach" -> "Head Coach"
+            "team_assistant_coach" -> "Assistant Coach"
+            else -> "Player"
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -80,7 +88,8 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
                             team = it
                         )
                     } ?: Text("Invited to team", modifier = Modifier.weight(1f))
-                    Button(onClick = { invite.team?.let { component.acceptTeamInvite(invite) } }) {
+                    Text("Role: ${inviteRoleLabel(invite.invite.type)}")
+                    Button(onClick = { component.acceptTeamInvite(invite) }) {
                         Text("Accept")
                     }
                     Button(onClick = { component.declineTeamInvite(invite) }) { Text("Decline") }
@@ -121,8 +130,11 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
                 selectedEvent = selectedEvent,
                 isCaptain = isCaptain,
                 currentUser = currentUser,
-                isNewTeam = selectedTeam!!.team.captainId == "",
+                isNewTeam = createTeam,
                 onEnsureUserByEmail = { email -> component.ensureUserByEmail(email) },
+                onInviteTeamRole = { teamId, userId, inviteType ->
+                    component.inviteUserToRole(teamId, userId, inviteType)
+                },
             )
         }
     }

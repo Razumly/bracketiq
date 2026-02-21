@@ -49,7 +49,8 @@ fun SearchPlayerDialog(
     onInviteByEmail: ((email: String) -> Unit)? = null,
     onDismiss: () -> Unit,
     suggestions: List<UserData>,
-    eventName: String
+    eventName: String,
+    entryLabel: String = "User",
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var showSearchOverlay by remember { mutableStateOf(false) }
@@ -82,11 +83,11 @@ fun SearchPlayerDialog(
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text(
-                            text = "Add User", style = MaterialTheme.typography.titleLarge
+                            text = "Add $entryLabel", style = MaterialTheme.typography.titleLarge
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         SearchBox(
-                            placeholder = if (isEmailMode) "Invite player by email" else "Search Players",
+                            placeholder = if (isEmailMode) "Invite $entryLabel by email" else "Search $entryLabel",
                             filter = false,
                             onChange = { newQuery ->
                                 searchQuery = newQuery
@@ -127,7 +128,7 @@ fun SearchPlayerDialog(
                                         showSearchOverlay = true
                                     }) {
                                         Text(
-                                            text = if (isEmailMode) "Search Players"
+                                            text = if (isEmailMode) "Search $entryLabel"
                                             else "Invite by Email"
                                         )
                                     }
@@ -227,7 +228,7 @@ fun SearchPlayerDialog(
                                                     }
                                             ) {
                                                 Text(
-                                                    text = "Invite $normalizedQuery",
+                                                    text = "Invite $normalizedQuery as $entryLabel",
                                                     modifier = Modifier.padding(12.dp),
                                                     overflow = TextOverflow.Ellipsis,
                                                     maxLines = 1,
@@ -245,7 +246,7 @@ fun SearchPlayerDialog(
                                                     .fillMaxWidth()
                                             ) {
                                                 Text(
-                                                    text = "Enter a valid email address to invite.",
+                                                    text = "Enter a valid email address to invite $entryLabel.",
                                                     modifier = Modifier.padding(12.dp),
                                                     style = MaterialTheme.typography.bodyLarge
                                                 )

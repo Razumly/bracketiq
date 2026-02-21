@@ -12,7 +12,10 @@ import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.Bill
 import com.razumly.mvp.core.data.dataTypes.BillPayment
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.Field
+import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.Subscription
+import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.FamilyChild
 import com.razumly.mvp.core.data.repositories.FamilyJoinRequest
@@ -23,6 +26,7 @@ import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.ProfileDocumentCard
 import com.razumly.mvp.core.data.repositories.ProfileDocumentType
 import com.razumly.mvp.core.data.repositories.SignStep
+import com.razumly.mvp.core.data.repositories.SignerContext
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.apiBaseUrl
@@ -99,6 +103,7 @@ data class ProfileChild(
     val userId: String,
     val firstName: String,
     val lastName: String,
+    val userName: String? = null,
     val dateOfBirth: String? = null,
     val age: Int? = null,
     val linkStatus: String? = null,
@@ -162,6 +167,15 @@ data class ProfileDocumentsState(
     val error: String? = null,
 )
 
+data class ProfileMyScheduleState(
+    val isLoading: Boolean = false,
+    val events: List<Event> = emptyList(),
+    val matches: List<MatchMVP> = emptyList(),
+    val teams: List<Team> = emptyList(),
+    val fields: List<Field> = emptyList(),
+    val error: String? = null,
+)
+
 data class ProfileTextSignaturePromptState(
     val document: ProfileDocumentCard,
     val step: SignStep,
@@ -177,6 +191,7 @@ interface ProfileComponent : IPaymentProcessor {
     val childrenState: StateFlow<ProfileChildrenState>
     val connectionsState: StateFlow<ProfileConnectionsState>
     val documentsState: StateFlow<ProfileDocumentsState>
+    val myScheduleState: StateFlow<ProfileMyScheduleState>
     val activeBillPaymentId: StateFlow<String?>
     val activeMembershipActionId: StateFlow<String?>
     val activeDocumentActionId: StateFlow<String?>
@@ -194,6 +209,7 @@ interface ProfileComponent : IPaymentProcessor {
     fun navigateToChildren()
     fun navigateToConnections()
     fun navigateToDocuments()
+    fun navigateToMySchedule()
 
     fun onLogout()
     fun manageTeams()
@@ -222,8 +238,10 @@ interface ProfileComponent : IPaymentProcessor {
     fun unfollowUser(user: UserData)
     fun removeFriend(user: UserData)
     fun refreshDocuments()
+    fun refreshMySchedule()
     fun signDocument(document: ProfileDocumentCard)
     fun openSignedDocument(document: ProfileDocumentCard)
+    fun openScheduleEvent(eventId: String)
     fun confirmTextSignature()
     fun dismissTextSignature()
     fun createChild(
@@ -259,6 +277,7 @@ interface ProfileComponent : IPaymentProcessor {
         data class Children(val component: ProfileComponent) : Child()
         data class Connections(val component: ProfileComponent) : Child()
         data class Documents(val component: ProfileComponent) : Child()
+        data class MySchedule(val component: ProfileComponent) : Child()
     }
 }
 
@@ -290,6 +309,9 @@ private sealed class ProfileConfig {
 
     @Serializable
     data object Documents : ProfileConfig()
+
+    @Serializable
+    data object MySchedule : ProfileConfig()
 
 }
 
@@ -329,6 +351,9 @@ class DefaultProfileComponent(
 
     private val _documentsState = MutableStateFlow(ProfileDocumentsState())
     override val documentsState = _documentsState.asStateFlow()
+
+    private val _myScheduleState = MutableStateFlow(ProfileMyScheduleState())
+    override val myScheduleState = _myScheduleState.asStateFlow()
 
     private val _activeBillPaymentId = MutableStateFlow<String?>(null)
     override val activeBillPaymentId = _activeBillPaymentId.asStateFlow()
@@ -439,6 +464,10 @@ class DefaultProfileComponent(
         push(ProfileConfig.Documents)
     }
 
+    override fun navigateToMySchedule() {
+        push(ProfileConfig.MySchedule)
+    }
+
     override fun onLogout() {
         scope.launch {
             userRepository.logout().onFailure {
@@ -527,6 +556,57 @@ class DefaultProfileComponent(
 
     override fun openEventTemplate(event: Event) {
         navigationHandler.navigateToEvent(event)
+    }
+
+    override fun refreshMySchedule() {
+        scope.launch {
+            _myScheduleState.value = _myScheduleState.value.copy(
+                isLoading = true,
+                error = null,
+            )
+
+            eventRepository.getMySchedule()
+                .onSuccess { snapshot ->
+                    _myScheduleState.value = ProfileMyScheduleState(
+                        isLoading = false,
+                        events = snapshot.events,
+                        matches = snapshot.matches,
+                        teams = snapshot.teams,
+                        fields = snapshot.fields,
+                        error = null,
+                    )
+                }
+                .onFailure { throwable ->
+                    _myScheduleState.value = _myScheduleState.value.copy(
+                        isLoading = false,
+                        error = throwable.message ?: "Failed to load schedule.",
+                    )
+                }
+        }
+    }
+
+    override fun openScheduleEvent(eventId: String) {
+        val normalizedId = eventId.trim()
+        if (normalizedId.isEmpty()) {
+            _errorState.value = ErrorMessage("Invalid event.")
+            return
+        }
+
+        val cached = _myScheduleState.value.events.firstOrNull { it.id == normalizedId }
+        if (cached != null) {
+            navigationHandler.navigateToEvent(cached)
+            return
+        }
+
+        scope.launch {
+            eventRepository.getEvent(normalizedId)
+                .onSuccess { event ->
+                    navigationHandler.navigateToEvent(event)
+                }
+                .onFailure {
+                    _errorState.value = ErrorMessage(it.message ?: "Unable to open event.")
+                }
+        }
     }
 
     override fun manageStripeAccountOnboarding() {
@@ -1080,10 +1160,19 @@ class DefaultProfileComponent(
     }
 
     override fun signDocument(document: ProfileDocumentCard) {
+        val currentUserId = userRepository.currentUser.value.getOrNull()?.id?.trim().orEmpty()
         if (document.requiresChildEmail) {
             _errorState.value = ErrorMessage(
                 document.statusNote ?: "Add child email before requesting child-signature documents.",
             )
+            return
+        }
+        if (
+            document.signerContext == SignerContext.CHILD
+            && !document.childUserId.isNullOrBlank()
+            && document.childUserId != currentUserId
+        ) {
+            _errorState.value = ErrorMessage("This signature must be completed from the child account.")
             return
         }
 
@@ -1201,6 +1290,8 @@ class DefaultProfileComponent(
                 templateId = prompt.step.templateId,
                 documentId = documentId,
                 type = prompt.step.type,
+                signerContext = prompt.document.signerContext,
+                childUserId = prompt.document.childUserId,
             ).onSuccess {
                 _textSignaturePrompt.value = null
                 _errorState.value = ErrorMessage("Document signed.")
@@ -1394,6 +1485,7 @@ class DefaultProfileComponent(
         ProfileConfig.Children -> ProfileComponent.Child.Children(this@DefaultProfileComponent)
         ProfileConfig.Connections -> ProfileComponent.Child.Connections(this@DefaultProfileComponent)
         ProfileConfig.Documents -> ProfileComponent.Child.Documents(this@DefaultProfileComponent)
+        ProfileConfig.MySchedule -> ProfileComponent.Child.MySchedule(this@DefaultProfileComponent)
     }
 }
 
@@ -1404,6 +1496,7 @@ private fun FamilyChild.toProfileChild(): ProfileChild {
         userId = userId,
         firstName = firstName,
         lastName = lastName,
+        userName = userName?.trim()?.takeIf(String::isNotBlank),
         dateOfBirth = dateOfBirth,
         age = age,
         linkStatus = linkStatus,

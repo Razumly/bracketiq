@@ -119,6 +119,11 @@ private fun PlayerActionPopup(
                 text = player.fullName,
                 style = MaterialTheme.typography.titleMedium
             )
+            Text(
+                text = "@${player.userName.ifBlank { "user" }}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
 
             HorizontalDivider()
 

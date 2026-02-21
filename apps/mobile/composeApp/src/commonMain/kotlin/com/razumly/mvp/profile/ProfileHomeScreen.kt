@@ -13,6 +13,8 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -126,6 +128,14 @@ fun ProfileHomeScreen(component: ProfileComponent) {
             )
             add(
                 ProfileAction(
+                    title = "My Schedule",
+                    description = "Events and matches I attend",
+                    icon = Icons.Default.DateRange,
+                    onClick = component::navigateToMySchedule,
+                ),
+            )
+            add(
+                ProfileAction(
                     title = "Teams",
                     description = "Team management",
                     icon = MVPIcons.ProfileActionTeams,
@@ -134,7 +144,7 @@ fun ProfileHomeScreen(component: ProfileComponent) {
             )
             add(
                 ProfileAction(
-                    title = "Events",
+                    title = "Event Management",
                     description = "Event management",
                     icon = MVPIcons.ProfileActionEvents,
                     onClick = component::manageEvents,

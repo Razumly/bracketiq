@@ -2,6 +2,7 @@ package com.razumly.mvp.core.network.dto
 
 import androidx.compose.ui.graphics.toArgb
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
@@ -281,6 +282,14 @@ data class EventChildRegistrationResponseDto(
     val requiresParentApproval: Boolean? = null,
     val warnings: List<String> = emptyList(),
     val error: String? = null,
+)
+
+@Serializable
+data class ProfileScheduleResponseDto(
+    val events: List<EventApiDto> = emptyList(),
+    val matches: List<MatchApiDto> = emptyList(),
+    val teams: List<TeamApiDto> = emptyList(),
+    val fields: List<Field> = emptyList(),
 )
 
 @Serializable

@@ -26,6 +26,7 @@ import coil3.compose.AsyncImagePainter
 import coil3.compose.SubcomposeAsyncImage
 import coil3.compose.SubcomposeAsyncImageContent
 import com.razumly.mvp.core.data.dataTypes.DisplayableEntity
+import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.presentation.util.toTitleCase
 import com.razumly.mvp.core.network.apiBaseUrl
 import com.razumly.mvp.core.util.UIConstants
@@ -48,6 +49,11 @@ fun UnifiedCard(
     }
 
     val imageUrl = entity.imageUrl ?: initialsUrl
+    val userHandle = (entity as? UserData)
+        ?.userName
+        ?.trim()
+        ?.takeIf { it.isNotBlank() }
+        ?.let { "@$it" }
 
     Column(modifier = modifier.fillMaxWidth()) {
         Row(
@@ -99,6 +105,16 @@ fun UnifiedCard(
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface
                 )
+
+                userHandle?.let { handle ->
+                    Text(
+                        text = handle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        overflow = TextOverflow.Ellipsis,
+                        maxLines = 1
+                    )
+                }
 
                 // Subtitle (for pending status, last message, etc.)
                 subtitle?.let {

@@ -501,6 +501,7 @@ fun EventDetailScreen(
     val showMatchEditDialog by component.showMatchEditDialog.collectAsState()
     val joinChoiceDialog by component.joinChoiceDialog.collectAsState()
     val childJoinSelectionDialog by component.childJoinSelectionDialog.collectAsState()
+    val withdrawTargets by component.withdrawTargets.collectAsState()
     val textSignaturePrompt by component.textSignaturePrompt.collectAsState()
     val eventImageIds by component.eventImageIds.collectAsState()
     val organizationTemplates by component.organizationTemplates.collectAsState()
@@ -539,7 +540,9 @@ fun EventDetailScreen(
     var showFab by remember { mutableStateOf(false) }
     var showOptionsDropdown by remember { mutableStateOf(false) }
     var showDeleteConfirmation by remember { mutableStateOf(false) }
+    var showWithdrawTargetDialog by remember { mutableStateOf(false) }
     var showRefundReasonDialog by remember { mutableStateOf(false) }
+    var selectedWithdrawalTarget by remember { mutableStateOf<WithdrawTargetOption?>(null) }
     var refundReason by remember { mutableStateOf("") }
     var showNotifyDialog by remember { mutableStateOf(false) }
     var showJoinOptionsSheet by remember { mutableStateOf(false) }
@@ -575,13 +578,52 @@ fun EventDetailScreen(
     val timeDiff = selectedEvent.event.start.minus(Clock.System.now())
     isRefundAutomatic = (cutoffHours != null && timeDiff <= cutoffHours.hours)
     val teamSignup = selectedEvent.event.teamSignup
-    val canLeaveEvent = isUserInEvent && (!teamSignup || isCaptain || isFreeAgent)
+    val canLeaveSelf = isUserInEvent && (!teamSignup || isCaptain || isFreeAgent || isWaitListed)
+    val selectableWithdrawTargets = remember(withdrawTargets, teamSignup, isCaptain) {
+        withdrawTargets.filter { target ->
+            if (!target.isSelf) return@filter true
+            when (target.membership) {
+                WithdrawTargetMembership.PARTICIPANT -> !teamSignup || isCaptain
+                WithdrawTargetMembership.WAITLIST -> true
+                WithdrawTargetMembership.FREE_AGENT -> true
+            }
+        }
+    }
+    val canLeaveEvent = canLeaveSelf || selectableWithdrawTargets.isNotEmpty()
+    val singleWithdrawTarget = selectableWithdrawTargets.singleOrNull()
     val leaveMessage = when {
+        selectableWithdrawTargets.size > 1 -> "Withdraw Profile"
+        singleWithdrawTarget?.membership == WithdrawTargetMembership.FREE_AGENT -> "Leave as Free Agent"
+        singleWithdrawTarget?.membership == WithdrawTargetMembership.WAITLIST -> "Leave Waitlist"
+        singleWithdrawTarget?.membership == WithdrawTargetMembership.PARTICIPANT &&
+            selectedEvent.event.price > 0 &&
+            isRefundAutomatic -> "Withdraw and Request Refund"
+        singleWithdrawTarget?.membership == WithdrawTargetMembership.PARTICIPANT &&
+            selectedEvent.event.price > 0 -> "Withdraw and Get Refund"
+        singleWithdrawTarget?.membership == WithdrawTargetMembership.PARTICIPANT -> "Leave Event"
         isFreeAgent -> "Leave as Free Agent"
         isWaitListed -> "Leave Waitlist"
         selectedEvent.event.price > 0 && isRefundAutomatic -> "Leave and Request Refund"
         selectedEvent.event.price > 0 -> "Leave and Get Refund"
         else -> "Leave Event"
+    }
+    val openLeaveOrRefundForTarget: (WithdrawTargetOption?) -> Unit = { target ->
+        val shouldRefund = when {
+            target != null -> {
+                target.membership == WithdrawTargetMembership.PARTICIPANT && selectedEvent.event.price > 0
+            }
+
+            else -> {
+                selectedEvent.event.price > 0 && !isFreeAgent && !isWaitListed
+            }
+        }
+
+        if (shouldRefund) {
+            selectedWithdrawalTarget = target
+            showRefundReasonDialog = true
+        } else {
+            component.leaveEvent(target?.userId)
+        }
     }
     val showStickyActions = !showDetails && !isEditing && !showMap && showStickyDockByScroll
     val joinOptions = remember(
@@ -1009,10 +1051,18 @@ fun EventDetailScreen(
                     onPrimaryClick = {
                         when {
                             canLeaveEvent -> {
-                                if (selectedEvent.event.price > 0 && !isFreeAgent && !isWaitListed) {
-                                    showRefundReasonDialog = true
-                                } else {
-                                    component.leaveEvent()
+                                when {
+                                    selectableWithdrawTargets.size > 1 -> {
+                                        showWithdrawTargetDialog = true
+                                    }
+
+                                    selectableWithdrawTargets.size == 1 -> {
+                                        openLeaveOrRefundForTarget(selectableWithdrawTargets.first())
+                                    }
+
+                                    else -> {
+                                        openLeaveOrRefundForTarget(null)
+                                    }
                                 }
                             }
 
@@ -1026,6 +1076,17 @@ fun EventDetailScreen(
                     onShareClick = component::shareEvent,
                 )
             }
+            }
+
+            if (showWithdrawTargetDialog && selectableWithdrawTargets.isNotEmpty()) {
+                WithdrawTargetDialog(
+                    targets = selectableWithdrawTargets,
+                    onDismiss = { showWithdrawTargetDialog = false },
+                    onTargetSelected = { target ->
+                        showWithdrawTargetDialog = false
+                        openLeaveOrRefundForTarget(target)
+                    },
+                )
             }
 
             if (showJoinOptionsSheet && joinOptions.isNotEmpty()) {
@@ -1150,13 +1211,18 @@ fun EventDetailScreen(
                     currentReason = refundReason,
                     onReasonChange = { refundReason = it },
                     onConfirm = {
-                        component.requestRefund(refundReason)
+                        component.requestRefund(
+                            reason = refundReason,
+                            targetUserId = selectedWithdrawalTarget?.userId,
+                        )
                         showRefundReasonDialog = false
                         refundReason = ""
+                        selectedWithdrawalTarget = null
                     },
                     onDismiss = {
                         showRefundReasonDialog = false
                         refundReason = ""
+                        selectedWithdrawalTarget = null
                     })
             }
 
@@ -1238,6 +1304,53 @@ private fun ChildJoinSelectionDialog(
                             } else {
                                 MaterialTheme.colorScheme.error
                             },
+                        )
+                    }
+                    HorizontalDivider()
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onDismiss) {
+                Text("Close")
+            }
+        },
+    )
+}
+
+private fun WithdrawTargetMembership.displayName(): String = when (this) {
+    WithdrawTargetMembership.PARTICIPANT -> "Registered"
+    WithdrawTargetMembership.WAITLIST -> "Waitlist"
+    WithdrawTargetMembership.FREE_AGENT -> "Free Agent"
+}
+
+@Composable
+private fun WithdrawTargetDialog(
+    targets: List<WithdrawTargetOption>,
+    onDismiss: () -> Unit,
+    onTargetSelected: (WithdrawTargetOption) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Withdraw Profile") },
+        text = {
+            LazyColumn {
+                items(targets, key = { it.userId }) { target ->
+                    val title = if (target.isSelf) "My Registration" else target.fullName
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onTargetSelected(target) }
+                            .padding(vertical = 8.dp),
+                    ) {
+                        Text(
+                            text = title.ifBlank { "Registration" },
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                        Text(
+                            text = target.membership.displayName(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                     HorizontalDivider()

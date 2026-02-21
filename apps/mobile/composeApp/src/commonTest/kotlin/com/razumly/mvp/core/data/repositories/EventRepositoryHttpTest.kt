@@ -289,6 +289,12 @@ private object EventRepositoryHttp_UnusedTeamRepository : ITeamRepository {
     override fun getTeamsWithPlayersFlow(id: String): Flow<Result<List<TeamWithPlayers>>> = error("unused")
     override fun getTeamWithPlayersFlow(id: String): Flow<Result<TeamWithRelations>> = error("unused")
     override suspend fun listTeamInvites(userId: String): Result<List<com.razumly.mvp.core.data.dataTypes.Invite>> = error("unused")
+    override suspend fun createTeamInvite(
+        teamId: String,
+        userId: String,
+        createdBy: String,
+        inviteType: String,
+    ): Result<Unit> = error("unused")
     override suspend fun deleteInvite(inviteId: String): Result<Unit> = error("unused")
     override suspend fun acceptTeamInvite(inviteId: String, teamId: String): Result<Unit> = error("unused")
 }

@@ -105,6 +105,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val showMatchEditDialog: StateFlow<MatchEditDialogState?>
     val joinChoiceDialog: StateFlow<JoinChoiceDialogState?>
     val childJoinSelectionDialog: StateFlow<ChildJoinSelectionDialogState?>
+    val withdrawTargets: StateFlow<List<WithdrawTargetOption>>
     val textSignaturePrompt: StateFlow<TextSignaturePromptState?>
     val eventImageIds: StateFlow<List<String>>
     val organizationTemplates: StateFlow<List<OrganizationTemplateDocument>>
@@ -130,8 +131,8 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun dismissJoinChoiceDialog()
     fun dismissChildJoinSelectionDialog()
     fun viewEvent()
-    fun leaveEvent()
-    fun requestRefund(reason: String)
+    fun leaveEvent(targetUserId: String? = null)
+    fun requestRefund(reason: String, targetUserId: String? = null)
     fun editEventField(update: Event.() -> Event)
     fun editTournamentField(update: Event.() -> Event)
     fun updateEvent()
@@ -193,6 +194,19 @@ data class JoinChoiceDialogState(
 
 data class ChildJoinSelectionDialogState(
     val children: List<JoinChildOption>,
+)
+
+enum class WithdrawTargetMembership {
+    PARTICIPANT,
+    WAITLIST,
+    FREE_AGENT,
+}
+
+data class WithdrawTargetOption(
+    val userId: String,
+    val fullName: String,
+    val membership: WithdrawTargetMembership,
+    val isSelf: Boolean,
 )
 
 private fun FamilyChild.toJoinChildOption(): JoinChildOption {
@@ -488,6 +502,9 @@ class DefaultEventDetailComponent(
     private val _childJoinSelectionDialog = MutableStateFlow<ChildJoinSelectionDialogState?>(null)
     override val childJoinSelectionDialog = _childJoinSelectionDialog.asStateFlow()
 
+    private val _withdrawTargets = MutableStateFlow<List<WithdrawTargetOption>>(emptyList())
+    override val withdrawTargets = _withdrawTargets.asStateFlow()
+
     private val _textSignaturePrompt = MutableStateFlow<TextSignaturePromptState?>(null)
     override val textSignaturePrompt = _textSignaturePrompt.asStateFlow()
 
@@ -496,6 +513,8 @@ class DefaultEventDetailComponent(
     private var pendingSignatureStepIndex = 0
     private var pendingPostSignatureAction: (suspend () -> Unit)? = null
     private var pendingSignatureContext: SignerContext = SignerContext.PARTICIPANT
+    private var pendingSignatureContexts: List<SignerContext> = emptyList()
+    private var pendingSignatureContextIndex = 0
     private var pendingSignatureChild: JoinChildOption? = null
     private val completedSignatureKeys = mutableSetOf<String>()
 
@@ -571,6 +590,7 @@ class DefaultEventDetailComponent(
 
                         _isUserCaptain.value = checkIsUserCaptain()
                     }
+                    refreshWithdrawTargets(event.event)
                     event.event.divisions.firstOrNull()?.let { selectDivision(it) }
                 }
         }
@@ -694,6 +714,9 @@ class DefaultEventDetailComponent(
 
     override fun joinEvent() {
         scope.launch {
+            if (resumePendingSignatureFlowIfNeeded()) {
+                return@launch
+            }
             if (!selectedEvent.value.teamSignup) {
                 val children = loadJoinableChildren()
                 if (children.isNotEmpty()) {
@@ -705,6 +728,15 @@ class DefaultEventDetailComponent(
             }
             runSelfJoinFlow()
         }
+    }
+
+    private suspend fun resumePendingSignatureFlowIfNeeded(): Boolean {
+        if (pendingPostSignatureAction == null || pendingSignatureContexts.isEmpty()) {
+            return false
+        }
+
+        loadSignatureStepsForCurrentContext()
+        return true
     }
 
     override fun joinEventAsTeam(team: TeamWithPlayers) {
@@ -906,11 +938,48 @@ class DefaultEventDetailComponent(
         child: JoinChildOption? = null,
         onReady: suspend () -> Unit,
     ) {
+        pendingSignatureContexts = buildSignatureContextQueue(signerContext, child)
+        pendingSignatureContextIndex = 0
+        pendingSignatureChild = child
+        pendingPostSignatureAction = onReady
+        loadSignatureStepsForCurrentContext()
+    }
+
+    private fun buildSignatureContextQueue(
+        baseContext: SignerContext,
+        child: JoinChildOption?,
+    ): List<SignerContext> {
+        if (child == null) return listOf(baseContext)
+        val childEmail = child.email?.trim()?.takeIf(String::isNotBlank)?.lowercase()
+        val currentEmail = userRepository.currentAccount.value.getOrNull()?.email
+            ?.trim()?.takeIf(String::isNotBlank)?.lowercase()
+        val shouldChainChild =
+            childEmail != null && currentEmail != null && childEmail == currentEmail && baseContext != SignerContext.CHILD
+
+        return if (shouldChainChild) {
+            listOf(baseContext, SignerContext.CHILD)
+        } else {
+            listOf(baseContext)
+        }
+    }
+
+    private fun currentSignatureContext(): SignerContext =
+        pendingSignatureContexts.getOrNull(pendingSignatureContextIndex) ?: SignerContext.PARTICIPANT
+
+    private suspend fun loadSignatureStepsForCurrentContext() {
+        if (pendingSignatureContexts.isEmpty()) {
+            clearPendingSignatureFlow()
+            return
+        }
+
+        val context = currentSignatureContext()
+        pendingSignatureContext = context
+
         billingRepository.getRequiredSignLinks(
             eventId = selectedEvent.value.id,
-            signerContext = signerContext,
-            childUserId = child?.userId,
-            childUserEmail = child?.email,
+            signerContext = context,
+            childUserId = pendingSignatureChild?.userId,
+            childUserEmail = pendingSignatureChild?.email,
         ).onFailure { throwable ->
             Napier.e("Failed to load required signing documents.", throwable)
             _errorState.value = ErrorMessage(
@@ -920,32 +989,45 @@ class DefaultEventDetailComponent(
             val pendingSteps = allSteps.filterNot { step ->
                 val key = signatureCompletionKey(
                     templateId = step.templateId,
-                    signerContext = signerContext,
-                    child = child,
+                    signerContext = context,
+                    child = pendingSignatureChild,
                 )
                 completedSignatureKeys.contains(key)
             }
 
             if (pendingSteps.isEmpty()) {
-                onReady()
+                advanceSigningContextOrComplete()
                 return@onSuccess
             }
 
             pendingSignatureSteps = pendingSteps
             pendingSignatureStepIndex = 0
-            pendingSignatureContext = signerContext
-            pendingSignatureChild = child
-            pendingPostSignatureAction = onReady
             processNextSignatureStep()
         }
+    }
+
+    private suspend fun advanceSigningContextOrComplete() {
+        pendingSignatureSteps = emptyList()
+        pendingSignatureStepIndex = 0
+
+        if (
+            pendingSignatureContexts.isNotEmpty() &&
+            pendingSignatureContextIndex < pendingSignatureContexts.lastIndex
+        ) {
+            pendingSignatureContextIndex += 1
+            loadSignatureStepsForCurrentContext()
+            return
+        }
+
+        val action = pendingPostSignatureAction
+        clearPendingSignatureFlow()
+        action?.invoke()
     }
 
     private suspend fun processNextSignatureStep() {
         val currentStep = pendingSignatureSteps.getOrNull(pendingSignatureStepIndex)
         if (currentStep == null) {
-            val action = pendingPostSignatureAction
-            clearPendingSignatureFlow()
-            action?.invoke()
+            advanceSigningContextOrComplete()
             return
         }
 
@@ -977,17 +1059,17 @@ class DefaultEventDetailComponent(
             )
         }.onSuccess {
             _errorState.value = ErrorMessage(
-                "Please complete document signing, then tap Join/Purchase again."
+                "Please complete document signing, then tap Join/Purchase again to continue registration."
             )
         }
-
-        clearPendingSignatureFlow()
     }
 
     private fun clearPendingSignatureFlow() {
         pendingSignatureSteps = emptyList()
         pendingSignatureStepIndex = 0
         pendingSignatureContext = SignerContext.PARTICIPANT
+        pendingSignatureContexts = emptyList()
+        pendingSignatureContextIndex = 0
         pendingSignatureChild = null
         pendingPostSignatureAction = null
         _textSignaturePrompt.value = null
@@ -1047,13 +1129,26 @@ class DefaultEventDetailComponent(
         )
     }
 
-    override fun requestRefund(reason: String) {
+    override fun requestRefund(reason: String, targetUserId: String?) {
         scope.launch {
-            if (!_isUserInEvent.value) {
+            val normalizedTargetUserId = targetUserId
+                ?.trim()
+                ?.takeIf(String::isNotBlank)
+                ?: currentUser.value.id
+            val membership = resolveWithdrawTargetMembership(
+                event = selectedEvent.value,
+                userId = normalizedTargetUserId,
+            )
+            if (membership == null) {
+                _errorState.value = ErrorMessage("Selected profile is not registered for this event.")
                 return@launch
             }
             loadingHandler.showLoading("Requesting Refund ...")
-            billingRepository.leaveAndRefundEvent(selectedEvent.value, reason).onFailure {
+            billingRepository.leaveAndRefundEvent(
+                event = selectedEvent.value,
+                reason = reason,
+                targetUserId = normalizedTargetUserId,
+            ).onFailure {
                 _errorState.value = ErrorMessage(it.message ?: "")
             }.onSuccess {
                 eventRepository.getEvent(selectedEvent.value.id)
@@ -1064,22 +1159,59 @@ class DefaultEventDetailComponent(
         }
     }
 
-    override fun leaveEvent() {
+    override fun leaveEvent(targetUserId: String?) {
         scope.launch {
-            if (!_isUserInEvent.value) {
+            val normalizedTargetUserId = targetUserId
+                ?.trim()
+                ?.takeIf(String::isNotBlank)
+                ?: currentUser.value.id
+            val membership = resolveWithdrawTargetMembership(
+                event = selectedEvent.value,
+                userId = normalizedTargetUserId,
+            )
+            if (membership == null) {
+                _errorState.value = ErrorMessage("Selected profile is not registered for this event.")
                 return@launch
             }
-            val result =
-                if (!selectedEvent.value.teamSignup || checkIsUserFreeAgent(selectedEvent.value)) {
-                    loadingHandler.showLoading("Leaving Event ...")
-                    eventRepository.removeCurrentUserFromEvent(selectedEvent.value)
-                        .onFailure { _errorState.value = ErrorMessage(it.message ?: "") }
-                } else {
-                    loadingHandler.showLoading("Team Leaving Event ...")
-                    eventRepository.removeTeamFromEvent(
-                        selectedEvent.value, _usersTeam.value!!
-                    ).onFailure { _errorState.value = ErrorMessage(it.message ?: "") }
+
+            val leavingSelf = normalizedTargetUserId == currentUser.value.id
+            val result = when (membership) {
+                WithdrawTargetMembership.PARTICIPANT -> {
+                    if (
+                        leavingSelf &&
+                        selectedEvent.value.teamSignup &&
+                        !checkIsUserFreeAgent(selectedEvent.value)
+                    ) {
+                        loadingHandler.showLoading("Team Leaving Event ...")
+                        val team = _usersTeam.value
+                        if (team == null) {
+                            Result.failure(IllegalStateException("Unable to resolve your team registration."))
+                        } else {
+                            eventRepository.removeTeamFromEvent(
+                                event = selectedEvent.value,
+                                teamWithPlayers = team,
+                            )
+                        }
+                    } else {
+                        loadingHandler.showLoading("Leaving Event ...")
+                        eventRepository.removeCurrentUserFromEvent(
+                            event = selectedEvent.value,
+                            targetUserId = normalizedTargetUserId,
+                        )
+                    }
                 }
+
+                WithdrawTargetMembership.WAITLIST,
+                WithdrawTargetMembership.FREE_AGENT -> {
+                    loadingHandler.showLoading("Leaving Event ...")
+                    eventRepository.removeCurrentUserFromEvent(
+                        event = selectedEvent.value,
+                        targetUserId = normalizedTargetUserId,
+                    )
+                }
+            }
+
+            result.onFailure { _errorState.value = ErrorMessage(it.message ?: "") }
             result.onSuccess {
                 loadingHandler.showLoading("Reloading Event")
                 eventRepository.getEvent(selectedEvent.value.id)
@@ -1322,6 +1454,59 @@ class DefaultEventDetailComponent(
         return checkIsUserParticipant(event) || checkIsUserFreeAgent(event) || checkIsUserWaitListed(
             event
         )
+    }
+
+    private suspend fun refreshWithdrawTargets(event: Event) {
+        val current = currentUser.value
+        val targets = LinkedHashMap<String, WithdrawTargetOption>()
+
+        resolveWithdrawTargetMembership(event, current.id)?.let { membership ->
+            targets[current.id] = WithdrawTargetOption(
+                userId = current.id,
+                fullName = current.fullName.ifBlank { "My Registration" },
+                membership = membership,
+                isSelf = true,
+            )
+        }
+
+        val children = userRepository.listChildren()
+            .onFailure { throwable ->
+                Napier.w("Failed to load linked children for withdraw targets.", throwable)
+            }
+            .getOrElse { emptyList() }
+            .filter { child ->
+                child.userId.isNotBlank() &&
+                    (child.linkStatus?.equals("active", ignoreCase = true) != false)
+            }
+
+        children.forEach { child ->
+            val childId = child.userId
+            val membership = resolveWithdrawTargetMembership(event, childId) ?: return@forEach
+            val fullName = listOf(child.firstName.trim(), child.lastName.trim())
+                .filter { it.isNotBlank() }
+                .joinToString(" ")
+                .ifBlank { "Child" }
+            targets[childId] = WithdrawTargetOption(
+                userId = childId,
+                fullName = fullName,
+                membership = membership,
+                isSelf = false,
+            )
+        }
+
+        _withdrawTargets.value = targets.values.toList()
+    }
+
+    private fun resolveWithdrawTargetMembership(
+        event: Event,
+        userId: String,
+    ): WithdrawTargetMembership? {
+        return when {
+            event.playerIds.contains(userId) -> WithdrawTargetMembership.PARTICIPANT
+            event.waitList.contains(userId) -> WithdrawTargetMembership.WAITLIST
+            event.freeAgents.contains(userId) -> WithdrawTargetMembership.FREE_AGENT
+            else -> null
+        }
     }
 
     private fun checkEventIsFull(event: Event): Boolean {

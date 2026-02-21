@@ -1281,6 +1281,11 @@ private fun ChildAccountCard(
                     style = MaterialTheme.typography.titleMedium,
                 )
                 Text(
+                    text = "@${child.userName?.trim()?.takeIf(String::isNotBlank) ?: "user"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
                     text = "Age: ${child.age ?: "Unknown"}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1540,7 +1545,7 @@ private val DATE_INPUT_REGEX = Regex("""\d{4}-\d{2}-\d{2}""")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ProfileSectionScaffold(
+fun ProfileSectionScaffold(
     title: String,
     description: String,
     onBack: () -> Unit,
@@ -1592,7 +1597,7 @@ private fun ProfileSectionScaffold(
 }
 
 @Composable
-private fun ProfileSectionContent(
+fun ProfileSectionContent(
     description: String,
     content: @Composable () -> Unit,
     modifier: Modifier = Modifier,
