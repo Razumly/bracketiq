@@ -11,6 +11,10 @@ data class DivisionDetail(
     val divisionTypeName: String = "",
     val ratingType: String = "",
     val gender: String = "",
+    // Stored in cents to match backend event/checkout pricing semantics.
+    val price: Int? = null,
+    val maxParticipants: Int? = null,
+    val playoffTeamCount: Int? = null,
     val sportId: String? = null,
     val ageCutoffDate: String? = null,
     val ageCutoffLabel: String? = null,

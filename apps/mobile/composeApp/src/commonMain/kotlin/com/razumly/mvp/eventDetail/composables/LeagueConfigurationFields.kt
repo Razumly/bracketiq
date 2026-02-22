@@ -79,17 +79,12 @@ fun ColumnScope.LeagueConfigurationFields(
         }
         Box(modifier = Modifier.weight(1f)) {
             LabeledCheckbox(
-                checked = leagueConfig.includePlayoffs,
-                label = "Include playoffs",
+                checked = leagueConfig.doTeamsRef,
+                label = "Teams provide referees",
                 onCheckedChange = { checked ->
                     onLeagueConfigChange(
                         leagueConfig.copy(
-                            includePlayoffs = checked,
-                            playoffTeamCount = if (checked) {
-                                leagueConfig.playoffTeamCount
-                            } else {
-                                null
-                            },
+                            doTeamsRef = checked,
                         )
                     )
                 },
@@ -97,46 +92,38 @@ fun ColumnScope.LeagueConfigurationFields(
         }
     }
 
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.Top,
-    ) {
-        Box(modifier = Modifier.weight(1f)) {
-            LabeledCheckbox(
-                checked = leagueConfig.doTeamsRef,
-                label = "Teams provide referees",
-                onCheckedChange = { checked ->
-                    onLeagueConfigChange(leagueConfig.copy(doTeamsRef = checked))
-                },
-            )
-        }
-        Box(modifier = Modifier.weight(1f)) {
-            LabeledCheckbox(
-                checked = leagueConfig.includePlayoffs && playoffConfig.doubleElimination,
-                label = "Double elimination",
-                enabled = leagueConfig.includePlayoffs,
-                onCheckedChange = { checked ->
-                    if (!leagueConfig.includePlayoffs) return@LabeledCheckbox
-                    val updated = if (checked) {
-                        playoffConfig.copy(
-                            doubleElimination = true,
-                            loserSetCount = loserSetCount,
-                            loserBracketPointsToVictory = normalizePoints(
-                                playoffConfig.loserBracketPointsToVictory,
-                                loserSetCount
-                            ),
-                        )
-                    } else {
-                        playoffConfig.copy(
-                            doubleElimination = false,
-                            loserSetCount = 1,
-                            loserBracketPointsToVictory = listOf(21),
-                        )
-                    }
-                    onPlayoffConfigChange(updated)
-                },
-            )
+    if (leagueConfig.includePlayoffs) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Box(modifier = Modifier.weight(1f)) {
+                LabeledCheckbox(
+                    checked = playoffConfig.doubleElimination,
+                    label = "Double elimination",
+                    onCheckedChange = { checked ->
+                        val updated = if (checked) {
+                            playoffConfig.copy(
+                                doubleElimination = true,
+                                loserSetCount = loserSetCount,
+                                loserBracketPointsToVictory = normalizePoints(
+                                    playoffConfig.loserBracketPointsToVictory,
+                                    loserSetCount
+                                ),
+                            )
+                        } else {
+                            playoffConfig.copy(
+                                doubleElimination = false,
+                                loserSetCount = 1,
+                                loserBracketPointsToVictory = listOf(21),
+                            )
+                        }
+                        onPlayoffConfigChange(updated)
+                    },
+                )
+            }
+            Box(modifier = Modifier.weight(1f))
         }
     }
 
@@ -223,24 +210,7 @@ fun ColumnScope.LeagueConfigurationFields(
                 },
                 isError = false,
             )
-            if (leagueConfig.includePlayoffs) {
-                NumberInputField(
-                    modifier = Modifier.weight(1f),
-                    value = leagueConfig.playoffTeamCount?.toString().orEmpty(),
-                    label = "Playoff Team Count",
-                    onValueChange = { newValue ->
-                        if (newValue.all { it.isDigit() }) {
-                            onLeagueConfigChange(
-                                leagueConfig.copy(playoffTeamCount = newValue.toIntOrNull())
-                            )
-                        }
-                    },
-                    isError = (leagueConfig.playoffTeamCount ?: 0) < 2,
-                    errorMessage = "Required when playoffs are enabled",
-                )
-            } else {
-                Box(modifier = Modifier.weight(1f))
-            }
+            Box(modifier = Modifier.weight(1f))
         }
 
         Text(
@@ -302,30 +272,6 @@ fun ColumnScope.LeagueConfigurationFields(
                 },
                 isError = false,
             )
-        }
-
-        if (leagueConfig.includePlayoffs) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.Top,
-            ) {
-                NumberInputField(
-                    modifier = Modifier.weight(1f),
-                    value = leagueConfig.playoffTeamCount?.toString().orEmpty(),
-                    label = "Playoff Team Count",
-                    onValueChange = { newValue ->
-                        if (newValue.all { it.isDigit() }) {
-                            onLeagueConfigChange(
-                                leagueConfig.copy(playoffTeamCount = newValue.toIntOrNull())
-                            )
-                        }
-                    },
-                    isError = (leagueConfig.playoffTeamCount ?: 0) < 2,
-                    errorMessage = "Required when playoffs are enabled",
-                )
-                Box(modifier = Modifier.weight(1f))
-            }
         }
     }
 

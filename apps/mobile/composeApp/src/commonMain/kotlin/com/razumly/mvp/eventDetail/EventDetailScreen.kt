@@ -87,6 +87,9 @@ import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.FeeBreakdown
+import com.razumly.mvp.core.data.util.divisionsEquivalent
+import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
+import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.composables.PlatformTextField
 import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
@@ -99,6 +102,7 @@ import com.razumly.mvp.core.util.LocalPopupHandler
 import com.razumly.mvp.eventDetail.composables.CollapsableHeader
 import com.razumly.mvp.eventDetail.composables.MatchEditControls
 import com.razumly.mvp.eventDetail.composables.MatchEditDialog
+import com.razumly.mvp.eventDetail.composables.ParticipantsSection
 import com.razumly.mvp.eventDetail.composables.ParticipantsView
 import com.razumly.mvp.eventDetail.composables.ScheduleView
 import com.razumly.mvp.eventDetail.composables.SendNotificationDialog
@@ -120,13 +124,18 @@ private enum class DetailTab(val label: String) {
     PARTICIPANTS("Participants"),
     BRACKET("Bracket"),
     SCHEDULE("Schedule"),
-    LEAGUES("Leagues")
+    LEAGUES("Standings")
 }
 
 private data class JoinOption(
     val label: String,
     val requiresPayment: Boolean,
     val onClick: () -> Unit
+)
+
+private data class BracketDivisionOption(
+    val id: String,
+    val label: String,
 )
 
 @Composable
@@ -447,6 +456,150 @@ private fun StickyActionBar(
 }
 
 @Composable
+private fun BracketFloatingBar(
+    selectedDivisionId: String?,
+    divisionOptions: List<BracketDivisionOption>,
+    onDivisionSelected: (String) -> Unit,
+    showBracketToggle: Boolean,
+    isLosersBracket: Boolean,
+    onBracketToggle: () -> Unit,
+    onShowDetailsClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var isDivisionMenuExpanded by remember { mutableStateOf(false) }
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        tonalElevation = 3.dp,
+        shadowElevation = 6.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(modifier = Modifier.weight(1f)) {
+                Button(
+                    onClick = { isDivisionMenuExpanded = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = divisionOptions.isNotEmpty()
+                ) {
+                    Text(text = "Division")
+                }
+                DropdownMenu(
+                    expanded = isDivisionMenuExpanded,
+                    onDismissRequest = { isDivisionMenuExpanded = false }
+                ) {
+                    divisionOptions.forEach { option ->
+                        DropdownMenuItem(
+                            text = { Text(option.label) },
+                            onClick = {
+                                isDivisionMenuExpanded = false
+                                onDivisionSelected(option.id)
+                            },
+                            leadingIcon = {
+                                if (option.id == selectedDivisionId) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = null
+                                    )
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+            if (showBracketToggle) {
+                Button(
+                    onClick = onBracketToggle,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = if (isLosersBracket) "Losers Bracket" else "Winners Bracket",
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+            Button(
+                onClick = onShowDetailsClick,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("Show Details")
+            }
+        }
+    }
+}
+
+@Composable
+private fun ParticipantsFloatingBar(
+    selectedSection: ParticipantsSection,
+    availableSections: List<ParticipantsSection>,
+    onSectionSelected: (ParticipantsSection) -> Unit,
+    onShowDetailsClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var isSectionMenuExpanded by remember { mutableStateOf(false) }
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        tonalElevation = 3.dp,
+        shadowElevation = 6.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(modifier = Modifier.weight(1f)) {
+                Button(
+                    onClick = { isSectionMenuExpanded = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = selectedSection.label,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                DropdownMenu(
+                    expanded = isSectionMenuExpanded,
+                    onDismissRequest = { isSectionMenuExpanded = false }
+                ) {
+                    availableSections.forEach { section ->
+                        DropdownMenuItem(
+                            text = { Text(section.label) },
+                            onClick = {
+                                isSectionMenuExpanded = false
+                                onSectionSelected(section)
+                            },
+                            leadingIcon = {
+                                if (section == selectedSection) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = null
+                                    )
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+            Button(
+                onClick = onShowDetailsClick,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("Show Details")
+            }
+        }
+    }
+}
+
+@Composable
 private fun JoinOptionsSheet(
     options: List<JoinOption>,
     paymentProcessor: EventDetailComponent,
@@ -509,6 +662,8 @@ fun EventDetailScreen(
     val editableMatches by component.editableMatches.collectAsState()
     val eventFields by component.eventFields.collectAsState()
     val divisionFields by component.divisionFields.collectAsState()
+    val selectedDivision by component.selectedDivision.collectAsState()
+    val losersBracket by component.losersBracket.collectAsState()
     val showTeamDialog by component.showTeamSelectionDialog.collectAsState()
     val showMatchEditDialog by component.showMatchEditDialog.collectAsState()
     val joinChoiceDialog by component.joinChoiceDialog.collectAsState()
@@ -539,11 +694,22 @@ fun EventDetailScreen(
     val leagueStandings = remember(
         selectedEvent.teams,
         selectedEvent.matches,
+        selectedEvent.event.singleDivision,
+        selectedDivision,
         selectedEvent.leagueScoringConfig
     ) {
+        val standingsMatches = if (
+            selectedEvent.event.singleDivision || selectedDivision.isNullOrBlank()
+        ) {
+            selectedEvent.matches
+        } else {
+            selectedEvent.matches.filter { match ->
+                divisionsEquivalent(match.match.division, selectedDivision)
+            }
+        }
         buildLeagueStandings(
             teams = selectedEvent.teams,
-            matches = selectedEvent.matches,
+            matches = standingsMatches,
             config = selectedEvent.leagueScoringConfig
         )
     }
@@ -587,6 +753,7 @@ fun EventDetailScreen(
         2 -> 48
         else -> null
     }
+    val eventHasStarted = Clock.System.now() >= selectedEvent.event.start
     val timeDiff = selectedEvent.event.start.minus(Clock.System.now())
     isRefundAutomatic = (cutoffHours != null && timeDiff <= cutoffHours.hours)
     val teamSignup = selectedEvent.event.teamSignup
@@ -601,7 +768,20 @@ fun EventDetailScreen(
             }
         }
     }
-    val canLeaveEvent = canLeaveSelf || selectableWithdrawTargets.isNotEmpty()
+    val refundableWithdrawTargets = remember(withdrawTargets, selectedEvent.event.price) {
+        if (selectedEvent.event.price <= 0) {
+            emptyList()
+        } else {
+            withdrawTargets.filter { it.membership == WithdrawTargetMembership.PARTICIPANT }
+        }
+    }
+    val canRequestRefundAfterStart = eventHasStarted && refundableWithdrawTargets.isNotEmpty()
+    val actionWithdrawTargets = if (canRequestRefundAfterStart) {
+        refundableWithdrawTargets
+    } else {
+        selectableWithdrawTargets
+    }
+    val canLeaveEvent = !eventHasStarted && (canLeaveSelf || selectableWithdrawTargets.isNotEmpty())
     val singleWithdrawTarget = selectableWithdrawTargets.singleOrNull()
     val leaveMessage = when {
         selectableWithdrawTargets.size > 1 -> "Withdraw Profile"
@@ -642,9 +822,10 @@ fun EventDetailScreen(
         isUserInEvent,
         isEventFull,
         teamSignup,
-        selectedEvent.event.price
+        selectedEvent.event.price,
+        eventHasStarted
     ) {
-        if (isUserInEvent) {
+        if (isUserInEvent || eventHasStarted) {
             emptyList()
         } else {
             buildList {
@@ -963,9 +1144,76 @@ fun EventDetailScreen(
                             }
                         }
                         var selectedTab by rememberSaveable { mutableStateOf(DetailTab.PARTICIPANTS) }
+                        val participantSections = remember(selectedEvent.event.teamSignup) {
+                            if (selectedEvent.event.teamSignup) {
+                                listOf(
+                                    ParticipantsSection.TEAMS,
+                                    ParticipantsSection.PARTICIPANTS,
+                                    ParticipantsSection.FREE_AGENTS
+                                )
+                            } else {
+                                listOf(ParticipantsSection.PARTICIPANTS)
+                            }
+                        }
+                        var selectedParticipantsSection by rememberSaveable {
+                            mutableStateOf(
+                                if (selectedEvent.event.teamSignup) {
+                                    ParticipantsSection.TEAMS
+                                } else {
+                                    ParticipantsSection.PARTICIPANTS
+                                }
+                            )
+                        }
+                        val bracketDivisionOptions = remember(
+                            selectedDivision,
+                            selectedEvent.event.divisions,
+                            selectedEvent.event.divisionDetails,
+                        ) {
+                            val options = mutableListOf<BracketDivisionOption>()
+                            val seenIds = mutableSetOf<String>()
+                            fun addOption(rawId: String?, explicitLabel: String? = null) {
+                                val normalizedId = rawId
+                                    ?.normalizeDivisionIdentifier()
+                                    .orEmpty()
+                                if (normalizedId.isEmpty() || !seenIds.add(normalizedId)) {
+                                    return
+                                }
+                                val label = explicitLabel
+                                    ?.takeIf { it.isNotBlank() }
+                                    ?: normalizedId.toDivisionDisplayLabel(selectedEvent.event.divisionDetails)
+                                options += BracketDivisionOption(
+                                    id = normalizedId,
+                                    label = label.ifBlank { normalizedId }
+                                )
+                            }
+                            selectedEvent.event.divisionDetails.forEach { detail ->
+                                val fallbackId = detail.id.ifBlank { detail.key }
+                                addOption(fallbackId, detail.name)
+                            }
+                            selectedEvent.event.divisions.forEach { divisionId ->
+                                addOption(divisionId)
+                            }
+                            addOption(selectedDivision)
+                            options
+                        }
+                        val selectedDivisionId = remember(
+                            selectedDivision,
+                            bracketDivisionOptions,
+                        ) {
+                            val normalizedSelected = selectedDivision
+                                ?.normalizeDivisionIdentifier()
+                                .orEmpty()
+                            bracketDivisionOptions.firstOrNull { it.id == normalizedSelected }?.id
+                                ?: bracketDivisionOptions.firstOrNull()?.id
+                        }
                         LaunchedEffect(availableTabs) {
                             if (selectedTab !in availableTabs) {
                                 selectedTab = availableTabs.first()
+                            }
+                        }
+                        LaunchedEffect(participantSections) {
+                            if (selectedParticipantsSection !in participantSections) {
+                                selectedParticipantsSection = participantSections.first()
                             }
                         }
                         val selectedTabIndex =
@@ -1001,10 +1249,19 @@ fun EventDetailScreen(
                                 }
 
                                 DetailTab.SCHEDULE -> {
-                                    val scheduleMatches = if (isEditingMatches) {
+                                    val allScheduleMatches = if (isEditingMatches) {
                                         editableMatches
                                     } else {
                                         selectedEvent.matches
+                                    }
+                                    val scheduleMatches = if (
+                                        selectedEvent.event.singleDivision || selectedDivision.isNullOrBlank()
+                                    ) {
+                                        allScheduleMatches
+                                    } else {
+                                        allScheduleMatches.filter { match ->
+                                            divisionsEquivalent(match.match.division, selectedDivision)
+                                        }
                                     }
                                     ScheduleView(
                                         matches = scheduleMatches,
@@ -1035,6 +1292,7 @@ fun EventDetailScreen(
                                 DetailTab.PARTICIPANTS -> {
                                     ParticipantsView(
                                         showFab = { showFab = it },
+                                        section = selectedParticipantsSection,
                                         onNavigateToChat = component::onNavigateToChat
                                     )
                                 }
@@ -1042,14 +1300,38 @@ fun EventDetailScreen(
                             androidx.compose.animation.AnimatedVisibility(
                                 visible = showFab,
                                 modifier = Modifier.align(Alignment.BottomCenter)
-                                    .padding(LocalNavBarPadding.current).padding(bottom = 64.dp),
+                                    .padding(LocalNavBarPadding.current)
+                                    .padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
                                 enter = slideInVertically() + fadeIn(),
                                 exit = slideOutVertically() + fadeOut()
                             ) {
-                                Button(
-                                    { component.toggleDetails() },
-                                ) {
-                                    Text("Show Details")
+                                when (selectedTab) {
+                                    DetailTab.BRACKET -> BracketFloatingBar(
+                                        selectedDivisionId = selectedDivisionId,
+                                        divisionOptions = bracketDivisionOptions,
+                                        onDivisionSelected = component::selectDivision,
+                                        showBracketToggle = selectedEvent.event.doubleElimination,
+                                        isLosersBracket = losersBracket,
+                                        onBracketToggle = component::toggleLosersBracket,
+                                        onShowDetailsClick = component::toggleDetails,
+                                    )
+
+                                    DetailTab.SCHEDULE, DetailTab.LEAGUES -> BracketFloatingBar(
+                                        selectedDivisionId = selectedDivisionId,
+                                        divisionOptions = bracketDivisionOptions,
+                                        onDivisionSelected = component::selectDivision,
+                                        showBracketToggle = false,
+                                        isLosersBracket = losersBracket,
+                                        onBracketToggle = component::toggleLosersBracket,
+                                        onShowDetailsClick = component::toggleDetails,
+                                    )
+
+                                    DetailTab.PARTICIPANTS -> ParticipantsFloatingBar(
+                                        selectedSection = selectedParticipantsSection,
+                                        availableSections = participantSections,
+                                        onSectionSelected = { selectedParticipantsSection = it },
+                                        onShowDetailsClick = component::toggleDetails,
+                                    )
                                 }
                             }
                         }
@@ -1067,21 +1349,29 @@ fun EventDetailScreen(
             ) {
                 StickyActionBar(
                     primaryLabel = when {
+                        canRequestRefundAfterStart -> {
+                            if (actionWithdrawTargets.size > 1) {
+                                "Request Refunds"
+                            } else {
+                                "Request Refund"
+                            }
+                        }
                         canLeaveEvent -> leaveMessage
-                        !isUserInEvent -> "Join options"
+                        !isUserInEvent && !eventHasStarted -> "Join options"
+                        eventHasStarted -> "Event Started"
                         else -> "Joined with Team"
                     },
-                    primaryEnabled = canLeaveEvent || !isUserInEvent,
+                    primaryEnabled = canRequestRefundAfterStart || canLeaveEvent || (!isUserInEvent && !eventHasStarted),
                     onPrimaryClick = {
                         when {
-                            canLeaveEvent -> {
+                            canRequestRefundAfterStart || canLeaveEvent -> {
                                 when {
-                                    selectableWithdrawTargets.size > 1 -> {
+                                    actionWithdrawTargets.size > 1 -> {
                                         showWithdrawTargetDialog = true
                                     }
 
-                                    selectableWithdrawTargets.size == 1 -> {
-                                        openLeaveOrRefundForTarget(selectableWithdrawTargets.first())
+                                    actionWithdrawTargets.size == 1 -> {
+                                        openLeaveOrRefundForTarget(actionWithdrawTargets.first())
                                     }
 
                                     else -> {
@@ -1090,7 +1380,7 @@ fun EventDetailScreen(
                                 }
                             }
 
-                            !isUserInEvent -> showJoinOptionsSheet = true
+                            !isUserInEvent && !eventHasStarted -> showJoinOptionsSheet = true
                         }
                     },
                     onMapClick = mapComponent::toggleMap,
@@ -1102,9 +1392,9 @@ fun EventDetailScreen(
             }
             }
 
-            if (showWithdrawTargetDialog && selectableWithdrawTargets.isNotEmpty()) {
+            if (showWithdrawTargetDialog && actionWithdrawTargets.isNotEmpty()) {
                 WithdrawTargetDialog(
-                    targets = selectableWithdrawTargets,
+                    targets = actionWithdrawTargets,
                     onDismiss = { showWithdrawTargetDialog = false },
                     onTargetSelected = { target ->
                         showWithdrawTargetDialog = false

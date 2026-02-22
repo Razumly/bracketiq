@@ -11,7 +11,7 @@ import kotlin.time.Instant
 class CreateEventSelectionRulesTest {
 
     @Test
-    fun league_selection_enforces_team_single_division_and_open_ended_flag() {
+    fun league_selection_enforces_team_signup_but_keeps_division_mode() {
         val start = Instant.fromEpochMilliseconds(1_000L)
         val end = Instant.fromEpochMilliseconds(2_000L)
         val draft = Event(
@@ -27,13 +27,13 @@ class CreateEventSelectionRulesTest {
 
         assertEquals(EventType.LEAGUE, updated.eventType)
         assertTrue(updated.teamSignup)
-        assertTrue(updated.singleDivision)
+        assertFalse(updated.singleDivision)
         assertTrue(updated.noFixedEndDateTime)
         assertEquals(end, updated.end)
     }
 
     @Test
-    fun tournament_selection_enforces_team_single_division_and_open_ended_flag() {
+    fun tournament_selection_enforces_team_signup_but_keeps_division_mode() {
         val start = Instant.fromEpochMilliseconds(5_000L)
         val end = Instant.fromEpochMilliseconds(8_000L)
         val draft = Event(
@@ -49,7 +49,7 @@ class CreateEventSelectionRulesTest {
 
         assertEquals(EventType.TOURNAMENT, updated.eventType)
         assertTrue(updated.teamSignup)
-        assertTrue(updated.singleDivision)
+        assertFalse(updated.singleDivision)
         assertTrue(updated.noFixedEndDateTime)
         assertEquals(end, updated.end)
     }

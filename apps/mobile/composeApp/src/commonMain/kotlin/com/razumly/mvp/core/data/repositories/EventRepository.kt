@@ -2,6 +2,7 @@ package com.razumly.mvp.core.data.repositories
 
 import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.Bounds
+import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.Field
@@ -435,7 +436,7 @@ class EventRepository(
     ): Result<SelfRegistrationResult> =
         runCatching {
             val currentUser = userRepository.currentUser.value.getOrThrow()
-            val eventAtCapacity = isEventAtCapacity(event)
+            val eventAtCapacity = isEventAtCapacity(event, preferredDivisionId)
             val divisionPayload = resolveRegistrationDivisionPayload(
                 event = event,
                 preferredDivisionId = preferredDivisionId,
@@ -527,7 +528,7 @@ class EventRepository(
             if (event.waitList.contains(team.id)) {
                 throw Exception("Team already in waitlist")
             }
-            val updated = if (isEventAtCapacity(event)) {
+            val updated = if (isEventAtCapacity(event, team.division)) {
                 api.post<EventParticipantsRequestDto, EventResponseDto>(
                     path = "api/events/${event.id}/waitlist",
                     body = EventParticipantsRequestDto(teamId = team.id),
@@ -611,23 +612,39 @@ class EventRepository(
             emptyList()
         }
 
-        // Team-player cross refs require user rows for every player id.
+        // Keep event-user cross refs aligned with all user ids referenced by event state.
         val teamPlayerIds = teams.flatMap { team -> team.playerIds }
-        val allUserIds = (event.playerIds + event.hostId + teamPlayerIds).distinct().filter(String::isNotBlank)
-        val users = if (allUserIds.isNotEmpty()) userRepository.getUsers(allUserIds).getOrThrow() else emptyList()
-
-        val players = if (event.playerIds.isNotEmpty()) users.filter { it.id in event.playerIds } else emptyList()
+        val relatedUserIds = (
+            event.playerIds +
+                event.freeAgentIds +
+                event.waitListIds +
+                event.hostId +
+                teamPlayerIds
+            )
+            .distinct()
+            .filter(String::isNotBlank)
+        val users = if (relatedUserIds.isNotEmpty()) {
+            userRepository.getUsers(relatedUserIds).getOrThrow()
+        } else {
+            emptyList()
+        }
+        val relatedUsers = if (relatedUserIds.isNotEmpty()) {
+            val relatedUserIdSet = relatedUserIds.toSet()
+            users.filter { it.id in relatedUserIdSet }
+        } else {
+            emptyList()
+        }
         val host = users.filter { it.id == event.hostId }
 
-        insertEventCrossReferences(event.id, players, host, teams)
+        insertEventCrossReferences(event.id, relatedUsers, host, teams)
     }
 
-    private fun resolveRegistrationDivisionPayload(
+    private fun resolveSelectedDivisionDetail(
         event: Event,
         preferredDivisionId: String?,
-    ): RegistrationDivisionPayload {
+    ): DivisionDetail? {
         if (event.divisions.isEmpty()) {
-            return RegistrationDivisionPayload()
+            return null
         }
 
         val normalizedPreferredDivision = preferredDivisionId
@@ -640,17 +657,25 @@ class EventRepository(
             eventId = event.id,
         )
         if (divisionDetails.isEmpty()) {
-            return RegistrationDivisionPayload()
+            return null
         }
 
-        val selectedDivision = if (!normalizedPreferredDivision.isNullOrBlank()) {
+        return if (!normalizedPreferredDivision.isNullOrBlank()) {
             divisionDetails.firstOrNull { detail ->
                 divisionsEquivalent(detail.id, normalizedPreferredDivision) ||
                     divisionsEquivalent(detail.key, normalizedPreferredDivision)
             } ?: divisionDetails.firstOrNull()
         } else {
             divisionDetails.firstOrNull()
-        } ?: return RegistrationDivisionPayload()
+        }
+    }
+
+    private fun resolveRegistrationDivisionPayload(
+        event: Event,
+        preferredDivisionId: String?,
+    ): RegistrationDivisionPayload {
+        val selectedDivision = resolveSelectedDivisionDetail(event, preferredDivisionId)
+            ?: return RegistrationDivisionPayload()
 
         val divisionId = selectedDivision.id.normalizeDivisionIdentifier().ifEmpty {
             selectedDivision.key.normalizeDivisionIdentifier()
@@ -665,11 +690,21 @@ class EventRepository(
         )
     }
 
-    private fun isEventAtCapacity(event: Event): Boolean {
-        return if (event.teamSignup) {
-            event.maxParticipants <= event.teamIds.size
+    private fun isEventAtCapacity(event: Event, preferredDivisionId: String? = null): Boolean {
+        val participantCount = if (event.teamSignup) {
+            event.teamIds.size
         } else {
-            event.maxParticipants <= event.playerIds.size
+            event.playerIds.size
         }
+        val maxParticipants = if (event.singleDivision) {
+            event.maxParticipants
+        } else {
+            resolveSelectedDivisionDetail(event, preferredDivisionId)?.maxParticipants ?: event.maxParticipants
+        }
+
+        if (maxParticipants <= 0) {
+            return false
+        }
+        return participantCount >= maxParticipants
     }
 }

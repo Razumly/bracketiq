@@ -102,6 +102,147 @@ class EventDtosTest {
     }
 
     @Test
+    fun to_update_dto_mirrors_event_price_and_capacity_for_single_division_events() {
+        val event = Event(
+            id = "event-12",
+            name = "Single Division Event",
+            eventType = EventType.EVENT,
+            hostId = "host-12",
+            start = Instant.fromEpochMilliseconds(1_700_000_000_000),
+            end = Instant.fromEpochMilliseconds(1_700_003_600_000),
+            singleDivision = true,
+            priceCents = 4200,
+            maxParticipants = 18,
+            divisions = listOf("event-12__division__open"),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = "event-12__division__open",
+                    key = "open",
+                    name = "Open",
+                    divisionTypeId = "open",
+                    divisionTypeName = "Open",
+                    ratingType = "SKILL",
+                    gender = "C",
+                    price = 1000,
+                    maxParticipants = 4,
+                )
+            ),
+        )
+
+        val dto = event.toUpdateDto()
+        val detail = dto.divisionDetails.first()
+
+        assertEquals(4200, detail.price)
+        assertEquals(18, detail.maxParticipants)
+    }
+
+    @Test
+    fun to_update_dto_keeps_division_price_and_capacity_for_multi_division_events() {
+        val event = Event(
+            id = "event-13",
+            name = "Multi Division Event",
+            eventType = EventType.EVENT,
+            hostId = "host-13",
+            start = Instant.fromEpochMilliseconds(1_700_000_000_000),
+            end = Instant.fromEpochMilliseconds(1_700_003_600_000),
+            singleDivision = false,
+            priceCents = 0,
+            maxParticipants = 50,
+            divisions = listOf("event-13__division__open"),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = "event-13__division__open",
+                    key = "open",
+                    name = "Open",
+                    divisionTypeId = "open",
+                    divisionTypeName = "Open",
+                    ratingType = "SKILL",
+                    gender = "C",
+                    price = 2500,
+                    maxParticipants = 12,
+                )
+            ),
+        )
+
+        val dto = event.toUpdateDto()
+        val detail = dto.divisionDetails.first()
+
+        assertEquals(2500, detail.price)
+        assertEquals(12, detail.maxParticipants)
+    }
+
+    @Test
+    fun to_update_dto_uses_event_playoff_count_for_single_division_leagues() {
+        val event = Event(
+            id = "event-14",
+            name = "Single Division League",
+            eventType = EventType.LEAGUE,
+            hostId = "host-14",
+            start = Instant.fromEpochMilliseconds(1_700_000_000_000),
+            end = Instant.fromEpochMilliseconds(1_700_003_600_000),
+            singleDivision = true,
+            includePlayoffs = true,
+            playoffTeamCount = 8,
+            maxParticipants = 24,
+            divisions = listOf("event-14__division__open"),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = "event-14__division__open",
+                    key = "open",
+                    name = "Open",
+                    divisionTypeId = "open",
+                    divisionTypeName = "Open",
+                    ratingType = "SKILL",
+                    gender = "C",
+                    playoffTeamCount = 4,
+                ),
+            ),
+        )
+
+        val dto = event.toUpdateDto()
+        val detail = dto.divisionDetails.first()
+
+        assertEquals(8, dto.playoffTeamCount)
+        assertEquals(8, detail.playoffTeamCount)
+    }
+
+    @Test
+    fun to_update_dto_keeps_division_playoff_count_for_multi_division_leagues() {
+        val event = Event(
+            id = "event-15",
+            name = "Multi Division League",
+            eventType = EventType.LEAGUE,
+            hostId = "host-15",
+            start = Instant.fromEpochMilliseconds(1_700_000_000_000),
+            end = Instant.fromEpochMilliseconds(1_700_003_600_000),
+            singleDivision = false,
+            includePlayoffs = true,
+            playoffTeamCount = 12,
+            maxParticipants = 40,
+            divisions = listOf("event-15__division__open"),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = "event-15__division__open",
+                    key = "open",
+                    name = "Open",
+                    divisionTypeId = "open",
+                    divisionTypeName = "Open",
+                    ratingType = "SKILL",
+                    gender = "C",
+                    maxParticipants = 16,
+                    playoffTeamCount = 6,
+                ),
+            ),
+        )
+
+        val dto = event.toUpdateDto()
+        val detail = dto.divisionDetails.first()
+
+        assertNull(dto.playoffTeamCount)
+        assertEquals(6, detail.playoffTeamCount)
+    }
+
+    @Test
     fun event_api_dto_maps_division_details_without_dropping_ids() {
         val dto = EventApiDto(
             id = "event-11",
@@ -129,5 +270,40 @@ class EventDtosTest {
         assertEquals(listOf("event-11__division__open"), event?.divisions)
         assertEquals("Open", event?.divisionDetails?.firstOrNull()?.name)
         assertEquals(true, event?.noFixedEndDateTime)
+    }
+
+    @Test
+    fun event_api_dto_applies_event_playoff_count_to_multi_division_details_when_missing() {
+        val dto = EventApiDto(
+            id = "event-16",
+            name = "API League",
+            hostId = "host-16",
+            eventType = EventType.LEAGUE.name,
+            includePlayoffs = true,
+            singleDivision = false,
+            playoffTeamCount = 10,
+            maxParticipants = 24,
+            noFixedEndDateTime = true,
+            start = "2026-02-10T00:00:00Z",
+            end = "2026-02-10T01:00:00Z",
+            divisions = listOf("event-16__division__open"),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = "event-16__division__open",
+                    key = "open",
+                    name = "Open",
+                    divisionTypeId = "open",
+                    divisionTypeName = "Open",
+                    ratingType = "SKILL",
+                    gender = "C",
+                    maxParticipants = 12,
+                ),
+            ),
+        )
+
+        val event = dto.toEventOrNull()
+
+        assertEquals(null, event?.playoffTeamCount)
+        assertEquals(10, event?.divisionDetails?.firstOrNull()?.playoffTeamCount)
     }
 }

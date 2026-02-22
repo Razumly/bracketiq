@@ -124,17 +124,40 @@ data class EventApiDto(
             existingDetails = normalizedDetails,
             eventId = resolvedId,
         )
+        val resolvedPriceCents = (price ?: 0).coerceAtLeast(0)
+        val resolvedMaxParticipants = (maxParticipants ?: 0).coerceAtLeast(0)
+        val resolvedEventPlayoffTeamCount = playoffTeamCount?.coerceAtLeast(2)
+        val mergedDetailsWithCapacity = mergedDetails.map { detail ->
+            val fallbackMaxParticipants = resolvedMaxParticipants.coerceAtLeast(2)
+            detail.copy(
+                price = if (singleDivision != false) {
+                    resolvedPriceCents
+                } else {
+                    (detail.price ?: resolvedPriceCents).coerceAtLeast(0)
+                },
+                maxParticipants = if (singleDivision != false) {
+                    fallbackMaxParticipants
+                } else {
+                    (detail.maxParticipants ?: fallbackMaxParticipants).coerceAtLeast(2)
+                },
+                playoffTeamCount = when {
+                    includePlayoffs != true -> null
+                    singleDivision != false -> resolvedEventPlayoffTeamCount
+                    else -> (detail.playoffTeamCount ?: resolvedEventPlayoffTeamCount)?.coerceAtLeast(2)
+                },
+            )
+        }
 
         return Event(
             id = resolvedId,
             name = resolvedName,
             description = description ?: "",
             divisions = normalizedDivisions,
-            divisionDetails = mergedDetails,
+            divisionDetails = mergedDetailsWithCapacity,
             location = location ?: "",
             start = Instant.parse(resolvedStart),
             end = Instant.parse(resolvedEnd),
-            priceCents = price ?: 0,
+            priceCents = resolvedPriceCents,
             rating = rating,
             imageId = imageId ?: "",
             coordinates = coordinates ?: listOf(0.0, 0.0),
@@ -155,7 +178,7 @@ data class EventApiDto(
             leagueScoringConfigId = leagueScoringConfigId,
             organizationId = organizationId,
             autoCancellation = autoCancellation ?: false,
-            maxParticipants = maxParticipants ?: 0,
+            maxParticipants = resolvedMaxParticipants,
             minAge = minAge,
             maxAge = maxAge,
             teamSizeLimit = (teamSizeLimit ?: 0).takeIf { it > 0 } ?: 2,
@@ -164,7 +187,11 @@ data class EventApiDto(
             fieldCount = fieldCount,
             gamesPerOpponent = gamesPerOpponent,
             includePlayoffs = includePlayoffs ?: false,
-            playoffTeamCount = playoffTeamCount,
+            playoffTeamCount = if (singleDivision == false) {
+                null
+            } else {
+                resolvedEventPlayoffTeamCount
+            },
             doubleElimination = doubleElimination ?: false,
             winnerSetCount = winnerSetCount ?: 1,
             loserSetCount = loserSetCount ?: 0,
@@ -383,6 +410,26 @@ fun Event.toUpdateDto(
         existingDetails = divisionDetails,
         eventId = id,
     )
+    val normalizedDivisionDetailsForPayload = normalizedDivisionDetails.map { detail ->
+        val fallbackMaxParticipants = maxParticipants.coerceAtLeast(2)
+        detail.copy(
+            price = if (singleDivision) {
+                priceCents.coerceAtLeast(0)
+            } else {
+                (detail.price ?: 0).coerceAtLeast(0)
+            },
+            maxParticipants = if (singleDivision) {
+                fallbackMaxParticipants
+            } else {
+                (detail.maxParticipants ?: fallbackMaxParticipants).coerceAtLeast(2)
+            },
+            playoffTeamCount = when {
+                !includePlayoffs -> null
+                singleDivision -> playoffTeamCount?.coerceAtLeast(2)
+                else -> (detail.playoffTeamCount ?: playoffTeamCount)?.coerceAtLeast(2)
+            },
+        )
+    }
 
     return EventUpdateDto(
         name = name,
@@ -390,7 +437,7 @@ fun Event.toUpdateDto(
         end = end.toString(),
         description = description,
         divisions = normalizedDivisions,
-        divisionDetails = normalizedDivisionDetails,
+        divisionDetails = normalizedDivisionDetailsForPayload,
         winnerSetCount = winnerSetCount,
         loserSetCount = loserSetCount,
         doubleElimination = doubleElimination,
@@ -419,7 +466,11 @@ fun Event.toUpdateDto(
         coordinates = coordinates,
         gamesPerOpponent = gamesPerOpponent,
         includePlayoffs = includePlayoffs,
-        playoffTeamCount = playoffTeamCount,
+        playoffTeamCount = if (includePlayoffs && singleDivision) {
+            playoffTeamCount?.coerceAtLeast(2)
+        } else {
+            null
+        },
         usesSets = usesSets,
         matchDurationMinutes = matchDurationMinutes,
         setDurationMinutes = setDurationMinutes,

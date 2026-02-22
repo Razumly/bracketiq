@@ -34,10 +34,12 @@ import androidx.compose.ui.zIndex
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
-import com.razumly.mvp.core.presentation.util.timeFormat
+import com.razumly.mvp.core.data.dataTypes.DivisionDetail
+import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 import com.razumly.mvp.eventDetail.LocalTournamentComponent
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
+import kotlin.time.Instant
 import kotlin.time.ExperimentalTime
 
 val localColors = compositionLocalOf<ColorPallete> { error("No colors provided")}
@@ -56,6 +58,7 @@ fun MatchCard(
     val teams by component.divisionTeams.collectAsState()
     val matches by component.divisionMatches.collectAsState()
     val fields by component.divisionFields.collectAsState()
+    val selectedEvent by component.selectedEvent.collectAsState()
     val matchCardColorPallet = if (match != null && match.match.losersBracket) {
         ColorPallete(MaterialTheme.colorScheme.tertiary,
             MaterialTheme.colorScheme.onTertiary,
@@ -74,14 +77,19 @@ fun MatchCard(
             modifier = modifier
         ) {
             match?.let {
+                val matchDateTimeLabel = formatMatchDateTimeLabel(match.match.start)
+                val showReferee = !match.match.teamRefereeId.isNullOrBlank() || match.teamReferee != null
+                val refereeLabel = resolveRefereeLabel(
+                    refereeTeamId = match.match.teamRefereeId,
+                    teams = teams,
+                    fallbackTeamName = match.teamReferee?.name,
+                )
                 FloatingBox(
                     modifier = Modifier.align(Alignment.TopCenter).offset(y = (-20).dp).zIndex(1f),
                     color = localColors.current.primaryContainer
                 ) {
                     Text(
-                        text = timeFormat.format(
-                            match.match.start.toLocalDateTime(TimeZone.currentSystemDefault()).time
-                        ),
+                        text = matchDateTimeLabel,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                         style = MaterialTheme.typography.labelLarge,
                         color = localColors.current.onPrimaryContainer
@@ -96,7 +104,7 @@ fun MatchCard(
                     )
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        MatchInfoSection(match, fields)
+                        MatchInfoSection(match, fields, selectedEvent.divisionDetails)
                         VerticalDivider(color = localColors.current.onPrimary)
                         TeamsSection(
                     team1 = teams[match.match.team1Id],
@@ -106,27 +114,19 @@ fun MatchCard(
                         )
                     }
                 }
-                FloatingBox(
-                    modifier = Modifier.align(Alignment.BottomCenter).offset(y = 20.dp),
-                    color = localColors.current.primaryContainer
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
+                if (showReferee) {
+                    FloatingBox(
+                        modifier = Modifier.align(Alignment.BottomCenter).offset(y = 20.dp),
+                        color = localColors.current.primaryContainer
                     ) {
-                        Text(
-                            "Ref: ",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = localColors.current.onPrimaryContainer
-                        )
-                        teams[match.match.teamRefereeId]?.players?.forEach { player ->
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
                             Text(
-                                "${player.firstName}.${player.lastName.first()}",
-                                modifier = Modifier.padding(start = 4.dp),
+                                "Ref: $refereeLabel",
                                 style = MaterialTheme.typography.labelLarge,
-                                overflow = TextOverflow.Ellipsis,
-                                maxLines = 1,
                                 color = localColors.current.onPrimaryContainer
                             )
                         }
@@ -150,8 +150,16 @@ private fun FloatingBox(modifier: Modifier, color: Color, content: @Composable (
 }
 
 @Composable
-private fun MatchInfoSection(match: MatchWithRelations, fields: List<FieldWithMatches>) {
+private fun MatchInfoSection(
+    match: MatchWithRelations,
+    fields: List<FieldWithMatches>,
+    divisionDetails: List<DivisionDetail>,
+) {
     val fieldLabel = resolveFieldLabel(match, fields)
+    val divisionLabel = match.match.division
+        ?.toDivisionDisplayLabel(divisionDetails)
+        .orEmpty()
+        .ifBlank { "TBD" }
     Column(
         modifier = Modifier.padding(8.dp).width(IntrinsicSize.Max),
         verticalArrangement = Arrangement.SpaceEvenly
@@ -159,7 +167,14 @@ private fun MatchInfoSection(match: MatchWithRelations, fields: List<FieldWithMa
         Text("M: ${match.match.matchId}", color = localColors.current.onPrimary)
         HorizontalDivider(color = localColors.current.onPrimary)
         Text(
-            "Field: $fieldLabel",
+            "F: $fieldLabel",
+            color = localColors.current.onPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        HorizontalDivider(color = localColors.current.onPrimary)
+        Text(
+            "D: $divisionLabel",
             color = localColors.current.onPrimary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
@@ -218,38 +233,75 @@ private fun TeamRow(
     previousMatch: MatchWithRelations?,
     isLosersBracket: Boolean,
 ) {
+    val label = when {
+        team != null -> resolveTeamLabel(team)
+        previousMatch?.match?.matchId != null -> {
+            val prefix =
+                if (isLosersBracket && !previousMatch.match.losersBracket) "Loser" else "Winner"
+            "$prefix of match #${previousMatch.match.matchId}"
+        }
+        else -> "TBD"
+    }
+
     Row(
         modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        team?.let { currentTeam ->
-            if (!currentTeam.team.name.isNullOrBlank()) {
-                Text(
-                    currentTeam.team.name.toString(),
-                    Modifier.weight(1f),
-                    overflow = TextOverflow.Ellipsis,
-                    maxLines = 1, color = localColors.current.onPrimary
-                )
-            } else {
-                currentTeam.players.forEach { player ->
-                    Text(
-                        "${player.firstName}.${player.lastName.first()}",
-                        Modifier.weight(1f),
-                        overflow = TextOverflow.Ellipsis,
-                        maxLines = 1, color = localColors.current.onPrimary
-                    )
-                }
-            }
-            Text(" ${points.joinToString(separator = ", ")}")
-        } ?: run {
-            previousMatch?.match?.matchId?.let { matchNumber ->
-                val prefix =
-                    if (isLosersBracket && !previousMatch.match.losersBracket) "Loser" else "Winner"
-                Text(
-                    "$prefix of match #$matchNumber",
-                    Modifier.weight(1f),
-                    color = localColors.current.onPrimary
-                )
-            }
+        Text(
+            text = label,
+            modifier = Modifier.weight(1f),
+            overflow = TextOverflow.Ellipsis,
+            maxLines = 1,
+            color = localColors.current.onPrimary
+        )
+        if (points.isNotEmpty()) {
+            Text(
+                " ${points.joinToString(separator = ", ")}",
+                color = localColors.current.onPrimary
+            )
         }
     }
+}
+
+private fun resolveTeamLabel(team: TeamWithPlayers): String {
+    val explicitTeamName = team.team.name?.trim().orEmpty()
+    if (explicitTeamName.isNotEmpty()) {
+        return explicitTeamName
+    }
+    val playerNames = team.players.map { player ->
+        val lastInitial = player.lastName.firstOrNull()?.toString().orEmpty()
+        if (lastInitial.isNotEmpty()) {
+            "${player.firstName}.$lastInitial"
+        } else {
+            player.firstName
+        }
+    }.filter { it.isNotBlank() }
+    return playerNames.joinToString(" & ").ifBlank { "TBD" }
+}
+
+private fun resolveRefereeLabel(
+    refereeTeamId: String?,
+    teams: Map<String, TeamWithPlayers>,
+    fallbackTeamName: String?,
+): String {
+    val refereeTeam = refereeTeamId?.let { teams[it] }
+    if (refereeTeam != null) {
+        return resolveTeamLabel(refereeTeam)
+    }
+    val fallback = fallbackTeamName?.trim().orEmpty()
+    return fallback.ifBlank { "TBD" }
+}
+
+private fun formatMatchDateTimeLabel(start: Instant): String {
+    val localDateTime = start.toLocalDateTime(TimeZone.currentSystemDefault())
+    val month = localDateTime.date.monthNumber.toString().padStart(2, '0')
+    val day = localDateTime.date.dayOfMonth.toString().padStart(2, '0')
+    val year = localDateTime.date.year
+    val hour24 = localDateTime.time.hour
+    val minute = localDateTime.time.minute.toString().padStart(2, '0')
+    val amPm = if (hour24 >= 12) "PM" else "AM"
+    val hour12 = when (val normalizedHour = hour24 % 12) {
+        0 -> 12
+        else -> normalizedHour
+    }
+    return "$month/$day/$year $hour12:$minute $amPm"
 }

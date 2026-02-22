@@ -61,6 +61,26 @@ val MIGRATION_83_84 = object : Migration(83, 84) {
     }
 }
 
+val MIGRATION_84_85 = object : Migration(84, 85) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        migrationSql84To85.forEach { sql ->
+            runCatching {
+                db.execSQL(sql)
+            }
+        }
+    }
+
+    override fun migrate(connection: SQLiteConnection) {
+        migrationSql84To85.forEach { sql ->
+            runCatching {
+                connection.prepare(sql).use { statement ->
+                    statement.step()
+                }
+            }
+        }
+    }
+}
+
 private val migrationSql80To81 = listOf(
     "ALTER TABLE `Event` DROP COLUMN `fieldType`",
     "ALTER TABLE `Field` DROP COLUMN `type`",
@@ -72,6 +92,7 @@ private val migrationSql81To82 = listOf(
 
 private val migrationSql82To83 = listOf(
     "ALTER TABLE `Event` ADD COLUMN `noFixedEndDateTime` INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE `Team` ADD COLUMN `headCoachId` TEXT",
     """
     UPDATE `Event`
     SET `noFixedEndDateTime` = 1
@@ -82,4 +103,26 @@ private val migrationSql82To83 = listOf(
 
 private val migrationSql83To84 = listOf(
     "ALTER TABLE `MatchMVP` ADD COLUMN `locked` INTEGER NOT NULL DEFAULT 0",
+)
+
+private val migrationSql84To85 = listOf(
+    "ALTER TABLE `Team` ADD COLUMN `managerId` TEXT",
+    "ALTER TABLE `Team` ADD COLUMN `headCoachId` TEXT",
+    "ALTER TABLE `Team` ADD COLUMN `coachIds` TEXT NOT NULL DEFAULT '[]'",
+    "ALTER TABLE `Team` ADD COLUMN `parentTeamId` TEXT",
+    "ALTER TABLE `Team` ADD COLUMN `profileImageId` TEXT",
+    "ALTER TABLE `Team` ADD COLUMN `sport` TEXT",
+    """
+    UPDATE `Team`
+    SET
+        `seed` = COALESCE(`seed`, 0),
+        `division` = COALESCE(`division`, 'OPEN'),
+        `wins` = COALESCE(`wins`, 0),
+        `losses` = COALESCE(`losses`, 0),
+        `captainId` = COALESCE(`captainId`, ''),
+        `coachIds` = COALESCE(`coachIds`, '[]'),
+        `playerIds` = COALESCE(`playerIds`, '[]'),
+        `pending` = COALESCE(`pending`, '[]'),
+        `teamSize` = COALESCE(`teamSize`, 0)
+    """.trimIndent(),
 )

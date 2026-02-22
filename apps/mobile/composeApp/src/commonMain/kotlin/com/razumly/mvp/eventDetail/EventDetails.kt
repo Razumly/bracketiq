@@ -83,8 +83,10 @@ import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
 import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
 import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.util.DEFAULT_DIVISION
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
+import com.razumly.mvp.core.data.util.divisionsEquivalent
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabels
 import com.razumly.mvp.core.presentation.IPaymentProcessor
@@ -219,15 +221,62 @@ fun EventDetails(
     val selectedDivisions = remember(editEvent.divisions) {
         editEvent.divisions.normalizeDivisionIdentifiers()
     }
-    val divisionOptions = remember(editEvent.divisionDetails, selectedDivisions) {
+    val normalizedDivisionDetails = remember(
+        editEvent.divisions,
+        editEvent.divisionDetails,
+        editEvent.id,
+    ) {
+        mergeDivisionDetailsForDivisions(
+            divisions = editEvent.divisions,
+            existingDetails = editEvent.divisionDetails,
+            eventId = editEvent.id,
+        )
+    }
+    val divisionDetailsForSettings = remember(
+        normalizedDivisionDetails,
+        editEvent.singleDivision,
+        editEvent.includePlayoffs,
+        editEvent.playoffTeamCount,
+        editEvent.priceCents,
+        editEvent.maxParticipants,
+    ) {
+        normalizedDivisionDetails.map { detail ->
+            val fallbackMaxParticipants = editEvent.maxParticipants.coerceAtLeast(2)
+            detail.copy(
+                price = if (editEvent.singleDivision) {
+                    editEvent.priceCents.coerceAtLeast(0)
+                } else {
+                    (detail.price ?: editEvent.priceCents).coerceAtLeast(0)
+                },
+                maxParticipants = if (editEvent.singleDivision) {
+                    fallbackMaxParticipants
+                } else {
+                    (detail.maxParticipants ?: fallbackMaxParticipants).coerceAtLeast(2)
+                },
+                playoffTeamCount = when {
+                    !editEvent.includePlayoffs -> null
+                    editEvent.singleDivision -> (
+                        editEvent.playoffTeamCount
+                            ?: detail.playoffTeamCount
+                            ?: fallbackMaxParticipants
+                        ).coerceAtLeast(2)
+                    else -> (
+                        detail.playoffTeamCount
+                            ?: fallbackMaxParticipants
+                        ).coerceAtLeast(2)
+                },
+            )
+        }
+    }
+    val divisionOptions = remember(divisionDetailsForSettings, selectedDivisions) {
         (
             selectedDivisions +
-                editEvent.divisionDetails.map { detail -> detail.id } +
-                editEvent.divisionDetails.map { detail -> detail.key }
+                divisionDetailsForSettings.map { detail -> detail.id } +
+                divisionDetailsForSettings.map { detail -> detail.key }
             ).normalizeDivisionIdentifiers().map { divisionId ->
             DivisionOption(
                 value = divisionId,
-                label = divisionId.toDivisionDisplayLabel(editEvent.divisionDetails),
+                label = divisionId.toDivisionDisplayLabel(divisionDetailsForSettings),
             )
         }
     }
@@ -294,6 +343,36 @@ fun EventDetails(
     val roundedCornerSize = 32.dp
     val currentLocation by mapComponent.currentLocation.collectAsState()
 
+    LaunchedEffect(
+        isNewEvent,
+        editView,
+        editEvent.eventType,
+        editEvent.divisions,
+        editEvent.divisionDetails,
+        editEvent.id,
+    ) {
+        val isSchedulableType = editEvent.eventType == EventType.LEAGUE ||
+            editEvent.eventType == EventType.TOURNAMENT
+        if (!isNewEvent || !editView || !isSchedulableType) {
+            return@LaunchedEffect
+        }
+        if (editEvent.divisions.normalizeDivisionIdentifiers().isNotEmpty()) {
+            return@LaunchedEffect
+        }
+        val seededDivisions = listOf(DEFAULT_DIVISION)
+        val seededDivisionDetails = mergeDivisionDetailsForDivisions(
+            divisions = seededDivisions,
+            existingDetails = editEvent.divisionDetails,
+            eventId = editEvent.id,
+        )
+        onEditEvent {
+            copy(
+                divisions = seededDivisions,
+                divisionDetails = seededDivisionDetails,
+            )
+        }
+    }
+
     LaunchedEffect(editEvent.fieldCount) {
         val normalized = editEvent.fieldCount ?: editableFields.size
         if (normalized != fieldCount) {
@@ -350,8 +429,18 @@ fun EventDetails(
                 else -> null
             }
             isLeagueGamesValid = (editEvent.gamesPerOpponent ?: 0) >= 1
-            isLeaguePlayoffTeamsValid = !editEvent.includePlayoffs || (editEvent.playoffTeamCount
-                ?: 0) >= 2
+            isLeaguePlayoffTeamsValid = if (!editEvent.includePlayoffs) {
+                true
+            } else if (editEvent.singleDivision) {
+                (editEvent.playoffTeamCount ?: 0) >= 2
+            } else {
+                val details = mergeDivisionDetailsForDivisions(
+                    divisions = editEvent.divisions,
+                    existingDetails = editEvent.divisionDetails,
+                    eventId = editEvent.id,
+                )
+                details.isNotEmpty() && details.all { detail -> (detail.playoffTeamCount ?: 0) >= 2 }
+            }
             if (editEvent.usesSets) {
                 isLeagueDurationValid = setCount != null && (editEvent.setDurationMinutes ?: 0) >= 5
                 isLeaguePointsValid = setCount != null &&
@@ -470,7 +559,13 @@ fun EventDetails(
                 add("Points to victory must be greater than 0 for every configured set.")
             }
             if (!isLeaguePlayoffTeamsValid) {
-                add("Playoff team count must be at least 2 when playoffs are enabled.")
+                add(
+                    if (editEvent.singleDivision) {
+                        "Playoff team count must be at least 2 when playoffs are enabled."
+                    } else {
+                        "Each division must have a playoff team count of at least 2 when playoffs are enabled."
+                    }
+                )
             }
             if (!isLeagueSlotsValid) {
                 add(
@@ -648,7 +743,8 @@ fun EventDetails(
                 state = lazyListState,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(
-                    bottom = navPadding.calculateBottomPadding() + 32.dp,
+                    // Keep final content scrollable above the floating action dock in view mode.
+                    bottom = navPadding.calculateBottomPadding() + if (editView) 32.dp else 120.dp,
                 ),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
@@ -1007,8 +1103,11 @@ fun EventDetails(
                         MoneyInputField(
                             value = editEvent.priceCents.toString(),
                             label = "Price",
-                            enabled = hostHasAccount && !rentalTimeLocked,
+                            enabled = hostHasAccount && !rentalTimeLocked && editEvent.singleDivision,
                             onValueChange = { newText ->
+                                if (!editEvent.singleDivision) {
+                                    return@MoneyInputField
+                                }
                                 if (newText.isBlank()) {
                                     onEditEvent { copy(priceCents = 0) }
                                     return@MoneyInputField
@@ -1017,7 +1116,9 @@ fun EventDetails(
                                 onEditEvent { copy(priceCents = newCleaned.toInt()) }
                             },
                             isError = !isPriceValid,
-                            supportingText = if (isPriceValid) {
+                            supportingText = if (!editEvent.singleDivision) {
+                                "Per-division pricing is active for multi-division events."
+                            } else if (isPriceValid) {
                                 stringResource(Res.string.free_entry_hint)
                             } else {
                                 stringResource(Res.string.invalid_price)
@@ -1144,7 +1245,11 @@ fun EventDetails(
                                             add(
                                                 DetailRowSpec(
                                                     "Playoffs",
-                                                    "${event.playoffTeamCount ?: 0} teams",
+                                                    if (event.singleDivision) {
+                                                        "${event.playoffTeamCount ?: 0} teams"
+                                                    } else {
+                                                        "Configured per division"
+                                                    },
                                                 ),
                                             )
                                         }
@@ -1217,12 +1322,45 @@ fun EventDetails(
                         }
                         Box(modifier = Modifier.weight(1f)) {
                             LabeledCheckboxRow(
-                                checked = if (editEvent.eventType == EventType.EVENT) editEvent.singleDivision else true,
+                                checked = editEvent.singleDivision,
                                 label = "Single Division",
-                                enabled = editEvent.eventType == EventType.EVENT,
+                                enabled = true,
                                 onCheckedChange = { checked ->
-                                    if (editEvent.eventType == EventType.EVENT) {
-                                        onEditEvent { copy(singleDivision = checked) }
+                                    val fallbackMaxParticipants = editEvent.maxParticipants.coerceAtLeast(2)
+                                    val fallbackPlayoffCount = (
+                                        editEvent.playoffTeamCount
+                                            ?: divisionDetailsForSettings.firstOrNull()?.playoffTeamCount
+                                            ?: fallbackMaxParticipants
+                                        ).coerceAtLeast(2)
+                                    onEditEvent {
+                                        val normalizedDivisions = divisions.normalizeDivisionIdentifiers()
+                                        val nextDivisionDetails = mergeDivisionDetailsForDivisions(
+                                            divisions = normalizedDivisions,
+                                            existingDetails = divisionDetails,
+                                            eventId = id,
+                                        ).map { existing ->
+                                            if (!includePlayoffs) {
+                                                existing.copy(playoffTeamCount = null)
+                                            } else if (checked) {
+                                                existing.copy(playoffTeamCount = fallbackPlayoffCount)
+                                            } else {
+                                                existing.copy(
+                                                    playoffTeamCount = (
+                                                        existing.playoffTeamCount
+                                                            ?: fallbackMaxParticipants
+                                                        ).coerceAtLeast(2)
+                                                )
+                                            }
+                                        }
+                                        copy(
+                                            singleDivision = checked,
+                                            playoffTeamCount = if (includePlayoffs && checked) {
+                                                fallbackPlayoffCount
+                                            } else {
+                                                null
+                                            },
+                                            divisionDetails = nextDivisionDetails,
+                                        )
                                     }
                                 },
                             )
@@ -1231,7 +1369,7 @@ fun EventDetails(
 
                     if (editEvent.eventType != EventType.EVENT) {
                         Text(
-                            "Leagues and tournaments are always team events and use a single division.",
+                            "Leagues and tournaments are always team events. Use Single Division to keep one shared capacity for all divisions.",
                             style = MaterialTheme.typography.bodySmall,
                             color = Color(localImageScheme.current.onSurface),
                         )
@@ -1268,7 +1406,11 @@ fun EventDetails(
                             modifier = Modifier.weight(1f),
                             value = editEvent.maxParticipants.toString(),
                             label = label,
+                            enabled = editEvent.singleDivision,
                             onValueChange = { newValue ->
+                                if (!editEvent.singleDivision) {
+                                    return@NumberInputField
+                                }
                                 if (newValue.all { it.isDigit() }) {
                                     if (newValue.isBlank()) {
                                         onEditEvent { copy(maxParticipants = 0) }
@@ -1303,6 +1445,100 @@ fun EventDetails(
                             },
                         )
                     }
+                    if (!editEvent.singleDivision) {
+                        Text(
+                            text = "Per-division participant limits are active for multi-division events.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(localImageScheme.current.onSurfaceVariant),
+                        )
+                    }
+
+                    if (editEvent.eventType == EventType.LEAGUE) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.Top,
+                        ) {
+                            Box(modifier = Modifier.weight(1f)) {
+                                LabeledCheckboxRow(
+                                    checked = editEvent.includePlayoffs,
+                                    label = "Include Playoffs",
+                                    onCheckedChange = { checked ->
+                                        val fallbackMaxParticipants = editEvent.maxParticipants.coerceAtLeast(2)
+                                        val fallbackSingleDivisionPlayoffCount = (
+                                            editEvent.playoffTeamCount
+                                                ?: divisionDetailsForSettings.firstOrNull()?.playoffTeamCount
+                                                ?: fallbackMaxParticipants
+                                            ).coerceAtLeast(2)
+                                        onEditEvent {
+                                            val nextDivisionDetails = mergeDivisionDetailsForDivisions(
+                                                divisions = divisions,
+                                                existingDetails = divisionDetails,
+                                                eventId = id,
+                                            ).map { detail ->
+                                                when {
+                                                    !checked -> detail.copy(playoffTeamCount = null)
+                                                    singleDivision -> detail.copy(
+                                                        playoffTeamCount = fallbackSingleDivisionPlayoffCount
+                                                    )
+                                                    else -> detail.copy(
+                                                        playoffTeamCount = (
+                                                            detail.playoffTeamCount
+                                                                ?: (detail.maxParticipants
+                                                                    ?: fallbackMaxParticipants)
+                                                            ).coerceAtLeast(2)
+                                                    )
+                                                }
+                                            }
+                                            copy(
+                                                includePlayoffs = checked,
+                                                playoffTeamCount = if (checked && singleDivision) {
+                                                    fallbackSingleDivisionPlayoffCount
+                                                } else {
+                                                    null
+                                                },
+                                                divisionDetails = nextDivisionDetails,
+                                            )
+                                        }
+                                    },
+                                )
+                            }
+
+                            if (editEvent.singleDivision) {
+                                NumberInputField(
+                                    modifier = Modifier.weight(1f),
+                                    value = editEvent.playoffTeamCount?.toString().orEmpty(),
+                                    label = "Playoff Team Count",
+                                    enabled = editEvent.includePlayoffs,
+                                    onValueChange = { newValue ->
+                                        if (!editEvent.includePlayoffs) {
+                                            return@NumberInputField
+                                        }
+                                        if (!newValue.all { it.isDigit() }) {
+                                            return@NumberInputField
+                                        }
+                                        onEditEvent {
+                                            copy(playoffTeamCount = newValue.toIntOrNull()?.coerceAtLeast(2))
+                                        }
+                                    },
+                                    isError = editEvent.includePlayoffs && (editEvent.playoffTeamCount ?: 0) < 2,
+                                    errorMessage = "Required when playoffs are enabled",
+                                )
+                            } else {
+                                Box(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = if (editEvent.includePlayoffs) {
+                                            "Playoff team count is configured per division below."
+                                        } else {
+                                            "Enable playoffs to configure playoff team count per division."
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color(localImageScheme.current.onSurfaceVariant),
+                                    )
+                                }
+                            }
+                        }
+                    }
 
                     MultiSelectDropdownField(
                         selectedItems = selectedDivisions,
@@ -1312,15 +1548,49 @@ fun EventDetails(
                         errorMessage = stringResource(Res.string.select_a_value),
                     ) { newSelection ->
                         val normalizedSelection = newSelection.normalizeDivisionIdentifiers()
-                        val nextDivisionDetails = mergeDivisionDetailsForDivisions(
+                        val mergedDivisionDetails = mergeDivisionDetailsForDivisions(
                             divisions = normalizedSelection,
-                            existingDetails = editEvent.divisionDetails,
+                            existingDetails = divisionDetailsForSettings,
                             eventId = editEvent.id,
                         )
+                        val fallbackMaxParticipants = editEvent.maxParticipants.coerceAtLeast(2)
+                        val fallbackSingleDivisionPlayoffCount = (
+                            editEvent.playoffTeamCount
+                                ?: mergedDivisionDetails.firstOrNull()?.playoffTeamCount
+                                ?: fallbackMaxParticipants
+                            ).coerceAtLeast(2)
+                        val nextDivisionDetails = mergedDivisionDetails.map { detail ->
+                            when {
+                                editEvent.eventType != EventType.LEAGUE || !editEvent.includePlayoffs -> {
+                                    detail.copy(playoffTeamCount = null)
+                                }
+                                editEvent.singleDivision -> {
+                                    detail.copy(playoffTeamCount = fallbackSingleDivisionPlayoffCount)
+                                }
+                                else -> {
+                                    detail.copy(
+                                        playoffTeamCount = (
+                                            detail.playoffTeamCount
+                                                ?: detail.maxParticipants
+                                                ?: fallbackMaxParticipants
+                                            ).coerceAtLeast(2)
+                                    )
+                                }
+                            }
+                        }
                         onEditEvent {
                             copy(
                                 divisions = normalizedSelection,
                                 divisionDetails = nextDivisionDetails,
+                                playoffTeamCount = if (
+                                    eventType == EventType.LEAGUE &&
+                                    includePlayoffs &&
+                                    singleDivision
+                                ) {
+                                    fallbackSingleDivisionPlayoffCount
+                                } else {
+                                    null
+                                },
                             )
                         }
                         if (isNewEvent && editEvent.eventType == EventType.LEAGUE && leagueTimeSlots.isNotEmpty()) {
@@ -1336,6 +1606,163 @@ fun EventDetails(
                                 if (nextSlotDivisions != currentDivisions) {
                                     onUpdateLeagueTimeSlot(index, slot.copy(divisions = nextSlotDivisions))
                                 }
+                            }
+                        }
+                    }
+                    if (divisionDetailsForSettings.isNotEmpty()) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(
+                                text = "Division settings",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = Color(localImageScheme.current.onSurface),
+                            )
+                            divisionDetailsForSettings.forEach { detail ->
+                                val detailIdentifier = detail.id.ifBlank { detail.key }
+                                val detailPlayoffCount = (
+                                    detail.playoffTeamCount
+                                        ?: editEvent.playoffTeamCount
+                                        ?: detail.maxParticipants
+                                        ?: editEvent.maxParticipants
+                                    ).coerceAtLeast(2)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.Top,
+                                ) {
+                                    PlatformTextField(
+                                        value = detail.name,
+                                        onValueChange = {},
+                                        modifier = Modifier.weight(1f),
+                                        label = "Division",
+                                        readOnly = true,
+                                        enabled = false,
+                                    )
+                                    MoneyInputField(
+                                        value = (detail.price ?: 0).toString(),
+                                        onValueChange = { newText ->
+                                            if (editEvent.singleDivision || !hostHasAccount) {
+                                                return@MoneyInputField
+                                            }
+                                            val normalizedPrice = if (newText.isBlank()) {
+                                                0
+                                            } else {
+                                                newText.filter { it.isDigit() }.toIntOrNull() ?: 0
+                                            }.coerceAtLeast(0)
+                                            onEditEvent {
+                                                val nextDivisionDetails = mergeDivisionDetailsForDivisions(
+                                                    divisions = divisions,
+                                                    existingDetails = divisionDetailsForSettings,
+                                                    eventId = id,
+                                                ).map { existing ->
+                                                    if (
+                                                        divisionsEquivalent(existing.id, detailIdentifier) ||
+                                                        divisionsEquivalent(existing.key, detailIdentifier)
+                                                    ) {
+                                                        existing.copy(price = normalizedPrice)
+                                                    } else {
+                                                        existing
+                                                    }
+                                                }
+                                                copy(divisionDetails = nextDivisionDetails)
+                                            }
+                                        },
+                                        modifier = Modifier.weight(1f),
+                                        label = "Price",
+                                        enabled = !editEvent.singleDivision && hostHasAccount,
+                                    )
+                                    NumberInputField(
+                                        modifier = Modifier.weight(1f),
+                                        value = (detail.maxParticipants ?: editEvent.maxParticipants.coerceAtLeast(2)).toString(),
+                                        label = if (editEvent.teamSignup) "Max teams" else "Max players",
+                                        enabled = !editEvent.singleDivision,
+                                        onValueChange = { newValue ->
+                                            if (editEvent.singleDivision) {
+                                                return@NumberInputField
+                                            }
+                                            if (!newValue.all { it.isDigit() }) {
+                                                return@NumberInputField
+                                            }
+                                            val normalizedMax = if (newValue.isBlank()) {
+                                                2
+                                            } else {
+                                                newValue.toIntOrNull() ?: 2
+                                            }.coerceAtLeast(2)
+                                            onEditEvent {
+                                                val nextDivisionDetails = mergeDivisionDetailsForDivisions(
+                                                    divisions = divisions,
+                                                    existingDetails = divisionDetailsForSettings,
+                                                    eventId = id,
+                                                ).map { existing ->
+                                                    if (
+                                                        divisionsEquivalent(existing.id, detailIdentifier) ||
+                                                        divisionsEquivalent(existing.key, detailIdentifier)
+                                                    ) {
+                                                        existing.copy(maxParticipants = normalizedMax)
+                                                    } else {
+                                                        existing
+                                                    }
+                                                }
+                                                copy(divisionDetails = nextDivisionDetails)
+                                            }
+                                        },
+                                        isError = false,
+                                    )
+                                }
+                                if (editEvent.eventType == EventType.LEAGUE) {
+                                    NumberInputField(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        value = detailPlayoffCount.toString(),
+                                        label = "Division Playoff Team Count",
+                                        enabled = !editEvent.singleDivision && editEvent.includePlayoffs,
+                                        onValueChange = { newValue ->
+                                            if (editEvent.singleDivision || !editEvent.includePlayoffs) {
+                                                return@NumberInputField
+                                            }
+                                            if (!newValue.all { it.isDigit() }) {
+                                                return@NumberInputField
+                                            }
+                                            val normalizedPlayoffCount = if (newValue.isBlank()) {
+                                                2
+                                            } else {
+                                                newValue.toIntOrNull() ?: 2
+                                            }.coerceAtLeast(2)
+                                            onEditEvent {
+                                                val nextDivisionDetails = mergeDivisionDetailsForDivisions(
+                                                    divisions = divisions,
+                                                    existingDetails = divisionDetailsForSettings,
+                                                    eventId = id,
+                                                ).map { existing ->
+                                                    if (
+                                                        divisionsEquivalent(existing.id, detailIdentifier) ||
+                                                        divisionsEquivalent(existing.key, detailIdentifier)
+                                                    ) {
+                                                        existing.copy(playoffTeamCount = normalizedPlayoffCount)
+                                                    } else {
+                                                        existing
+                                                    }
+                                                }
+                                                copy(divisionDetails = nextDivisionDetails)
+                                            }
+                                        },
+                                        isError = editEvent.includePlayoffs && !editEvent.singleDivision &&
+                                            (detail.playoffTeamCount ?: 0) < 2,
+                                        errorMessage = "Required when playoffs are enabled",
+                                    )
+                                }
+                            }
+                            if (editEvent.singleDivision) {
+                                Text(
+                                    text = if (editEvent.eventType == EventType.LEAGUE) {
+                                        "Division price, capacity, and playoff team count mirror event-level values while single division is enabled."
+                                    } else {
+                                        "Division price and capacity mirror event-level values while single division is enabled."
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(localImageScheme.current.onSurfaceVariant),
+                                )
                             }
                         }
                     }
@@ -1384,7 +1811,11 @@ fun EventDetails(
                         }
                         if (!isLeaguePlayoffTeamsValid) {
                             Text(
-                                "Playoff team count must be at least 2 when playoffs are enabled.",
+                                if (editEvent.singleDivision) {
+                                    "Playoff team count must be at least 2 when playoffs are enabled."
+                                } else {
+                                    "Each division must have a playoff team count of at least 2 when playoffs are enabled."
+                                },
                                 color = MaterialTheme.colorScheme.error,
                             )
                         }

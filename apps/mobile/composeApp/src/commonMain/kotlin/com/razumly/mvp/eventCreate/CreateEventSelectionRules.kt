@@ -9,7 +9,6 @@ internal fun Event.applyCreateSelectionRules(isRentalFlow: Boolean): Event {
         EventType.LEAGUE, EventType.TOURNAMENT -> copy(
             eventType = normalizedType,
             teamSignup = true,
-            singleDivision = true,
         )
 
         EventType.EVENT -> copy(

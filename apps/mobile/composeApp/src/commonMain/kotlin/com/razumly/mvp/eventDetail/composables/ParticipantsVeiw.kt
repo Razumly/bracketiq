@@ -34,9 +34,16 @@ import com.razumly.mvp.eventDetail.LocalTournamentComponent
 import org.koin.core.parameter.parametersOf
 import org.koin.mp.KoinPlatform.getKoin
 
+enum class ParticipantsSection(val label: String) {
+    TEAMS("Teams"),
+    PARTICIPANTS("Participants"),
+    FREE_AGENTS("Free Agents"),
+}
+
 @Composable
 fun ParticipantsView(
     showFab: (Boolean) -> Unit,
+    section: ParticipantsSection = ParticipantsSection.TEAMS,
     onNavigateToChat: (UserData) -> Unit
 ) {
     val component = LocalTournamentComponent.current
@@ -45,6 +52,16 @@ fun ParticipantsView(
     val currentUser by component.currentUser.collectAsState()
     val participants = selectedEvent.players
     val teamSignup = selectedEvent.event.teamSignup
+    val participantIds = remember(selectedEvent.event.playerIds) {
+        selectedEvent.event.playerIds
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .distinct()
+    }
+    val participantUsersFromEvent = remember(participantIds, selectedEvent.players) {
+        val playersById = selectedEvent.players.associateBy(UserData::id)
+        participantIds.mapNotNull(playersById::get)
+    }
     val freeAgentIds = remember(selectedEvent.event.freeAgentIds) {
         selectedEvent.event.freeAgentIds
             .map(String::trim)
@@ -54,6 +71,10 @@ fun ParticipantsView(
     val freeAgentUsers = remember(freeAgentIds, selectedEvent.players) {
         val playersById = selectedEvent.players.associateBy(UserData::id)
         freeAgentIds.mapNotNull(playersById::get)
+    }
+    val participantUsers = remember(selectedEvent.players, selectedEvent.teams, freeAgentUsers) {
+        val teamPlayers = selectedEvent.teams.flatMap { team -> team.players }
+        (teamPlayers + selectedEvent.players + freeAgentUsers).distinctBy(UserData::id)
     }
     val canInviteToTeam = remember(selectedEvent.teams, currentUser.id) {
         selectedEvent.teams.any { teamWithPlayers ->
@@ -99,79 +120,109 @@ fun ParticipantsView(
             Text("Participants", style = MaterialTheme.typography.titleLarge)
         }
 
-        if (teamSignup) {
-            item(key = "teams-header") {
-                Text("Teams", style = MaterialTheme.typography.titleLarge)
-            }
-            items(
-                divisionTeams.values.toList(),
-                key = { it.team.id },
-            ) { team ->
-                TeamCard(
-                    team = team,
-                    modifier = Modifier.clickable {
-                        selectedTeam = team
-                        showTeamDialog = true
+        item(key = "section-header") {
+            Text(section.label, style = MaterialTheme.typography.titleLarge)
+        }
+
+        when (section) {
+            ParticipantsSection.TEAMS -> {
+                if (!teamSignup || divisionTeams.isEmpty()) {
+                    item(key = "teams-empty") {
+                        Text(
+                            "No teams yet.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
-                )
+                } else {
+                    items(
+                        divisionTeams.values.toList(),
+                        key = { it.team.id },
+                    ) { team ->
+                        TeamCard(
+                            team = team,
+                            modifier = Modifier.clickable {
+                                selectedTeam = team
+                                showTeamDialog = true
+                            }
+                        )
+                    }
+                }
             }
 
-            item(key = "free-agents-header") {
-                Text("Free Agents", style = MaterialTheme.typography.titleLarge)
-            }
-            if (freeAgentUsers.isEmpty()) {
-                item(key = "free-agents-empty") {
-                    Text(
-                        "No free agents yet.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            } else {
-                items(freeAgentUsers, key = { it.id }) { freeAgent ->
-                    PlayerCardWithActions(
-                        player = freeAgent,
-                        currentUser = currentUser,
-                        onMessage = { user ->
-                            onNavigateToChat(user)
-                        },
-                        onSendFriendRequest = { user ->
-                            playerInteractionComponent.sendFriendRequest(user)
-                        },
-                        onFollow = { user ->
-                            playerInteractionComponent.followUser(user)
-                        },
-                        onUnfollow = { user ->
-                            playerInteractionComponent.unfollowUser(user)
-                        },
-                        onInviteToTeam = if (canInviteToTeam) {
-                            { user -> component.inviteFreeAgentToTeam(user.id) }
-                        } else {
-                            null
-                        }
-                    )
-                }
-            }
-        } else {
-            items(participants, key = { it.id }) { participant ->
-                PlayerCardWithActions(
-                    player = participant,
-                    currentUser = currentUser,
-                    onMessage = { user ->
-                        onNavigateToChat(user)
-                    },
-                    onSendFriendRequest = { user ->
-                        playerInteractionComponent.sendFriendRequest(user)
-                    },
-                    onFollow = { user ->
-                        playerInteractionComponent.followUser(user)
-                    },
-                    onUnfollow = { user ->
-                        playerInteractionComponent.unfollowUser(user)
+            ParticipantsSection.FREE_AGENTS -> {
+                if (!teamSignup || freeAgentUsers.isEmpty()) {
+                    item(key = "free-agents-empty") {
+                        Text(
+                            "No free agents yet.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
-                )
+                } else {
+                    items(freeAgentUsers, key = { it.id }) { freeAgent ->
+                        PlayerCardWithActions(
+                            player = freeAgent,
+                            currentUser = currentUser,
+                            onMessage = { user ->
+                                onNavigateToChat(user)
+                            },
+                            onSendFriendRequest = { user ->
+                                playerInteractionComponent.sendFriendRequest(user)
+                            },
+                            onFollow = { user ->
+                                playerInteractionComponent.followUser(user)
+                            },
+                            onUnfollow = { user ->
+                                playerInteractionComponent.unfollowUser(user)
+                            },
+                            onInviteToTeam = if (canInviteToTeam) {
+                                { user -> component.inviteFreeAgentToTeam(user.id) }
+                            } else {
+                                null
+                            }
+                        )
+                    }
+                }
+            }
+
+            ParticipantsSection.PARTICIPANTS -> {
+                val visibleParticipants = if (teamSignup) {
+                    participantUsers
+                } else {
+                    participantUsersFromEvent.ifEmpty { participants }
+                }
+                if (visibleParticipants.isEmpty()) {
+                    item(key = "participants-empty") {
+                        Text(
+                            "No participants yet.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                } else {
+                    items(visibleParticipants, key = { it.id }) { participant ->
+                        PlayerCardWithActions(
+                            player = participant,
+                            currentUser = currentUser,
+                            onMessage = { user ->
+                                onNavigateToChat(user)
+                            },
+                            onSendFriendRequest = { user ->
+                                playerInteractionComponent.sendFriendRequest(user)
+                            },
+                            onFollow = { user ->
+                                playerInteractionComponent.followUser(user)
+                            },
+                            onUnfollow = { user ->
+                                playerInteractionComponent.unfollowUser(user)
+                            }
+                        )
+                    }
+                }
             }
         }
+
     }
 
     // Show team details dialog

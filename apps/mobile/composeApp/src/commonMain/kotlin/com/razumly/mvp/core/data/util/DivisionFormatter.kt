@@ -257,6 +257,9 @@ fun inferDivisionDetail(
         divisionTypeName = inference.divisionTypeName,
         ratingType = inference.ratingType,
         gender = inference.gender,
+        price = null,
+        maxParticipants = null,
+        playoffTeamCount = null,
     )
 }
 
@@ -295,6 +298,11 @@ fun DivisionDetail.normalizeDivisionDetail(eventId: String? = null): DivisionDet
         divisionTypeName = normalizedDivisionTypeName,
         ratingType = normalizedRatingType,
         gender = normalizedGender,
+        price = price?.coerceAtLeast(0),
+        maxParticipants = maxParticipants
+            ?.takeIf { participantCount -> participantCount >= 2 },
+        playoffTeamCount = playoffTeamCount
+            ?.takeIf { participantCount -> participantCount >= 2 },
         sportId = sportId?.trim()?.takeIf(String::isNotBlank),
         ageCutoffDate = ageCutoffDate?.trim()?.takeIf(String::isNotBlank),
         ageCutoffLabel = ageCutoffLabel?.trim()?.takeIf(String::isNotBlank),

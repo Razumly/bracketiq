@@ -34,6 +34,7 @@ import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.data.util.divisionsEquivalent
+import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.IPaymentProcessor
@@ -470,9 +471,9 @@ class DefaultEventDetailComponent(
         flowOf(teams.filter { it.team.teamSize == event.teamSizeLimit && it.team.captainId == currentUser.value.id })
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
-    override val isEventFull = selectedEvent.map { event ->
-        checkEventIsFull(event)
-    }.stateIn(scope, SharingStarted.Eagerly, checkEventIsFull(event))
+    override val isEventFull = combine(selectedEvent, selectedDivision) { selected, division ->
+        checkEventIsFull(selected, division)
+    }.stateIn(scope, SharingStarted.Eagerly, checkEventIsFull(event, null))
 
     private val _isUserInEvent: MutableStateFlow<Boolean> =
         MutableStateFlow(checkIsUserInEvent(event))
@@ -726,8 +727,21 @@ class DefaultEventDetailComponent(
         }
     }
 
+    private fun hasEventStarted(event: Event = selectedEvent.value): Boolean =
+        Clock.System.now() >= event.start
+
+    private fun ensureRegistrationOpen(): Boolean {
+        if (!hasEventStarted()) return true
+        _errorState.value = ErrorMessage("This event has already started. Registration is closed.")
+        return false
+    }
+
+    private fun canRequestPaidRefund(event: Event, membership: WithdrawTargetMembership): Boolean =
+        event.price > 0 && membership == WithdrawTargetMembership.PARTICIPANT
+
     override fun joinEvent() {
         scope.launch {
+            if (!ensureRegistrationOpen()) return@launch
             if (resumePendingSignatureFlowIfNeeded()) {
                 return@launch
             }
@@ -755,6 +769,7 @@ class DefaultEventDetailComponent(
 
     override fun joinEventAsTeam(team: TeamWithPlayers) {
         scope.launch {
+            if (!ensureRegistrationOpen()) return@launch
             _usersTeam.value = team
             _joinChoiceDialog.value = null
             _childJoinSelectionDialog.value = null
@@ -788,6 +803,11 @@ class DefaultEventDetailComponent(
     }
 
     override fun selectChildForJoin(childUserId: String) {
+        if (!ensureRegistrationOpen()) {
+            _joinChoiceDialog.value = null
+            _childJoinSelectionDialog.value = null
+            return
+        }
         val selectedChild = joinableChildren.firstOrNull { it.userId == childUserId }
         if (selectedChild == null) {
             _errorState.value = ErrorMessage("Unable to find that child profile.")
@@ -815,6 +835,7 @@ class DefaultEventDetailComponent(
     }
 
     private suspend fun runSelfJoinFlow() {
+        if (!ensureRegistrationOpen()) return
         runActionAfterRequiredSigning(
             signerContext = SignerContext.PARTICIPANT,
             child = null,
@@ -852,6 +873,7 @@ class DefaultEventDetailComponent(
     }
 
     private suspend fun executeChildRegistration(child: JoinChildOption) {
+        if (!ensureRegistrationOpen()) return
         try {
             val joiningWaitlist = !selectedEvent.value.teamSignup && isEventFull.value
             loadingHandler.showLoading("Registering Child ...")
@@ -893,6 +915,7 @@ class DefaultEventDetailComponent(
     }
 
     private suspend fun executeJoinEvent() {
+        if (!ensureRegistrationOpen()) return
         try {
             if (selectedEvent.value.price == 0.0 || isEventFull.value || selectedEvent.value.teamSignup) {
                 loadingHandler.showLoading("Joining Event ...")
@@ -932,6 +955,7 @@ class DefaultEventDetailComponent(
     }
 
     private suspend fun executeJoinEventAsTeam(team: TeamWithPlayers) {
+        if (!ensureRegistrationOpen()) return
         try {
             if (selectedEvent.value.price == 0.0 || isEventFull.value) {
                 loadingHandler.showLoading("Joining Event ...")
@@ -1161,46 +1185,68 @@ class DefaultEventDetailComponent(
 
     override fun requestRefund(reason: String, targetUserId: String?) {
         scope.launch {
+            val event = selectedEvent.value
             val normalizedTargetUserId = targetUserId
                 ?.trim()
                 ?.takeIf(String::isNotBlank)
                 ?: currentUser.value.id
             val membership = resolveWithdrawTargetMembership(
-                event = selectedEvent.value,
+                event = event,
                 userId = normalizedTargetUserId,
             )
             if (membership == null) {
                 _errorState.value = ErrorMessage("Selected profile is not registered for this event.")
                 return@launch
             }
+            if (!canRequestPaidRefund(event, membership)) {
+                _errorState.value = ErrorMessage(
+                    if (event.price <= 0.0) {
+                        "Refund requests are only available for paid events."
+                    } else {
+                        "Only registered participants can request refunds."
+                    }
+                )
+                return@launch
+            }
             loadingHandler.showLoading("Requesting Refund ...")
             billingRepository.leaveAndRefundEvent(
-                event = selectedEvent.value,
+                event = event,
                 reason = reason,
                 targetUserId = normalizedTargetUserId,
             ).onFailure {
                 _errorState.value = ErrorMessage(it.message ?: "")
             }.onSuccess {
-                eventRepository.getEvent(selectedEvent.value.id)
+                eventRepository.getEvent(event.id)
             }
             loadingHandler.showLoading("Reloading Event")
-            eventRepository.getEvent(selectedEvent.value.id)
+            eventRepository.getEvent(event.id)
             loadingHandler.hideLoading()
         }
     }
 
     override fun leaveEvent(targetUserId: String?) {
         scope.launch {
+            val event = selectedEvent.value
             val normalizedTargetUserId = targetUserId
                 ?.trim()
                 ?.takeIf(String::isNotBlank)
                 ?: currentUser.value.id
             val membership = resolveWithdrawTargetMembership(
-                event = selectedEvent.value,
+                event = event,
                 userId = normalizedTargetUserId,
             )
             if (membership == null) {
                 _errorState.value = ErrorMessage("Selected profile is not registered for this event.")
+                return@launch
+            }
+            if (hasEventStarted(event)) {
+                _errorState.value = ErrorMessage(
+                    if (canRequestPaidRefund(event, membership)) {
+                        "This event has already started. Leaving is disabled. Request a refund instead."
+                    } else {
+                        "This event has already started. Leaving is no longer available."
+                    }
+                )
                 return@launch
             }
 
@@ -1209,8 +1255,8 @@ class DefaultEventDetailComponent(
                 WithdrawTargetMembership.PARTICIPANT -> {
                     if (
                         leavingSelf &&
-                        selectedEvent.value.teamSignup &&
-                        !checkIsUserFreeAgent(selectedEvent.value)
+                        event.teamSignup &&
+                        !checkIsUserFreeAgent(event)
                     ) {
                         loadingHandler.showLoading("Team Leaving Event ...")
                         val team = _usersTeam.value
@@ -1218,14 +1264,14 @@ class DefaultEventDetailComponent(
                             Result.failure(IllegalStateException("Unable to resolve your team registration."))
                         } else {
                             eventRepository.removeTeamFromEvent(
-                                event = selectedEvent.value,
+                                event = event,
                                 teamWithPlayers = team,
                             )
                         }
                     } else {
                         loadingHandler.showLoading("Leaving Event ...")
                         eventRepository.removeCurrentUserFromEvent(
-                            event = selectedEvent.value,
+                            event = event,
                             targetUserId = normalizedTargetUserId,
                         )
                     }
@@ -1235,7 +1281,7 @@ class DefaultEventDetailComponent(
                 WithdrawTargetMembership.FREE_AGENT -> {
                     loadingHandler.showLoading("Leaving Event ...")
                     eventRepository.removeCurrentUserFromEvent(
-                        event = selectedEvent.value,
+                        event = event,
                         targetUserId = normalizedTargetUserId,
                     )
                 }
@@ -1244,7 +1290,7 @@ class DefaultEventDetailComponent(
             result.onFailure { _errorState.value = ErrorMessage(it.message ?: "") }
             result.onSuccess {
                 loadingHandler.showLoading("Reloading Event")
-                eventRepository.getEvent(selectedEvent.value.id)
+                eventRepository.getEvent(event.id)
             }
             loadingHandler.hideLoading()
         }
@@ -1550,12 +1596,38 @@ class DefaultEventDetailComponent(
         }
     }
 
-    private fun checkEventIsFull(event: Event): Boolean {
-        return if (event.teamSignup) {
-            event.maxParticipants <= event.teamIds.size
+    private fun checkEventIsFull(event: Event, preferredDivisionId: String?): Boolean {
+        val participantCount = if (event.teamSignup) {
+            event.teamIds.size
         } else {
-            event.maxParticipants <= event.playerIds.size
+            event.playerIds.size
         }
+        val maxParticipants = if (event.singleDivision) {
+            event.maxParticipants
+        } else {
+            val normalizedPreferredDivision = preferredDivisionId
+                ?.normalizeDivisionIdentifier()
+                ?.ifEmpty { null }
+            val divisionDetails = mergeDivisionDetailsForDivisions(
+                divisions = event.divisions,
+                existingDetails = event.divisionDetails,
+                eventId = event.id,
+            )
+            val selectedDivision = if (!normalizedPreferredDivision.isNullOrBlank()) {
+                divisionDetails.firstOrNull { detail ->
+                    divisionsEquivalent(detail.id, normalizedPreferredDivision) ||
+                        divisionsEquivalent(detail.key, normalizedPreferredDivision)
+                } ?: divisionDetails.firstOrNull()
+            } else {
+                divisionDetails.firstOrNull()
+            }
+            selectedDivision?.maxParticipants ?: event.maxParticipants
+        }
+
+        if (maxParticipants <= 0) {
+            return false
+        }
+        return participantCount >= maxParticipants
     }
 
     override fun showFeeBreakdown(

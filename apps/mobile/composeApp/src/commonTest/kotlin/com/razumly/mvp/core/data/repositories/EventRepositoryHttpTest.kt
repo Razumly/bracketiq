@@ -623,6 +623,91 @@ class EventRepositoryHttpTest {
     }
 
     @Test
+    fun addCurrentUserToEvent_uses_division_capacity_for_waitlist_routing_in_multi_division_events() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u_new"))
+
+        val divisionOpenId = "e1__division__open"
+        val divisionAdvancedId = "e1__division__advanced"
+        var capturedPath = ""
+
+        val engine = MockEngine { request ->
+            capturedPath = request.url.encodedPath
+            respond(
+                content = """
+                    {
+                      "event": {
+                        "id": "e1",
+                        "name": "Event One",
+                        "hostId": "h1",
+                        "start": "2026-02-10T00:00:00Z",
+                        "end": "2026-02-10T01:00:00Z",
+                        "coordinates": [-80.0, 25.0],
+                        "userIds": ["existing_user", "existing_user_2"],
+                        "teamIds": []
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val event = Event(
+            id = "e1",
+            name = "Event One",
+            hostId = "h1",
+            coordinates = listOf(-80.0, 25.0),
+            start = Instant.parse("2026-02-10T00:00:00Z"),
+            end = Instant.parse("2026-02-10T01:00:00Z"),
+            maxParticipants = 30,
+            teamSignup = false,
+            singleDivision = false,
+            userIds = listOf("existing_user", "existing_user_2"),
+            divisions = listOf(divisionOpenId, divisionAdvancedId),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = divisionOpenId,
+                    key = "open",
+                    name = "Open",
+                    divisionTypeId = "open",
+                    divisionTypeName = "Open",
+                    ratingType = "SKILL",
+                    gender = "C",
+                    maxParticipants = 8,
+                ),
+                DivisionDetail(
+                    id = divisionAdvancedId,
+                    key = "advanced",
+                    name = "Advanced",
+                    divisionTypeId = "advanced",
+                    divisionTypeName = "Advanced",
+                    ratingType = "SKILL",
+                    gender = "C",
+                    maxParticipants = 2,
+                ),
+            ),
+        )
+
+        repo.addCurrentUserToEvent(
+            event = event,
+            preferredDivisionId = divisionAdvancedId,
+        ).getOrThrow()
+
+        assertEquals("/api/events/e1/waitlist", capturedPath)
+    }
+
+    @Test
     fun registerChildForEvent_posts_child_registration_payload() = runTest {
         val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
         val eventDao = EventRepositoryHttp_FakeEventDao()
