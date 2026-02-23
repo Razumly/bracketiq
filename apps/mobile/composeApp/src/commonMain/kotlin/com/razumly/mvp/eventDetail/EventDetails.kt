@@ -144,6 +144,7 @@ import io.ktor.http.Url
 import kotlinx.coroutines.launch
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.format
 import kotlinx.datetime.toLocalDateTime
 import mvp.composeapp.generated.resources.Res
@@ -229,6 +230,7 @@ fun EventDetails(
     var isValid by remember { mutableStateOf(false) }
     var showStartPicker by remember { mutableStateOf(false) }
     var showEndPicker by remember { mutableStateOf(false) }
+    var installmentDueDatePickerIndex by remember { mutableStateOf<Int?>(null) }
     var showImageSelector by rememberSaveable { mutableStateOf(false) }
     var showUploadImagePicker by rememberSaveable { mutableStateOf(false) }
     var previousSelection by remember { mutableStateOf<LatLng?>(null) }
@@ -773,7 +775,7 @@ fun EventDetails(
                 1, 3, 5 -> editEvent.setsPerMatch
                 else -> null
             }
-            isLeagueGamesValid = (editEvent.gamesPerOpponent ?: 0) >= 1
+            isLeagueGamesValid = (editEvent.gamesPerOpponent ?: 1) >= 1
             isLeaguePlayoffTeamsValid = if (!editEvent.includePlayoffs) {
                 true
             } else if (editEvent.singleDivision) {
@@ -1879,9 +1881,12 @@ fun EventDetails(
                                     )
                                     PlatformTextField(
                                         value = dueDate,
-                                        onValueChange = { updated -> onUpdateInstallmentDueDate(index, updated) },
-                                        label = "Due Date (YYYY-MM-DD)",
+                                        onValueChange = {},
+                                        label = "Due Date",
+                                        placeholder = "YYYY-MM-DD",
                                         modifier = Modifier.weight(1f),
+                                        readOnly = true,
+                                        onTap = { installmentDueDatePickerIndex = index },
                                     )
                                 }
                                 if (installmentCount > 1) {
@@ -3006,6 +3011,7 @@ fun EventDetails(
         showPicker = showStartPicker && !rentalTimeLocked,
         getTime = true,
         canSelectPast = false,
+        initialDate = editEvent.start,
     )
 
     PlatformDateTimePicker(
@@ -3017,6 +3023,36 @@ fun EventDetails(
         showPicker = showEndPicker && !rentalTimeLocked,
         getTime = true,
         canSelectPast = false,
+        initialDate = editEvent.end,
+    )
+
+    val installmentInitialDate = remember(installmentDueDatePickerIndex, editEvent.installmentDueDates) {
+        val selectedInstallmentIndex = installmentDueDatePickerIndex ?: return@remember null
+        val rawDueDate = editEvent.installmentDueDates.getOrNull(selectedInstallmentIndex)?.trim().orEmpty()
+        if (rawDueDate.isBlank()) {
+            return@remember null
+        }
+        runCatching {
+            LocalDate.parse(rawDueDate).atStartOfDayIn(TimeZone.currentSystemDefault())
+        }.getOrNull()
+    }
+
+    PlatformDateTimePicker(
+        onDateSelected = { selectedInstant ->
+            val targetIndex = installmentDueDatePickerIndex
+            if (targetIndex != null) {
+                val selectedDate = (selectedInstant ?: Clock.System.now())
+                    .toLocalDateTime(TimeZone.currentSystemDefault())
+                    .date
+                onUpdateInstallmentDueDate(targetIndex, selectedDate.toString())
+            }
+            installmentDueDatePickerIndex = null
+        },
+        onDismissRequest = { installmentDueDatePickerIndex = null },
+        showPicker = installmentDueDatePickerIndex != null,
+        getTime = false,
+        canSelectPast = false,
+        initialDate = installmentInitialDate,
     )
 
     EventMap(
@@ -3178,9 +3214,6 @@ fun LazyListScope.animatedCardSection(
         val defaultExpanded = if (isEditMode) defaultExpandedInEditMode else defaultExpandedInViewMode
         var expanded by rememberSaveable(sectionId, isEditMode) {
             mutableStateOf(defaultExpanded)
-        }
-        LaunchedEffect(isEditMode) {
-            expanded = if (isEditMode) defaultExpandedInEditMode else defaultExpandedInViewMode
         }
 
         Box(

@@ -13,4 +13,5 @@ expect fun PlatformDateTimePicker(
     showPicker: Boolean,
     getTime: Boolean,
     canSelectPast: Boolean,
+    initialDate: Instant? = null,
 )

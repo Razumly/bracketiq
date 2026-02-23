@@ -22,7 +22,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
@@ -129,7 +128,6 @@ private fun LocalInitialsAvatar(
             fontWeight = FontWeight.Bold,
             fontSize = (size.value * 0.42f).sp,
             style = MaterialTheme.typography.titleMedium.copy(
-                platformStyle = PlatformTextStyle(includeFontPadding = false),
                 lineHeight = (size.value * 0.42f).sp,
             ),
         )

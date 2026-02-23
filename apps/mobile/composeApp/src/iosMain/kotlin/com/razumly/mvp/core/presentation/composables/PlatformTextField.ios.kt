@@ -210,7 +210,7 @@ fun createSimpleUITextField(
     val textField = UITextField() // Just regular UITextField - no custom subclass!
 
     // Basic setup only
-    textField.text = text
+    textField.text = toDisplayText(text, keyboardType)
     textField.placeholder = placeholder
     textField.borderStyle = UITextBorderStyle.UITextBorderStyleRoundedRect
     textField.secureTextEntry = isSecure
@@ -220,7 +220,7 @@ fun createSimpleUITextField(
     // Set keyboard type
     when (keyboardType) {
         "email" -> textField.keyboardType = UIKeyboardTypeEmailAddress
-        "number" -> textField.keyboardType = UIKeyboardTypeNumberPad
+        "number", "money" -> textField.keyboardType = UIKeyboardTypeNumberPad
         "password" -> {
             textField.keyboardType = UIKeyboardTypeDefault
             textField.secureTextEntry = true
@@ -242,7 +242,8 @@ fun createSimpleUITextField(
     // Keep your existing delegate for focus management
     val delegate = SimpleTextFieldDelegate(
         onTextChanged = onTextChanged,
-        focusManager = focusManager
+        focusManager = focusManager,
+        keyboardType = keyboardType,
     )
 
     textField.delegate = delegate
@@ -267,9 +268,10 @@ fun updateSimpleUITextField(
     fontSize: TextUnit = 16.sp,
     imeAction: ImeAction = ImeAction.Next
 ) {
+    val displayText = toDisplayText(text, keyboardType)
     // Only update text if different to avoid cursor jumping
-    if (textField.text != text) {
-        textField.text = text
+    if (textField.text != displayText) {
+        textField.text = displayText
     }
 
     textField.placeholder = placeholder
@@ -280,7 +282,7 @@ fun updateSimpleUITextField(
     // Update keyboard type
     when (keyboardType) {
         "email" -> textField.keyboardType = UIKeyboardTypeEmailAddress
-        "number" -> textField.keyboardType = UIKeyboardTypeNumberPad
+        "number", "money" -> textField.keyboardType = UIKeyboardTypeNumberPad
         "password" -> {
             textField.keyboardType = UIKeyboardTypeDefault
             textField.secureTextEntry = true
@@ -298,10 +300,30 @@ fun updateSimpleUITextField(
     }
 }
 
+private fun toDisplayText(value: String, keyboardType: String): String {
+    return if (keyboardType == "money") {
+        formatMoneyDisplay(value)
+    } else {
+        value
+    }
+}
+
+private fun formatMoneyDisplay(rawValue: String): String {
+    val digits = rawValue.filter { it.isDigit() }
+    if (digits.isEmpty()) return ""
+
+    val normalized = digits.trimStart('0').ifEmpty { "0" }
+    val padded = normalized.padStart(3, '0')
+    val whole = padded.dropLast(2).trimStart('0').ifEmpty { "0" }
+    val fractional = padded.takeLast(2)
+    return "$whole.$fractional"
+}
+
 // Simplified delegate - only handles text changes and focus
 class SimpleTextFieldDelegate(
     private val onTextChanged: (String) -> Unit,
-    private val focusManager: IOSFocusManager
+    private val focusManager: IOSFocusManager,
+    private val keyboardType: String,
 ) : NSObject(), UITextFieldDelegateProtocol {
 
     @OptIn(ExperimentalForeignApi::class)
@@ -315,6 +337,14 @@ class SimpleTextFieldDelegate(
             shouldChangeCharactersInRange,
             replacementString
         )
+        if (keyboardType == "money") {
+            val rawDigits = newText.filter { it.isDigit() }
+            onTextChanged(rawDigits)
+            textField.text = formatMoneyDisplay(rawDigits)
+            val endPosition = textField.endOfDocument
+            textField.selectedTextRange = textField.textRangeFromPosition(endPosition, toPosition = endPosition)
+            return false
+        }
         onTextChanged(newText)
         return true
     }

@@ -21,7 +21,6 @@ import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZoneOffset
-import java.util.Calendar
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
@@ -33,22 +32,34 @@ actual fun PlatformDateTimePicker(
     showPicker: Boolean,
     getTime: Boolean,
     canSelectPast: Boolean,
+    initialDate: Instant?,
 ) {
     if (showPicker) {
         var showDatePicker by remember { mutableStateOf(true) }
         var showTimePicker by remember { mutableStateOf(false) }
-        var selectedDate by remember { mutableStateOf<LocalDate?>(null) }
+        val nowMillis = System.currentTimeMillis()
+        val initialMillis = initialDate?.toEpochMilliseconds() ?: nowMillis
+        val clampedInitialMillis = if (canSelectPast) {
+            initialMillis
+        } else {
+            maxOf(initialMillis, nowMillis)
+        }
+        val initialDateTime = java.time.Instant.ofEpochMilli(clampedInitialMillis)
+            .atZone(ZoneId.systemDefault())
+            .toLocalDateTime()
+        var selectedDate by remember(clampedInitialMillis) {
+            mutableStateOf(initialDateTime.toLocalDate())
+        }
 
-        val currentCalendar = Calendar.getInstance()
         val timeState = rememberTimePickerState(
-            initialHour = currentCalendar.get(Calendar.HOUR_OF_DAY),
-            initialMinute = currentCalendar.get(Calendar.MINUTE),
+            initialHour = initialDateTime.hour,
+            initialMinute = initialDateTime.minute,
             is24Hour = false
         )
 
         if (showDatePicker) {
             val datePickerState = rememberDatePickerState(
-                initialSelectedDateMillis = System.currentTimeMillis(),
+                initialSelectedDateMillis = clampedInitialMillis,
                 selectableDates = PastOrFutureSelectableDates(canSelectPast)
             )
 

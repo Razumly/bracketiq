@@ -36,57 +36,36 @@ fun ColumnScope.LeagueConfigurationFields(
 
     Text("League Configuration", style = MaterialTheme.typography.titleMedium)
 
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.Top,
-    ) {
-        Box(modifier = Modifier.weight(1f)) {
-            LabeledCheckbox(
-                checked = leagueConfig.usesSets,
-                label = "Use set-based scoring",
-                onCheckedChange = { checked ->
-                    if (checked) {
-                        onLeagueConfigChange(
-                            leagueConfig.copy(
-                                usesSets = true,
-                                setsPerMatch = currentSets,
-                                setDurationMinutes = leagueConfig.setDurationMinutes ?: 20,
-                                pointsToVictory = normalizePoints(
-                                    leagueConfig.pointsToVictory,
-                                    currentSets
-                                ),
-                                matchDurationMinutes = 60,
-                            )
-                        )
-                    } else {
-                        onLeagueConfigChange(
-                            leagueConfig.copy(
-                                usesSets = false,
-                                setDurationMinutes = null,
-                                setsPerMatch = null,
-                                pointsToVictory = emptyList(),
-                                matchDurationMinutes = leagueConfig.matchDurationMinutes,
-                            )
-                        )
-                    }
-                },
-            )
-        }
-        Box(modifier = Modifier.weight(1f)) {
-            LabeledCheckbox(
-                checked = leagueConfig.doTeamsRef,
-                label = "Teams provide referees",
-                onCheckedChange = { checked ->
-                    onLeagueConfigChange(
-                        leagueConfig.copy(
-                            doTeamsRef = checked,
-                        )
+    LabeledCheckbox(
+        checked = leagueConfig.usesSets,
+        label = "Use set-based scoring",
+        onCheckedChange = { checked ->
+            if (checked) {
+                onLeagueConfigChange(
+                    leagueConfig.copy(
+                        usesSets = true,
+                        setsPerMatch = currentSets,
+                        setDurationMinutes = leagueConfig.setDurationMinutes ?: 20,
+                        pointsToVictory = normalizePoints(
+                            leagueConfig.pointsToVictory,
+                            currentSets
+                        ),
+                        matchDurationMinutes = 60,
                     )
-                },
-            )
-        }
-    }
+                )
+            } else {
+                onLeagueConfigChange(
+                    leagueConfig.copy(
+                        usesSets = false,
+                        setDurationMinutes = null,
+                        setsPerMatch = null,
+                        pointsToVictory = emptyList(),
+                        matchDurationMinutes = leagueConfig.matchDurationMinutes,
+                    )
+                )
+            }
+        },
+    )
 
     Text("League Scoring", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
     Text(
