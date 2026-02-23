@@ -87,10 +87,16 @@ import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
 import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
 import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.util.DEFAULT_AGE_DIVISION
+import com.razumly.mvp.core.data.util.DEFAULT_AGE_DIVISION_OPTIONS
 import com.razumly.mvp.core.data.util.DEFAULT_DIVISION
 import com.razumly.mvp.core.data.util.DEFAULT_DIVISION_OPTIONS
+import com.razumly.mvp.core.data.util.buildCombinedDivisionTypeId
+import com.razumly.mvp.core.data.util.buildCombinedDivisionTypeName
 import com.razumly.mvp.core.data.util.buildEventDivisionId
+import com.razumly.mvp.core.data.util.buildGenderSkillAgeDivisionToken
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
+import com.razumly.mvp.core.data.util.normalizeDivisionDetail
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.data.util.divisionsEquivalent
@@ -334,23 +340,24 @@ fun EventDetails(
             ),
         )
     }
-    val divisionTypeSelectOptions = remember(
-        divisionDetailsForSettings,
-        divisionEditor.ratingType,
-    ) {
-        buildDivisionTypeOptions(
-            selectedRatingType = divisionEditor.ratingType,
+    val skillDivisionTypeSelectOptions = remember(divisionDetailsForSettings) {
+        buildSkillDivisionTypeOptions(
+            existingDetails = divisionDetailsForSettings,
+        )
+    }
+    val ageDivisionTypeSelectOptions = remember(divisionDetailsForSettings) {
+        buildAgeDivisionTypeOptions(
             existingDetails = divisionDetailsForSettings,
         )
     }
     val divisionEditorReady = remember(
         divisionEditor.gender,
-        divisionEditor.ratingType,
-        divisionEditor.divisionTypeId,
+        divisionEditor.skillDivisionTypeId,
+        divisionEditor.ageDivisionTypeId,
     ) {
         divisionEditor.gender.isNotBlank() &&
-            divisionEditor.ratingType.isNotBlank() &&
-            divisionEditor.divisionTypeId.isNotBlank()
+            divisionEditor.skillDivisionTypeId.isNotBlank() &&
+            divisionEditor.ageDivisionTypeId.isNotBlank()
     }
     fun resetDivisionEditor() {
         divisionEditor = defaultDivisionEditorState(
@@ -379,36 +386,49 @@ fun EventDetails(
     }
     fun updateDivisionEditorSelection(
         gender: String? = null,
-        ratingType: String? = null,
-        divisionTypeId: String? = null,
+        skillDivisionTypeId: String? = null,
+        ageDivisionTypeId: String? = null,
     ) {
         val previous = divisionEditor
         val nextGender = gender ?: previous.gender
-        val nextRatingType = ratingType ?: previous.ratingType
-        val nextDivisionTypeId = when {
-            ratingType != null && ratingType != previous.ratingType -> ""
-            divisionTypeId != null -> divisionTypeId.normalizeDivisionIdentifier()
-            else -> previous.divisionTypeId
+        val nextSkillDivisionTypeId = if (skillDivisionTypeId != null) {
+            skillDivisionTypeId.normalizeDivisionIdentifier()
+        } else {
+            previous.skillDivisionTypeId
         }
-        val divisionTypeName = resolveDivisionTypeName(
-            divisionTypeId = nextDivisionTypeId,
-            ratingType = nextRatingType,
+        val nextAgeDivisionTypeId = if (ageDivisionTypeId != null) {
+            ageDivisionTypeId.normalizeDivisionIdentifier()
+        } else {
+            previous.ageDivisionTypeId
+        }
+        val resolvedSkillDivisionTypeName = resolveDivisionTypeName(
+            divisionTypeId = nextSkillDivisionTypeId,
             existingDetails = divisionDetailsForSettings,
-            fallbackOptions = divisionTypeSelectOptions,
+            fallbackOptions = skillDivisionTypeSelectOptions,
+        )
+        val resolvedAgeDivisionTypeName = resolveDivisionTypeName(
+            divisionTypeId = nextAgeDivisionTypeId,
+            existingDetails = divisionDetailsForSettings,
+            fallbackOptions = ageDivisionTypeSelectOptions,
         )
         val hasRequiredFields = nextGender.isNotBlank() &&
-            nextRatingType.isNotBlank() &&
-            nextDivisionTypeId.isNotBlank()
+            nextSkillDivisionTypeId.isNotBlank() &&
+            nextAgeDivisionTypeId.isNotBlank()
         val autoName = if (hasRequiredFields) {
-            buildDivisionName(nextGender, divisionTypeName)
+            buildDivisionName(
+                gender = nextGender,
+                skillDivisionTypeName = resolvedSkillDivisionTypeName,
+                ageDivisionTypeName = resolvedAgeDivisionTypeName,
+            )
         } else {
             ""
         }
         divisionEditor = previous.copy(
             gender = nextGender,
-            ratingType = nextRatingType,
-            divisionTypeId = nextDivisionTypeId,
-            divisionTypeName = divisionTypeName,
+            skillDivisionTypeId = nextSkillDivisionTypeId,
+            skillDivisionTypeName = resolvedSkillDivisionTypeName,
+            ageDivisionTypeId = nextAgeDivisionTypeId,
+            ageDivisionTypeName = resolvedAgeDivisionTypeName,
             name = when {
                 !hasRequiredFields -> ""
                 previous.nameTouched -> previous.name
@@ -420,24 +440,40 @@ fun EventDetails(
     }
     fun handleSaveDivisionDetail() {
         val normalizedGender = divisionEditor.gender.uppercase()
-        val normalizedRatingType = divisionEditor.ratingType.uppercase()
-        val normalizedDivisionTypeId = divisionEditor.divisionTypeId.normalizeDivisionIdentifier()
-        val resolvedDivisionTypeName = resolveDivisionTypeName(
-            divisionTypeId = normalizedDivisionTypeId,
-            ratingType = normalizedRatingType,
+        val normalizedSkillDivisionTypeId = divisionEditor.skillDivisionTypeId.normalizeDivisionIdentifier()
+        val normalizedAgeDivisionTypeId = divisionEditor.ageDivisionTypeId.normalizeDivisionIdentifier()
+        val resolvedSkillDivisionTypeName = resolveDivisionTypeName(
+            divisionTypeId = normalizedSkillDivisionTypeId,
             existingDetails = divisionDetailsForSettings,
-            fallbackOptions = divisionTypeSelectOptions,
+            fallbackOptions = skillDivisionTypeSelectOptions,
+        )
+        val resolvedAgeDivisionTypeName = resolveDivisionTypeName(
+            divisionTypeId = normalizedAgeDivisionTypeId,
+            existingDetails = divisionDetailsForSettings,
+            fallbackOptions = ageDivisionTypeSelectOptions,
+        )
+        val resolvedDivisionTypeId = buildCombinedDivisionTypeId(
+            skillDivisionTypeId = normalizedSkillDivisionTypeId,
+            ageDivisionTypeId = normalizedAgeDivisionTypeId,
+        )
+        val resolvedDivisionTypeName = buildCombinedDivisionTypeName(
+            skillDivisionTypeName = resolvedSkillDivisionTypeName,
+            ageDivisionTypeName = resolvedAgeDivisionTypeName,
         )
         val resolvedDivisionName = divisionEditor.name.trim().ifBlank {
-            buildDivisionName(normalizedGender, resolvedDivisionTypeName)
+            buildDivisionName(
+                gender = normalizedGender,
+                skillDivisionTypeName = resolvedSkillDivisionTypeName,
+                ageDivisionTypeName = resolvedAgeDivisionTypeName,
+            )
         }
         if (
             normalizedGender.isBlank() ||
-            normalizedRatingType.isBlank() ||
-            normalizedDivisionTypeId.isBlank()
+            normalizedSkillDivisionTypeId.isBlank() ||
+            normalizedAgeDivisionTypeId.isBlank()
         ) {
             divisionEditor = divisionEditor.copy(
-                error = "Select gender, rating type, and division before adding.",
+                error = "Select gender, skill division, and age division before adding.",
             )
             return
         }
@@ -447,8 +483,8 @@ fun EventDetails(
         }
         val normalizedToken = buildDivisionToken(
             gender = normalizedGender,
-            ratingType = normalizedRatingType,
-            divisionTypeId = normalizedDivisionTypeId,
+            skillDivisionTypeId = normalizedSkillDivisionTypeId,
+            ageDivisionTypeId = normalizedAgeDivisionTypeId,
         )
         val nextDivisionId = buildEventDivisionId(editEvent.id, normalizedToken)
         val duplicate = divisionDetailsForSettings.firstOrNull { existing ->
@@ -490,9 +526,13 @@ fun EventDetails(
             key = normalizedToken,
             name = resolvedDivisionName,
             gender = normalizedGender,
-            ratingType = normalizedRatingType,
-            divisionTypeId = normalizedDivisionTypeId,
+            ratingType = "SKILL",
+            divisionTypeId = resolvedDivisionTypeId,
             divisionTypeName = resolvedDivisionTypeName,
+            skillDivisionTypeId = normalizedSkillDivisionTypeId,
+            skillDivisionTypeName = resolvedSkillDivisionTypeName,
+            ageDivisionTypeId = normalizedAgeDivisionTypeId,
+            ageDivisionTypeName = resolvedAgeDivisionTypeName,
             price = normalizedPrice,
             maxParticipants = normalizedMaxParticipants,
             playoffTeamCount = normalizedPlayoffTeamCount,
@@ -539,10 +579,13 @@ fun EventDetails(
         divisionEditor = DivisionEditorState(
             editingId = detail.id,
             gender = parsedToken.gender,
-            ratingType = parsedToken.ratingType,
-            divisionTypeId = parsedToken.divisionTypeId,
-            divisionTypeName = detail.divisionTypeName.ifBlank {
-                parsedToken.divisionTypeId.toDivisionDisplayLabel()
+            skillDivisionTypeId = parsedToken.skillDivisionTypeId,
+            skillDivisionTypeName = detail.skillDivisionTypeName.ifBlank {
+                parsedToken.skillDivisionTypeId.toDivisionDisplayLabel()
+            },
+            ageDivisionTypeId = parsedToken.ageDivisionTypeId,
+            ageDivisionTypeName = detail.ageDivisionTypeName.ifBlank {
+                parsedToken.ageDivisionTypeId.toDivisionDisplayLabel()
             },
             name = detail.name,
             priceCents = (detail.price ?: editEvent.priceCents).coerceAtLeast(0),
@@ -2202,14 +2245,14 @@ fun EventDetails(
                             placeholder = "Select gender",
                         )
                         PlatformDropdown(
-                            selectedValue = divisionEditor.ratingType,
+                            selectedValue = divisionEditor.skillDivisionTypeId,
                             onSelectionChange = { value ->
-                                updateDivisionEditorSelection(ratingType = value)
+                                updateDivisionEditorSelection(skillDivisionTypeId = value)
                             },
-                            options = DIVISION_RATING_TYPE_OPTIONS,
+                            options = skillDivisionTypeSelectOptions,
                             modifier = Modifier.weight(1f),
-                            label = "Rating Type",
-                            placeholder = "Select rating type",
+                            label = "Skill Division",
+                            placeholder = "Select skill division",
                         )
                     }
 
@@ -2219,19 +2262,14 @@ fun EventDetails(
                         verticalAlignment = Alignment.Top,
                     ) {
                         PlatformDropdown(
-                            selectedValue = divisionEditor.divisionTypeId,
+                            selectedValue = divisionEditor.ageDivisionTypeId,
                             onSelectionChange = { value ->
-                                updateDivisionEditorSelection(divisionTypeId = value)
+                                updateDivisionEditorSelection(ageDivisionTypeId = value)
                             },
-                            options = divisionTypeSelectOptions,
+                            options = ageDivisionTypeSelectOptions,
                             modifier = Modifier.weight(1f),
-                            label = "Division",
-                            placeholder = if (divisionEditor.ratingType.isBlank()) {
-                                "Select rating type first"
-                            } else {
-                                "Select division"
-                            },
-                            enabled = divisionEditor.ratingType.isNotBlank(),
+                            label = "Age Division",
+                            placeholder = "Select age division",
                         )
                         PlatformTextField(
                             value = divisionEditor.name,
@@ -2411,16 +2449,14 @@ fun EventDetails(
                                 } else {
                                     null
                                 }
-                                val detailRating = when (detail.ratingType.uppercase()) {
-                                    "AGE" -> "Age Based"
-                                    "SKILL" -> "Skill Based"
-                                    else -> detail.ratingType.ifBlank { "Skill Based" }
-                                }
+                                val normalizedDetail = detail.normalizeDivisionDetail(editEvent.id)
                                 val detailMeta = listOf(
-                                    detail.gender.ifBlank { "C" },
-                                    detailRating,
-                                    detail.divisionTypeName.ifBlank {
-                                        detail.divisionTypeId.toDivisionDisplayLabel()
+                                    normalizedDetail.gender.ifBlank { "C" },
+                                    normalizedDetail.skillDivisionTypeName.ifBlank {
+                                        normalizedDetail.skillDivisionTypeId.toDivisionDisplayLabel()
+                                    },
+                                    normalizedDetail.ageDivisionTypeName.ifBlank {
+                                        normalizedDetail.ageDivisionTypeId.toDivisionDisplayLabel()
                                     },
                                 ).joinToString(" • ")
 
@@ -3369,9 +3405,10 @@ private fun DetailStatsGrid(
 internal data class DivisionEditorState(
     val editingId: String? = null,
     val gender: String = "",
-    val ratingType: String = "",
-    val divisionTypeId: String = "",
-    val divisionTypeName: String = "",
+    val skillDivisionTypeId: String = "",
+    val skillDivisionTypeName: String = "",
+    val ageDivisionTypeId: String = "",
+    val ageDivisionTypeName: String = "",
     val name: String = "",
     val priceCents: Int = 0,
     val maxParticipants: Int = 2,
@@ -3382,33 +3419,17 @@ internal data class DivisionEditorState(
 
 internal data class ParsedDivisionToken(
     val gender: String,
-    val ratingType: String,
-    val divisionTypeId: String,
+    val skillDivisionTypeId: String,
+    val ageDivisionTypeId: String,
 )
 
 internal val DIVISION_TOKEN_PATTERN = Regex("^([mfc])_(age|skill)_(.+)$")
+internal val COMBINED_DIVISION_TOKEN_PATTERN = Regex("^([mfc])_skill_(.+)_age_(.+)$")
 
 internal val DIVISION_GENDER_OPTIONS = listOf(
     DropdownOption(value = "M", label = "Men"),
     DropdownOption(value = "F", label = "Women"),
     DropdownOption(value = "C", label = "Coed"),
-)
-
-internal val DIVISION_RATING_TYPE_OPTIONS = listOf(
-    DropdownOption(value = "AGE", label = "Age Based"),
-    DropdownOption(value = "SKILL", label = "Skill Based"),
-)
-
-internal val DEFAULT_AGE_DIVISION_TYPE_OPTIONS = listOf(
-    "u8",
-    "u10",
-    "u12",
-    "u14",
-    "u16",
-    "u18",
-    "18plus",
-    "30plus",
-    "40plus",
 )
 
 internal fun defaultDivisionEditorState(
@@ -3421,9 +3442,10 @@ internal fun defaultDivisionEditorState(
     return DivisionEditorState(
         editingId = null,
         gender = "",
-        ratingType = "",
-        divisionTypeId = "",
-        divisionTypeName = "",
+        skillDivisionTypeId = "",
+        skillDivisionTypeName = "",
+        ageDivisionTypeId = "",
+        ageDivisionTypeName = "",
         name = "",
         priceCents = defaultPriceCents.coerceAtLeast(0),
         maxParticipants = fallbackMax,
@@ -3433,11 +3455,9 @@ internal fun defaultDivisionEditorState(
     )
 }
 
-internal fun buildDivisionTypeOptions(
-    selectedRatingType: String,
+internal fun buildSkillDivisionTypeOptions(
     existingDetails: List<DivisionDetail>,
 ): List<DropdownOption> {
-    val normalizedRatingType = selectedRatingType.trim().uppercase()
     val options = linkedMapOf<String, String>()
     fun addOption(divisionTypeId: String, label: String? = null) {
         val normalizedId = divisionTypeId.normalizeDivisionIdentifier()
@@ -3446,28 +3466,41 @@ internal fun buildDivisionTypeOptions(
             ?: normalizedId.toDivisionDisplayLabel()
     }
 
-    val includeSkill = normalizedRatingType.isBlank() || normalizedRatingType == "SKILL"
-    val includeAge = normalizedRatingType.isBlank() || normalizedRatingType == "AGE"
-    if (includeSkill) {
-        DEFAULT_DIVISION_OPTIONS.forEach { divisionTypeId ->
-            addOption(divisionTypeId)
-        }
-    }
-    if (includeAge) {
-        DEFAULT_AGE_DIVISION_TYPE_OPTIONS.forEach { divisionTypeId ->
-            addOption(divisionTypeId)
-        }
+    DEFAULT_DIVISION_OPTIONS.forEach { divisionTypeId ->
+        addOption(divisionTypeId)
     }
     existingDetails.forEach { detail ->
-        if (
-            normalizedRatingType.isBlank() ||
-            detail.ratingType.trim().uppercase() == normalizedRatingType
-        ) {
-            addOption(
-                divisionTypeId = detail.divisionTypeId,
-                label = detail.divisionTypeName,
-            )
-        }
+        val normalizedDetail = detail.normalizeDivisionDetail()
+        addOption(
+            divisionTypeId = normalizedDetail.skillDivisionTypeId,
+            label = normalizedDetail.skillDivisionTypeName,
+        )
+    }
+    return options.map { (value, label) ->
+        DropdownOption(value = value, label = label)
+    }
+}
+
+internal fun buildAgeDivisionTypeOptions(
+    existingDetails: List<DivisionDetail>,
+): List<DropdownOption> {
+    val options = linkedMapOf<String, String>()
+    fun addOption(divisionTypeId: String, label: String? = null) {
+        val normalizedId = divisionTypeId.normalizeDivisionIdentifier()
+        if (normalizedId.isBlank()) return
+        options[normalizedId] = label?.trim().takeIf { !it.isNullOrBlank() }
+            ?: normalizedId.toDivisionDisplayLabel()
+    }
+
+    DEFAULT_AGE_DIVISION_OPTIONS.forEach { divisionTypeId ->
+        addOption(divisionTypeId)
+    }
+    existingDetails.forEach { detail ->
+        val normalizedDetail = detail.normalizeDivisionDetail()
+        addOption(
+            divisionTypeId = normalizedDetail.ageDivisionTypeId,
+            label = normalizedDetail.ageDivisionTypeName,
+        )
     }
     return options.map { (value, label) ->
         DropdownOption(value = value, label = label)
@@ -3476,20 +3509,31 @@ internal fun buildDivisionTypeOptions(
 
 internal fun resolveDivisionTypeName(
     divisionTypeId: String,
-    ratingType: String,
     existingDetails: List<DivisionDetail>,
     fallbackOptions: List<DropdownOption>,
 ): String {
     val normalizedDivisionTypeId = divisionTypeId.normalizeDivisionIdentifier()
     if (normalizedDivisionTypeId.isBlank()) return ""
-    val normalizedRatingType = ratingType.trim().uppercase()
     existingDetails.firstOrNull { detail ->
-        detail.divisionTypeId.normalizeDivisionIdentifier() == normalizedDivisionTypeId &&
-            (
-                normalizedRatingType.isBlank() ||
-                    detail.ratingType.trim().uppercase() == normalizedRatingType
-                )
-    }?.divisionTypeName?.trim()?.takeIf { it.isNotBlank() }?.let { return it }
+        val normalizedDetail = detail.normalizeDivisionDetail()
+        normalizedDetail.skillDivisionTypeId.normalizeDivisionIdentifier() == normalizedDivisionTypeId ||
+            normalizedDetail.ageDivisionTypeId.normalizeDivisionIdentifier() == normalizedDivisionTypeId ||
+            normalizedDetail.divisionTypeId.normalizeDivisionIdentifier() == normalizedDivisionTypeId
+    }?.let { matchedDetail ->
+        val normalizedDetail = matchedDetail.normalizeDivisionDetail()
+        val resolvedName = when {
+            normalizedDetail.skillDivisionTypeId.normalizeDivisionIdentifier() == normalizedDivisionTypeId -> {
+                normalizedDetail.skillDivisionTypeName
+            }
+            normalizedDetail.ageDivisionTypeId.normalizeDivisionIdentifier() == normalizedDivisionTypeId -> {
+                normalizedDetail.ageDivisionTypeName
+            }
+            else -> normalizedDetail.divisionTypeName
+        }.trim()
+        if (resolvedName.isNotBlank()) {
+            return resolvedName
+        }
+    }
 
     fallbackOptions.firstOrNull { option ->
         option.value.normalizeDivisionIdentifier() == normalizedDivisionTypeId
@@ -3502,51 +3546,74 @@ internal fun parseDivisionToken(detail: DivisionDetail): ParsedDivisionToken {
     val tokenFromDetail = detail.key.normalizeDivisionIdentifier().ifBlank {
         detail.id.extractDivisionTokenFromId().orEmpty()
     }
-    val match = DIVISION_TOKEN_PATTERN.matchEntire(tokenFromDetail)
-    if (match != null) {
+    val combinedMatch = COMBINED_DIVISION_TOKEN_PATTERN.matchEntire(tokenFromDetail)
+    if (combinedMatch != null) {
         return ParsedDivisionToken(
-            gender = match.groupValues[1].uppercase(),
-            ratingType = match.groupValues[2].uppercase(),
-            divisionTypeId = match.groupValues[3].normalizeDivisionIdentifier(),
+            gender = combinedMatch.groupValues[1].uppercase(),
+            skillDivisionTypeId = combinedMatch.groupValues[2].normalizeDivisionIdentifier()
+                .ifBlank { DEFAULT_DIVISION },
+            ageDivisionTypeId = combinedMatch.groupValues[3].normalizeDivisionIdentifier()
+                .ifBlank { DEFAULT_AGE_DIVISION },
         )
     }
-    val fallbackGender = detail.gender.trim().uppercase().ifBlank { "C" }
-    val fallbackRatingType = detail.ratingType.trim().uppercase().ifBlank { "SKILL" }
-    val fallbackDivisionType = detail.divisionTypeId.normalizeDivisionIdentifier().ifBlank {
-        tokenFromDetail.normalizeDivisionIdentifier()
-    }.ifBlank { DEFAULT_DIVISION }
+    val legacyMatch = DIVISION_TOKEN_PATTERN.matchEntire(tokenFromDetail)
+    if (legacyMatch != null) {
+        val normalizedLegacyDivisionTypeId = legacyMatch.groupValues[3]
+            .normalizeDivisionIdentifier()
+            .ifBlank { DEFAULT_DIVISION }
+        val legacyRatingType = legacyMatch.groupValues[2].uppercase()
+        return ParsedDivisionToken(
+            gender = legacyMatch.groupValues[1].uppercase(),
+            skillDivisionTypeId = if (legacyRatingType == "SKILL") {
+                normalizedLegacyDivisionTypeId
+            } else {
+                DEFAULT_DIVISION
+            },
+            ageDivisionTypeId = if (legacyRatingType == "AGE") {
+                normalizedLegacyDivisionTypeId
+            } else {
+                DEFAULT_AGE_DIVISION
+            },
+        )
+    }
+    val normalizedDetail = detail.normalizeDivisionDetail()
+    val fallbackGender = normalizedDetail.gender.trim().uppercase().ifBlank { "C" }
     return ParsedDivisionToken(
         gender = fallbackGender,
-        ratingType = fallbackRatingType,
-        divisionTypeId = fallbackDivisionType,
+        skillDivisionTypeId = normalizedDetail.skillDivisionTypeId.normalizeDivisionIdentifier()
+            .ifBlank { DEFAULT_DIVISION },
+        ageDivisionTypeId = normalizedDetail.ageDivisionTypeId.normalizeDivisionIdentifier()
+            .ifBlank { DEFAULT_AGE_DIVISION },
     )
 }
 
 internal fun buildDivisionToken(
     gender: String,
-    ratingType: String,
-    divisionTypeId: String,
+    skillDivisionTypeId: String,
+    ageDivisionTypeId: String,
 ): String {
-    val normalizedGender = gender.trim().uppercase().ifBlank { "C" }.first().lowercaseChar()
-    val normalizedRatingType = when (ratingType.trim().uppercase()) {
-        "AGE" -> "age"
-        else -> "skill"
-    }
-    val normalizedDivisionTypeId = divisionTypeId.normalizeDivisionIdentifier().ifBlank { DEFAULT_DIVISION }
-    return "${normalizedGender}_${normalizedRatingType}_${normalizedDivisionTypeId}"
+    return buildGenderSkillAgeDivisionToken(
+        gender = gender,
+        skillDivisionTypeId = skillDivisionTypeId,
+        ageDivisionTypeId = ageDivisionTypeId,
+    )
 }
 
 internal fun buildDivisionName(
     gender: String,
-    divisionTypeName: String,
+    skillDivisionTypeName: String,
+    ageDivisionTypeName: String,
 ): String {
-    val normalizedDivisionTypeName = divisionTypeName.trim().ifBlank {
+    val normalizedSkillDivisionTypeName = skillDivisionTypeName.trim().ifBlank {
         DEFAULT_DIVISION.toDivisionDisplayLabel()
     }
+    val normalizedAgeDivisionTypeName = ageDivisionTypeName.trim().ifBlank {
+        DEFAULT_AGE_DIVISION.toDivisionDisplayLabel()
+    }
     return when (gender.trim().uppercase()) {
-        "M" -> "Men's $normalizedDivisionTypeName"
-        "F" -> "Women's $normalizedDivisionTypeName"
-        else -> "Coed $normalizedDivisionTypeName"
+        "M" -> "Men's $normalizedSkillDivisionTypeName $normalizedAgeDivisionTypeName"
+        "F" -> "Women's $normalizedSkillDivisionTypeName $normalizedAgeDivisionTypeName"
+        else -> "Coed $normalizedSkillDivisionTypeName $normalizedAgeDivisionTypeName"
     }
 }
 

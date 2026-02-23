@@ -328,6 +328,74 @@ class BillingRepositoryHttpTest {
     }
 
     @Test
+    fun createBill_posts_and_parses_response() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+        var capturedBody = ""
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/billing/bills", request.url.encodedPath)
+            assertEquals(HttpMethod.Post, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+
+            respond(
+                content = """
+                    {
+                      "bill": {
+                        "id": "bill_1",
+                        "ownerType": "USER",
+                        "ownerId": "u1",
+                        "eventId": "event_1",
+                        "organizationId": "org_1",
+                        "totalAmountCents": 4500,
+                        "paidAmountCents": 0,
+                        "status": "OPEN",
+                        "paymentPlanEnabled": true,
+                        "allowSplit": false,
+                        "createdBy": "u1"
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.Created,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = BillingRepository(api, userRepo, BillingRepositoryHttp_UnusedEventRepository, db)
+
+        val bill = repo.createBill(
+            CreateBillRequest(
+                ownerType = "user",
+                ownerId = "u1",
+                totalAmountCents = 4500,
+                eventId = "event_1",
+                organizationId = "org_1",
+                installmentAmounts = listOf(1500, 1500, 1500),
+                installmentDueDates = listOf("2026-08-01", "2026-09-01", "2026-10-01"),
+                paymentPlanEnabled = true,
+            )
+        ).getOrThrow()
+
+        assertEquals("bill_1", bill.id)
+        assertEquals("USER", bill.ownerType)
+        assertEquals("u1", bill.ownerId)
+        assertEquals(4500, bill.totalAmountCents)
+        assertTrue(capturedBody.contains("\"ownerType\":\"USER\""))
+        assertTrue(capturedBody.contains("\"paymentPlanEnabled\":true"))
+        assertTrue(capturedBody.contains("\"installmentAmounts\":[1500,1500,1500]"))
+    }
+
+    @Test
     fun createPurchaseIntent_posts_and_parses_response() = runTest {
         val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
         val userRepo = BillingRepositoryHttp_FakeUserRepository(

@@ -41,6 +41,7 @@ import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.ProfileDocumentsBundle
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.data.repositories.ChildRegistrationResult
+import com.razumly.mvp.core.data.repositories.CreateBillRequest
 import com.razumly.mvp.core.data.repositories.SelfRegistrationResult
 import com.razumly.mvp.core.data.repositories.SignerContext
 import com.razumly.mvp.core.data.repositories.SignStep
@@ -416,6 +417,19 @@ internal class CreateEvent_FakeMatchRepository : IMatchRepository {
 internal class CreateEvent_FakeBillingRepository : IBillingRepository {
     override suspend fun createPurchaseIntent(event: Event, teamId: String?): Result<PurchaseIntent> =
         Result.success(PurchaseIntent(paymentIntent = "pi_test", publishableKey = "pk_test"))
+
+    override suspend fun createBill(request: CreateBillRequest): Result<Bill> = Result.success(
+        Bill(
+            ownerType = request.ownerType,
+            ownerId = request.ownerId,
+            organizationId = request.organizationId,
+            eventId = request.eventId,
+            totalAmountCents = request.totalAmountCents,
+            allowSplit = request.allowSplit,
+            paymentPlanEnabled = request.paymentPlanEnabled,
+            id = "bill-test",
+        )
+    )
 
     override suspend fun getRequiredSignLinks(eventId: String): Result<List<SignStep>> =
         Result.success(emptyList())

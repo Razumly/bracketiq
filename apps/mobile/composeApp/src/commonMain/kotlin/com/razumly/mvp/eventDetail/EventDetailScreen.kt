@@ -970,7 +970,7 @@ fun EventDetailScreen(
                                             }
                                             Button(
                                                 onClick = {
-                                                    component.toggleEdit()
+                                                    component.cancelEditingEvent()
                                                 }, colors = buttonColors
                                             ) {
                                                 Text("Cancel")
@@ -1037,7 +1037,7 @@ fun EventDetailScreen(
                                     if (isHost) {
                                         DropdownMenuItem(
                                             text = { Text("Edit") }, onClick = {
-                                            component.toggleEdit()
+                                            component.startEditingEvent()
                                             showOptionsDropdown = false
                                         }, leadingIcon = {
                                             Icon(Icons.Default.Edit, contentDescription = null)

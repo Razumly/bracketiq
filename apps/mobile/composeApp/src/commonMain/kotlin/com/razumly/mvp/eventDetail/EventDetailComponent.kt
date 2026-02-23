@@ -33,6 +33,7 @@ import com.razumly.mvp.core.data.repositories.SignerContext
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
+import com.razumly.mvp.core.data.repositories.CreateBillRequest
 import com.razumly.mvp.core.data.util.divisionsEquivalent
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
@@ -125,6 +126,8 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun toggleLosersBracket()
     fun toggleDetails()
     fun toggleEdit()
+    fun startEditingEvent()
+    fun cancelEditingEvent()
     fun joinEvent()
     fun joinEventAsTeam(team: TeamWithPlayers)
     fun confirmJoinAsSelf()
@@ -914,9 +917,67 @@ class DefaultEventDetailComponent(
         }
     }
 
+    private suspend fun startPaymentPlanForOwner(ownerType: String, ownerId: String, allowSplit: Boolean) {
+        val event = selectedEvent.value
+        val normalizedOwnerId = ownerId.trim()
+        if (normalizedOwnerId.isEmpty()) {
+            _errorState.value = ErrorMessage("Unable to start payment plan: owner id is missing.")
+            return
+        }
+        if (event.priceCents <= 0) {
+            _errorState.value = ErrorMessage("This event does not have a price set for a payment plan.")
+            return
+        }
+
+        val installmentDueDates = event.installmentDueDates
+            .mapNotNull { dueDate -> dueDate.trim().takeIf(String::isNotBlank) }
+
+        loadingHandler.showLoading("Starting Payment Plan ...")
+        billingRepository.createBill(
+            CreateBillRequest(
+                ownerType = ownerType,
+                ownerId = normalizedOwnerId,
+                totalAmountCents = event.priceCents,
+                eventId = event.id,
+                organizationId = event.organizationId,
+                installmentAmounts = event.installmentAmounts,
+                installmentDueDates = installmentDueDates,
+                allowSplit = allowSplit,
+                paymentPlanEnabled = true,
+            )
+        ).onSuccess {
+            loadingHandler.showLoading("Reloading Event")
+            eventRepository.getEvent(event.id).onFailure { throwable ->
+                Napier.w("Failed to refresh event after starting payment plan.", throwable)
+            }
+            _errorState.value = ErrorMessage(
+                if (ownerType.equals("TEAM", ignoreCase = true)) {
+                    "Payment plan started for your team. A bill was created. Manage installments from your Profile."
+                } else {
+                    "Payment plan started. A bill was created for you. Pay installments from your Profile."
+                }
+            )
+        }.onFailure { throwable ->
+            _errorState.value = ErrorMessage(throwable.message ?: "")
+        }
+    }
+
     private suspend fun executeJoinEvent() {
         if (!ensureRegistrationOpen()) return
         try {
+            if (
+                selectedEvent.value.allowPaymentPlans == true
+                && selectedEvent.value.priceCents > 0
+                && !isEventFull.value
+                && !selectedEvent.value.teamSignup
+            ) {
+                startPaymentPlanForOwner(
+                    ownerType = "USER",
+                    ownerId = currentUser.value.id,
+                    allowSplit = false,
+                )
+                return
+            }
             if (selectedEvent.value.price == 0.0 || isEventFull.value || selectedEvent.value.teamSignup) {
                 loadingHandler.showLoading("Joining Event ...")
                 eventRepository.addCurrentUserToEvent(
@@ -957,6 +1018,18 @@ class DefaultEventDetailComponent(
     private suspend fun executeJoinEventAsTeam(team: TeamWithPlayers) {
         if (!ensureRegistrationOpen()) return
         try {
+            if (
+                selectedEvent.value.allowPaymentPlans == true
+                && selectedEvent.value.priceCents > 0
+                && !isEventFull.value
+            ) {
+                startPaymentPlanForOwner(
+                    ownerType = "TEAM",
+                    ownerId = team.team.id,
+                    allowSplit = selectedEvent.value.allowTeamSplitDefault == true,
+                )
+                return
+            }
             if (selectedEvent.value.price == 0.0 || isEventFull.value) {
                 loadingHandler.showLoading("Joining Event ...")
                 eventRepository.addTeamToEvent(selectedEvent.value, team.team).onSuccess {
@@ -1305,8 +1378,24 @@ class DefaultEventDetailComponent(
     }
 
     override fun toggleEdit() {
+        setEventEditMode(enabled = !_isEditing.value)
+    }
+
+    override fun startEditingEvent() {
+        setEventEditMode(enabled = true)
+    }
+
+    override fun cancelEditingEvent() {
+        setEventEditMode(enabled = false)
+    }
+
+    private fun setEventEditMode(enabled: Boolean) {
+        if (_isEditing.value == enabled) {
+            return
+        }
+        // Initialize or reset the draft from the latest selected event when mode changes.
         _editedEvent.value = selectedEvent.value
-        _isEditing.value = !_isEditing.value
+        _isEditing.value = enabled
     }
 
     override fun editEventField(update: Event.() -> Event) {
@@ -1328,7 +1417,7 @@ class DefaultEventDetailComponent(
                 .onFailure {
                     _errorState.value = ErrorMessage(it.message ?: "")
                 }
-            toggleEdit()
+            cancelEditingEvent()
         }
     }
 

@@ -75,6 +75,18 @@ data class ProfileDocumentsBundle(
     val signed: List<ProfileDocumentCard> = emptyList(),
 )
 
+data class CreateBillRequest(
+    val ownerType: String,
+    val ownerId: String,
+    val totalAmountCents: Int,
+    val eventId: String? = null,
+    val organizationId: String? = null,
+    val installmentAmounts: List<Int> = emptyList(),
+    val installmentDueDates: List<String> = emptyList(),
+    val allowSplit: Boolean = false,
+    val paymentPlanEnabled: Boolean = false,
+)
+
 interface IBillingRepository : IMVPRepository {
     suspend fun createPurchaseIntent(
         event: Event,
@@ -99,6 +111,7 @@ interface IBillingRepository : IMVPRepository {
     suspend fun createAccount(): Result<String>
     suspend fun getOnboardingLink(): Result<String>
     suspend fun listBills(ownerType: String, ownerId: String, limit: Int = 100): Result<List<Bill>>
+    suspend fun createBill(request: CreateBillRequest): Result<Bill>
     suspend fun getBillPayments(billId: String): Result<List<BillPayment>>
     suspend fun createBillingIntent(billId: String, billPaymentId: String): Result<PurchaseIntent>
     suspend fun listSubscriptions(userId: String, limit: Int = 100): Result<List<Subscription>>
@@ -285,6 +298,57 @@ class BillingRepository(
             )
             response.bills.mapNotNull { it.toBillOrNull() }
         }
+
+    override suspend fun createBill(request: CreateBillRequest): Result<Bill> = runCatching {
+        val ownerType = request.ownerType.trim().uppercase()
+        if (ownerType != "USER" && ownerType != "TEAM") {
+            throw IllegalArgumentException("Bill ownerType must be USER or TEAM.")
+        }
+
+        val ownerId = request.ownerId.trim()
+        if (ownerId.isEmpty()) {
+            throw IllegalArgumentException("Bill ownerId is required.")
+        }
+
+        if (request.totalAmountCents <= 0) {
+            throw IllegalArgumentException("Bill totalAmountCents must be greater than 0.")
+        }
+
+        val currentUser = userRepository.currentUser.value.getOrNull()
+        val currentAccount = userRepository.currentAccount.value.getOrNull()
+        val response = api.post<CreateBillRequestDto, CreateBillResponseDto>(
+            path = "api/billing/bills",
+            body = CreateBillRequestDto(
+                ownerType = ownerType,
+                ownerId = ownerId,
+                totalAmountCents = request.totalAmountCents,
+                eventId = request.eventId?.trim()?.takeIf(String::isNotBlank),
+                organizationId = request.organizationId?.trim()?.takeIf(String::isNotBlank),
+                installmentAmounts = request.installmentAmounts.takeIf { it.isNotEmpty() },
+                installmentDueDates = request.installmentDueDates.takeIf { it.isNotEmpty() },
+                allowSplit = request.allowSplit,
+                paymentPlanEnabled = request.paymentPlanEnabled,
+                event = request.eventId?.trim()?.takeIf(String::isNotBlank)?.let { eventId ->
+                    BillingEventRefDto(
+                        id = eventId,
+                        legacyId = eventId,
+                        priceCents = request.totalAmountCents,
+                        organizationId = request.organizationId?.trim()?.takeIf(String::isNotBlank),
+                    )
+                },
+                user = currentUser?.let { user ->
+                    BillingUserRefDto(
+                        id = user.id,
+                        legacyId = user.id,
+                        email = currentAccount?.email,
+                    )
+                },
+            ),
+        )
+
+        response.error?.takeIf(String::isNotBlank)?.let { throw Exception(it) }
+        response.bill?.toBillOrNull() ?: error("Create bill response missing bill")
+    }
 
     override suspend fun getBillPayments(billId: String): Result<List<BillPayment>> = runCatching {
         val encodedBillId = billId.encodeURLQueryComponent()
@@ -717,6 +781,27 @@ private data class CreateBillingIntentRequestDto(
     val billId: String,
     val billPaymentId: String,
     val user: BillingUserRefDto? = null,
+)
+
+@Serializable
+private data class CreateBillRequestDto(
+    val ownerType: String,
+    val ownerId: String,
+    val totalAmountCents: Int,
+    val eventId: String? = null,
+    val organizationId: String? = null,
+    val installmentAmounts: List<Int>? = null,
+    val installmentDueDates: List<String>? = null,
+    val allowSplit: Boolean = false,
+    val paymentPlanEnabled: Boolean = false,
+    val event: BillingEventRefDto? = null,
+    val user: BillingUserRefDto? = null,
+)
+
+@Serializable
+private data class CreateBillResponseDto(
+    val bill: BillApiDto? = null,
+    val error: String? = null,
 )
 
 @Serializable

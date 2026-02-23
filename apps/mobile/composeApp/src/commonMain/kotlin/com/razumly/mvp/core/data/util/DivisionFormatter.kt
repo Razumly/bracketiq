@@ -5,6 +5,7 @@ import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 private val whitespaceRegex = "\\s+".toRegex()
 private val delimiterRegex = "[\\s-]+".toRegex()
 private val duplicateUnderscoreRegex = "_+".toRegex()
+private val dualDivisionTokenRegex = Regex("^([mfc])_skill_(.+)_age_(.+)$")
 private val divisionTokenRegex = Regex("^([mfc])_(age|skill)_(.+)$")
 private val ageTokenRegex = Regex("^(u\\d+|\\d+u|\\d+plus)$")
 private val decimalTokenRegex = Regex("^(\\d+)_(\\d+)$")
@@ -15,6 +16,18 @@ private const val DIVISION_MARKER = "__division__"
 
 const val DEFAULT_DIVISION = "open"
 val DEFAULT_DIVISION_OPTIONS = listOf("beginner", "b", "bb", "a", "aa", "open")
+const val DEFAULT_AGE_DIVISION = "18plus"
+val DEFAULT_AGE_DIVISION_OPTIONS = listOf(
+    "u8",
+    "u10",
+    "u12",
+    "u14",
+    "u16",
+    "u18",
+    "18plus",
+    "30plus",
+    "40plus",
+)
 
 private val legacyDivisionAliases = mapOf(
     "novice" to "beginner",
@@ -39,7 +52,16 @@ private data class DivisionInference(
     val divisionTypeName: String,
     val ratingType: String,
     val gender: String,
+    val skillDivisionTypeId: String,
+    val skillDivisionTypeName: String,
+    val ageDivisionTypeId: String,
+    val ageDivisionTypeName: String,
     val defaultName: String,
+)
+
+data class ParsedDivisionTypeSelection(
+    val skillDivisionTypeId: String,
+    val ageDivisionTypeId: String,
 )
 
 private fun String.cleanDivisionText(): String = trim().replace(whitespaceRegex, " ")
@@ -53,18 +75,134 @@ private fun normalizeDivisionToken(raw: String): String {
     return legacyDivisionAliases[normalized] ?: normalized
 }
 
+fun buildCombinedDivisionTypeId(
+    skillDivisionTypeId: String,
+    ageDivisionTypeId: String,
+): String {
+    val normalizedSkillDivisionId = skillDivisionTypeId.normalizeDivisionIdentifier()
+        .ifBlank { DEFAULT_DIVISION }
+    val normalizedAgeDivisionId = ageDivisionTypeId.normalizeDivisionIdentifier()
+        .ifBlank { DEFAULT_AGE_DIVISION }
+    return "skill_${normalizedSkillDivisionId}_age_${normalizedAgeDivisionId}"
+}
+
+fun parseCombinedDivisionTypeId(
+    divisionTypeId: String?,
+): ParsedDivisionTypeSelection? {
+    val normalizedDivisionTypeId = divisionTypeId?.normalizeDivisionIdentifier().orEmpty()
+    if (normalizedDivisionTypeId.isBlank()) return null
+    val match = Regex("^skill_(.+)_age_(.+)$").matchEntire(normalizedDivisionTypeId) ?: return null
+    return ParsedDivisionTypeSelection(
+        skillDivisionTypeId = match.groupValues[1].normalizeDivisionIdentifier()
+            .ifBlank { DEFAULT_DIVISION },
+        ageDivisionTypeId = match.groupValues[2].normalizeDivisionIdentifier()
+            .ifBlank { DEFAULT_AGE_DIVISION },
+    )
+}
+
+fun buildCombinedDivisionTypeName(
+    skillDivisionTypeName: String,
+    ageDivisionTypeName: String,
+): String {
+    val normalizedSkillName = skillDivisionTypeName.trim().ifBlank {
+        DEFAULT_DIVISION.toDivisionDisplayLabel()
+    }
+    val normalizedAgeName = ageDivisionTypeName.trim().ifBlank {
+        DEFAULT_AGE_DIVISION.toDivisionDisplayLabel()
+    }
+    return "$normalizedSkillName / $normalizedAgeName"
+}
+
+fun buildGenderSkillAgeDivisionToken(
+    gender: String,
+    skillDivisionTypeId: String,
+    ageDivisionTypeId: String,
+): String {
+    val normalizedGender = gender.trim().uppercase().ifBlank { "C" }.first().lowercaseChar()
+    val normalizedSkillDivisionId = skillDivisionTypeId.normalizeDivisionIdentifier()
+        .ifBlank { DEFAULT_DIVISION }
+    val normalizedAgeDivisionId = ageDivisionTypeId.normalizeDivisionIdentifier()
+        .ifBlank { DEFAULT_AGE_DIVISION }
+    return "${normalizedGender}_skill_${normalizedSkillDivisionId}_age_${normalizedAgeDivisionId}"
+}
+
+private fun buildDivisionName(
+    gender: String,
+    skillDivisionTypeName: String,
+    ageDivisionTypeName: String,
+): String {
+    val normalizedSkillName = skillDivisionTypeName.trim().ifBlank {
+        DEFAULT_DIVISION.toDivisionDisplayLabel()
+    }
+    val normalizedAgeName = ageDivisionTypeName.trim().ifBlank {
+        DEFAULT_AGE_DIVISION.toDivisionDisplayLabel()
+    }
+    return when (gender.trim().uppercase()) {
+        "M" -> "Men's $normalizedSkillName $normalizedAgeName"
+        "F" -> "Women's $normalizedSkillName $normalizedAgeName"
+        else -> "Coed $normalizedSkillName $normalizedAgeName"
+    }
+}
+
 private fun inferDivisionMetadata(
     identifier: String,
     fallbackName: String? = null,
 ): DivisionInference {
     val normalizedIdentifier = identifier.normalizeDivisionIdentifier()
     val token = normalizedIdentifier.extractDivisionTokenFromId() ?: normalizedIdentifier
+    val explicitDualPattern = dualDivisionTokenRegex.matchEntire(token)
+    if (explicitDualPattern != null) {
+        val gender = explicitDualPattern.groupValues[1].uppercase()
+        val skillDivisionTypeId = normalizeDivisionToken(explicitDualPattern.groupValues[2])
+        val ageDivisionTypeId = normalizeDivisionToken(explicitDualPattern.groupValues[3])
+        val skillDivisionTypeName = tokenToDisplayLabel(skillDivisionTypeId)
+        val ageDivisionTypeName = tokenToDisplayLabel(ageDivisionTypeId)
+        val combinedDivisionTypeId = buildCombinedDivisionTypeId(
+            skillDivisionTypeId = skillDivisionTypeId,
+            ageDivisionTypeId = ageDivisionTypeId,
+        )
+        val combinedDivisionTypeName = buildCombinedDivisionTypeName(
+            skillDivisionTypeName = skillDivisionTypeName,
+            ageDivisionTypeName = ageDivisionTypeName,
+        )
+        val inferredName = fallbackName?.trim().takeIf { !it.isNullOrEmpty() }
+            ?: buildDivisionName(
+                gender = gender,
+                skillDivisionTypeName = skillDivisionTypeName,
+                ageDivisionTypeName = ageDivisionTypeName,
+            )
+        return DivisionInference(
+            token = token,
+            divisionTypeId = combinedDivisionTypeId,
+            divisionTypeName = combinedDivisionTypeName,
+            ratingType = "SKILL",
+            gender = gender,
+            skillDivisionTypeId = skillDivisionTypeId,
+            skillDivisionTypeName = skillDivisionTypeName,
+            ageDivisionTypeId = ageDivisionTypeId,
+            ageDivisionTypeName = ageDivisionTypeName,
+            defaultName = inferredName,
+        )
+    }
+
     val explicitPattern = divisionTokenRegex.matchEntire(token)
     if (explicitPattern != null) {
         val gender = explicitPattern.groupValues[1].uppercase()
         val ratingType = explicitPattern.groupValues[2].uppercase()
         val divisionTypeId = normalizeDivisionToken(explicitPattern.groupValues[3])
         val divisionTypeName = tokenToDisplayLabel(divisionTypeId)
+        val skillDivisionTypeId = if (ratingType == "SKILL") {
+            divisionTypeId
+        } else {
+            DEFAULT_DIVISION
+        }
+        val ageDivisionTypeId = if (ratingType == "AGE") {
+            divisionTypeId
+        } else {
+            DEFAULT_AGE_DIVISION
+        }
+        val skillDivisionTypeName = tokenToDisplayLabel(skillDivisionTypeId)
+        val ageDivisionTypeName = tokenToDisplayLabel(ageDivisionTypeId)
         val inferredName = fallbackName?.trim().takeIf { !it.isNullOrEmpty() }
             ?: when (gender) {
                 "M" -> "Men's $divisionTypeName"
@@ -77,24 +215,44 @@ private fun inferDivisionMetadata(
             divisionTypeName = divisionTypeName,
             ratingType = ratingType,
             gender = gender,
+            skillDivisionTypeId = skillDivisionTypeId,
+            skillDivisionTypeName = skillDivisionTypeName,
+            ageDivisionTypeId = ageDivisionTypeId,
+            ageDivisionTypeName = ageDivisionTypeName,
             defaultName = inferredName,
         )
     }
 
     val divisionTypeId = normalizeDivisionToken(token)
     val divisionTypeName = tokenToDisplayLabel(divisionTypeId)
-    val ratingType = if (ageTokenRegex.matches(divisionTypeId)) {
+    val inferredRatingType = if (ageTokenRegex.matches(divisionTypeId)) {
         "AGE"
     } else {
         "SKILL"
     }
+    val skillDivisionTypeId = if (inferredRatingType == "SKILL") {
+        divisionTypeId
+    } else {
+        DEFAULT_DIVISION
+    }
+    val ageDivisionTypeId = if (inferredRatingType == "AGE") {
+        divisionTypeId
+    } else {
+        DEFAULT_AGE_DIVISION
+    }
+    val skillDivisionTypeName = tokenToDisplayLabel(skillDivisionTypeId)
+    val ageDivisionTypeName = tokenToDisplayLabel(ageDivisionTypeId)
     val inferredName = fallbackName?.trim().takeIf { !it.isNullOrEmpty() } ?: divisionTypeName
     return DivisionInference(
         token = divisionTypeId,
         divisionTypeId = divisionTypeId,
         divisionTypeName = divisionTypeName,
-        ratingType = ratingType,
+        ratingType = inferredRatingType,
         gender = "C",
+        skillDivisionTypeId = skillDivisionTypeId,
+        skillDivisionTypeName = skillDivisionTypeName,
+        ageDivisionTypeId = ageDivisionTypeId,
+        ageDivisionTypeName = ageDivisionTypeName,
         defaultName = inferredName,
     )
 }
@@ -257,6 +415,10 @@ fun inferDivisionDetail(
         divisionTypeName = inference.divisionTypeName,
         ratingType = inference.ratingType,
         gender = inference.gender,
+        skillDivisionTypeId = inference.skillDivisionTypeId,
+        skillDivisionTypeName = inference.skillDivisionTypeName,
+        ageDivisionTypeId = inference.ageDivisionTypeId,
+        ageDivisionTypeName = inference.ageDivisionTypeName,
         price = null,
         maxParticipants = null,
         playoffTeamCount = null,
@@ -286,18 +448,55 @@ fun DivisionDetail.normalizeDivisionDetail(eventId: String? = null): DivisionDet
     val normalizedDivisionTypeId =
         divisionTypeId.normalizeDivisionIdentifier().ifEmpty { inferred.divisionTypeId }
     val normalizedDivisionTypeName = divisionTypeName.trim().ifEmpty { inferred.divisionTypeName }
+    val parsedDivisionTypeSelection = parseCombinedDivisionTypeId(normalizedDivisionTypeId)
+    val normalizedSkillDivisionTypeId = skillDivisionTypeId
+        .normalizeDivisionIdentifier()
+        .ifEmpty {
+            parsedDivisionTypeSelection?.skillDivisionTypeId
+                ?: inferred.skillDivisionTypeId
+        }
+        .ifEmpty { DEFAULT_DIVISION }
+    val normalizedAgeDivisionTypeId = ageDivisionTypeId
+        .normalizeDivisionIdentifier()
+        .ifEmpty {
+            parsedDivisionTypeSelection?.ageDivisionTypeId
+                ?: inferred.ageDivisionTypeId
+        }
+        .ifEmpty { DEFAULT_AGE_DIVISION }
+    val normalizedSkillDivisionTypeName = skillDivisionTypeName.trim().ifEmpty {
+        tokenToDisplayLabel(normalizedSkillDivisionTypeId)
+    }
+    val normalizedAgeDivisionTypeName = ageDivisionTypeName.trim().ifEmpty {
+        tokenToDisplayLabel(normalizedAgeDivisionTypeId)
+    }
     val normalizedRatingType = ratingType.trim().uppercase().takeIf { it == "AGE" || it == "SKILL" }
         ?: inferred.ratingType
     val normalizedGender = gender.trim().uppercase().takeIf { it == "M" || it == "F" || it == "C" }
         ?: inferred.gender
+    val normalizedCombinedDivisionTypeId = buildCombinedDivisionTypeId(
+        skillDivisionTypeId = normalizedSkillDivisionTypeId,
+        ageDivisionTypeId = normalizedAgeDivisionTypeId,
+    )
+    val normalizedCombinedDivisionTypeName = buildCombinedDivisionTypeName(
+        skillDivisionTypeName = normalizedSkillDivisionTypeName,
+        ageDivisionTypeName = normalizedAgeDivisionTypeName,
+    )
     return copy(
         id = normalizedId,
         key = normalizedKey,
         name = name.trim().ifEmpty { inferred.defaultName },
-        divisionTypeId = normalizedDivisionTypeId,
-        divisionTypeName = normalizedDivisionTypeName,
+        divisionTypeId = if (normalizedDivisionTypeId.isBlank()) {
+            normalizedCombinedDivisionTypeId
+        } else {
+            normalizedDivisionTypeId
+        },
+        divisionTypeName = normalizedDivisionTypeName.ifBlank { normalizedCombinedDivisionTypeName },
         ratingType = normalizedRatingType,
         gender = normalizedGender,
+        skillDivisionTypeId = normalizedSkillDivisionTypeId,
+        skillDivisionTypeName = normalizedSkillDivisionTypeName,
+        ageDivisionTypeId = normalizedAgeDivisionTypeId,
+        ageDivisionTypeName = normalizedAgeDivisionTypeName,
         price = price?.coerceAtLeast(0),
         maxParticipants = maxParticipants
             ?.takeIf { participantCount -> participantCount >= 2 },

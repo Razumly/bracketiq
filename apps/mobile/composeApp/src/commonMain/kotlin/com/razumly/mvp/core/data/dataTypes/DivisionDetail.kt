@@ -11,6 +11,10 @@ data class DivisionDetail(
     val divisionTypeName: String = "",
     val ratingType: String = "",
     val gender: String = "",
+    val skillDivisionTypeId: String = "",
+    val skillDivisionTypeName: String = "",
+    val ageDivisionTypeId: String = "",
+    val ageDivisionTypeName: String = "",
     // Stored in cents to match backend event/checkout pricing semantics.
     val price: Int? = null,
     val maxParticipants: Int? = null,

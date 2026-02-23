@@ -5,18 +5,17 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.scaleIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.matchParentSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -30,7 +29,6 @@ import coil3.compose.SubcomposeAsyncImage
 import coil3.compose.SubcomposeAsyncImageContent
 import com.razumly.mvp.core.network.apiBaseUrl
 import com.razumly.mvp.core.presentation.util.getImageUrl
-import io.ktor.http.encodeURLQueryComponent
 
 private data class AvatarColorScheme(val background: Color, val text: Color)
 
@@ -57,14 +55,9 @@ fun NetworkAvatar(
         displayName.trim().ifBlank { "User" }
     }
     val sizePx = remember(size) { size.value.toInt().coerceAtLeast(16) }
-    val initialsUrl = remember(safeName, sizePx) { buildInitialsAvatarUrl(safeName, sizePx) }
     val normalizedImageUrl = remember(imageRef, sizePx) { resolveImageRef(imageRef, sizePx) }
-    var imageModel by remember(normalizedImageUrl, initialsUrl) {
-        mutableStateOf(normalizedImageUrl ?: initialsUrl)
-    }
-
-    LaunchedEffect(normalizedImageUrl, initialsUrl) {
-        imageModel = normalizedImageUrl ?: initialsUrl
+    var imageModel by remember(normalizedImageUrl) {
+        mutableStateOf(normalizedImageUrl)
     }
 
     Box(
@@ -79,29 +72,31 @@ fun NetworkAvatar(
             modifier = Modifier.matchParentSize(),
         )
 
-        SubcomposeAsyncImage(
-            model = imageModel,
-            contentDescription = contentDescription,
-            modifier = Modifier
-                .matchParentSize()
-                .clip(CircleShape),
-            contentScale = ContentScale.Crop,
-            onState = { state ->
-                if (state is AsyncImagePainter.State.Error && imageModel != initialsUrl) {
-                    imageModel = initialsUrl
-                }
-            },
-        ) {
-            val state by painter.state.collectAsState()
-            AnimatedVisibility(
-                visible = state is AsyncImagePainter.State.Success,
-                modifier = Modifier.matchParentSize(),
-                enter = scaleIn(
-                    animationSpec = tween(durationMillis = 250),
-                    initialScale = 0.9f,
-                ),
+        if (imageModel != null) {
+            SubcomposeAsyncImage(
+                model = imageModel,
+                contentDescription = contentDescription,
+                modifier = Modifier
+                    .matchParentSize()
+                    .clip(CircleShape),
+                contentScale = ContentScale.Crop,
+                onState = { state ->
+                    if (state is AsyncImagePainter.State.Error) {
+                        imageModel = null
+                    }
+                },
             ) {
-                SubcomposeAsyncImageContent(modifier = Modifier.matchParentSize())
+                val state by painter.state.collectAsState()
+                AnimatedVisibility(
+                    visible = state is AsyncImagePainter.State.Success,
+                    modifier = Modifier.matchParentSize(),
+                    enter = scaleIn(
+                        animationSpec = tween(durationMillis = 250),
+                        initialScale = 0.9f,
+                    ),
+                ) {
+                    SubcomposeAsyncImageContent(modifier = Modifier.matchParentSize())
+                }
             }
         }
     }
@@ -127,19 +122,13 @@ private fun LocalInitialsAvatar(
             color = colors.text,
             fontWeight = FontWeight.Bold,
             fontSize = (size.value * 0.42f).sp,
-            style = MaterialTheme.typography.titleMedium,
+            style = MaterialTheme.typography.titleMedium.copy(
+                platformStyle = PlatformTextStyle(includeFontPadding = false),
+                lineHeight = (size.value * 0.42f).sp,
+            ),
         )
     }
 }
-
-private fun buildInitialsAvatarUrl(name: String, sizePx: Int): String =
-    buildString {
-        append(apiBaseUrl.trimEnd('/'))
-        append("/api/avatars/initials?name=")
-        append(name.encodeURLQueryComponent())
-        append("&size=")
-        append(sizePx)
-    }
 
 private fun resolveImageRef(imageRef: String?, sizePx: Int): String? {
     val raw = imageRef?.trim().orEmpty()

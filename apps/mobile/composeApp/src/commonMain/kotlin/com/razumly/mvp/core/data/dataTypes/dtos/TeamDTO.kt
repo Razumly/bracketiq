@@ -23,6 +23,13 @@ data class TeamDTO (
     val teamSize: Int,
     val profileImageId: String? = null,
     val sport: String? = null,
+    val divisionTypeId: String? = null,
+    val divisionTypeName: String? = null,
+    val skillDivisionTypeId: String? = null,
+    val skillDivisionTypeName: String? = null,
+    val ageDivisionTypeId: String? = null,
+    val ageDivisionTypeName: String? = null,
+    val divisionGender: String? = null,
     @Transient
     val id: String = ""
 )
@@ -44,6 +51,13 @@ fun TeamDTO.toTeam(id: String): Team {
         teamSize = teamSize,
         id = id,
         profileImageId = profileImageId,
-        sport = sport
+        sport = sport,
+        divisionTypeId = divisionTypeId,
+        divisionTypeName = divisionTypeName,
+        skillDivisionTypeId = skillDivisionTypeId,
+        skillDivisionTypeName = skillDivisionTypeName,
+        ageDivisionTypeId = ageDivisionTypeId,
+        ageDivisionTypeName = ageDivisionTypeName,
+        divisionGender = divisionGender,
     )
 }

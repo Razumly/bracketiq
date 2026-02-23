@@ -26,6 +26,13 @@ data class TeamApiDto(
     val teamSize: Int? = null,
     val profileImageId: String? = null,
     val sport: String? = null,
+    val divisionTypeId: String? = null,
+    val divisionTypeName: String? = null,
+    val skillDivisionTypeId: String? = null,
+    val skillDivisionTypeName: String? = null,
+    val ageDivisionTypeId: String? = null,
+    val ageDivisionTypeName: String? = null,
+    val divisionGender: String? = null,
 ) {
     fun toTeamOrNull(): Team? {
         val resolvedId = id ?: legacyId
@@ -50,6 +57,13 @@ data class TeamApiDto(
             teamSize = resolvedTeamSize,
             profileImageId = profileImageId,
             sport = sport,
+            divisionTypeId = divisionTypeId,
+            divisionTypeName = divisionTypeName,
+            skillDivisionTypeId = skillDivisionTypeId,
+            skillDivisionTypeName = skillDivisionTypeName,
+            ageDivisionTypeId = ageDivisionTypeId,
+            ageDivisionTypeName = ageDivisionTypeName,
+            divisionGender = divisionGender,
             id = resolvedId,
         )
     }
@@ -78,6 +92,13 @@ data class TeamUpdateDto(
     val teamSize: Int? = null,
     val profileImageId: String? = null,
     val sport: String? = null,
+    val divisionTypeId: String? = null,
+    val divisionTypeName: String? = null,
+    val skillDivisionTypeId: String? = null,
+    val skillDivisionTypeName: String? = null,
+    val ageDivisionTypeId: String? = null,
+    val ageDivisionTypeName: String? = null,
+    val divisionGender: String? = null,
 )
 
 @Serializable
@@ -103,5 +124,12 @@ fun Team.toUpdateDto(): TeamUpdateDto {
         teamSize = teamSize,
         profileImageId = profileImageId,
         sport = sport,
+        divisionTypeId = divisionTypeId,
+        divisionTypeName = divisionTypeName,
+        skillDivisionTypeId = skillDivisionTypeId,
+        skillDivisionTypeName = skillDivisionTypeName,
+        ageDivisionTypeId = ageDivisionTypeId,
+        ageDivisionTypeName = ageDivisionTypeName,
+        divisionGender = divisionGender,
     )
 }
