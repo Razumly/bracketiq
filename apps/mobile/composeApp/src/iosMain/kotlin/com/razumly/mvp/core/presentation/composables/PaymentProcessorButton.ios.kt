@@ -5,6 +5,7 @@ import androidx.compose.material3.ButtonColors
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import com.razumly.mvp.LocalNativeViewFactory
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentProcessor
@@ -21,13 +22,15 @@ actual fun StripeButton(
     onClick: () -> Unit,
     paymentProcessor: IPaymentProcessor,
     text: String,
-    colors: ButtonColors?
+    colors: ButtonColors?,
+    modifier: Modifier,
 ) {
     PreparePaymentProcessor(paymentProcessor)
 
     Button(
         onClick = onClick,
-        colors = colors ?: ButtonDefaults.buttonColors()
+        colors = colors ?: ButtonDefaults.buttonColors(),
+        modifier = modifier,
     ) {
         Text(text)
     }

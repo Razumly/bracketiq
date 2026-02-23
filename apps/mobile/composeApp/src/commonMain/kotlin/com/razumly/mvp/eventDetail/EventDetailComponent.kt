@@ -595,7 +595,11 @@ class DefaultEventDetailComponent(
                     _isUserFreeAgent.value = checkIsUserFreeAgent(event.event)
                     if (_isUserInEvent.value) {
                         _usersTeam.value =
-                            event.teams.find { it.team.playerIds.contains(currentUser.value.id) }
+                            event.teams.find { teamWithPlayers ->
+                                teamWithPlayers.team.playerIds.contains(currentUser.value.id) ||
+                                    teamWithPlayers.team.captainId == currentUser.value.id ||
+                                    teamWithPlayers.team.managerId == currentUser.value.id
+                            }
                                 ?.let {
                                     teamRepository.getTeamWithPlayers(it.team.id).getOrNull()
                                 } ?: event.event.waitList.find { waitlisted ->
@@ -1032,7 +1036,11 @@ class DefaultEventDetailComponent(
             }
             if (selectedEvent.value.price == 0.0 || isEventFull.value) {
                 loadingHandler.showLoading("Joining Event ...")
-                eventRepository.addTeamToEvent(selectedEvent.value, team.team).onSuccess {
+                eventRepository.addTeamToEvent(
+                    event = selectedEvent.value,
+                    team = team.team,
+                    preferredDivisionId = selectedDivision.value,
+                ).onSuccess {
                     loadingHandler.showLoading("Reloading Event")
                     eventRepository.getEvent(selectedEvent.value.id)
                 }.onFailure {
@@ -1577,10 +1585,9 @@ class DefaultEventDetailComponent(
     }
 
     override fun checkIsUserWaitListed(event: Event): Boolean {
+        val userTeamIds = currentUserTeamIds()
         return event.waitList.any { participant ->
-            (currentUser.value.id + currentUser.value.teamIds).contains(
-                participant
-            )
+            participant == currentUser.value.id || userTeamIds.contains(participant)
         }
     }
 
@@ -1611,19 +1618,26 @@ class DefaultEventDetailComponent(
     }
 
     override fun checkIsUserFreeAgent(event: Event): Boolean {
+        val userTeamIds = currentUserTeamIds()
         return event.freeAgents.any { participant ->
-            (currentUser.value.id + currentUser.value.teamIds).contains(
-                participant
-            )
+            participant == currentUser.value.id || userTeamIds.contains(participant)
         }
     }
 
     private fun checkIsUserParticipant(event: Event): Boolean {
-        return event.playerIds.contains(currentUser.value.id)
+        if (event.playerIds.contains(currentUser.value.id)) {
+            return true
+        }
+        if (!event.teamSignup) {
+            return false
+        }
+        val userTeamIds = currentUserTeamIds()
+        return event.teamIds.any { teamId -> userTeamIds.contains(teamId) }
     }
 
     private fun checkIsUserCaptain(): Boolean {
-        return _usersTeam.value?.team?.captainId == currentUser.value.id
+        return _usersTeam.value?.team?.captainId == currentUser.value.id ||
+            _usersTeam.value?.team?.managerId == currentUser.value.id
     }
 
     private fun checkIsUserInEvent(event: Event): Boolean {
@@ -1681,8 +1695,30 @@ class DefaultEventDetailComponent(
             event.playerIds.contains(userId) -> WithdrawTargetMembership.PARTICIPANT
             event.waitList.contains(userId) -> WithdrawTargetMembership.WAITLIST
             event.freeAgents.contains(userId) -> WithdrawTargetMembership.FREE_AGENT
+            event.teamSignup && userId == currentUser.value.id -> {
+                val userTeamIds = currentUserTeamIds()
+                when {
+                    event.teamIds.any { teamId -> userTeamIds.contains(teamId) } ->
+                        WithdrawTargetMembership.PARTICIPANT
+                    event.waitList.any { teamId -> userTeamIds.contains(teamId) } ->
+                        WithdrawTargetMembership.WAITLIST
+                    event.freeAgents.any { teamId -> userTeamIds.contains(teamId) } ->
+                        WithdrawTargetMembership.FREE_AGENT
+                    else -> null
+                }
+            }
             else -> null
         }
+    }
+
+    private fun currentUserTeamIds(): Set<String> {
+        val teamIdsFromProfile = currentUser.value.teamIds
+            .map(String::trim)
+            .filter(String::isNotBlank)
+        val activeTeamId = _usersTeam.value?.team?.id
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+        return (teamIdsFromProfile + listOfNotNull(activeTeamId)).toSet()
     }
 
     private fun checkEventIsFull(event: Event, preferredDivisionId: String?): Boolean {

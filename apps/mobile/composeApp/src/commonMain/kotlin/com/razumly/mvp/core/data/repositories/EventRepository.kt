@@ -87,7 +87,11 @@ interface IEventRepository : IMVPRepository {
         childUserId: String,
         joinWaitlist: Boolean = false,
     ): Result<ChildRegistrationResult>
-    suspend fun addTeamToEvent(event: Event, team: Team): Result<Unit>
+    suspend fun addTeamToEvent(
+        event: Event,
+        team: Team,
+        preferredDivisionId: String? = null,
+    ): Result<Unit>
     suspend fun removeTeamFromEvent(event: Event, teamWithPlayers: TeamWithPlayers): Result<Unit>
     suspend fun removeCurrentUserFromEvent(event: Event, targetUserId: String? = null): Result<Unit>
     suspend fun getMySchedule(): Result<UserScheduleSnapshot> = Result.success(UserScheduleSnapshot())
@@ -447,16 +451,27 @@ class EventRepository(
                 divisionTypeId = divisionPayload.divisionTypeId,
                 divisionTypeKey = divisionPayload.divisionTypeKey,
             )
-            val response = if (eventAtCapacity) {
-                api.post<EventParticipantsRequestDto, EventParticipantsResponseDto>(
-                    path = "api/events/${event.id}/waitlist",
-                    body = request,
-                )
-            } else {
-                api.post<EventParticipantsRequestDto, EventParticipantsResponseDto>(
-                    path = "api/events/${event.id}/participants",
-                    body = request,
-                )
+            val response = when {
+                eventAtCapacity -> {
+                    api.post<EventParticipantsRequestDto, EventParticipantsResponseDto>(
+                        path = "api/events/${event.id}/waitlist",
+                        body = request,
+                    )
+                }
+
+                event.teamSignup -> {
+                    api.post<EventParticipantsRequestDto, EventParticipantsResponseDto>(
+                        path = "api/events/${event.id}/free-agents",
+                        body = EventParticipantsRequestDto(userId = currentUser.id),
+                    )
+                }
+
+                else -> {
+                    api.post<EventParticipantsRequestDto, EventParticipantsResponseDto>(
+                        path = "api/events/${event.id}/participants",
+                        body = request,
+                    )
+                }
             }
 
             response.error?.takeIf(String::isNotBlank)?.let { errorMessage ->
@@ -523,20 +538,35 @@ class EventRepository(
             )
         }
 
-    override suspend fun addTeamToEvent(event: Event, team: Team): Result<Unit> =
+    override suspend fun addTeamToEvent(
+        event: Event,
+        team: Team,
+        preferredDivisionId: String?,
+    ): Result<Unit> =
         runCatching {
             if (event.waitList.contains(team.id)) {
                 throw Exception("Team already in waitlist")
             }
-            val updated = if (isEventAtCapacity(event, team.division)) {
+            val divisionPreference = preferredDivisionId?.trim()?.takeIf(String::isNotBlank) ?: team.division
+            val divisionPayload = resolveRegistrationDivisionPayload(
+                event = event,
+                preferredDivisionId = divisionPreference,
+            )
+            val request = EventParticipantsRequestDto(
+                teamId = team.id,
+                divisionId = divisionPayload.divisionId,
+                divisionTypeId = divisionPayload.divisionTypeId,
+                divisionTypeKey = divisionPayload.divisionTypeKey,
+            )
+            val updated = if (isEventAtCapacity(event, divisionPreference)) {
                 api.post<EventParticipantsRequestDto, EventResponseDto>(
                     path = "api/events/${event.id}/waitlist",
-                    body = EventParticipantsRequestDto(teamId = team.id),
+                    body = request,
                 )
             } else {
                 api.post<EventParticipantsRequestDto, EventResponseDto>(
                     path = "api/events/${event.id}/participants",
-                    body = EventParticipantsRequestDto(teamId = team.id),
+                    body = request,
                 )
             }.event?.toEventOrNull() ?: error("Participant update response missing event")
 

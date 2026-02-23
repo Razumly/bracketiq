@@ -603,9 +603,18 @@ private fun ParticipantsFloatingBar(
 private fun JoinOptionsSheet(
     options: List<JoinOption>,
     paymentProcessor: EventDetailComponent,
+    selectedDivisionId: String?,
+    divisionOptions: List<BracketDivisionOption>,
+    onDivisionSelected: (String) -> Unit,
     onDismiss: () -> Unit,
     onSelectOption: (JoinOption) -> Unit,
 ) {
+    var isDivisionMenuExpanded by remember { mutableStateOf(false) }
+    val selectedDivisionLabel = remember(selectedDivisionId, divisionOptions) {
+        val selected = divisionOptions.firstOrNull { it.id == selectedDivisionId }
+        selected?.label ?: divisionOptions.firstOrNull()?.label.orEmpty()
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -617,13 +626,51 @@ private fun JoinOptionsSheet(
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.SemiBold
         )
+        if (divisionOptions.isNotEmpty()) {
+            Box(modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = { isDivisionMenuExpanded = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    val label = if (selectedDivisionLabel.isNotBlank()) {
+                        "Division: $selectedDivisionLabel"
+                    } else {
+                        "Select division"
+                    }
+                    Text(label)
+                }
+                DropdownMenu(
+                    expanded = isDivisionMenuExpanded,
+                    onDismissRequest = { isDivisionMenuExpanded = false }
+                ) {
+                    divisionOptions.forEach { option ->
+                        DropdownMenuItem(
+                            text = { Text(option.label) },
+                            onClick = {
+                                isDivisionMenuExpanded = false
+                                onDivisionSelected(option.id)
+                            },
+                            leadingIcon = {
+                                if (option.id == selectedDivisionId) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = null
+                                    )
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+        }
         options.forEach { option ->
             if (option.requiresPayment) {
                 StripeButton(
                     onClick = { onSelectOption(option) },
                     paymentProcessor = paymentProcessor,
                     text = option.label,
-                    colors = ButtonDefaults.buttonColors()
+                    colors = ButtonDefaults.buttonColors(),
+                    modifier = Modifier.fillMaxWidth(),
                 )
             } else {
                 Button(
@@ -818,12 +865,56 @@ fun EventDetailScreen(
         }
     }
     val showStickyActions = !showDetails && !isEditing && !showMap && showStickyDockByScroll
+    val joinDivisionOptions = remember(
+        selectedDivision,
+        selectedEvent.event.divisions,
+        selectedEvent.event.divisionDetails,
+    ) {
+        val options = mutableListOf<BracketDivisionOption>()
+        val seenIds = mutableSetOf<String>()
+        fun addOption(rawId: String?, explicitLabel: String? = null) {
+            val normalizedId = rawId
+                ?.normalizeDivisionIdentifier()
+                .orEmpty()
+            if (normalizedId.isEmpty() || !seenIds.add(normalizedId)) {
+                return
+            }
+            val label = explicitLabel
+                ?.takeIf { it.isNotBlank() }
+                ?: normalizedId.toDivisionDisplayLabel(selectedEvent.event.divisionDetails)
+            options += BracketDivisionOption(
+                id = normalizedId,
+                label = label.ifBlank { normalizedId }
+            )
+        }
+        selectedEvent.event.divisionDetails.forEach { detail ->
+            val fallbackId = detail.id.ifBlank { detail.key }
+            addOption(fallbackId, detail.name)
+        }
+        selectedEvent.event.divisions.forEach { divisionId ->
+            addOption(divisionId)
+        }
+        addOption(selectedDivision)
+        options
+    }
+    val selectedJoinDivisionId = remember(
+        selectedDivision,
+        joinDivisionOptions,
+    ) {
+        val normalizedSelected = selectedDivision
+            ?.normalizeDivisionIdentifier()
+            .orEmpty()
+        joinDivisionOptions.firstOrNull { it.id == normalizedSelected }?.id
+            ?: joinDivisionOptions.firstOrNull()?.id
+    }
     val joinOptions = remember(
         isUserInEvent,
         isEventFull,
         teamSignup,
         selectedEvent.event.price,
-        eventHasStarted
+        eventHasStarted,
+        selectedJoinDivisionId,
+        joinDivisionOptions,
     ) {
         if (isUserInEvent || eventHasStarted) {
             emptyList()
@@ -839,7 +930,11 @@ fun EventDetailScreen(
                                     "Join Waitlist as Team"
                                 },
                                 requiresPayment = selectedEvent.event.price > 0,
-                                onClick = { showTeamSelectionDialog = true }
+                                onClick = {
+                                    selectedJoinDivisionId?.let { component.selectDivision(it) }
+                                        ?: joinDivisionOptions.firstOrNull()?.id?.let { component.selectDivision(it) }
+                                    showTeamSelectionDialog = true
+                                }
                             )
                         )
                     } else {
@@ -871,7 +966,11 @@ fun EventDetailScreen(
                                 "Join as Team"
                             },
                             requiresPayment = selectedEvent.event.price > 0,
-                            onClick = { showTeamSelectionDialog = true }
+                            onClick = {
+                                selectedJoinDivisionId?.let { component.selectDivision(it) }
+                                    ?: joinDivisionOptions.firstOrNull()?.id?.let { component.selectDivision(it) }
+                                showTeamSelectionDialog = true
+                            }
                         )
                     )
                 } else {
@@ -1164,48 +1263,6 @@ fun EventDetailScreen(
                                 }
                             )
                         }
-                        val bracketDivisionOptions = remember(
-                            selectedDivision,
-                            selectedEvent.event.divisions,
-                            selectedEvent.event.divisionDetails,
-                        ) {
-                            val options = mutableListOf<BracketDivisionOption>()
-                            val seenIds = mutableSetOf<String>()
-                            fun addOption(rawId: String?, explicitLabel: String? = null) {
-                                val normalizedId = rawId
-                                    ?.normalizeDivisionIdentifier()
-                                    .orEmpty()
-                                if (normalizedId.isEmpty() || !seenIds.add(normalizedId)) {
-                                    return
-                                }
-                                val label = explicitLabel
-                                    ?.takeIf { it.isNotBlank() }
-                                    ?: normalizedId.toDivisionDisplayLabel(selectedEvent.event.divisionDetails)
-                                options += BracketDivisionOption(
-                                    id = normalizedId,
-                                    label = label.ifBlank { normalizedId }
-                                )
-                            }
-                            selectedEvent.event.divisionDetails.forEach { detail ->
-                                val fallbackId = detail.id.ifBlank { detail.key }
-                                addOption(fallbackId, detail.name)
-                            }
-                            selectedEvent.event.divisions.forEach { divisionId ->
-                                addOption(divisionId)
-                            }
-                            addOption(selectedDivision)
-                            options
-                        }
-                        val selectedDivisionId = remember(
-                            selectedDivision,
-                            bracketDivisionOptions,
-                        ) {
-                            val normalizedSelected = selectedDivision
-                                ?.normalizeDivisionIdentifier()
-                                .orEmpty()
-                            bracketDivisionOptions.firstOrNull { it.id == normalizedSelected }?.id
-                                ?: bracketDivisionOptions.firstOrNull()?.id
-                        }
                         LaunchedEffect(availableTabs) {
                             if (selectedTab !in availableTabs) {
                                 selectedTab = availableTabs.first()
@@ -1307,8 +1364,8 @@ fun EventDetailScreen(
                             ) {
                                 when (selectedTab) {
                                     DetailTab.BRACKET -> BracketFloatingBar(
-                                        selectedDivisionId = selectedDivisionId,
-                                        divisionOptions = bracketDivisionOptions,
+                                        selectedDivisionId = selectedJoinDivisionId,
+                                        divisionOptions = joinDivisionOptions,
                                         onDivisionSelected = component::selectDivision,
                                         showBracketToggle = selectedEvent.event.doubleElimination,
                                         isLosersBracket = losersBracket,
@@ -1317,8 +1374,8 @@ fun EventDetailScreen(
                                     )
 
                                     DetailTab.SCHEDULE, DetailTab.LEAGUES -> BracketFloatingBar(
-                                        selectedDivisionId = selectedDivisionId,
-                                        divisionOptions = bracketDivisionOptions,
+                                        selectedDivisionId = selectedJoinDivisionId,
+                                        divisionOptions = joinDivisionOptions,
                                         onDivisionSelected = component::selectDivision,
                                         showBracketToggle = false,
                                         isLosersBracket = losersBracket,
@@ -1410,6 +1467,13 @@ fun EventDetailScreen(
                     JoinOptionsSheet(
                         options = joinOptions,
                         paymentProcessor = component,
+                        selectedDivisionId = selectedJoinDivisionId,
+                        divisionOptions = if (teamSignup) {
+                            joinDivisionOptions
+                        } else {
+                            emptyList()
+                        },
+                        onDivisionSelected = component::selectDivision,
                         onDismiss = { showJoinOptionsSheet = false },
                         onSelectOption = { action ->
                             showJoinOptionsSheet = false

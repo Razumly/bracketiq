@@ -2,6 +2,7 @@ package com.razumly.mvp.core.presentation.composables
 
 import androidx.compose.material3.ButtonColors
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 
 @Composable
@@ -13,4 +14,5 @@ expect fun StripeButton(
     paymentProcessor: IPaymentProcessor,
     text: String,
     colors: ButtonColors? = null,
+    modifier: Modifier = Modifier,
 )

@@ -514,7 +514,9 @@ class EventRepositoryHttpTest {
         val api = MvpApiClient(http, "http://example.test", tokenStore)
         val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
 
-        val baseEvent = makeEvent(id = "e1", hostId = "h1", userIds = emptyList())
+        val baseEvent = makeEvent(id = "e1", hostId = "h1", userIds = emptyList()).copy(
+            teamSignup = false,
+        )
 
         repo.addCurrentUserToEvent(baseEvent).getOrThrow()
         assertEquals(listOf("u1"), eventDao.getEventById("e1")?.userIds)
@@ -526,6 +528,55 @@ class EventRepositoryHttpTest {
         val requested = userRepo.requestedUserIds
         assertTrue("u1" in requested)
         assertTrue("h1" in requested)
+    }
+
+    @Test
+    fun addCurrentUserToEvent_uses_free_agents_endpoint_for_team_signup_events() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+        var capturedPath = ""
+
+        val engine = MockEngine { request ->
+            capturedPath = request.url.encodedPath
+            assertEquals(HttpMethod.Post, request.method)
+            respond(
+                content = """
+                    {
+                      "event": {
+                        "id": "e1",
+                        "name": "Event One",
+                        "hostId": "h1",
+                        "start": "2026-02-10T00:00:00Z",
+                        "end": "2026-02-10T01:00:00Z",
+                        "coordinates": [-80.0, 25.0],
+                        "userIds": [],
+                        "freeAgentIds": ["u1"],
+                        "teamIds": []
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val teamSignupEvent = makeEvent(id = "e1", hostId = "h1", userIds = emptyList())
+
+        repo.addCurrentUserToEvent(teamSignupEvent).getOrThrow()
+
+        assertEquals("/api/events/e1/free-agents", capturedPath)
+        assertEquals(listOf("u1"), eventDao.getEventById("e1")?.freeAgentIds)
+        assertEquals(emptyList<String>(), eventDao.getEventById("e1")?.userIds)
     }
 
     @Test
@@ -705,6 +756,131 @@ class EventRepositoryHttpTest {
         ).getOrThrow()
 
         assertEquals("/api/events/e1/waitlist", capturedPath)
+    }
+
+    @Test
+    fun addTeamToEvent_posts_selected_division_payload() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+        val divisionAId = "e1__division__m_skill_b"
+        val divisionBId = "e1__division__f_skill_a"
+        var capturedPath = ""
+        var capturedBody = ""
+
+        val team = Team(
+            seed = 1,
+            division = "open",
+            wins = 0,
+            losses = 0,
+            name = "Team One",
+            captainId = "u1",
+            managerId = "u1",
+            playerIds = listOf("u1"),
+            teamSize = 2,
+            id = "t1",
+            divisionTypeId = "a",
+            divisionTypeName = "A",
+            skillDivisionTypeId = "a",
+            skillDivisionTypeName = "A",
+            ageDivisionTypeId = "open",
+            ageDivisionTypeName = "Open",
+            divisionGender = "F",
+        )
+
+        val teamRepository = object : ITeamRepository by EventRepositoryHttp_UnusedTeamRepository {
+            override suspend fun getTeams(ids: List<String>): Result<List<Team>> {
+                return Result.success(
+                    if (ids.contains(team.id)) {
+                        listOf(team)
+                    } else {
+                        emptyList()
+                    }
+                )
+            }
+        }
+
+        val engine = MockEngine { request ->
+            capturedPath = request.url.encodedPath
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+
+            respond(
+                content = """
+                    {
+                      "event": {
+                        "id": "e1",
+                        "name": "Event One",
+                        "hostId": "h1",
+                        "start": "2026-02-10T00:00:00Z",
+                        "end": "2026-02-10T01:00:00Z",
+                        "coordinates": [-80.0, 25.0],
+                        "userIds": [],
+                        "teamIds": ["t1"]
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, teamRepository, userRepo)
+
+        val event = Event(
+            id = "e1",
+            name = "Event One",
+            hostId = "h1",
+            coordinates = listOf(-80.0, 25.0),
+            start = Instant.parse("2026-02-10T00:00:00Z"),
+            end = Instant.parse("2026-02-10T01:00:00Z"),
+            maxParticipants = 24,
+            teamSignup = true,
+            singleDivision = false,
+            divisions = listOf(divisionAId, divisionBId),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = divisionAId,
+                    key = "m_skill_b",
+                    name = "Men B",
+                    divisionTypeId = "b",
+                    divisionTypeName = "B",
+                    ratingType = "SKILL",
+                    gender = "M",
+                ),
+                DivisionDetail(
+                    id = divisionBId,
+                    key = "f_skill_a",
+                    name = "Women A",
+                    divisionTypeId = "a",
+                    divisionTypeName = "A",
+                    ratingType = "SKILL",
+                    gender = "F",
+                ),
+            ),
+        )
+
+        repo.addTeamToEvent(
+            event = event,
+            team = team,
+            preferredDivisionId = divisionBId,
+        ).getOrThrow()
+
+        assertEquals("/api/events/e1/participants", capturedPath)
+        assertTrue(capturedBody.contains("\"teamId\":\"t1\""))
+        assertTrue(capturedBody.contains("\"divisionId\":\"$divisionBId\""))
+        assertTrue(capturedBody.contains("\"divisionTypeId\":\"a\""))
+        assertTrue(capturedBody.contains("\"divisionTypeKey\":\"f_skill_a\""))
+        assertEquals(listOf("t1"), eventDao.getEventById("e1")?.teamIds)
     }
 
     @Test

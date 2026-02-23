@@ -320,7 +320,11 @@ internal class CreateEvent_FakeEventRepository(
         childUserId: String,
         joinWaitlist: Boolean,
     ): Result<ChildRegistrationResult> = Result.failure(NotImplementedError("unused"))
-    override suspend fun addTeamToEvent(event: Event, team: Team): Result<Unit> = Result.success(Unit)
+    override suspend fun addTeamToEvent(
+        event: Event,
+        team: Team,
+        preferredDivisionId: String?,
+    ): Result<Unit> = Result.success(Unit)
     override suspend fun removeTeamFromEvent(event: Event, teamWithPlayers: TeamWithPlayers): Result<Unit> =
         Result.success(Unit)
     override suspend fun removeCurrentUserFromEvent(event: Event, targetUserId: String?): Result<Unit> =
