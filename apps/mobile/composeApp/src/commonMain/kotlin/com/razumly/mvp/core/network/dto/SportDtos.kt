@@ -65,16 +65,27 @@ data class SportApiDto(
             return null
         }
 
+        val resolvedUsePointsForWin = usePointsForWin ?: false
+        val resolvedUsePointsForLoss = usePointsForLoss ?: false
+        val resolvedUsePointsPerSetWin = usePointsPerSetWin ?: false
+        val resolvedUsePointsPerSetLoss = usePointsPerSetLoss ?: false
+        val resolvedUsePointsForDraw = usePointsForDraw ?: (
+            resolvedUsePointsForWin &&
+                resolvedUsePointsForLoss &&
+                !resolvedUsePointsPerSetWin &&
+                !resolvedUsePointsPerSetLoss
+            )
+
         return Sport(
             id = resolvedId,
             name = resolvedName,
-            usePointsForWin = usePointsForWin ?: false,
-            usePointsForDraw = usePointsForDraw ?: false,
-            usePointsForLoss = usePointsForLoss ?: false,
+            usePointsForWin = resolvedUsePointsForWin,
+            usePointsForDraw = resolvedUsePointsForDraw,
+            usePointsForLoss = resolvedUsePointsForLoss,
             usePointsForForfeitWin = usePointsForForfeitWin ?: false,
             usePointsForForfeitLoss = usePointsForForfeitLoss ?: false,
-            usePointsPerSetWin = usePointsPerSetWin ?: false,
-            usePointsPerSetLoss = usePointsPerSetLoss ?: false,
+            usePointsPerSetWin = resolvedUsePointsPerSetWin,
+            usePointsPerSetLoss = resolvedUsePointsPerSetLoss,
             usePointsPerGameWin = usePointsPerGameWin ?: false,
             usePointsPerGameLoss = usePointsPerGameLoss ?: false,
             usePointsPerGoalScored = usePointsPerGoalScored ?: false,

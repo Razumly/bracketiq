@@ -18,12 +18,20 @@ const val DEFAULT_DIVISION = "open"
 val DEFAULT_DIVISION_OPTIONS = listOf("beginner", "b", "bb", "a", "aa", "open")
 const val DEFAULT_AGE_DIVISION = "18plus"
 val DEFAULT_AGE_DIVISION_OPTIONS = listOf(
+    "u6",
+    "u7",
     "u8",
+    "u9",
     "u10",
+    "u11",
     "u12",
+    "u13",
     "u14",
+    "u15",
     "u16",
+    "u17",
     "u18",
+    "u19",
     "18plus",
     "30plus",
     "40plus",
@@ -267,7 +275,7 @@ private fun String.displayTokenPart(): String {
         return "${match.groupValues[1]}+"
     }
     trailingUTokenRegex.matchEntire(normalized)?.let { match ->
-        return "${match.groupValues[1]}U"
+        return "U${match.groupValues[1]}"
     }
     leadingUTokenRegex.matchEntire(normalized)?.let { match ->
         return "U${match.groupValues[1]}"
@@ -290,7 +298,7 @@ private fun tokenToDisplayLabel(token: String): String {
         return "${match.groupValues[1]}+"
     }
     trailingUTokenRegex.matchEntire(normalized)?.let { match ->
-        return "${match.groupValues[1]}U"
+        return "U${match.groupValues[1]}"
     }
     leadingUTokenRegex.matchEntire(normalized)?.let { match ->
         return "U${match.groupValues[1]}"

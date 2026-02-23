@@ -1,5 +1,6 @@
 package com.razumly.mvp.eventCreate
 
+import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.presentation.RentalCreateContext
 import kotlinx.coroutines.test.runTest
@@ -92,6 +93,74 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         assertEquals(null, harness.component.newEventState.value.installmentCount)
         assertEquals(emptyList(), harness.component.newEventState.value.installmentAmounts)
         assertEquals(emptyList(), harness.component.newEventState.value.installmentDueDates)
+    }
+
+    @Test
+    fun switching_sports_with_different_scoring_modes_resets_league_scoring_config() = runTest(testDispatcher) {
+        val setBasedSport = createSport(
+            id = "sport-sets",
+            usePointsPerSetWin = true,
+        )
+        val timedSport = createSport(
+            id = "sport-timed",
+            usePointsPerSetWin = false,
+        )
+        val harness = CreateEventHarness(sports = listOf(setBasedSport, timedSport))
+        advance()
+
+        harness.component.updateEventField { copy(sportId = timedSport.id) }
+        advance()
+
+        harness.component.updateLeagueScoringConfig {
+            copy(
+                pointsForWin = 9,
+                pointsForDraw = 4,
+                pointsForLoss = -2,
+                pointsPerSetWin = 1.5,
+                pointsPerSetLoss = 0.5,
+                overtimeEnabled = true,
+            )
+        }
+        assertEquals(9, harness.component.leagueScoringConfig.value.pointsForWin)
+        assertEquals(1.5, harness.component.leagueScoringConfig.value.pointsPerSetWin)
+
+        harness.component.updateEventField { copy(sportId = setBasedSport.id) }
+        advance()
+
+        assertEquals(LeagueScoringConfigDTO(), harness.component.leagueScoringConfig.value)
+    }
+
+    @Test
+    fun updating_fields_without_sport_change_keeps_league_scoring_config() = runTest(testDispatcher) {
+        val timedSport = createSport(
+            id = "sport-timed",
+            usePointsPerSetWin = false,
+        )
+        val harness = CreateEventHarness(sports = listOf(timedSport))
+        advance()
+
+        harness.component.updateEventField { copy(sportId = timedSport.id) }
+        advance()
+
+        harness.component.updateLeagueScoringConfig {
+            copy(
+                pointsForWin = 7,
+                pointsForDraw = 3,
+                pointsForLoss = 0,
+                overtimeEnabled = true,
+            )
+        }
+        val configured = harness.component.leagueScoringConfig.value
+
+        harness.component.updateEventField {
+            copy(
+                sportId = timedSport.id,
+                name = "League Config Should Stay",
+            )
+        }
+        advance()
+
+        assertEquals(configured, harness.component.leagueScoringConfig.value)
     }
 
     @Test

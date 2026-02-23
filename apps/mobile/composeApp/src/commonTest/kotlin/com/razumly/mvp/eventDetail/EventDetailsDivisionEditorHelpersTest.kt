@@ -76,6 +76,8 @@ class EventDetailsDivisionEditorHelpersTest {
         assertTrue(skillValues.contains("open"))
         assertTrue(skillValues.contains("b"))
         assertTrue(ageValues.contains("u18"))
+        assertTrue(ageValues.contains("u19"))
+        assertTrue(ageValues.contains("18plus"))
         assertTrue(ageValues.contains("u14"))
     }
 
@@ -134,5 +136,16 @@ class EventDetailsDivisionEditorHelpersTest {
         assertEquals("Men's Open U18", buildDivisionName("M", "Open", "U18"))
         assertEquals("Women's Open U18", buildDivisionName("F", "Open", "U18"))
         assertEquals("Coed Open U18", buildDivisionName("C", "Open", "U18"))
+    }
+
+    @Test
+    fun resolve_division_type_name_formats_trailing_u_tokens_consistently() {
+        val label = resolveDivisionTypeName(
+            divisionTypeId = "12u",
+            existingDetails = emptyList(),
+            fallbackOptions = emptyList(),
+        )
+
+        assertEquals("U12", label)
     }
 }

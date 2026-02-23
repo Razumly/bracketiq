@@ -297,8 +297,12 @@ class DefaultCreateEventComponent(
                 .applyCreateSelectionRules(_isRentalFlow.value)
                 .withSportRules()
             val normalized = applyRentalConstraints(updated)
+            val sportChanged = previous.sportId != normalized.sportId
 
             _newEventState.value = normalized
+            if (sportChanged) {
+                _leagueScoringConfig.value = defaultLeagueScoringConfigForSport(normalized.sportId)
+            }
             syncLocalFieldsForEvent(normalized)
         }
     }
@@ -1072,11 +1076,29 @@ class DefaultCreateEventComponent(
         }
     }
 
+    private fun usesSetScoringForSport(sportId: String?): Boolean = sportId
+        ?.let { selectedSportId -> _sports.value.firstOrNull { it.id == selectedSportId } }
+        ?.usePointsPerSetWin
+        ?: false
+
+    private fun defaultLeagueScoringConfigForSport(sportId: String?): LeagueScoringConfigDTO {
+        val defaults = LeagueScoringConfigDTO()
+        return if (usesSetScoringForSport(sportId)) {
+            defaults.copy(
+                pointsForWin = null,
+                pointsForDraw = null,
+                pointsForLoss = null,
+            )
+        } else {
+            defaults.copy(
+                pointsPerSetWin = null,
+                pointsPerSetLoss = null,
+            )
+        }
+    }
+
     private fun Event.withSportRules(): Event {
-        val requiresSets = sportId
-            ?.let { selectedSportId -> _sports.value.firstOrNull { it.id == selectedSportId } }
-            ?.usePointsPerSetWin
-            ?: false
+        val requiresSets = usesSetScoringForSport(sportId)
         return when (eventType) {
             EventType.EVENT -> this
             EventType.LEAGUE -> applyLeagueSportRules(requiresSets)
