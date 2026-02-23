@@ -42,7 +42,6 @@ import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
 import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
 import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
-import com.razumly.mvp.core.data.util.DEFAULT_DIVISION_OPTIONS
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 import com.razumly.mvp.core.presentation.composables.DropdownOption
@@ -74,7 +73,6 @@ fun ColumnScope.LeagueScheduleFields(
     slots: List<TimeSlot>,
     onFieldCountChange: (Int) -> Unit,
     onFieldNameChange: (Int, String) -> Unit,
-    onFieldDivisionsChange: (Int, List<String>) -> Unit,
     onAddSlot: () -> Unit,
     onUpdateSlot: (Int, TimeSlot) -> Unit,
     onRemoveSlot: (Int) -> Unit,
@@ -106,16 +104,6 @@ fun ColumnScope.LeagueScheduleFields(
         val visibleFieldRows = min(fields.size, MAX_VISIBLE_FIELD_ROWS)
         val fieldListMaxHeight = (fieldRowMinHeight * visibleFieldRows) +
             (fieldListItemSpacing * (visibleFieldRows - 1).coerceAtLeast(0))
-        val divisionOptions = remember(fields) {
-            (DEFAULT_DIVISION_OPTIONS + fields.flatMap { it.divisions })
-                .normalizeDivisionIdentifiers()
-                .map { divisionId ->
-                    DropdownOption(
-                        value = divisionId,
-                        label = divisionId.toDivisionDisplayLabel(),
-                    )
-                }
-        }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -139,31 +127,17 @@ fun ColumnScope.LeagueScheduleFields(
                 verticalArrangement = Arrangement.spacedBy(fieldListItemSpacing),
             ) {
                 itemsIndexed(fields, key = { _, field -> field.id }) { index, field ->
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .heightIn(min = fieldRowMinHeight),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.Top,
                     ) {
                         TextInputField(
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.fillMaxWidth(),
                             value = field.name ?: "",
                             label = "Field ${field.fieldNumber} Name",
                             onValueChange = { onFieldNameChange(index, it) },
                             isError = false,
-                        )
-                        PlatformDropdown(
-                            selectedValue = "",
-                            onSelectionChange = {},
-                            options = divisionOptions,
-                            label = "Allowed Divisions",
-                            multiSelect = true,
-                            selectedValues = field.divisions.normalizeDivisionIdentifiers(),
-                            onMultiSelectionChange = { values ->
-                                onFieldDivisionsChange(index, values.normalizeDivisionIdentifiers())
-                            },
-                            modifier = Modifier.weight(1f),
                         )
                     }
                 }

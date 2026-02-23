@@ -32,6 +32,7 @@ import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.ktx.DynamicScheme
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
@@ -65,6 +66,7 @@ fun CreateEventScreen(
     val localFields by component.localFields.collectAsState()
     val leagueSlots by component.leagueSlots.collectAsState()
     val leagueScoringConfig by component.leagueScoringConfig.collectAsState()
+    val suggestedUsers by component.suggestedUsers.collectAsState()
     val isEditing = true
     val currentUser by component.currentUser.collectAsState()
     val isDark = isSystemInDarkTheme()
@@ -148,6 +150,24 @@ fun CreateEventScreen(
             }
         }
     }
+    val onUpdateHostId: (String) -> Unit = remember(component) { component::updateHostId }
+    val onUpdateAssistantHostIds: (List<String>) -> Unit =
+        remember(component) { component::updateAssistantHostIds }
+    val onUpdateDoTeamsRef: (Boolean) -> Unit = remember(component) { component::updateDoTeamsRef }
+    val onAddRefereeId: (String) -> Unit = remember(component) { component::addRefereeId }
+    val onRemoveRefereeId: (String) -> Unit = remember(component) { component::removeRefereeId }
+    val onSetPaymentPlansEnabled: (Boolean) -> Unit =
+        remember(component) { component::setPaymentPlansEnabled }
+    val onSetInstallmentCount: (Int) -> Unit = remember(component) { component::setInstallmentCount }
+    val onUpdateInstallmentAmount: (Int, Int) -> Unit =
+        remember(component) { component::updateInstallmentAmount }
+    val onUpdateInstallmentDueDate: (Int, String) -> Unit =
+        remember(component) { component::updateInstallmentDueDate }
+    val onAddInstallmentRow: () -> Unit = remember(component) { component::addInstallmentRow }
+    val onRemoveInstallmentRow: (Int) -> Unit = remember(component) { component::removeInstallmentRow }
+    val onSearchUsers: (String) -> Unit = remember(component) { component::searchUsers }
+    val onEnsureUserByEmail: suspend (String) -> Result<UserData> =
+        remember(component) { { email -> component.ensureUserByEmail(email) } }
 
     Scaffold(
         modifier = Modifier.padding(LocalNavBarPadding.current),
@@ -243,6 +263,20 @@ fun CreateEventScreen(
                         onLeagueScoringConfigChange = { updated ->
                             component.updateLeagueScoringConfig { updated }
                         },
+                        userSuggestions = suggestedUsers,
+                        onSearchUsers = onSearchUsers,
+                        onEnsureUserByEmail = onEnsureUserByEmail,
+                        onUpdateHostId = onUpdateHostId,
+                        onUpdateAssistantHostIds = onUpdateAssistantHostIds,
+                        onUpdateDoTeamsRef = onUpdateDoTeamsRef,
+                        onAddRefereeId = onAddRefereeId,
+                        onRemoveRefereeId = onRemoveRefereeId,
+                        onSetPaymentPlansEnabled = onSetPaymentPlansEnabled,
+                        onSetInstallmentCount = onSetInstallmentCount,
+                        onUpdateInstallmentAmount = onUpdateInstallmentAmount,
+                        onUpdateInstallmentDueDate = onUpdateInstallmentDueDate,
+                        onAddInstallmentRow = onAddInstallmentRow,
+                        onRemoveInstallmentRow = onRemoveInstallmentRow,
                         onUploadSelected = component::onUploadSelected,
                         onDeleteImage = component::deleteImage,
                         onValidationChange = { isValid, errors ->

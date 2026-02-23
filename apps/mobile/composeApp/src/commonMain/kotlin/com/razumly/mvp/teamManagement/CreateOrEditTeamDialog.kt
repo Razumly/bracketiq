@@ -3,7 +3,6 @@ package com.razumly.mvp.teamManagement
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,7 +17,6 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonColors
@@ -43,7 +41,6 @@ import com.razumly.mvp.core.presentation.composables.InvitePlayerCard
 import com.razumly.mvp.core.presentation.composables.PlatformTextField
 import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.SearchPlayerDialog
-import com.razumly.mvp.core.presentation.util.teamSizeFormat
 import kotlinx.coroutines.launch
 
 private enum class TeamInviteTarget(val label: String, val inviteType: String?) {
@@ -68,11 +65,12 @@ fun CreateOrEditTeamDialog(
     isCaptain: Boolean,
     currentUser: UserData,
     isNewTeam: Boolean,
+    staffUsersById: Map<String, UserData> = emptyMap(),
     onEnsureUserByEmail: (suspend (email: String) -> Result<UserData>)? = null,
     onInviteTeamRole: ((teamId: String, userId: String, inviteType: String) -> Unit)? = null,
 ) {
     var teamName by remember { mutableStateOf(team.team.name ?: "") }
-    var teamSize by remember { mutableStateOf(team.team.teamSize) }
+    var teamSizeInput by remember { mutableStateOf(team.team.teamSize.toString()) }
     var showSearchDialog by remember { mutableStateOf(false) }
     var invitedPlayers by remember { mutableStateOf(team.pendingPlayers) }
     var playersInTeam by remember { mutableStateOf(team.players) }
@@ -82,6 +80,42 @@ fun CreateOrEditTeamDialog(
     var inviteTarget by remember { mutableStateOf(TeamInviteTarget.PLAYER) }
     val scope = rememberCoroutineScope()
     val showEditDetails = isCaptain || isNewTeam
+    val parsedTeamSize = teamSizeInput.toIntOrNull()
+    val isTeamSizeValid = parsedTeamSize != null && parsedTeamSize > 0
+    val resolvedTeamSize = parsedTeamSize ?: team.team.teamSize
+    val knownUsersById = remember(
+        staffUsersById,
+        team.captain,
+        playersInTeam,
+        invitedPlayers,
+        friends,
+        freeAgents,
+        suggestions,
+    ) {
+        buildMap {
+            putAll(staffUsersById)
+            put(team.captain.id, team.captain)
+            playersInTeam.forEach { put(it.id, it) }
+            invitedPlayers.forEach { put(it.id, it) }
+            friends.forEach { put(it.id, it) }
+            freeAgents.forEach { put(it.id, it) }
+            suggestions.forEach { put(it.id, it) }
+        }
+    }
+    val resolveUserName: (String?) -> String? = { userId ->
+        userId
+            ?.takeIf(String::isNotBlank)
+            ?.let { knownUsersById[it]?.displayName ?: "Unknown user" }
+    }
+    val managerLabel = resolveUserName(team.team.managerId ?: team.team.captainId) ?: "Unassigned"
+    val headCoachLabel = resolveUserName(team.team.headCoachId) ?: "Unassigned"
+    val assistantCoachLabel = if (team.team.coachIds.isNotEmpty()) {
+        team.team.coachIds.joinToString { coachId ->
+            resolveUserName(coachId) ?: "Unknown user"
+        }
+    } else {
+        "Unassigned"
+    }
 
     Card(
         modifier = Modifier.fillMaxWidth().padding(16.dp),
@@ -111,14 +145,21 @@ fun CreateOrEditTeamDialog(
             )
 
             Spacer(modifier = Modifier.height(12.dp))
-            Text("Select Team Size")
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(2, 3, 4, 5, 6, 7).forEach { size ->
-                    FilterChip(enabled = showEditDetails, selected = size == teamSize, onClick = {
-                        teamSize = size
-                    }, label = { Text(size.teamSizeFormat()) })
-                }
-            }
+            PlatformTextField(
+                value = teamSizeInput,
+                onValueChange = { teamSizeInput = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = "Team Size",
+                keyboardType = "number",
+                inputFilter = { value -> value.filter(Char::isDigit) },
+                readOnly = !showEditDetails,
+                isError = showEditDetails && !isTeamSizeValid,
+                supportingText = if (showEditDetails && !isTeamSizeValid) {
+                    "Enter a team size greater than 0."
+                } else {
+                    ""
+                },
+            )
 
             Spacer(modifier = Modifier.height(12.dp))
             Text("Players")
@@ -155,7 +196,7 @@ fun CreateOrEditTeamDialog(
                         }
                     }
                 }
-                if (playersInTeam.size + invitedPlayers.size < teamSize || teamSize == 7 && showEditDetails) {
+                if (playersInTeam.size + invitedPlayers.size < resolvedTeamSize || resolvedTeamSize == 7 && showEditDetails) {
                     item {
                         InvitePlayerCard {
                             inviteTarget = TeamInviteTarget.PLAYER
@@ -168,15 +209,15 @@ fun CreateOrEditTeamDialog(
             Spacer(modifier = Modifier.height(12.dp))
             Text("Team Staff")
             Text(
-                text = "Manager: ${team.team.managerId ?: team.team.captainId}",
+                text = "Manager: $managerLabel",
                 style = MaterialTheme.typography.bodySmall,
             )
             Text(
-                text = "Head Coach: ${team.team.headCoachId ?: "Unassigned"}",
+                text = "Head Coach: $headCoachLabel",
                 style = MaterialTheme.typography.bodySmall,
             )
             Text(
-                text = "Assistant Coaches: ${if (team.team.coachIds.isNotEmpty()) team.team.coachIds.joinToString() else "Unassigned"}",
+                text = "Assistant Coaches: $assistantCoachLabel",
                 style = MaterialTheme.typography.bodySmall,
             )
             if (showEditDetails && !isNewTeam) {
@@ -228,10 +269,10 @@ fun CreateOrEditTeamDialog(
                             team.team.copy(playerIds = playersInTeam.map { it.id },
                                 pending = invitedPlayers.map { it.id },
                                 name = teamName,
-                                teamSize = teamSize,
+                                teamSize = resolvedTeamSize,
                             )
                         )
-                    }) {
+                    }, enabled = isTeamSizeValid) {
                         Text("Finish")
                     }
                 } else {
@@ -283,7 +324,7 @@ fun CreateOrEditTeamDialog(
                         team.team.copy(playerIds = (playersInTeam - currentUser).map { it.id },
                             pending = invitedPlayers.map { it.id },
                             name = teamName,
-                            teamSize = teamSize
+                            teamSize = resolvedTeamSize
                         )
                     )
                     showLeaveTeamDialog = false

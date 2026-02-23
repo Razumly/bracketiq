@@ -1,36 +1,22 @@
 package com.razumly.mvp.core.presentation.composables
 
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.scaleIn
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import coil3.compose.AsyncImagePainter
-import coil3.compose.SubcomposeAsyncImage
-import coil3.compose.SubcomposeAsyncImageContent
 import com.razumly.mvp.core.data.dataTypes.DisplayableEntity
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.presentation.util.toTitleCase
-import com.razumly.mvp.core.network.apiBaseUrl
 import com.razumly.mvp.core.util.UIConstants
-import io.ktor.http.encodeURLQueryComponent
 
 @Composable
 fun UnifiedCard(
@@ -40,15 +26,6 @@ fun UnifiedCard(
     trailingContent: @Composable (() -> Unit)? = null,
     isPending: Boolean = false
 ) {
-    val initialsUrl = buildString {
-        append(apiBaseUrl.trimEnd('/'))
-        append("/api/avatars/initials?name=")
-        append(entity.displayName.encodeURLQueryComponent())
-        append("&size=")
-        append(UIConstants.PROFILE_PICTURE_HEIGHT)
-    }
-
-    val imageUrl = entity.imageUrl ?: initialsUrl
     val userHandle = (entity as? UserData)
         ?.userName
         ?.trim()
@@ -63,35 +40,12 @@ fun UnifiedCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Profile image with animation
-            Box(
-                modifier = Modifier
-                    .size(UIConstants.PROFILE_PICTURE_HEIGHT.dp)
-                    .clip(CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                SubcomposeAsyncImage(
-                    model = imageUrl,
-                    contentDescription = "${entity.displayName} Image",
-                    modifier = Modifier
-                        .size(UIConstants.PROFILE_PICTURE_HEIGHT.dp)
-                        .clip(CircleShape),
-                    contentScale = ContentScale.Crop
-                ) {
-                    val state by painter.state.collectAsState()
-                    androidx.compose.animation.AnimatedVisibility(
-                        visible = state is AsyncImagePainter.State.Success || state is AsyncImagePainter.State.Error,
-                        modifier = Modifier.clip(CircleShape),
-                        enter = scaleIn(
-                            animationSpec = tween(durationMillis = 300),
-                            initialScale = 0.8f
-                        )
-                    ) {
-                        SubcomposeAsyncImageContent(modifier = Modifier
-                            .clip(CircleShape))
-                    }
-                }
-            }
+            NetworkAvatar(
+                displayName = entity.displayName,
+                imageRef = entity.imageUrl,
+                size = UIConstants.PROFILE_PICTURE_HEIGHT.dp,
+                contentDescription = "${entity.displayName} Image",
+            )
 
             // Content
             Column(

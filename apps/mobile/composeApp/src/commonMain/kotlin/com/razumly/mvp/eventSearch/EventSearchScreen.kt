@@ -40,7 +40,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -88,6 +87,7 @@ import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
+import com.razumly.mvp.core.presentation.composables.NetworkAvatar
 import com.razumly.mvp.core.presentation.composables.SearchBox
 import com.razumly.mvp.core.presentation.composables.SearchOverlay
 import com.razumly.mvp.core.presentation.util.dateFormat
@@ -723,10 +723,11 @@ private fun DiscoverOrganizationCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(
-                    imageVector = Icons.Default.Groups,
-                    contentDescription = "Organization icon",
-                    tint = MaterialTheme.colorScheme.primary
+                NetworkAvatar(
+                    displayName = organization.name.ifBlank { "Organization" },
+                    imageRef = organization.logoId,
+                    size = 36.dp,
+                    contentDescription = "Organization logo",
                 )
                 Text(
                     text = organization.name.ifBlank { "Organization" },
@@ -790,10 +791,11 @@ private fun DiscoverOrganizationSuggestion(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(
-                    imageVector = Icons.Default.Groups,
-                    contentDescription = "Organization icon",
-                    tint = MaterialTheme.colorScheme.primary
+                NetworkAvatar(
+                    displayName = organization.name.ifBlank { "Organization" },
+                    imageRef = organization.logoId,
+                    size = 32.dp,
+                    contentDescription = "Organization logo",
                 )
                 Text(
                     text = organization.name.ifBlank { "Organization" },

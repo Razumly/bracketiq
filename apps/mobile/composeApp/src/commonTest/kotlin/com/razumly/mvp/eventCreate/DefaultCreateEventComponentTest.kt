@@ -11,6 +11,90 @@ import kotlin.test.assertTrue
 
 class DefaultCreateEventComponentTest : MainDispatcherTest() {
     @Test
+    fun updating_host_and_assistant_hosts_normalizes_ids_and_prevents_host_duplication() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        advance()
+
+        harness.component.updateAssistantHostIds(
+            listOf(" assistant-1 ", "", "assistant-1", "user-1", "assistant-2"),
+        )
+        advance()
+
+        val withAssistants = harness.component.newEventState.value
+        assertEquals("user-1", withAssistants.hostId)
+        assertEquals(listOf("assistant-1", "assistant-2"), withAssistants.assistantHostIds)
+
+        harness.component.updateHostId("assistant-1")
+        advance()
+
+        val withUpdatedHost = harness.component.newEventState.value
+        assertEquals("assistant-1", withUpdatedHost.hostId)
+        assertEquals(listOf("assistant-2"), withUpdatedHost.assistantHostIds)
+    }
+
+    @Test
+    fun updating_referee_state_supports_toggle_and_add_remove_operations() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        advance()
+
+        harness.component.updateDoTeamsRef(true)
+        harness.component.addRefereeId(" ref-1 ")
+        harness.component.addRefereeId("ref-1")
+        harness.component.addRefereeId("ref-2")
+        advance()
+
+        harness.component.removeRefereeId("ref-1")
+        advance()
+
+        val updatedEvent = harness.component.newEventState.value
+        assertEquals(true, updatedEvent.doTeamsRef)
+        assertEquals(listOf("ref-2"), updatedEvent.refereeIds)
+    }
+
+    @Test
+    fun payment_plan_mutations_keep_installment_state_in_sync() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        advance()
+
+        harness.component.setPaymentPlansEnabled(true)
+        advance()
+        assertEquals(true, harness.component.newEventState.value.allowPaymentPlans)
+        assertEquals(1, harness.component.newEventState.value.installmentCount)
+        assertEquals(listOf(0), harness.component.newEventState.value.installmentAmounts)
+        assertEquals(listOf(""), harness.component.newEventState.value.installmentDueDates)
+
+        harness.component.updateInstallmentAmount(index = 0, amountCents = 1500)
+        harness.component.updateInstallmentDueDate(index = 0, dueDate = " 2026-04-01 ")
+        harness.component.addInstallmentRow()
+        advance()
+
+        assertEquals(2, harness.component.newEventState.value.installmentCount)
+        assertEquals(listOf(1500, 0), harness.component.newEventState.value.installmentAmounts)
+        assertEquals(listOf("2026-04-01", ""), harness.component.newEventState.value.installmentDueDates)
+
+        harness.component.setInstallmentCount(3)
+        advance()
+        assertEquals(3, harness.component.newEventState.value.installmentCount)
+        assertEquals(listOf(1500, 0, 0), harness.component.newEventState.value.installmentAmounts)
+        assertEquals(listOf("2026-04-01", "", ""), harness.component.newEventState.value.installmentDueDates)
+
+        harness.component.removeInstallmentRow(1)
+        advance()
+        assertEquals(2, harness.component.newEventState.value.installmentCount)
+        assertEquals(listOf(1500, 0), harness.component.newEventState.value.installmentAmounts)
+        assertEquals(listOf("2026-04-01", ""), harness.component.newEventState.value.installmentDueDates)
+
+        harness.component.removeInstallmentRow(0)
+        harness.component.removeInstallmentRow(0)
+        advance()
+
+        assertEquals(false, harness.component.newEventState.value.allowPaymentPlans)
+        assertEquals(null, harness.component.newEventState.value.installmentCount)
+        assertEquals(emptyList(), harness.component.newEventState.value.installmentAmounts)
+        assertEquals(emptyList(), harness.component.newEventState.value.installmentDueDates)
+    }
+
+    @Test
     fun selecting_league_or_tournament_enables_open_ended_end_flag() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         advance()

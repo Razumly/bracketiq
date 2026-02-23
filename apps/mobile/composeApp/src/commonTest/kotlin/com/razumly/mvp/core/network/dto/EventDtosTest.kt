@@ -47,6 +47,22 @@ class EventDtosTest {
     }
 
     @Test
+    fun to_update_dto_includes_assistant_host_ids() {
+        val event = Event(
+            name = "Assistants Event",
+            eventType = EventType.EVENT,
+            hostId = "host-2",
+            assistantHostIds = listOf("assistant-1", "assistant-2"),
+            start = Instant.fromEpochMilliseconds(1_700_000_000_000),
+            end = Instant.fromEpochMilliseconds(1_700_003_600_000),
+        )
+
+        val dto = event.toUpdateDto()
+
+        assertEquals(listOf("assistant-1", "assistant-2"), dto.assistantHostIds)
+    }
+
+    @Test
     fun to_update_dto_includes_league_scoring_config_when_override_is_provided() {
         val event = Event(
             name = "League Event",
@@ -270,6 +286,29 @@ class EventDtosTest {
         assertEquals(listOf("event-11__division__open"), event?.divisions)
         assertEquals("Open", event?.divisionDetails?.firstOrNull()?.name)
         assertEquals(true, event?.noFixedEndDateTime)
+    }
+
+    @Test
+    fun event_api_dto_maps_assistant_hosts_with_backward_compatible_default() {
+        val missingAssistantHosts = EventApiDto(
+            id = "event-17",
+            name = "API Event",
+            hostId = "host-17",
+            start = "2026-02-10T00:00:00Z",
+            end = "2026-02-10T01:00:00Z",
+        ).toEventOrNull()
+
+        val withAssistantHosts = EventApiDto(
+            id = "event-18",
+            name = "API Event",
+            hostId = "host-18",
+            assistantHostIds = listOf("assistant-1", "assistant-2"),
+            start = "2026-02-10T00:00:00Z",
+            end = "2026-02-10T01:00:00Z",
+        ).toEventOrNull()
+
+        assertEquals(emptyList(), missingAssistantHosts?.assistantHostIds)
+        assertEquals(listOf("assistant-1", "assistant-2"), withAssistantHosts?.assistantHostIds)
     }
 
     @Test

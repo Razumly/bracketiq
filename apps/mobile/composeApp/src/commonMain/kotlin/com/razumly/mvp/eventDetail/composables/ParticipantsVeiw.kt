@@ -27,12 +27,15 @@ import com.razumly.mvp.core.presentation.composables.PlayerAction
 import com.razumly.mvp.core.presentation.composables.PlayerCardWithActions
 import com.razumly.mvp.core.presentation.composables.TeamCard
 import com.razumly.mvp.core.presentation.composables.TeamDetailsDialog
+import com.razumly.mvp.core.presentation.util.getScreenWidth
 import com.razumly.mvp.core.presentation.util.isScrollingUp
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
 import com.razumly.mvp.eventDetail.LocalTournamentComponent
 import org.koin.core.parameter.parametersOf
 import org.koin.mp.KoinPlatform.getKoin
+
+private const val MOBILE_BREAKPOINT_DP = 600
 
 enum class ParticipantsSection(val label: String) {
     TEAMS("Teams"),
@@ -85,6 +88,7 @@ fun ParticipantsView(
     val navPadding = LocalNavBarPadding.current
     val lazyColumnState = rememberLazyListState()
     val isScrollingUp by lazyColumnState.isScrollingUp()
+    val showParticipantsTitle = getScreenWidth() >= MOBILE_BREAKPOINT_DP
     val popUpHandler = LocalPopupHandler.current
     val loadingHandler = LocalLoadingHandler.current
 
@@ -116,8 +120,10 @@ fun ParticipantsView(
         verticalArrangement = Arrangement.spacedBy(16.dp),
         contentPadding = navPadding
     ) {
-        item(key = "header") {
-            Text("Participants", style = MaterialTheme.typography.titleLarge)
+        if (showParticipantsTitle) {
+            item(key = "header") {
+                Text("Participants", style = MaterialTheme.typography.titleLarge)
+            }
         }
 
         item(key = "section-header") {

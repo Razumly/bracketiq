@@ -23,8 +23,8 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 
 interface TeamManagementComponent {
     val selectedEvent: Event?
@@ -35,6 +35,7 @@ interface TeamManagementComponent {
     val currentTeams: StateFlow<List<TeamWithPlayers>>
     val teamInvites: StateFlow<List<TeamInvite>>
     val selectedTeam: StateFlow<TeamWithPlayers?>
+    val staffUsersById: StateFlow<Map<String, UserData>>
     val suggestedPlayers: StateFlow<List<UserData>>
     val freeAgentsFiltered: StateFlow<List<UserData>>
     val enableDeleteTeam: StateFlow<Boolean>
@@ -96,6 +97,9 @@ class DefaultTeamManagementComponent(
     private val _selectedTeam = MutableStateFlow<TeamWithPlayers?>(null)
     override val selectedTeam = _selectedTeam.asStateFlow()
 
+    private val _staffUsersById = MutableStateFlow<Map<String, UserData>>(emptyMap())
+    override val staffUsersById = _staffUsersById.asStateFlow()
+
     private val _suggestedPlayers = MutableStateFlow<List<UserData>>(listOf())
     override val suggestedPlayers = _suggestedPlayers.asStateFlow()
 
@@ -155,8 +159,10 @@ class DefaultTeamManagementComponent(
         scope.launch {
             currentTeams.collect { teams ->
                 if (_selectedTeam.value != null) {
-                    _selectedTeam.value =
+                    val updatedSelectedTeam =
                         teams.find { team -> team.team.id == _selectedTeam.value!!.team.id }
+                    _selectedTeam.value = updatedSelectedTeam
+                    refreshSelectedTeamStaffUsers(updatedSelectedTeam)
                 }
             }
         }
@@ -164,9 +170,11 @@ class DefaultTeamManagementComponent(
     }
 
     override fun selectTeam(team: TeamWithPlayers?) {
-        _selectedTeam.value = team ?: TeamWithPlayers(
-            Team(currentUser.id), currentUser,listOf(currentUser), listOf()
+        val resolvedTeam = team ?: TeamWithPlayers(
+            Team(currentUser.id), currentUser, listOf(currentUser), listOf()
         )
+        _selectedTeam.value = resolvedTeam
+        refreshSelectedTeamStaffUsers(resolvedTeam)
     }
 
     override fun createTeam(team: Team) {
@@ -202,6 +210,7 @@ class DefaultTeamManagementComponent(
 
     override fun deselectTeam() {
         _selectedTeam.value = null
+        _staffUsersById.value = emptyMap()
     }
 
     override fun deleteTeam(team: TeamWithPlayers) {
@@ -281,5 +290,43 @@ class DefaultTeamManagementComponent(
                 TeamInvite(invite = invite, team = invite.teamId?.let(teamMap::get))
             }
         }
+    }
+
+    private fun refreshSelectedTeamStaffUsers(team: TeamWithPlayers?) {
+        if (team == null) {
+            _staffUsersById.value = emptyMap()
+            return
+        }
+
+        val selectedTeamId = team.team.id
+        val knownUsers = buildKnownUsers(team)
+        val staffIds = buildSet {
+            add(team.team.managerId ?: team.team.captainId)
+            team.team.headCoachId?.takeIf(String::isNotBlank)?.let(::add)
+            team.team.coachIds.filter(String::isNotBlank).forEach(::add)
+        }
+
+        val missingUserIds = staffIds.filterNot { knownUsers.containsKey(it) }
+        if (missingUserIds.isEmpty()) {
+            _staffUsersById.value = knownUsers
+            return
+        }
+
+        scope.launch {
+            val fetchedUsers = userRepository.getUsers(missingUserIds).getOrElse {
+                _errorState.value = it.message
+                emptyList()
+            }
+            if (_selectedTeam.value?.team?.id != selectedTeamId) {
+                return@launch
+            }
+            _staffUsersById.value = knownUsers + fetchedUsers.associateBy { it.id }
+        }
+    }
+
+    private fun buildKnownUsers(team: TeamWithPlayers): Map<String, UserData> = buildMap {
+        put(team.captain.id, team.captain)
+        team.players.forEach { put(it.id, it) }
+        team.pendingPlayers.forEach { put(it.id, it) }
     }
 }

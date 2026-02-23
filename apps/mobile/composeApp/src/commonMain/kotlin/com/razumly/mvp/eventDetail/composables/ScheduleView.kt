@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -24,11 +25,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -56,10 +59,9 @@ import com.kizitonwose.calendar.core.CalendarDay
 import com.kizitonwose.calendar.core.DayPosition
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
-import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
+import com.razumly.mvp.core.presentation.util.getScreenWidth
 import com.razumly.mvp.core.presentation.util.isScrollingUp
-import com.razumly.mvp.core.presentation.util.timeFormat
 import kotlinx.coroutines.launch
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.Month
@@ -80,7 +82,11 @@ private data class FieldScheduleGroup(
     val matches: List<MatchWithRelations>,
 )
 
+private const val MOBILE_BREAKPOINT_DP = 600
 private const val UNASSIGNED_FIELD_KEY = "__unassigned_field__"
+private const val ALL_FIELDS_KEY = "__all_fields__"
+private const val BRACKET_CARD_HEIGHT_DP = 90
+private const val BRACKET_CARD_VERTICAL_PADDING_DP = 20
 
 @Composable
 fun ScheduleView(
@@ -145,9 +151,16 @@ fun ScheduleView(
     }
     var selectedDate by remember(defaultDate) { mutableStateOf(defaultDate) }
     var groupingMode by rememberSaveable { mutableStateOf(ScheduleGroupingMode.TIME) }
+    var selectedFieldKey by rememberSaveable { mutableStateOf(ALL_FIELDS_KEY) }
+    val isMobileLayout = getScreenWidth() < MOBILE_BREAKPOINT_DP
     LaunchedEffect(sortedDates) {
         if (selectedDate !in matchesByDate.keys) {
             selectedDate = sortedDates.first()
+        }
+    }
+    LaunchedEffect(groupingMode) {
+        if (groupingMode != ScheduleGroupingMode.FIELD) {
+            selectedFieldKey = ALL_FIELDS_KEY
         }
     }
     val startMonth = remember(sortedDates) { sortedDates.first().toYearMonth() }
@@ -211,6 +224,21 @@ fun ScheduleView(
         val fieldGroups = remember(dayMatches, fieldsById) {
             buildFieldScheduleGroups(dayMatches, fieldsById)
         }
+        val selectableFieldKeys = remember(fieldGroups) {
+            fieldGroups.map(FieldScheduleGroup::key).toSet()
+        }
+        LaunchedEffect(selectableFieldKeys) {
+            if (selectedFieldKey != ALL_FIELDS_KEY && selectedFieldKey !in selectableFieldKeys) {
+                selectedFieldKey = ALL_FIELDS_KEY
+            }
+        }
+        val visibleFieldGroups = remember(fieldGroups, selectedFieldKey) {
+            if (selectedFieldKey == ALL_FIELDS_KEY) {
+                fieldGroups
+            } else {
+                fieldGroups.filter { it.key == selectedFieldKey }
+            }
+        }
         DaySummaryHeader(selectedDate, dayMatches.size)
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -248,43 +276,51 @@ fun ScheduleView(
                 )
             }
         } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                state = lazyListState,
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                contentPadding = navPadding
-            ) {
-                if (groupingMode == ScheduleGroupingMode.TIME) {
-                    items(dayMatches, key = { it.match.id }) { match ->
-                        ScheduleMatchCard(
-                            match = match,
-                            fieldsById = fieldsById,
-                            timeZone = timeZone,
-                            onClick = { onMatchClick(match) }
-                        )
-                    }
-                } else {
-                    items(fieldGroups, key = { it.key }) { group ->
-                        Column(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(
-                                text = "${group.label} (${group.matches.size})",
-                                modifier = Modifier.padding(horizontal = 16.dp),
-                                style = MaterialTheme.typography.titleSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+            Box(modifier = Modifier.fillMaxSize()) {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    state = lazyListState,
+                    verticalArrangement = Arrangement.spacedBy(0.dp),
+                    contentPadding = navPadding
+                ) {
+                    if (groupingMode == ScheduleGroupingMode.TIME) {
+                        items(dayMatches, key = { it.match.id }) { match ->
+                            ScheduleMatchCard(
+                                match = match,
+                                onClick = { onMatchClick(match) }
                             )
-                            group.matches.forEach { match ->
-                                ScheduleMatchCard(
-                                    match = match,
-                                    fieldsById = fieldsById,
-                                    timeZone = timeZone,
-                                    onClick = { onMatchClick(match) }
+                        }
+                    } else {
+                        items(visibleFieldGroups, key = { it.key }) { group ->
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(0.dp)
+                            ) {
+                                Text(
+                                    text = "${group.label} (${group.matches.size})",
+                                    modifier = Modifier.padding(horizontal = 16.dp),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                                group.matches.forEach { match ->
+                                    ScheduleMatchCard(
+                                        match = match,
+                                        onClick = { onMatchClick(match) }
+                                    )
+                                }
                             }
                         }
                     }
+                }
+                if (isMobileLayout && groupingMode == ScheduleGroupingMode.FIELD && fieldGroups.isNotEmpty()) {
+                    FieldSelectorEdgeButton(
+                        fieldGroups = fieldGroups,
+                        selectedFieldKey = selectedFieldKey,
+                        onFieldSelected = { selectedFieldKey = it },
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .padding(end = 0.dp)
+                    )
                 }
             }
         }
@@ -418,6 +454,72 @@ private fun ScheduleGroupingToggle(
     }
 }
 
+@Composable
+private fun FieldSelectorEdgeButton(
+    fieldGroups: List<FieldScheduleGroup>,
+    selectedFieldKey: String,
+    onFieldSelected: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selectedLabel = remember(fieldGroups, selectedFieldKey) {
+        fieldGroups.firstOrNull { it.key == selectedFieldKey }?.label ?: "All fields"
+    }
+
+    Box(modifier = modifier) {
+        Surface(
+            modifier = Modifier
+                .clip(RoundedCornerShape(topStart = 16.dp, bottomStart = 16.dp))
+                .clickable { expanded = true },
+            shape = RoundedCornerShape(topStart = 16.dp, bottomStart = 16.dp),
+            tonalElevation = 4.dp,
+            shadowElevation = 6.dp,
+            color = MaterialTheme.colorScheme.surfaceVariant
+        ) {
+            Row(
+                modifier = Modifier
+                    .padding(start = 12.dp, end = 6.dp, top = 10.dp, bottom = 10.dp)
+                    .widthIn(max = 136.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = selectedLabel,
+                    style = MaterialTheme.typography.labelLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Icon(
+                    imageVector = Icons.Default.ArrowDropDown,
+                    contentDescription = "Select field"
+                )
+            }
+        }
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            DropdownMenuItem(
+                text = { Text("All fields") },
+                onClick = {
+                    onFieldSelected(ALL_FIELDS_KEY)
+                    expanded = false
+                }
+            )
+            fieldGroups.forEach { group ->
+                DropdownMenuItem(
+                    text = { Text(group.label) },
+                    onClick = {
+                        onFieldSelected(group.key)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+}
+
 private fun buildFieldScheduleGroups(
     dayMatches: List<MatchWithRelations>,
     fieldsById: Map<String, FieldWithMatches>,
@@ -485,66 +587,20 @@ private fun resolveFieldLabel(
 @Composable
 private fun ScheduleMatchCard(
     match: MatchWithRelations,
-    fieldsById: Map<String, FieldWithMatches>,
-    timeZone: TimeZone,
     onClick: () -> Unit
 ) {
-    val localDateTime = remember(match.match.start, timeZone) {
-        match.match.start.toLocalDateTime(timeZone)
-    }
-    val timeText = remember(localDateTime) { timeFormat.format(localDateTime.time) }
-    val fieldLabel = remember(match, fieldsById) {
-        resolveFieldLabel(match, fieldsById)
-    }
-    val teamOne = match.team1?.displayName.orEmpty().ifBlank { "TBD" }
-    val teamTwo = match.team2?.displayName.orEmpty().ifBlank { "TBD" }
-    Card(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-            .clickable(onClick = onClick),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+            .padding(horizontal = 16.dp, vertical = BRACKET_CARD_VERTICAL_PADDING_DP.dp)
     ) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(
-                text = "$teamOne vs $teamTwo",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = "$timeText - $fieldLabel",
-                style = MaterialTheme.typography.bodyMedium
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = "Division: ${match.match.division?.toDivisionDisplayLabel().orEmpty().ifBlank { "TBD" }}",
-                    style = MaterialTheme.typography.labelMedium
-                )
-                Text(
-                    text = scoreLine(match),
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-        }
-    }
-}
-
-private fun scoreLine(match: MatchWithRelations): String {
-    val team1Score = match.match.team1Points.takeIf { it.isNotEmpty() }?.joinToString("-")
-    val team2Score = match.match.team2Points.takeIf { it.isNotEmpty() }?.joinToString("-")
-    return if (team1Score != null && team2Score != null) {
-        "$team1Score : $team2Score"
-    } else {
-        "Score TBD"
+        MatchCard(
+            match = match,
+            onClick = onClick,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(BRACKET_CARD_HEIGHT_DP.dp)
+        )
     }
 }
 

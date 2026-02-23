@@ -42,6 +42,7 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
     val selectedFreeAgent by component.selectedFreeAgent.collectAsState()
     val selectedEvent = component.selectedEvent
     val selectedTeam by component.selectedTeam.collectAsState()
+    val staffUsersById by component.staffUsersById.collectAsState()
     val currentUser = component.currentUser
     val isCaptain = selectedTeam?.team?.captainId == currentUser.id || selectedTeam?.team?.managerId == currentUser.id
     var createTeam by remember { mutableStateOf(false) }
@@ -160,6 +161,7 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
                 isCaptain = isCaptain,
                 currentUser = currentUser,
                 isNewTeam = createTeam,
+                staffUsersById = staffUsersById,
                 onEnsureUserByEmail = { email -> component.ensureUserByEmail(email) },
                 onInviteTeamRole = { teamId, userId, inviteType ->
                     component.inviteUserToRole(teamId, userId, inviteType)

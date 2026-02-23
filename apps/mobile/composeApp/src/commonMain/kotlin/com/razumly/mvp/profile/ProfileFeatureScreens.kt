@@ -10,7 +10,9 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -33,20 +35,28 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.ProfileDocumentCard
 import com.razumly.mvp.core.data.repositories.ProfileDocumentType
+import com.razumly.mvp.core.network.apiBaseUrl
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
 import com.razumly.mvp.core.presentation.composables.PlatformDropdown
 import com.razumly.mvp.core.presentation.composables.PlatformTextField
 import com.razumly.mvp.core.presentation.composables.PullToRefreshContainer
+import com.razumly.mvp.core.presentation.util.getImageUrl
 import com.razumly.mvp.core.presentation.util.MoneyInputUtils
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
+import coil3.compose.AsyncImage
+import coil3.compose.AsyncImagePainter
+import io.ktor.http.encodeURLQueryComponent
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 
@@ -1171,6 +1181,27 @@ private fun ConnectionUserCard(
     primaryActions: @Composable () -> Unit,
     secondaryActions: (@Composable () -> Unit)? = null,
 ) {
+    val avatarSize = 56
+    var useGeneratedAvatar by remember(user.id, user.profileImageId) {
+        mutableStateOf(user.profileImageId.isNullOrBlank())
+    }
+    val avatarModel = remember(
+        user.id,
+        user.profileImageId,
+        user.fullName,
+        user.userName,
+        useGeneratedAvatar,
+    ) {
+        val profileImageId = user.profileImageId?.trim().orEmpty()
+        if (!useGeneratedAvatar && profileImageId.isNotBlank()) {
+            getImageUrl(profileImageId, width = avatarSize, height = avatarSize)
+        } else {
+            val fallbackName = user.fullName
+                .ifBlank { user.userName.ifBlank { "User" } }
+            buildConnectionAvatarUrl(fallbackName, size = avatarSize)
+        }
+    }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
@@ -1182,15 +1213,40 @@ private fun ConnectionUserCard(
             modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(
-                text = user.fullName.ifBlank { "User" },
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Text(
-                text = "@${user.userName.ifBlank { "user" }}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                AsyncImage(
+                    model = avatarModel,
+                    contentDescription = "${user.fullName.ifBlank { "User" }} avatar",
+                    modifier = Modifier
+                        .size(avatarSize.dp)
+                        .clip(CircleShape),
+                    contentScale = ContentScale.Crop,
+                    onState = { state ->
+                        if (!useGeneratedAvatar && state is AsyncImagePainter.State.Error) {
+                            useGeneratedAvatar = true
+                        }
+                    },
+                )
+
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = user.fullName.ifBlank { "User" },
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        text = "@${user.userName.ifBlank { "user" }}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1213,6 +1269,15 @@ private fun ConnectionUserCard(
         }
     }
 }
+
+private fun buildConnectionAvatarUrl(name: String, size: Int): String =
+    buildString {
+        append(apiBaseUrl.trimEnd('/'))
+        append("/api/avatars/initials?name=")
+        append(name.encodeURLQueryComponent())
+        append("&size=")
+        append(size)
+    }
 
 @Composable
 private fun ChildrenGrid(

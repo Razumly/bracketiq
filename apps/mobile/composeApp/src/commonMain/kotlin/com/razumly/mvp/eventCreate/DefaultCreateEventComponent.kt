@@ -72,10 +72,24 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     val localFields: StateFlow<List<Field>>
     val leagueSlots: StateFlow<List<TimeSlot>>
     val leagueScoringConfig: StateFlow<LeagueScoringConfigDTO>
+    val suggestedUsers: StateFlow<List<UserData>>
 
     fun onBackClicked()
     fun updateEventField(update: Event.() -> Event)
     fun updateTournamentField(update: Event.() -> Event)
+    fun updateHostId(hostId: String)
+    fun updateAssistantHostIds(assistantHostIds: List<String>)
+    fun updateDoTeamsRef(doTeamsRef: Boolean)
+    fun addRefereeId(refereeId: String)
+    fun removeRefereeId(refereeId: String)
+    fun setPaymentPlansEnabled(enabled: Boolean)
+    fun setInstallmentCount(count: Int)
+    fun updateInstallmentAmount(index: Int, amountCents: Int)
+    fun updateInstallmentDueDate(index: Int, dueDate: String)
+    fun addInstallmentRow()
+    fun removeInstallmentRow(index: Int)
+    fun searchUsers(query: String)
+    suspend fun ensureUserByEmail(email: String): Result<UserData>
     fun setLoadingHandler(loadingHandler: LoadingHandler)
     fun createEvent()
     fun nextStep()
@@ -155,6 +169,8 @@ class DefaultCreateEventComponent(
 
     override val currentUser = userRepository.currentUser.map { it.getOrThrow() }
         .stateIn(scope, SharingStarted.Eagerly, null)
+    private val _suggestedUsers = MutableStateFlow<List<UserData>>(emptyList())
+    override val suggestedUsers = _suggestedUsers.asStateFlow()
 
     override val eventImageUrls = imageRepository
         .getUserImageIdsFlow()
@@ -200,8 +216,7 @@ class DefaultCreateEventComponent(
         loadSports()
         scope.launch {
             userRepository.currentUser.collect { currentUser ->
-                updateEventField { copy(hostId = currentUser.getOrThrow().id) }
-                updateTournamentField { copy(hostId = currentUser.getOrThrow().id) }
+                updateHostId(currentUser.getOrThrow().id)
             }
         }
         scope.launch {
@@ -325,6 +340,195 @@ class DefaultCreateEventComponent(
             _newEventState.value = normalized
             syncLocalFieldsForEvent(normalized)
         }
+    }
+
+    override fun updateHostId(hostId: String) {
+        val normalizedHostId = hostId.trim()
+        if (normalizedHostId.isEmpty()) return
+        updateEventField {
+            copy(
+                hostId = normalizedHostId,
+                assistantHostIds = assistantHostIds
+                    .normalizeDistinctIds()
+                    .filterNot { assistantHostId -> assistantHostId == normalizedHostId },
+            )
+        }
+    }
+
+    override fun updateAssistantHostIds(assistantHostIds: List<String>) {
+        updateEventField {
+            val normalizedHostId = hostId.trim()
+            copy(
+                assistantHostIds = assistantHostIds
+                    .normalizeDistinctIds()
+                    .filterNot { assistantHostId -> assistantHostId == normalizedHostId },
+            )
+        }
+    }
+
+    override fun updateDoTeamsRef(doTeamsRef: Boolean) {
+        updateEventField { copy(doTeamsRef = doTeamsRef) }
+    }
+
+    override fun addRefereeId(refereeId: String) {
+        val normalizedRefereeId = refereeId.trim()
+        if (normalizedRefereeId.isEmpty()) return
+        updateEventField {
+            copy(refereeIds = (refereeIds + normalizedRefereeId).normalizeDistinctIds())
+        }
+    }
+
+    override fun removeRefereeId(refereeId: String) {
+        val normalizedRefereeId = refereeId.trim()
+        if (normalizedRefereeId.isEmpty()) return
+        updateEventField {
+            copy(refereeIds = refereeIds.filterNot { existingId -> existingId == normalizedRefereeId })
+        }
+    }
+
+    override fun setPaymentPlansEnabled(enabled: Boolean) {
+        updateEventField {
+            if (!enabled) {
+                copy(
+                    allowPaymentPlans = false,
+                    installmentCount = null,
+                    installmentDueDates = emptyList(),
+                    installmentAmounts = emptyList(),
+                )
+            } else {
+                val targetCount = currentInstallmentCount().coerceAtLeast(1)
+                val (amounts, dueDates) = normalizeInstallments(targetCount)
+                copy(
+                    allowPaymentPlans = true,
+                    installmentCount = targetCount,
+                    installmentDueDates = dueDates,
+                    installmentAmounts = amounts,
+                )
+            }
+        }
+    }
+
+    override fun setInstallmentCount(count: Int) {
+        val targetCount = count.coerceAtLeast(1)
+        updateEventField {
+            val (amounts, dueDates) = normalizeInstallments(targetCount)
+            copy(
+                allowPaymentPlans = true,
+                installmentCount = targetCount,
+                installmentDueDates = dueDates,
+                installmentAmounts = amounts,
+            )
+        }
+    }
+
+    override fun updateInstallmentAmount(index: Int, amountCents: Int) {
+        if (index < 0) return
+        updateEventField {
+            val targetCount = currentInstallmentCount().coerceAtLeast(index + 1).coerceAtLeast(1)
+            val (amounts, dueDates) = normalizeInstallments(targetCount)
+            if (index !in amounts.indices) {
+                return@updateEventField this
+            }
+            val updatedAmounts = amounts.toMutableList().apply {
+                this[index] = amountCents.coerceAtLeast(0)
+            }
+            copy(
+                allowPaymentPlans = true,
+                installmentCount = targetCount,
+                installmentAmounts = updatedAmounts,
+                installmentDueDates = dueDates,
+            )
+        }
+    }
+
+    override fun updateInstallmentDueDate(index: Int, dueDate: String) {
+        if (index < 0) return
+        updateEventField {
+            val targetCount = currentInstallmentCount().coerceAtLeast(index + 1).coerceAtLeast(1)
+            val (amounts, dueDates) = normalizeInstallments(targetCount)
+            if (index !in dueDates.indices) {
+                return@updateEventField this
+            }
+            val updatedDueDates = dueDates.toMutableList().apply {
+                this[index] = dueDate.trim()
+            }
+            copy(
+                allowPaymentPlans = true,
+                installmentCount = targetCount,
+                installmentAmounts = amounts,
+                installmentDueDates = updatedDueDates,
+            )
+        }
+    }
+
+    override fun addInstallmentRow() {
+        updateEventField {
+            val targetCount = currentInstallmentCount().coerceAtLeast(0) + 1
+            val (amounts, dueDates) = normalizeInstallments(targetCount)
+            copy(
+                allowPaymentPlans = true,
+                installmentCount = targetCount,
+                installmentAmounts = amounts,
+                installmentDueDates = dueDates,
+            )
+        }
+    }
+
+    override fun removeInstallmentRow(index: Int) {
+        if (index < 0) return
+        updateEventField {
+            val targetCount = currentInstallmentCount().coerceAtLeast(1)
+            val (amounts, dueDates) = normalizeInstallments(targetCount)
+            if (index !in amounts.indices || index !in dueDates.indices) {
+                return@updateEventField this
+            }
+            val updatedAmounts = amounts.toMutableList().apply { removeAt(index) }
+            val updatedDueDates = dueDates.toMutableList().apply { removeAt(index) }
+            if (updatedAmounts.isEmpty()) {
+                copy(
+                    allowPaymentPlans = false,
+                    installmentCount = null,
+                    installmentAmounts = emptyList(),
+                    installmentDueDates = emptyList(),
+                )
+            } else {
+                copy(
+                    allowPaymentPlans = true,
+                    installmentCount = updatedAmounts.size,
+                    installmentAmounts = updatedAmounts,
+                    installmentDueDates = updatedDueDates,
+                )
+            }
+        }
+    }
+
+    override fun searchUsers(query: String) {
+        val normalizedQuery = query.trim()
+        if (normalizedQuery.isEmpty()) {
+            _suggestedUsers.value = emptyList()
+            return
+        }
+
+        scope.launch {
+            _suggestedUsers.value = userRepository.searchPlayers(normalizedQuery)
+                .getOrElse { error ->
+                    _errorState.value = ErrorMessage(error.message ?: "Unable to search users.")
+                    emptyList()
+                }
+                .filterNot { suggested -> suggested.id == _newEventState.value.hostId }
+        }
+    }
+
+    override suspend fun ensureUserByEmail(email: String): Result<UserData> {
+        val normalizedEmail = email.trim()
+        if (normalizedEmail.isEmpty()) {
+            return Result.failure(IllegalArgumentException("Email is required."))
+        }
+
+        return userRepository.ensureUserByEmail(normalizedEmail)
+            .onFailure { error ->
+                _errorState.value = ErrorMessage(error.message ?: "Unable to invite by email.")
+            }
     }
 
     override fun onTypeSelected(type: EventType) {
@@ -955,6 +1159,32 @@ class DefaultCreateEventComponent(
     private fun defaultFieldDivisions(event: Event): List<String> {
         val eventDivisions = event.divisions.normalizeDivisionIdentifiers()
         return eventDivisions.ifEmpty { listOf(DEFAULT_DIVISION) }
+    }
+
+    private fun Event.currentInstallmentCount(): Int {
+        return maxOf(
+            installmentCount ?: 0,
+            installmentAmounts.size,
+            installmentDueDates.size,
+        ).coerceAtLeast(0)
+    }
+
+    private fun Event.normalizeInstallments(targetCount: Int): Pair<List<Int>, List<String>> {
+        val normalizedCount = targetCount.coerceAtLeast(0)
+        val amounts = List(normalizedCount) { index ->
+            installmentAmounts.getOrNull(index)?.coerceAtLeast(0) ?: 0
+        }
+        val dueDates = List(normalizedCount) { index ->
+            installmentDueDates.getOrNull(index)?.trim().orEmpty()
+        }
+        return amounts to dueDates
+    }
+
+    private fun List<String>.normalizeDistinctIds(): List<String> {
+        return this
+            .map { value -> value.trim() }
+            .filter(String::isNotBlank)
+            .distinct()
     }
 
     private fun reserveRentalCheckoutLocks(eventDraft: Event): Boolean {
