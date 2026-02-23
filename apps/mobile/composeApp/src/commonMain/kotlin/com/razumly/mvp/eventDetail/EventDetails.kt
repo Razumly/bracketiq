@@ -231,6 +231,7 @@ fun EventDetails(
     var showStartPicker by remember { mutableStateOf(false) }
     var showEndPicker by remember { mutableStateOf(false) }
     var installmentDueDatePickerIndex by remember { mutableStateOf<Int?>(null) }
+    var divisionInstallmentDueDatePickerIndex by remember { mutableStateOf<Int?>(null) }
     var showImageSelector by rememberSaveable { mutableStateOf(false) }
     var showUploadImagePicker by rememberSaveable { mutableStateOf(false) }
     var previousSelection by remember { mutableStateOf<LatLng?>(null) }
@@ -287,15 +288,53 @@ fun EventDetails(
         editEvent.playoffTeamCount,
         editEvent.priceCents,
         editEvent.maxParticipants,
+        editEvent.allowPaymentPlans,
+        editEvent.installmentCount,
+        editEvent.installmentDueDates,
+        editEvent.installmentAmounts,
     ) {
+        val defaultInstallmentAmounts = editEvent.installmentAmounts.map { amount ->
+            amount.coerceAtLeast(0)
+        }
+        val defaultInstallmentDueDates = editEvent.installmentDueDates
+            .map { dueDate -> dueDate.trim() }
+            .filter(String::isNotBlank)
+        val defaultInstallmentCount = maxOf(
+            editEvent.installmentCount ?: 0,
+            defaultInstallmentAmounts.size,
+            defaultInstallmentDueDates.size,
+        ).takeIf { count -> count > 0 }
+        val defaultAllowPaymentPlans = editEvent.allowPaymentPlans == true &&
+            defaultInstallmentCount != null &&
+            editEvent.priceCents.coerceAtLeast(0) > 0
+
         normalizedDivisionDetails.map { detail ->
             val fallbackMaxParticipants = editEvent.maxParticipants.coerceAtLeast(2)
+            val effectiveDivisionPrice = if (editEvent.singleDivision) {
+                editEvent.priceCents.coerceAtLeast(0)
+            } else {
+                (detail.price ?: editEvent.priceCents).coerceAtLeast(0)
+            }
+            val detailInstallmentAmounts = detail.installmentAmounts.map { amount ->
+                amount.coerceAtLeast(0)
+            }
+            val detailInstallmentDueDates = detail.installmentDueDates
+                .map { dueDate -> dueDate.trim() }
+                .filter(String::isNotBlank)
+            val detailInstallmentCount = maxOf(
+                detail.installmentCount ?: 0,
+                detailInstallmentAmounts.size,
+                detailInstallmentDueDates.size,
+            ).takeIf { count -> count > 0 }
+            val detailAllowPaymentPlans = when {
+                editEvent.singleDivision -> defaultAllowPaymentPlans
+                detail.allowPaymentPlans == false -> false
+                detail.allowPaymentPlans == true -> detailInstallmentCount != null && effectiveDivisionPrice > 0
+                else -> defaultAllowPaymentPlans
+            }
+
             detail.copy(
-                price = if (editEvent.singleDivision) {
-                    editEvent.priceCents.coerceAtLeast(0)
-                } else {
-                    (detail.price ?: editEvent.priceCents).coerceAtLeast(0)
-                },
+                price = effectiveDivisionPrice,
                 maxParticipants = if (editEvent.singleDivision) {
                     fallbackMaxParticipants
                 } else {
@@ -312,6 +351,30 @@ fun EventDetails(
                         detail.playoffTeamCount
                             ?: fallbackMaxParticipants
                         ).coerceAtLeast(2)
+                },
+                allowPaymentPlans = detailAllowPaymentPlans,
+                installmentCount = when {
+                    editEvent.singleDivision -> defaultInstallmentCount
+                    detailAllowPaymentPlans -> detailInstallmentCount ?: defaultInstallmentCount
+                    else -> null
+                },
+                installmentDueDates = when {
+                    editEvent.singleDivision -> defaultInstallmentDueDates
+                    detailAllowPaymentPlans -> if (detailInstallmentDueDates.isNotEmpty()) {
+                        detailInstallmentDueDates
+                    } else {
+                        defaultInstallmentDueDates
+                    }
+                    else -> emptyList()
+                },
+                installmentAmounts = when {
+                    editEvent.singleDivision -> defaultInstallmentAmounts
+                    detailAllowPaymentPlans -> if (detailInstallmentAmounts.isNotEmpty()) {
+                        detailInstallmentAmounts
+                    } else {
+                        defaultInstallmentAmounts
+                    }
+                    else -> emptyList()
                 },
             )
         }
@@ -339,6 +402,10 @@ fun EventDetails(
                 defaultPriceCents = editEvent.priceCents,
                 defaultMaxParticipants = editEvent.maxParticipants,
                 defaultPlayoffTeamCount = editEvent.playoffTeamCount ?: editEvent.maxParticipants,
+                defaultAllowPaymentPlans = editEvent.allowPaymentPlans == true,
+                defaultInstallmentCount = editEvent.installmentCount,
+                defaultInstallmentDueDates = editEvent.installmentDueDates,
+                defaultInstallmentAmounts = editEvent.installmentAmounts,
             ),
         )
     }
@@ -362,10 +429,15 @@ fun EventDetails(
             divisionEditor.ageDivisionTypeId.isNotBlank()
     }
     fun resetDivisionEditor() {
+        divisionInstallmentDueDatePickerIndex = null
         divisionEditor = defaultDivisionEditorState(
             defaultPriceCents = editEvent.priceCents,
             defaultMaxParticipants = editEvent.maxParticipants,
             defaultPlayoffTeamCount = editEvent.playoffTeamCount ?: editEvent.maxParticipants,
+            defaultAllowPaymentPlans = editEvent.allowPaymentPlans == true,
+            defaultInstallmentCount = editEvent.installmentCount,
+            defaultInstallmentDueDates = editEvent.installmentDueDates,
+            defaultInstallmentAmounts = editEvent.installmentAmounts,
         )
     }
     fun syncLeagueSlotsForSelectedDivisions(normalizedSelection: List<String>) {
@@ -437,6 +509,136 @@ fun EventDetails(
                 else -> autoName
             },
             nameTouched = hasRequiredFields && previous.nameTouched,
+            error = null,
+        )
+    }
+    fun syncDivisionInstallmentCount(count: Int) {
+        val safeCount = count.coerceAtLeast(1)
+        val nextAmounts = divisionEditor.installmentAmounts.toMutableList()
+        val nextDueDates = divisionEditor.installmentDueDates.toMutableList()
+        while (nextAmounts.size < safeCount) {
+            nextAmounts.add(0)
+        }
+        while (nextDueDates.size < safeCount) {
+            nextDueDates.add("")
+        }
+        if (nextAmounts.size > safeCount) {
+            nextAmounts.subList(safeCount, nextAmounts.size).clear()
+        }
+        if (nextDueDates.size > safeCount) {
+            nextDueDates.subList(safeCount, nextDueDates.size).clear()
+        }
+        divisionEditor = divisionEditor.copy(
+            installmentCount = safeCount,
+            installmentAmounts = nextAmounts,
+            installmentDueDates = nextDueDates,
+            error = null,
+        )
+    }
+    fun setDivisionPaymentPlansEnabled(enabled: Boolean) {
+        if (!enabled) {
+            divisionInstallmentDueDatePickerIndex = null
+            divisionEditor = divisionEditor.copy(
+                allowPaymentPlans = false,
+                installmentCount = 0,
+                installmentAmounts = emptyList(),
+                installmentDueDates = emptyList(),
+                error = null,
+            )
+            return
+        }
+        val fallbackCount = maxOf(
+            divisionEditor.installmentCount,
+            divisionEditor.installmentAmounts.size,
+            divisionEditor.installmentDueDates.size,
+            1,
+        )
+        val nextAmounts = divisionEditor.installmentAmounts.toMutableList()
+        val nextDueDates = divisionEditor.installmentDueDates.toMutableList()
+        while (nextAmounts.size < fallbackCount) {
+            nextAmounts.add(0)
+        }
+        while (nextDueDates.size < fallbackCount) {
+            nextDueDates.add("")
+        }
+        divisionEditor = divisionEditor.copy(
+            allowPaymentPlans = true,
+            installmentCount = fallbackCount,
+            installmentAmounts = nextAmounts,
+            installmentDueDates = nextDueDates,
+            error = null,
+        )
+    }
+    fun updateDivisionInstallmentAmount(index: Int, amountCents: Int) {
+        val normalizedCount = maxOf(
+            divisionEditor.installmentCount,
+            divisionEditor.installmentAmounts.size,
+            divisionEditor.installmentDueDates.size,
+            index + 1,
+            1,
+        )
+        val nextAmounts = divisionEditor.installmentAmounts.toMutableList()
+        while (nextAmounts.size < normalizedCount) {
+            nextAmounts.add(0)
+        }
+        nextAmounts[index] = amountCents.coerceAtLeast(0)
+        divisionEditor = divisionEditor.copy(
+            installmentCount = normalizedCount,
+            installmentAmounts = nextAmounts,
+            error = null,
+        )
+    }
+    fun updateDivisionInstallmentDueDate(index: Int, dueDate: String) {
+        val normalizedCount = maxOf(
+            divisionEditor.installmentCount,
+            divisionEditor.installmentAmounts.size,
+            divisionEditor.installmentDueDates.size,
+            index + 1,
+            1,
+        )
+        val nextDueDates = divisionEditor.installmentDueDates.toMutableList()
+        while (nextDueDates.size < normalizedCount) {
+            nextDueDates.add("")
+        }
+        nextDueDates[index] = dueDate.trim()
+        divisionEditor = divisionEditor.copy(
+            installmentCount = normalizedCount,
+            installmentDueDates = nextDueDates,
+            error = null,
+        )
+    }
+    fun addDivisionInstallmentRow() {
+        syncDivisionInstallmentCount(
+            maxOf(
+                1,
+                divisionEditor.installmentCount,
+                divisionEditor.installmentAmounts.size,
+                divisionEditor.installmentDueDates.size,
+            ) + 1,
+        )
+    }
+    fun removeDivisionInstallmentRow(index: Int) {
+        val nextAmounts = divisionEditor.installmentAmounts.toMutableList()
+        val nextDueDates = divisionEditor.installmentDueDates.toMutableList()
+        if (index !in nextAmounts.indices || index !in nextDueDates.indices) {
+            return
+        }
+        nextAmounts.removeAt(index)
+        nextDueDates.removeAt(index)
+        val nextCount = maxOf(nextAmounts.size, nextDueDates.size, 1)
+        while (nextAmounts.size < nextCount) {
+            nextAmounts.add(0)
+        }
+        while (nextDueDates.size < nextCount) {
+            nextDueDates.add("")
+        }
+        if (divisionInstallmentDueDatePickerIndex == index) {
+            divisionInstallmentDueDatePickerIndex = null
+        }
+        divisionEditor = divisionEditor.copy(
+            installmentCount = nextCount,
+            installmentAmounts = nextAmounts,
+            installmentDueDates = nextDueDates,
             error = null,
         )
     }
@@ -520,6 +722,89 @@ fun EventDetails(
 
             else -> divisionEditor.playoffTeamCount.coerceAtLeast(2)
         }
+        val defaultInstallmentAmounts = editEvent.installmentAmounts.map { amount ->
+            amount.coerceAtLeast(0)
+        }
+        val defaultInstallmentDueDates = editEvent.installmentDueDates
+            .map { dueDate -> dueDate.trim() }
+            .filter(String::isNotBlank)
+        val defaultInstallmentCount = maxOf(
+            editEvent.installmentCount ?: 0,
+            defaultInstallmentAmounts.size,
+            defaultInstallmentDueDates.size,
+        ).takeIf { count -> count > 0 }
+        val defaultAllowPaymentPlans = editEvent.allowPaymentPlans == true &&
+            defaultInstallmentCount != null &&
+            editEvent.priceCents.coerceAtLeast(0) > 0
+        val editorInstallmentAmounts = divisionEditor.installmentAmounts.map { amount ->
+            amount.coerceAtLeast(0)
+        }
+        val editorInstallmentDueDates = divisionEditor.installmentDueDates
+            .map { dueDate -> dueDate.trim() }
+            .filter(String::isNotBlank)
+        val editorInstallmentCount = maxOf(
+            divisionEditor.installmentCount,
+            editorInstallmentAmounts.size,
+            editorInstallmentDueDates.size,
+        ).takeIf { count -> count > 0 }
+        val normalizedAllowPaymentPlans = if (editEvent.singleDivision) {
+            defaultAllowPaymentPlans
+        } else {
+            divisionEditor.allowPaymentPlans && normalizedPrice > 0 && editorInstallmentCount != null
+        }
+        val normalizedInstallmentCount = if (normalizedAllowPaymentPlans) {
+            if (editEvent.singleDivision) {
+                defaultInstallmentCount
+            } else {
+                editorInstallmentCount
+            }
+        } else {
+            null
+        }
+        val normalizedInstallmentAmounts = if (normalizedAllowPaymentPlans) {
+            if (editEvent.singleDivision) {
+                defaultInstallmentAmounts
+            } else {
+                editorInstallmentAmounts
+            }
+        } else {
+            emptyList()
+        }
+        val normalizedInstallmentDueDates = if (normalizedAllowPaymentPlans) {
+            if (editEvent.singleDivision) {
+                defaultInstallmentDueDates
+            } else {
+                editorInstallmentDueDates
+            }
+        } else {
+            emptyList()
+        }
+        if (!editEvent.singleDivision && normalizedAllowPaymentPlans) {
+            if (normalizedInstallmentCount == null || normalizedInstallmentCount <= 0) {
+                divisionEditor = divisionEditor.copy(
+                    error = "Installment count must be at least 1 when payment plans are enabled.",
+                )
+                return
+            }
+            if (normalizedInstallmentAmounts.size != normalizedInstallmentCount) {
+                divisionEditor = divisionEditor.copy(
+                    error = "Installment count must match installment amounts.",
+                )
+                return
+            }
+            if (normalizedInstallmentDueDates.size != normalizedInstallmentCount) {
+                divisionEditor = divisionEditor.copy(
+                    error = "Installment count must match installment due dates.",
+                )
+                return
+            }
+            if (normalizedInstallmentAmounts.sum() != normalizedPrice) {
+                divisionEditor = divisionEditor.copy(
+                    error = "Installment total must equal the division price.",
+                )
+                return
+            }
+        }
         val existingDetail = divisionDetailsForSettings.firstOrNull { detail ->
             divisionsEquivalent(detail.id, divisionEditor.editingId)
         }
@@ -538,6 +823,10 @@ fun EventDetails(
             price = normalizedPrice,
             maxParticipants = normalizedMaxParticipants,
             playoffTeamCount = normalizedPlayoffTeamCount,
+            allowPaymentPlans = normalizedAllowPaymentPlans,
+            installmentCount = normalizedInstallmentCount,
+            installmentDueDates = normalizedInstallmentDueDates,
+            installmentAmounts = normalizedInstallmentAmounts,
         )
         val nextDivisionDetails = if (divisionEditor.editingId.isNullOrBlank()) {
             divisionDetailsForSettings + nextDetail
@@ -601,6 +890,14 @@ fun EventDetails(
                     ?: editEvent.playoffTeamCount
                     ?: editEvent.maxParticipants
                 ).coerceAtLeast(2),
+            allowPaymentPlans = detail.allowPaymentPlans == true,
+            installmentCount = maxOf(
+                detail.installmentCount ?: 0,
+                detail.installmentAmounts.size,
+                detail.installmentDueDates.size,
+            ).takeIf { count -> count > 0 } ?: 0,
+            installmentDueDates = detail.installmentDueDates,
+            installmentAmounts = detail.installmentAmounts,
             nameTouched = true,
             error = null,
         )
@@ -804,7 +1101,10 @@ fun EventDetails(
             isLeaguePlayoffTeamsValid = true
         }
 
-        paymentPlanValidationErrors = validatePaymentPlans(editEvent)
+        paymentPlanValidationErrors = validatePaymentPlans(
+            event = editEvent,
+            divisionDetails = divisionDetailsForSettings,
+        )
         isPaymentPlansValid = paymentPlanValidationErrors.isEmpty()
 
         isValid =
@@ -1585,12 +1885,13 @@ fun EventDetails(
                             NumberInputField(
                                 modifier = Modifier.weight(1f),
                                 value = editEvent.maxParticipants.toString(),
-                                label = maxParticipantsLabel,
-                                enabled = editEvent.singleDivision,
+                                label = if (editEvent.singleDivision) {
+                                    maxParticipantsLabel
+                                } else {
+                                    "Default $maxParticipantsLabel"
+                                },
+                                enabled = true,
                                 onValueChange = { newValue ->
-                                    if (!editEvent.singleDivision) {
-                                        return@NumberInputField
-                                    }
                                     if (newValue.all { it.isDigit() }) {
                                         if (newValue.isBlank()) {
                                             onEditEvent { copy(maxParticipants = 0) }
@@ -1603,6 +1904,11 @@ fun EventDetails(
                                 errorMessage = if (isMaxParticipantsValid) "" else stringResource(
                                     Res.string.value_too_low, 2
                                 ),
+                                supportingText = if (editEvent.singleDivision) {
+                                    null
+                                } else {
+                                    "Used as the default capacity for new divisions."
+                                },
                             )
                             NumberInputField(
                                 modifier = Modifier.weight(1f),
@@ -1696,7 +2002,7 @@ fun EventDetails(
                                                 }
                                                 copy(
                                                     includePlayoffs = checked,
-                                                    playoffTeamCount = if (checked && singleDivision) {
+                                                    playoffTeamCount = if (checked) {
                                                         fallbackSingleDivisionPlayoffCount
                                                     } else {
                                                         null
@@ -1707,36 +2013,31 @@ fun EventDetails(
                                         },
                                     )
                                 }
-                                if (editEvent.singleDivision) {
-                                    NumberInputField(
-                                        modifier = Modifier.weight(1f),
-                                        value = editEvent.playoffTeamCount?.toString().orEmpty(),
-                                        label = "Playoff Team Count",
-                                        enabled = editEvent.includePlayoffs,
-                                        onValueChange = { newValue ->
-                                            if (!editEvent.includePlayoffs) return@NumberInputField
-                                            if (!newValue.all { it.isDigit() }) return@NumberInputField
-                                            onEditEvent {
-                                                copy(playoffTeamCount = newValue.toIntOrNull()?.coerceAtLeast(2))
-                                            }
-                                        },
-                                        isError = editEvent.includePlayoffs &&
-                                            (editEvent.playoffTeamCount ?: 0) < 2,
-                                        errorMessage = "Required when playoffs are enabled",
-                                    )
-                                } else {
-                                    Box(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = if (editEvent.includePlayoffs) {
-                                                "Playoff team count is configured per division."
-                                            } else {
-                                                "Enable playoffs to configure playoff team count."
-                                            },
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = Color(localImageScheme.current.onSurfaceVariant),
-                                        )
-                                    }
-                                }
+                                NumberInputField(
+                                    modifier = Modifier.weight(1f),
+                                    value = editEvent.playoffTeamCount?.toString().orEmpty(),
+                                    label = if (editEvent.singleDivision) {
+                                        "Playoff Team Count"
+                                    } else {
+                                        "Default Playoff Team Count"
+                                    },
+                                    enabled = editEvent.includePlayoffs,
+                                    onValueChange = { newValue ->
+                                        if (!editEvent.includePlayoffs) return@NumberInputField
+                                        if (!newValue.all { it.isDigit() }) return@NumberInputField
+                                        onEditEvent {
+                                            copy(playoffTeamCount = newValue.toIntOrNull()?.coerceAtLeast(2))
+                                        }
+                                    },
+                                    isError = editEvent.includePlayoffs &&
+                                        (editEvent.playoffTeamCount ?: 0) < 2,
+                                    errorMessage = "Required when playoffs are enabled",
+                                    supportingText = if (editEvent.singleDivision) {
+                                        null
+                                    } else {
+                                        "Used as the default playoff team count for new divisions."
+                                    },
+                                )
                             }
                         }
 
@@ -1749,12 +2050,9 @@ fun EventDetails(
                         }
                         MoneyInputField(
                             value = editEvent.priceCents.toString(),
-                            label = "Price",
-                            enabled = hostHasAccount && !rentalTimeLocked && editEvent.singleDivision,
+                            label = if (editEvent.singleDivision) "Price" else "Default Price",
+                            enabled = hostHasAccount && !rentalTimeLocked,
                             onValueChange = { newText ->
-                                if (!editEvent.singleDivision) {
-                                    return@MoneyInputField
-                                }
                                 if (newText.isBlank()) {
                                     onEditEvent { copy(priceCents = 0) }
                                     return@MoneyInputField
@@ -1764,7 +2062,7 @@ fun EventDetails(
                             },
                             isError = !isPriceValid,
                             supportingText = if (!editEvent.singleDivision) {
-                                "Per-division pricing is active for multi-division events."
+                                "Used as the default price for new divisions."
                             } else if (isPriceValid) {
                                 stringResource(Res.string.free_entry_hint)
                             } else {
@@ -1827,13 +2125,28 @@ fun EventDetails(
 
                         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                         Text(
-                            text = "Payment Plans",
+                            text = if (editEvent.singleDivision) {
+                                "Payment Plans"
+                            } else {
+                                "Default Payment Plan"
+                            },
                             style = MaterialTheme.typography.titleSmall,
                             color = Color(localImageScheme.current.onSurface),
                         )
+                        if (!editEvent.singleDivision) {
+                            Text(
+                                text = "Used as the default payment plan when adding new divisions.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(localImageScheme.current.onSurfaceVariant),
+                            )
+                        }
                         LabeledCheckboxRow(
                             checked = editEvent.allowPaymentPlans == true,
-                            label = "Allow payment plans",
+                            label = if (editEvent.singleDivision) {
+                                "Allow payment plans"
+                            } else {
+                                "Allow default payment plan"
+                            },
                             enabled = hostHasAccount && editEvent.priceCents > 0,
                             onCheckedChange = onSetPaymentPlansEnabled,
                         )
@@ -1917,7 +2230,11 @@ fun EventDetails(
                                 val installmentTotal = editEvent.installmentAmounts.sum()
                                 val totalsMatch = installmentTotal == editEvent.priceCents
                                 Text(
-                                    text = "Total ${installmentTotal.toDouble().div(100).moneyFormat()} / ${editEvent.priceCents.toDouble().div(100).moneyFormat()}",
+                                    text = if (editEvent.singleDivision) {
+                                        "Total ${installmentTotal.toDouble().div(100).moneyFormat()} / ${editEvent.priceCents.toDouble().div(100).moneyFormat()}"
+                                    } else {
+                                        "Default total ${installmentTotal.toDouble().div(100).moneyFormat()} / ${editEvent.priceCents.toDouble().div(100).moneyFormat()}"
+                                    },
                                     color = if (totalsMatch) {
                                         Color(localImageScheme.current.onSurfaceVariant)
                                     } else {
@@ -2163,6 +2480,20 @@ fun EventDetails(
                                             ?: divisionDetailsForSettings.firstOrNull()?.playoffTeamCount
                                             ?: fallbackMaxParticipants
                                         ).coerceAtLeast(2)
+                                    val defaultInstallmentAmounts = editEvent.installmentAmounts.map { amount ->
+                                        amount.coerceAtLeast(0)
+                                    }
+                                    val defaultInstallmentDueDates = editEvent.installmentDueDates
+                                        .map { dueDate -> dueDate.trim() }
+                                        .filter(String::isNotBlank)
+                                    val defaultInstallmentCount = maxOf(
+                                        editEvent.installmentCount ?: 0,
+                                        defaultInstallmentAmounts.size,
+                                        defaultInstallmentDueDates.size,
+                                    ).takeIf { count -> count > 0 }
+                                    val defaultAllowPaymentPlans = editEvent.allowPaymentPlans == true &&
+                                        defaultInstallmentCount != null &&
+                                        editEvent.priceCents.coerceAtLeast(0) > 0
                                     onEditEvent {
                                         val normalizedDivisions = divisions.normalizeDivisionIdentifiers()
                                         val nextDivisionDetails = mergeDivisionDetailsForDivisions(
@@ -2170,23 +2501,84 @@ fun EventDetails(
                                             existingDetails = divisionDetails,
                                             eventId = id,
                                         ).map { existing ->
-                                            if (!includePlayoffs) {
-                                                existing.copy(playoffTeamCount = null)
+                                            val nextPlayoffCount = if (!includePlayoffs) {
+                                                null
                                             } else if (checked) {
-                                                existing.copy(playoffTeamCount = fallbackPlayoffCount)
+                                                fallbackPlayoffCount
                                             } else {
+                                                (
+                                                    existing.playoffTeamCount
+                                                        ?: fallbackMaxParticipants
+                                                    ).coerceAtLeast(2)
+                                            }
+                                            if (checked) {
                                                 existing.copy(
-                                                    playoffTeamCount = (
-                                                        existing.playoffTeamCount
-                                                            ?: fallbackMaxParticipants
-                                                        ).coerceAtLeast(2)
+                                                    playoffTeamCount = nextPlayoffCount,
+                                                    allowPaymentPlans = defaultAllowPaymentPlans,
+                                                    installmentCount = defaultInstallmentCount,
+                                                    installmentDueDates = if (defaultAllowPaymentPlans) {
+                                                        defaultInstallmentDueDates
+                                                    } else {
+                                                        emptyList()
+                                                    },
+                                                    installmentAmounts = if (defaultAllowPaymentPlans) {
+                                                        defaultInstallmentAmounts
+                                                    } else {
+                                                        emptyList()
+                                                    },
+                                                )
+                                            } else {
+                                                val existingInstallmentAmounts = existing.installmentAmounts
+                                                    .map { amount -> amount.coerceAtLeast(0) }
+                                                val existingInstallmentDueDates = existing.installmentDueDates
+                                                    .map { dueDate -> dueDate.trim() }
+                                                    .filter(String::isNotBlank)
+                                                val existingInstallmentCount = maxOf(
+                                                    existing.installmentCount ?: 0,
+                                                    existingInstallmentAmounts.size,
+                                                    existingInstallmentDueDates.size,
+                                                ).takeIf { count -> count > 0 } ?: defaultInstallmentCount
+                                                val existingAllowPaymentPlans = when (existing.allowPaymentPlans) {
+                                                    null -> defaultAllowPaymentPlans
+                                                    else -> existing.allowPaymentPlans == true
+                                                } && existingInstallmentCount != null
+                                                existing.copy(
+                                                    playoffTeamCount = nextPlayoffCount,
+                                                    allowPaymentPlans = existingAllowPaymentPlans,
+                                                    installmentCount = if (existingAllowPaymentPlans) {
+                                                        existingInstallmentCount
+                                                    } else {
+                                                        null
+                                                    },
+                                                    installmentDueDates = if (existingAllowPaymentPlans) {
+                                                        if (existingInstallmentDueDates.isNotEmpty()) {
+                                                            existingInstallmentDueDates
+                                                        } else {
+                                                            defaultInstallmentDueDates
+                                                        }
+                                                    } else {
+                                                        emptyList()
+                                                    },
+                                                    installmentAmounts = if (existingAllowPaymentPlans) {
+                                                        if (existingInstallmentAmounts.isNotEmpty()) {
+                                                            existingInstallmentAmounts
+                                                        } else {
+                                                            defaultInstallmentAmounts
+                                                        }
+                                                    } else {
+                                                        emptyList()
+                                                    },
                                                 )
                                             }
                                         }
                                         copy(
                                             singleDivision = checked,
-                                            playoffTeamCount = if (includePlayoffs && checked) {
-                                                fallbackPlayoffCount
+                                            playoffTeamCount = if (includePlayoffs) {
+                                                if (checked) {
+                                                    fallbackPlayoffCount
+                                                } else {
+                                                    (playoffTeamCount ?: fallbackPlayoffCount).coerceAtLeast(2)
+                                                }
                                             } else {
                                                 null
                                             },
@@ -2381,12 +2773,114 @@ fun EventDetails(
                         )
                     }
 
+                    if (!editEvent.singleDivision) {
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                        Text(
+                            text = "Division Payment Plan",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = Color(localImageScheme.current.onSurface),
+                        )
+                        LabeledCheckboxRow(
+                            checked = divisionEditor.allowPaymentPlans,
+                            label = "Allow payment plan for this division",
+                            enabled = hostHasAccount && divisionEditor.priceCents > 0 && divisionEditorReady,
+                            onCheckedChange = { checked ->
+                                if (!divisionEditorReady || !hostHasAccount) {
+                                    return@LabeledCheckboxRow
+                                }
+                                setDivisionPaymentPlansEnabled(checked)
+                            },
+                        )
+                        if (divisionEditor.allowPaymentPlans) {
+                            val installmentCount = maxOf(
+                                divisionEditor.installmentCount,
+                                divisionEditor.installmentAmounts.size,
+                                divisionEditor.installmentDueDates.size,
+                                1,
+                            )
+                            NumberInputField(
+                                value = installmentCount.toString(),
+                                label = "Installment Count",
+                                onValueChange = { newValue ->
+                                    if (!newValue.all { it.isDigit() }) return@NumberInputField
+                                    val parsed = newValue.toIntOrNull() ?: 1
+                                    syncDivisionInstallmentCount(parsed.coerceAtLeast(1))
+                                },
+                                isError = installmentCount <= 0,
+                                errorMessage = "Installment count must be at least 1.",
+                            )
+                            repeat(installmentCount) { index ->
+                                val amountCents = divisionEditor.installmentAmounts.getOrNull(index) ?: 0
+                                val dueDate = divisionEditor.installmentDueDates.getOrNull(index).orEmpty()
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.Top,
+                                ) {
+                                    MoneyInputField(
+                                        value = amountCents.toString(),
+                                        label = "Installment ${index + 1} Amount",
+                                        onValueChange = { newValue ->
+                                            val parsed = newValue.filter(Char::isDigit).toIntOrNull() ?: 0
+                                            updateDivisionInstallmentAmount(index, parsed)
+                                        },
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    PlatformTextField(
+                                        value = dueDate,
+                                        onValueChange = {},
+                                        label = "Due Date",
+                                        placeholder = "YYYY-MM-DD",
+                                        modifier = Modifier.weight(1f),
+                                        readOnly = true,
+                                        onTap = { divisionInstallmentDueDatePickerIndex = index },
+                                    )
+                                }
+                                if (installmentCount > 1) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.End,
+                                    ) {
+                                        TextButton(
+                                            onClick = { removeDivisionInstallmentRow(index) },
+                                        ) {
+                                            Text(
+                                                text = "Remove installment",
+                                                color = MaterialTheme.colorScheme.error,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                TextButton(onClick = { addDivisionInstallmentRow() }) {
+                                    Text("Add installment")
+                                }
+                                val installmentTotal = divisionEditor.installmentAmounts.sum()
+                                val totalsMatch = installmentTotal == divisionEditor.priceCents
+                                Text(
+                                    text = "Total ${installmentTotal.toDouble().div(100).moneyFormat()} / ${divisionEditor.priceCents.toDouble().div(100).moneyFormat()}",
+                                    color = if (totalsMatch) {
+                                        Color(localImageScheme.current.onSurfaceVariant)
+                                    } else {
+                                        MaterialTheme.colorScheme.error
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                        }
+                    }
+
                     if (editEvent.singleDivision) {
                         Text(
                             text = if (editEvent.eventType == EventType.LEAGUE) {
-                                "Division price, capacity, and playoff team count mirror event-level values while single division is enabled."
+                                "Division price, capacity, payment plan, and playoff team count mirror event-level values while single division is enabled."
                             } else {
-                                "Division price and capacity mirror event-level values while single division is enabled."
+                                "Division price, capacity, and payment plan mirror event-level values while single division is enabled."
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = Color(localImageScheme.current.onSurfaceVariant),
@@ -2497,6 +2991,18 @@ fun EventDetails(
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
+                                        val paymentPlanInstallmentCount = maxOf(
+                                            detail.installmentCount ?: 0,
+                                            detail.installmentAmounts.size,
+                                            detail.installmentDueDates.size,
+                                        )
+                                        if (detail.allowPaymentPlans == true && paymentPlanInstallmentCount > 0) {
+                                            Text(
+                                                text = "Payment plan: $paymentPlanInstallmentCount installments",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
                                         if (playoffTeams != null) {
                                             Text(
                                                 text = "Playoff teams: ${playoffTeams.coerceAtLeast(2)}",
@@ -3055,6 +3561,41 @@ fun EventDetails(
         initialDate = installmentInitialDate,
     )
 
+    val divisionInstallmentInitialDate = remember(
+        divisionInstallmentDueDatePickerIndex,
+        divisionEditor.installmentDueDates,
+    ) {
+        val selectedInstallmentIndex = divisionInstallmentDueDatePickerIndex ?: return@remember null
+        val rawDueDate = divisionEditor.installmentDueDates
+            .getOrNull(selectedInstallmentIndex)
+            ?.trim()
+            .orEmpty()
+        if (rawDueDate.isBlank()) {
+            return@remember null
+        }
+        runCatching {
+            LocalDate.parse(rawDueDate).atStartOfDayIn(TimeZone.currentSystemDefault())
+        }.getOrNull()
+    }
+
+    PlatformDateTimePicker(
+        onDateSelected = { selectedInstant ->
+            val targetIndex = divisionInstallmentDueDatePickerIndex
+            if (targetIndex != null) {
+                val selectedDate = (selectedInstant ?: Clock.System.now())
+                    .toLocalDateTime(TimeZone.currentSystemDefault())
+                    .date
+                updateDivisionInstallmentDueDate(targetIndex, selectedDate.toString())
+            }
+            divisionInstallmentDueDatePickerIndex = null
+        },
+        onDismissRequest = { divisionInstallmentDueDatePickerIndex = null },
+        showPicker = divisionInstallmentDueDatePickerIndex != null,
+        getTime = false,
+        canSelectPast = false,
+        initialDate = divisionInstallmentInitialDate,
+    )
+
     EventMap(
         component = mapComponent,
         onEventSelected = { showImageSelector = true },
@@ -3446,6 +3987,10 @@ internal data class DivisionEditorState(
     val priceCents: Int = 0,
     val maxParticipants: Int = 2,
     val playoffTeamCount: Int = 2,
+    val allowPaymentPlans: Boolean = false,
+    val installmentCount: Int = 0,
+    val installmentDueDates: List<String> = emptyList(),
+    val installmentAmounts: List<Int> = emptyList(),
     val nameTouched: Boolean = false,
     val error: String? = null,
 )
@@ -3469,9 +4014,27 @@ internal fun defaultDivisionEditorState(
     defaultPriceCents: Int,
     defaultMaxParticipants: Int,
     defaultPlayoffTeamCount: Int?,
+    defaultAllowPaymentPlans: Boolean,
+    defaultInstallmentCount: Int?,
+    defaultInstallmentDueDates: List<String>,
+    defaultInstallmentAmounts: List<Int>,
 ): DivisionEditorState {
     val fallbackMax = defaultMaxParticipants.coerceAtLeast(2)
     val fallbackPlayoff = (defaultPlayoffTeamCount ?: fallbackMax).coerceAtLeast(2)
+    val normalizedInstallmentAmounts = defaultInstallmentAmounts.map { amount ->
+        amount.coerceAtLeast(0)
+    }
+    val normalizedInstallmentDueDates = defaultInstallmentDueDates
+        .map { dueDate -> dueDate.trim() }
+        .filter(String::isNotBlank)
+    val normalizedInstallmentCount = maxOf(
+        defaultInstallmentCount ?: 0,
+        normalizedInstallmentAmounts.size,
+        normalizedInstallmentDueDates.size,
+    ).takeIf { count -> count > 0 } ?: 0
+    val normalizedAllowPaymentPlans = defaultAllowPaymentPlans &&
+        normalizedInstallmentCount > 0 &&
+        defaultPriceCents.coerceAtLeast(0) > 0
     return DivisionEditorState(
         editingId = null,
         gender = "",
@@ -3483,6 +4046,10 @@ internal fun defaultDivisionEditorState(
         priceCents = defaultPriceCents.coerceAtLeast(0),
         maxParticipants = fallbackMax,
         playoffTeamCount = fallbackPlayoff,
+        allowPaymentPlans = normalizedAllowPaymentPlans,
+        installmentCount = if (normalizedAllowPaymentPlans) normalizedInstallmentCount else 0,
+        installmentDueDates = if (normalizedAllowPaymentPlans) normalizedInstallmentDueDates else emptyList(),
+        installmentAmounts = if (normalizedAllowPaymentPlans) normalizedInstallmentAmounts else emptyList(),
         nameTouched = false,
         error = null,
     )
@@ -3701,51 +4268,93 @@ private fun userDisplayName(user: UserData): String {
     }
 }
 
-private fun validatePaymentPlans(event: Event): List<String> {
-    if (event.allowPaymentPlans != true) return emptyList()
+private fun validatePaymentPlans(
+    event: Event,
+    divisionDetails: List<DivisionDetail> = emptyList(),
+): List<String> {
+    fun validatePlan(
+        label: String,
+        priceCents: Int,
+        allowPaymentPlans: Boolean,
+        installmentCount: Int?,
+        installmentAmounts: List<Int>,
+        installmentDueDates: List<String>,
+    ): List<String> {
+        if (!allowPaymentPlans) return emptyList()
 
-    val errors = mutableListOf<String>()
-    val normalizedCount = maxOf(
-        event.installmentCount ?: 0,
-        event.installmentAmounts.size,
-        event.installmentDueDates.size,
-    )
+        val errors = mutableListOf<String>()
+        val normalizedAmounts = installmentAmounts.map { amount -> amount.coerceAtLeast(0) }
+        val normalizedDueDates = installmentDueDates
+            .map { dueDate -> dueDate.trim() }
+            .filter(String::isNotBlank)
+        val normalizedCount = maxOf(
+            installmentCount ?: 0,
+            normalizedAmounts.size,
+            normalizedDueDates.size,
+        )
 
-    if (event.priceCents <= 0) {
-        errors += "Set a price greater than 0 before enabling payment plans."
-    }
-    if (normalizedCount <= 0) {
-        errors += "Installment count must be at least 1 when payment plans are enabled."
-    }
-    if (event.installmentAmounts.size != normalizedCount) {
-        errors += "Installment count must match the number of installment amounts."
-    }
-    if (event.installmentDueDates.size != normalizedCount) {
-        errors += "Installment count must match the number of installment due dates."
-    }
-    if (event.installmentAmounts.any { amount -> amount < 0 }) {
-        errors += "Installment amounts must be 0 or higher."
-    }
+        if (priceCents <= 0) {
+            errors += "$label: set a price greater than 0 before enabling payment plans."
+        }
+        if (normalizedCount <= 0) {
+            errors += "$label: installment count must be at least 1 when payment plans are enabled."
+        }
+        if (normalizedAmounts.size != normalizedCount) {
+            errors += "$label: installment count must match installment amounts."
+        }
+        if (normalizedDueDates.size != normalizedCount) {
+            errors += "$label: installment count must match installment due dates."
+        }
 
-    val parsedDueDates = event.installmentDueDates.mapIndexed { index, dueDate ->
-        val normalized = dueDate.trim()
-        if (normalized.isBlank()) {
-            errors += "Each installment needs a due date."
-            null
-        } else {
-            runCatching { LocalDate.parse(normalized) }
+        val parsedDueDates = normalizedDueDates.mapIndexed { index, dueDate ->
+            runCatching { LocalDate.parse(dueDate) }
                 .getOrElse {
-                    errors += "Installment ${index + 1} due date must use YYYY-MM-DD."
+                    errors += "$label: installment ${index + 1} due date must use YYYY-MM-DD."
                     null
                 }
         }
-    }
-    if (parsedDueDates.filterNotNull().zipWithNext().any { (previous, next) -> next < previous }) {
-        errors += "Installment due dates must be in chronological order."
+        if (parsedDueDates.filterNotNull().zipWithNext().any { (previous, next) -> next < previous }) {
+            errors += "$label: installment due dates must be in chronological order."
+        }
+
+        if (normalizedAmounts.sum() != priceCents) {
+            errors += "$label: installment total must equal the configured price."
+        }
+
+        return errors
     }
 
-    if (event.installmentAmounts.sum() != event.priceCents) {
-        errors += "Installment total must equal the event price."
+    if (event.singleDivision) {
+        return validatePlan(
+            label = "Payment plan",
+            priceCents = event.priceCents.coerceAtLeast(0),
+            allowPaymentPlans = event.allowPaymentPlans == true,
+            installmentCount = event.installmentCount,
+            installmentAmounts = event.installmentAmounts,
+            installmentDueDates = event.installmentDueDates,
+        ).distinct()
+    }
+
+    val errors = mutableListOf<String>()
+    errors += validatePlan(
+        label = "Default payment plan",
+        priceCents = event.priceCents.coerceAtLeast(0),
+        allowPaymentPlans = event.allowPaymentPlans == true,
+        installmentCount = event.installmentCount,
+        installmentAmounts = event.installmentAmounts,
+        installmentDueDates = event.installmentDueDates,
+    )
+
+    divisionDetails.forEach { detail ->
+        val detailName = detail.name.trim().ifBlank { detail.id }
+        errors += validatePlan(
+            label = "Division \"$detailName\" payment plan",
+            priceCents = (detail.price ?: event.priceCents).coerceAtLeast(0),
+            allowPaymentPlans = detail.allowPaymentPlans == true,
+            installmentCount = detail.installmentCount,
+            installmentAmounts = detail.installmentAmounts,
+            installmentDueDates = detail.installmentDueDates,
+        )
     }
 
     return errors.distinct()

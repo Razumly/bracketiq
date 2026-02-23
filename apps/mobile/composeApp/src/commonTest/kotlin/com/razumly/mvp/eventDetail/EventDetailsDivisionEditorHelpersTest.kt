@@ -12,28 +12,28 @@ class EventDetailsDivisionEditorHelpersTest {
     fun build_division_token_formats_components() {
         val token = buildDivisionToken(
             gender = "F",
-            ratingType = "SKILL",
-            divisionTypeId = "A",
+            skillDivisionTypeId = "A",
+            ageDivisionTypeId = "U18",
         )
 
-        assertEquals("f_skill_a", token)
+        assertEquals("f_skill_a_age_u18", token)
     }
 
     @Test
     fun parse_division_token_uses_detail_key_when_present() {
         val parsed = parseDivisionToken(
             DivisionDetail(
-                id = "event-1__division__f_skill_a",
-                key = "f_skill_a",
-                divisionTypeId = "a",
-                ratingType = "SKILL",
+                id = "event-1__division__f_skill_a_age_u18",
+                key = "f_skill_a_age_u18",
+                skillDivisionTypeId = "a",
+                ageDivisionTypeId = "u18",
                 gender = "F",
             ),
         )
 
         assertEquals("F", parsed.gender)
-        assertEquals("SKILL", parsed.ratingType)
-        assertEquals("a", parsed.divisionTypeId)
+        assertEquals("a", parsed.skillDivisionTypeId)
+        assertEquals("u18", parsed.ageDivisionTypeId)
     }
 
     @Test
@@ -42,69 +42,64 @@ class EventDetailsDivisionEditorHelpersTest {
             DivisionDetail(
                 id = "event-1__division__open",
                 key = "",
-                divisionTypeId = "open",
-                ratingType = "AGE",
                 gender = "C",
+                skillDivisionTypeId = "b",
+                ageDivisionTypeId = "u16",
             ),
         )
 
         assertEquals("C", parsed.gender)
-        assertEquals("AGE", parsed.ratingType)
-        assertEquals("open", parsed.divisionTypeId)
+        assertEquals("b", parsed.skillDivisionTypeId)
+        assertEquals("u16", parsed.ageDivisionTypeId)
     }
 
     @Test
-    fun build_division_type_options_filters_by_rating_type_and_includes_existing_values() {
-        val options = buildDivisionTypeOptions(
-            selectedRatingType = "AGE",
-            existingDetails = listOf(
-                DivisionDetail(
-                    id = "event-1__division__c_age_u14",
-                    key = "c_age_u14",
-                    divisionTypeId = "u14",
-                    divisionTypeName = "U14",
-                    ratingType = "AGE",
-                    gender = "C",
-                ),
-                DivisionDetail(
-                    id = "event-1__division__m_skill_b",
-                    key = "m_skill_b",
-                    divisionTypeId = "b",
-                    divisionTypeName = "B",
-                    ratingType = "SKILL",
-                    gender = "M",
-                ),
+    fun build_division_type_options_include_defaults_and_existing_values() {
+        val existingDetails = listOf(
+            DivisionDetail(
+                id = "event-1__division__c_skill_b_age_u14",
+                key = "c_skill_b_age_u14",
+                skillDivisionTypeId = "b",
+                skillDivisionTypeName = "B",
+                ageDivisionTypeId = "u14",
+                ageDivisionTypeName = "U14",
+                gender = "C",
             ),
         )
 
-        val values = options.map { option -> option.value }.toSet()
-        assertTrue(values.contains("u14"))
-        assertTrue(values.contains("u18"))
-        assertTrue(!values.contains("open"))
+        val skillOptions = buildSkillDivisionTypeOptions(existingDetails)
+        val ageOptions = buildAgeDivisionTypeOptions(existingDetails)
+
+        val skillValues = skillOptions.map { option -> option.value }.toSet()
+        val ageValues = ageOptions.map { option -> option.value }.toSet()
+
+        assertTrue(skillValues.contains("open"))
+        assertTrue(skillValues.contains("b"))
+        assertTrue(ageValues.contains("u18"))
+        assertTrue(ageValues.contains("u14"))
     }
 
     @Test
     fun resolve_division_type_name_prefers_existing_detail_name_then_fallback_options() {
         val existingDetails = listOf(
             DivisionDetail(
-                id = "event-1__division__m_skill_a",
-                key = "m_skill_a",
-                divisionTypeId = "a",
-                divisionTypeName = "Advanced",
-                ratingType = "SKILL",
+                id = "event-1__division__m_skill_a_age_u18",
+                key = "m_skill_a_age_u18",
+                skillDivisionTypeId = "a",
+                skillDivisionTypeName = "Advanced",
+                ageDivisionTypeId = "u18",
+                ageDivisionTypeName = "U18",
                 gender = "M",
             ),
         )
 
         val fromExisting = resolveDivisionTypeName(
             divisionTypeId = "a",
-            ratingType = "SKILL",
             existingDetails = existingDetails,
             fallbackOptions = emptyList(),
         )
         val fromFallback = resolveDivisionTypeName(
             divisionTypeId = "u16",
-            ratingType = "AGE",
             existingDetails = existingDetails,
             fallbackOptions = listOf(
                 DropdownOption(value = "u16", label = "U16"),
@@ -121,17 +116,23 @@ class EventDetailsDivisionEditorHelpersTest {
             defaultPriceCents = -1,
             defaultMaxParticipants = 0,
             defaultPlayoffTeamCount = 1,
+            defaultAllowPaymentPlans = true,
+            defaultInstallmentCount = 2,
+            defaultInstallmentDueDates = listOf("  ", "2026-02-01T00:00:00Z"),
+            defaultInstallmentAmounts = listOf(-50, 100),
         )
 
         assertEquals(0, state.priceCents)
         assertEquals(2, state.maxParticipants)
         assertEquals(2, state.playoffTeamCount)
+        assertEquals(false, state.allowPaymentPlans)
+        assertEquals(0, state.installmentCount)
     }
 
     @Test
     fun build_division_name_uses_gender_prefix() {
-        assertEquals("Men's Open", buildDivisionName("M", "Open"))
-        assertEquals("Women's Open", buildDivisionName("F", "Open"))
-        assertEquals("Coed Open", buildDivisionName("C", "Open"))
+        assertEquals("Men's Open U18", buildDivisionName("M", "Open", "U18"))
+        assertEquals("Women's Open U18", buildDivisionName("F", "Open", "U18"))
+        assertEquals("Coed Open U18", buildDivisionName("C", "Open", "U18"))
     }
 }

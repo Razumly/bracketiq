@@ -422,6 +422,10 @@ fun inferDivisionDetail(
         price = null,
         maxParticipants = null,
         playoffTeamCount = null,
+        allowPaymentPlans = null,
+        installmentCount = null,
+        installmentDueDates = emptyList(),
+        installmentAmounts = emptyList(),
     )
 }
 
@@ -481,6 +485,19 @@ fun DivisionDetail.normalizeDivisionDetail(eventId: String? = null): DivisionDet
         skillDivisionTypeName = normalizedSkillDivisionTypeName,
         ageDivisionTypeName = normalizedAgeDivisionTypeName,
     )
+    val normalizedInstallmentAmounts = installmentAmounts.map { amount ->
+        amount.coerceAtLeast(0)
+    }
+    val normalizedInstallmentDueDates = installmentDueDates
+        .map { dueDate -> dueDate.trim() }
+        .filter(String::isNotBlank)
+    val normalizedInstallmentCount = installmentCount
+        ?.coerceAtLeast(0)
+        ?.takeIf { count -> count > 0 }
+        ?: maxOf(normalizedInstallmentAmounts.size, normalizedInstallmentDueDates.size).takeIf { count -> count > 0 }
+    val normalizedAllowPaymentPlans = allowPaymentPlans == true
+        && normalizedInstallmentCount != null
+
     return copy(
         id = normalizedId,
         key = normalizedKey,
@@ -502,6 +519,22 @@ fun DivisionDetail.normalizeDivisionDetail(eventId: String? = null): DivisionDet
             ?.takeIf { participantCount -> participantCount >= 2 },
         playoffTeamCount = playoffTeamCount
             ?.takeIf { participantCount -> participantCount >= 2 },
+        allowPaymentPlans = if (normalizedAllowPaymentPlans) true else false,
+        installmentCount = if (normalizedAllowPaymentPlans) {
+            normalizedInstallmentCount
+        } else {
+            null
+        },
+        installmentDueDates = if (normalizedAllowPaymentPlans) {
+            normalizedInstallmentDueDates
+        } else {
+            emptyList()
+        },
+        installmentAmounts = if (normalizedAllowPaymentPlans) {
+            normalizedInstallmentAmounts
+        } else {
+            emptyList()
+        },
         sportId = sportId?.trim()?.takeIf(String::isNotBlank),
         ageCutoffDate = ageCutoffDate?.trim()?.takeIf(String::isNotBlank),
         ageCutoffLabel = ageCutoffLabel?.trim()?.takeIf(String::isNotBlank),

@@ -91,6 +91,7 @@ interface IBillingRepository : IMVPRepository {
     suspend fun createPurchaseIntent(
         event: Event,
         teamId: String? = null,
+        priceCents: Int? = null,
     ): Result<PurchaseIntent>
     suspend fun getRequiredSignLinks(eventId: String): Result<List<SignStep>>
     suspend fun getRequiredSignLinks(
@@ -148,9 +149,13 @@ class BillingRepository(
     override suspend fun createPurchaseIntent(
         event: Event,
         teamId: String?,
+        priceCents: Int?,
     ): Result<PurchaseIntent> = runCatching {
         val user = userRepository.currentUser.value.getOrThrow()
         val email = userRepository.currentAccount.value.getOrNull()?.email
+        val effectivePriceCents = priceCents
+            ?.takeIf { value -> value >= 0 }
+            ?: event.priceCents
 
         val response = api.post<PurchaseIntentRequestDto, PurchaseIntent>(
             path = "api/billing/purchase-intent",
@@ -159,7 +164,7 @@ class BillingRepository(
                 event = BillingEventRefDto(
                     id = event.id,
                     eventType = event.eventType.name,
-                    priceCents = event.priceCents,
+                    priceCents = effectivePriceCents,
                     hostId = event.hostId,
                     organizationId = event.organizationId,
                 ),

@@ -419,7 +419,11 @@ internal class CreateEvent_FakeMatchRepository : IMatchRepository {
 }
 
 internal class CreateEvent_FakeBillingRepository : IBillingRepository {
-    override suspend fun createPurchaseIntent(event: Event, teamId: String?): Result<PurchaseIntent> =
+    override suspend fun createPurchaseIntent(
+        event: Event,
+        teamId: String?,
+        priceCents: Int?,
+    ): Result<PurchaseIntent> =
         Result.success(PurchaseIntent(paymentIntent = "pi_test", publishableKey = "pk_test"))
 
     override suspend fun createBill(request: CreateBillRequest): Result<Bill> = Result.success(

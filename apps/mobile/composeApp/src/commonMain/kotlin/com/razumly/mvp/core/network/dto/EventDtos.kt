@@ -128,6 +128,19 @@ data class EventApiDto(
         val resolvedPriceCents = (price ?: 0).coerceAtLeast(0)
         val resolvedMaxParticipants = (maxParticipants ?: 0).coerceAtLeast(0)
         val resolvedEventPlayoffTeamCount = playoffTeamCount?.coerceAtLeast(2)
+        val resolvedEventInstallmentAmounts = (installmentAmounts ?: emptyList())
+            .map { amount -> amount.coerceAtLeast(0) }
+        val resolvedEventInstallmentDueDates = (installmentDueDates ?: emptyList())
+            .map { dueDate -> dueDate.trim() }
+            .filter(String::isNotBlank)
+        val resolvedEventInstallmentCount = maxOf(
+            installmentCount ?: 0,
+            resolvedEventInstallmentAmounts.size,
+            resolvedEventInstallmentDueDates.size,
+        ).takeIf { count -> count > 0 }
+        val resolvedEventAllowPaymentPlans = allowPaymentPlans == true &&
+            resolvedEventInstallmentCount != null &&
+            resolvedPriceCents > 0
         val mergedDetailsWithCapacity = mergedDetails.map { detail ->
             val fallbackMaxParticipants = resolvedMaxParticipants.coerceAtLeast(2)
             detail.copy(
@@ -145,6 +158,35 @@ data class EventApiDto(
                     includePlayoffs != true -> null
                     singleDivision != false -> resolvedEventPlayoffTeamCount
                     else -> (detail.playoffTeamCount ?: resolvedEventPlayoffTeamCount)?.coerceAtLeast(2)
+                },
+                allowPaymentPlans = if (singleDivision != false) {
+                    resolvedEventAllowPaymentPlans
+                } else {
+                    detail.allowPaymentPlans ?: resolvedEventAllowPaymentPlans
+                },
+                installmentCount = if (singleDivision != false) {
+                    resolvedEventInstallmentCount
+                } else {
+                    maxOf(
+                        detail.installmentCount ?: 0,
+                        detail.installmentAmounts.size,
+                        detail.installmentDueDates.size,
+                    ).takeIf { count -> count > 0 } ?: resolvedEventInstallmentCount
+                },
+                installmentDueDates = if (singleDivision != false) {
+                    resolvedEventInstallmentDueDates
+                } else {
+                    val normalized = detail.installmentDueDates
+                        .map { dueDate -> dueDate.trim() }
+                        .filter(String::isNotBlank)
+                    if (normalized.isNotEmpty()) normalized else resolvedEventInstallmentDueDates
+                },
+                installmentAmounts = if (singleDivision != false) {
+                    resolvedEventInstallmentAmounts
+                } else {
+                    val normalized = detail.installmentAmounts
+                        .map { amount -> amount.coerceAtLeast(0) }
+                    if (normalized.isNotEmpty()) normalized else resolvedEventInstallmentAmounts
                 },
             )
         }
@@ -209,10 +251,10 @@ data class EventApiDto(
             state = state ?: "UNPUBLISHED",
             pointsToVictory = pointsToVictory ?: emptyList(),
             refereeIds = refereeIds ?: emptyList(),
-            allowPaymentPlans = allowPaymentPlans,
-            installmentCount = installmentCount,
-            installmentDueDates = installmentDueDates ?: emptyList(),
-            installmentAmounts = installmentAmounts ?: emptyList(),
+            allowPaymentPlans = resolvedEventAllowPaymentPlans,
+            installmentCount = resolvedEventInstallmentCount,
+            installmentDueDates = resolvedEventInstallmentDueDates,
+            installmentAmounts = resolvedEventInstallmentAmounts,
             allowTeamSplitDefault = allowTeamSplitDefault,
             requiredTemplateIds = requiredTemplateIds ?: emptyList(),
             lastUpdated = Clock.System.now(),
@@ -415,11 +457,36 @@ fun Event.toUpdateDto(
     )
     val normalizedDivisionDetailsForPayload = normalizedDivisionDetails.map { detail ->
         val fallbackMaxParticipants = maxParticipants.coerceAtLeast(2)
+        val defaultInstallmentAmounts = installmentAmounts.map { amount -> amount.coerceAtLeast(0) }
+        val defaultInstallmentDueDates = installmentDueDates
+            .map { dueDate -> dueDate.trim() }
+            .filter(String::isNotBlank)
+        val defaultInstallmentCount = maxOf(
+            installmentCount ?: 0,
+            defaultInstallmentAmounts.size,
+            defaultInstallmentDueDates.size,
+        ).takeIf { count -> count > 0 }
+        val defaultAllowPaymentPlans = allowPaymentPlans == true &&
+            defaultInstallmentCount != null &&
+            priceCents > 0
+        val detailInstallmentAmounts = detail.installmentAmounts
+            .map { amount -> amount.coerceAtLeast(0) }
+        val detailInstallmentDueDates = detail.installmentDueDates
+            .map { dueDate -> dueDate.trim() }
+            .filter(String::isNotBlank)
+        val detailInstallmentCount = maxOf(
+            detail.installmentCount ?: 0,
+            detailInstallmentAmounts.size,
+            detailInstallmentDueDates.size,
+        ).takeIf { count -> count > 0 }
+        val detailAllowPaymentPlans = detail.allowPaymentPlans == true &&
+            detailInstallmentCount != null &&
+            (detail.price ?: priceCents).coerceAtLeast(0) > 0
         detail.copy(
             price = if (singleDivision) {
                 priceCents.coerceAtLeast(0)
             } else {
-                (detail.price ?: 0).coerceAtLeast(0)
+                (detail.price ?: priceCents).coerceAtLeast(0)
             },
             maxParticipants = if (singleDivision) {
                 fallbackMaxParticipants
@@ -430,6 +497,32 @@ fun Event.toUpdateDto(
                 !includePlayoffs -> null
                 singleDivision -> playoffTeamCount?.coerceAtLeast(2)
                 else -> (detail.playoffTeamCount ?: playoffTeamCount)?.coerceAtLeast(2)
+            },
+            allowPaymentPlans = if (singleDivision) {
+                defaultAllowPaymentPlans
+            } else {
+                detailAllowPaymentPlans
+            },
+            installmentCount = if (singleDivision) {
+                defaultInstallmentCount
+            } else if (detailAllowPaymentPlans) {
+                detailInstallmentCount
+            } else {
+                null
+            },
+            installmentDueDates = if (singleDivision) {
+                defaultInstallmentDueDates
+            } else if (detailAllowPaymentPlans) {
+                detailInstallmentDueDates
+            } else {
+                emptyList()
+            },
+            installmentAmounts = if (singleDivision) {
+                defaultInstallmentAmounts
+            } else if (detailAllowPaymentPlans) {
+                detailInstallmentAmounts
+            } else {
+                emptyList()
             },
         )
     }
