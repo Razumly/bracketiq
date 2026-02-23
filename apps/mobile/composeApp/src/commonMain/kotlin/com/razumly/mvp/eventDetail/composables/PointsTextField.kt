@@ -14,6 +14,7 @@ import com.razumly.mvp.core.presentation.composables.PlatformTextField
 
 @Composable
 fun PointsTextField(
+    modifier: Modifier = Modifier.width(120.dp),
     value: String,
     label: String,
     onValueChange: (String) -> Unit,
@@ -25,8 +26,7 @@ fun PointsTextField(
     PlatformTextField(
         value = value,
         onValueChange = onValueChange,
-        modifier = Modifier
-            .width(120.dp)
+        modifier = modifier
             .focusRequester(focusRequester)
             .onKeyEvent {
                 if (it.key == Key.Enter) {
@@ -40,4 +40,3 @@ fun PointsTextField(
         supportingText = if (isError && errorMessage.isNotEmpty()) { errorMessage } else ""
     )
 }
-

@@ -44,10 +44,18 @@ import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
 import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
+import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import com.razumly.mvp.core.presentation.composables.PlatformDropdown
 import com.razumly.mvp.core.presentation.composables.PlatformTextField
+import com.razumly.mvp.core.util.Platform
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atStartOfDayIn
+import kotlinx.datetime.toLocalDateTime
 import kotlin.math.min
+import kotlin.time.Clock
+import kotlin.time.ExperimentalTime
+import kotlin.time.Instant
 
 private const val MAX_VISIBLE_FIELD_ROWS = 5
 private const val MAX_VISIBLE_SLOT_ROWS = 2
@@ -394,7 +402,7 @@ private fun TimeslotCard(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalTime::class)
 @Composable
 private fun TimeOfDayPickerField(
     label: String,
@@ -404,6 +412,7 @@ private fun TimeOfDayPickerField(
     isError: Boolean = false,
 ) {
     var showTimePicker by remember { mutableStateOf(false) }
+    var showNativeTimePicker by remember { mutableStateOf(false) }
     val timeState = rememberTimePickerState(
         initialHour = minutes?.div(60) ?: 12,
         initialMinute = minutes?.rem(60) ?: 0,
@@ -424,12 +433,44 @@ private fun TimeOfDayPickerField(
         readOnly = true,
         isError = isError,
         trailingIcon = {
-            IconButton(onClick = { showTimePicker = true }) {
+            IconButton(
+                onClick = {
+                    if (Platform.isIOS) {
+                        showNativeTimePicker = true
+                    } else {
+                        showTimePicker = true
+                    }
+                },
+            ) {
                 Icon(Icons.Default.AccessTime, contentDescription = "Select time")
             }
         },
-        onTap = { showTimePicker = true },
+        onTap = {
+            if (Platform.isIOS) {
+                showNativeTimePicker = true
+            } else {
+                showTimePicker = true
+            }
+        },
     )
+
+    if (showNativeTimePicker) {
+        PlatformDateTimePicker(
+            onDateSelected = { selected ->
+                selected?.let { selectedInstant ->
+                    val localTime = selectedInstant.toLocalDateTime(TimeZone.currentSystemDefault()).time
+                    onMinutesSelected(localTime.hour * 60 + localTime.minute)
+                }
+                showNativeTimePicker = false
+            },
+            onDismissRequest = { showNativeTimePicker = false },
+            showPicker = showNativeTimePicker,
+            getTime = true,
+            showDate = false,
+            canSelectPast = true,
+            initialDate = minutes?.toTodayInstant(),
+        )
+    }
 
     if (showTimePicker) {
         AlertDialog(
@@ -452,6 +493,16 @@ private fun TimeOfDayPickerField(
             },
         )
     }
+}
+
+@OptIn(ExperimentalTime::class)
+private fun Int.toTodayInstant(): Instant {
+    val timezone = TimeZone.currentSystemDefault()
+    val nowLocalDate = Clock.System.now().toLocalDateTime(timezone).date
+    val startOfToday = nowLocalDate.atStartOfDayIn(timezone)
+    return Instant.fromEpochMilliseconds(
+        startOfToday.toEpochMilliseconds() + this.toLong() * 60_000L
+    )
 }
 
 private fun Int.toTimeLabel(): String {

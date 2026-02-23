@@ -441,7 +441,11 @@ fun EventDetails(
         )
     }
     fun syncLeagueSlotsForSelectedDivisions(normalizedSelection: List<String>) {
-        if (!isNewEvent || editEvent.eventType != EventType.LEAGUE || leagueTimeSlots.isEmpty()) {
+        if (
+            !isNewEvent ||
+            (editEvent.eventType != EventType.LEAGUE && editEvent.eventType != EventType.TOURNAMENT) ||
+            leagueTimeSlots.isEmpty()
+        ) {
             return
         }
         val selectedDivisionSet = normalizedSelection.toSet()
@@ -976,7 +980,7 @@ fun EventDetails(
         editEvent.divisions,
         isNewEvent,
     ) {
-        if (isNewEvent && editEvent.eventType == EventType.LEAGUE) {
+        if (isNewEvent && (editEvent.eventType == EventType.LEAGUE || editEvent.eventType == EventType.TOURNAMENT)) {
             computeLeagueSlotErrors(
                 slots = leagueTimeSlots,
                 singleDivision = editEvent.singleDivision,
@@ -1037,18 +1041,18 @@ fun EventDetails(
             editEvent.eventType == EventType.LEAGUE || editEvent.eventType == EventType.TOURNAMENT
         ) && !editEvent.noFixedEndDateTime
         isFixedEndDateRangeValid = !requiresFixedEndValidation || editEvent.end > editEvent.start
-        isLeagueSlotsValid = if (isNewEvent && editEvent.eventType == EventType.LEAGUE) {
+        isLeagueSlotsValid = if (isNewEvent && (editEvent.eventType == EventType.LEAGUE || editEvent.eventType == EventType.TOURNAMENT)) {
             leagueTimeSlots.isNotEmpty() && leagueSlotErrors.isEmpty()
         } else {
             true
         }
 
         if (editEvent.eventType == EventType.TOURNAMENT) {
-            isWinnerSetCountValid = editEvent.winnerSetCount in 1..5
+            isWinnerSetCountValid = editEvent.winnerSetCount in setOf(1, 3, 5)
             isWinnerPointsValid = editEvent.winnerBracketPointsToVictory.size >= editEvent.winnerSetCount &&
                 editEvent.winnerBracketPointsToVictory.take(editEvent.winnerSetCount).all { it > 0 }
             if (editEvent.doubleElimination) {
-                isLoserSetCountValid = editEvent.loserSetCount in 1..5
+                isLoserSetCountValid = editEvent.loserSetCount in setOf(1, 3, 5)
                 isLoserPointsValid = editEvent.loserBracketPointsToVictory.size >= editEvent.loserSetCount &&
                     editEvent.loserBracketPointsToVictory.take(editEvent.loserSetCount).all { it > 0 }
             } else {
@@ -1230,9 +1234,9 @@ fun EventDetails(
             if (!isLeagueSlotsValid) {
                 add(
                     if (leagueTimeSlots.isEmpty()) {
-                        "Add at least one timeslot for league scheduling."
+                        "Add at least one timeslot for scheduling."
                     } else {
-                        "Fix league timeslot issues before continuing."
+                        "Fix timeslot issues before continuing."
                     }
                 )
             }
@@ -1388,7 +1392,7 @@ fun EventDetails(
     }
     val facilitiesSummaryLine = remember(fieldCount, eventWithRelations.timeSlots, editEvent.eventType) {
         val fieldSummary = "${fieldCount.coerceAtLeast(0)} fields"
-        val slotSummary = if (editEvent.eventType == EventType.LEAGUE) {
+        val slotSummary = if (editEvent.eventType == EventType.LEAGUE || editEvent.eventType == EventType.TOURNAMENT) {
             "${eventWithRelations.timeSlots.size} weekly slots"
         } else {
             null
@@ -1490,6 +1494,29 @@ fun EventDetails(
                             verticalArrangement = Arrangement.spacedBy(12.dp),
                             horizontalAlignment = if (editView) Alignment.CenterHorizontally else Alignment.Start
                         ) {
+                            if (editView && isNewEvent) {
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                    ),
+                                    border = BorderStroke(
+                                        width = 1.dp,
+                                        color = MaterialTheme.colorScheme.outlineVariant,
+                                    ),
+                                ) {
+                                    Text(
+                                        text = "For more complex events and billing use the web version.",
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    )
+                                }
+                            }
+
                             // Event Title - Animated
                             AnimatedContent(
                                 targetState = editView,
@@ -2124,132 +2151,140 @@ fun EventDetails(
                         }
 
                         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                        Text(
-                            text = if (editEvent.singleDivision) {
-                                "Payment Plans"
-                            } else {
-                                "Default Payment Plan"
-                            },
-                            style = MaterialTheme.typography.titleSmall,
-                            color = Color(localImageScheme.current.onSurface),
-                        )
-                        if (!editEvent.singleDivision) {
+                        if (isNewEvent) {
                             Text(
-                                text = "Used as the default payment plan when adding new divisions.",
+                                text = "Payment plans can be configured on the web version.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Color(localImageScheme.current.onSurfaceVariant),
                             )
-                        }
-                        LabeledCheckboxRow(
-                            checked = editEvent.allowPaymentPlans == true,
-                            label = if (editEvent.singleDivision) {
-                                "Allow payment plans"
-                            } else {
-                                "Allow default payment plan"
-                            },
-                            enabled = hostHasAccount && editEvent.priceCents > 0,
-                            onCheckedChange = onSetPaymentPlansEnabled,
-                        )
-                        if (editEvent.allowPaymentPlans == true) {
-                            val installmentCount =
-                                maxOf(
-                                    editEvent.installmentCount ?: 0,
-                                    editEvent.installmentAmounts.size,
-                                    editEvent.installmentDueDates.size,
-                                    1,
+                        } else {
+                            Text(
+                                text = if (editEvent.singleDivision) {
+                                    "Payment Plans"
+                                } else {
+                                    "Default Payment Plan"
+                                },
+                                style = MaterialTheme.typography.titleSmall,
+                                color = Color(localImageScheme.current.onSurface),
+                            )
+                            if (!editEvent.singleDivision) {
+                                Text(
+                                    text = "Used as the default payment plan when adding new divisions.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(localImageScheme.current.onSurfaceVariant),
+                                )
+                            }
+                            LabeledCheckboxRow(
+                                checked = editEvent.allowPaymentPlans == true,
+                                label = if (editEvent.singleDivision) {
+                                    "Allow payment plans"
+                                } else {
+                                    "Allow default payment plan"
+                                },
+                                enabled = hostHasAccount && editEvent.priceCents > 0,
+                                onCheckedChange = onSetPaymentPlansEnabled,
+                            )
+                            if (editEvent.allowPaymentPlans == true) {
+                                val installmentCount =
+                                    maxOf(
+                                        editEvent.installmentCount ?: 0,
+                                        editEvent.installmentAmounts.size,
+                                        editEvent.installmentDueDates.size,
+                                        1,
+                                    )
+
+                                NumberInputField(
+                                    value = installmentCount.toString(),
+                                    label = "Installment Count",
+                                    onValueChange = { newValue ->
+                                        if (!newValue.all { it.isDigit() }) return@NumberInputField
+                                        val parsed = newValue.toIntOrNull() ?: 1
+                                        onSetInstallmentCount(parsed.coerceAtLeast(1))
+                                    },
+                                    isError = installmentCount <= 0,
+                                    errorMessage = if (installmentCount <= 0) {
+                                        "Installment count must be at least 1."
+                                    } else {
+                                        ""
+                                    },
                                 )
 
-                            NumberInputField(
-                                value = installmentCount.toString(),
-                                label = "Installment Count",
-                                onValueChange = { newValue ->
-                                    if (!newValue.all { it.isDigit() }) return@NumberInputField
-                                    val parsed = newValue.toIntOrNull() ?: 1
-                                    onSetInstallmentCount(parsed.coerceAtLeast(1))
-                                },
-                                isError = installmentCount <= 0,
-                                errorMessage = if (installmentCount <= 0) {
-                                    "Installment count must be at least 1."
-                                } else {
-                                    ""
-                                },
-                            )
-
-                            repeat(installmentCount) { index ->
-                                val amountCents = editEvent.installmentAmounts.getOrNull(index) ?: 0
-                                val dueDate = editEvent.installmentDueDates.getOrNull(index).orEmpty()
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalAlignment = Alignment.Top,
-                                ) {
-                                    MoneyInputField(
-                                        value = amountCents.toString(),
-                                        label = "Installment ${index + 1} Amount",
-                                        onValueChange = { newValue ->
-                                            val parsed = newValue.filter { it.isDigit() }.toIntOrNull() ?: 0
-                                            onUpdateInstallmentAmount(index, parsed)
-                                        },
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                    PlatformTextField(
-                                        value = dueDate,
-                                        onValueChange = {},
-                                        label = "Due Date",
-                                        placeholder = "YYYY-MM-DD",
-                                        modifier = Modifier.weight(1f),
-                                        readOnly = true,
-                                        onTap = { installmentDueDatePickerIndex = index },
-                                    )
-                                }
-                                if (installmentCount > 1) {
+                                repeat(installmentCount) { index ->
+                                    val amountCents = editEvent.installmentAmounts.getOrNull(index) ?: 0
+                                    val dueDate = editEvent.installmentDueDates.getOrNull(index).orEmpty()
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.End,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.Top,
                                     ) {
-                                        TextButton(
-                                            onClick = { onRemoveInstallmentRow(index) },
+                                        MoneyInputField(
+                                            value = amountCents.toString(),
+                                            label = "Installment ${index + 1} Amount",
+                                            onValueChange = { newValue ->
+                                                val parsed = newValue.filter { it.isDigit() }.toIntOrNull() ?: 0
+                                                onUpdateInstallmentAmount(index, parsed)
+                                            },
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        PlatformTextField(
+                                            value = dueDate,
+                                            onValueChange = {},
+                                            label = "Due Date",
+                                            placeholder = "YYYY-MM-DD",
+                                            modifier = Modifier.weight(1f),
+                                            readOnly = true,
+                                            onTap = { installmentDueDatePickerIndex = index },
+                                        )
+                                    }
+                                    if (installmentCount > 1) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.End,
                                         ) {
-                                            Text(
-                                                text = "Remove installment",
-                                                color = MaterialTheme.colorScheme.error,
-                                            )
+                                            TextButton(
+                                                onClick = { onRemoveInstallmentRow(index) },
+                                            ) {
+                                                Text(
+                                                    text = "Remove installment",
+                                                    color = MaterialTheme.colorScheme.error,
+                                                )
+                                            }
                                         }
                                     }
                                 }
-                            }
 
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                TextButton(onClick = onAddInstallmentRow) {
-                                    Text("Add installment")
-                                }
-                                val installmentTotal = editEvent.installmentAmounts.sum()
-                                val totalsMatch = installmentTotal == editEvent.priceCents
-                                Text(
-                                    text = if (editEvent.singleDivision) {
-                                        "Total ${installmentTotal.toDouble().div(100).moneyFormat()} / ${editEvent.priceCents.toDouble().div(100).moneyFormat()}"
-                                    } else {
-                                        "Default total ${installmentTotal.toDouble().div(100).moneyFormat()} / ${editEvent.priceCents.toDouble().div(100).moneyFormat()}"
-                                    },
-                                    color = if (totalsMatch) {
-                                        Color(localImageScheme.current.onSurfaceVariant)
-                                    } else {
-                                        MaterialTheme.colorScheme.error
-                                    },
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                            }
-                            if (!isPaymentPlansValid) {
-                                paymentPlanValidationErrors.forEach { paymentError ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    TextButton(onClick = onAddInstallmentRow) {
+                                        Text("Add installment")
+                                    }
+                                    val installmentTotal = editEvent.installmentAmounts.sum()
+                                    val totalsMatch = installmentTotal == editEvent.priceCents
                                     Text(
-                                        text = paymentError,
+                                        text = if (editEvent.singleDivision) {
+                                            "Total ${installmentTotal.toDouble().div(100).moneyFormat()} / ${editEvent.priceCents.toDouble().div(100).moneyFormat()}"
+                                        } else {
+                                            "Default total ${installmentTotal.toDouble().div(100).moneyFormat()} / ${editEvent.priceCents.toDouble().div(100).moneyFormat()}"
+                                        },
+                                        color = if (totalsMatch) {
+                                            Color(localImageScheme.current.onSurfaceVariant)
+                                        } else {
+                                            MaterialTheme.colorScheme.error
+                                        },
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.error,
                                     )
+                                }
+                                if (!isPaymentPlansValid) {
+                                    paymentPlanValidationErrors.forEach { paymentError ->
+                                        Text(
+                                            text = paymentError,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.error,
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -2470,10 +2505,13 @@ fun EventDetails(
                         }
                         Box(modifier = Modifier.weight(1f)) {
                             LabeledCheckboxRow(
-                                checked = editEvent.singleDivision,
+                                checked = if (isNewEvent) true else editEvent.singleDivision,
                                 label = "Single Division",
-                                enabled = true,
+                                enabled = !isNewEvent,
                                 onCheckedChange = { checked ->
+                                    if (isNewEvent) {
+                                        return@LabeledCheckboxRow
+                                    }
                                     val fallbackMaxParticipants = editEvent.maxParticipants.coerceAtLeast(2)
                                     val fallbackPlayoffCount = (
                                         editEvent.playoffTeamCount
@@ -2588,6 +2626,14 @@ fun EventDetails(
                                 },
                             )
                         }
+                    }
+
+                    if (isNewEvent) {
+                        Text(
+                            text = "Split-by-division setup is available on the web version.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(localImageScheme.current.onSurfaceVariant),
+                        )
                     }
 
                     if (editEvent.eventType != EventType.EVENT) {
@@ -2773,7 +2819,7 @@ fun EventDetails(
                         )
                     }
 
-                    if (!editEvent.singleDivision) {
+                    if (!isNewEvent && !editEvent.singleDivision) {
                         HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                         Text(
                             text = "Division Payment Plan",
@@ -3080,7 +3126,7 @@ fun EventDetails(
                             DetailKeyValueList(
                                 rows = buildList {
                                     add(DetailRowSpec("Field count", (editEvent.fieldCount ?: 0).toString()))
-                                    if (editEvent.eventType == EventType.LEAGUE) {
+                                    if (editEvent.eventType == EventType.LEAGUE || editEvent.eventType == EventType.TOURNAMENT) {
                                         add(
                                             DetailRowSpec(
                                                 "Weekly timeslots",
@@ -3092,9 +3138,11 @@ fun EventDetails(
                             )
                         },
                         editContent = {
-                            val setCountOptions = (1..5).map { count ->
-                                DropdownOption(value = count.toString(), label = count.toString())
-                            }
+                            val setCountOptions = listOf(
+                                DropdownOption(value = "1", label = "Best of 1"),
+                                DropdownOption(value = "3", label = "Best of 3"),
+                                DropdownOption(value = "5", label = "Best of 5"),
+                            )
                             if (editEvent.eventType == EventType.LEAGUE) {
                                 LeagueConfigurationFields(
                                     leagueConfig = editEvent.toLeagueConfig(),
@@ -3176,6 +3224,35 @@ fun EventDetails(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     verticalAlignment = Alignment.Top,
                                 ) {
+                                    val normalizedWinnerSetCount = remember(editEvent.winnerSetCount) {
+                                        when (editEvent.winnerSetCount) {
+                                            1, 3, 5 -> editEvent.winnerSetCount
+                                            else -> 1
+                                        }
+                                    }
+
+                                    PlatformDropdown(
+                                        selectedValue = normalizedWinnerSetCount.toString(),
+                                        onSelectionChange = { selected ->
+                                            val newValue = selected.toInt()
+                                            onEditTournament {
+                                                copy(
+                                                    winnerSetCount = newValue,
+                                                    winnerBracketPointsToVictory = List(newValue) { 21 }
+                                                )
+                                            }
+                                        },
+                                        options = setCountOptions,
+                                        label = "Winner Set Count",
+                                        modifier = Modifier.weight(1f),
+                                        isError = !isWinnerSetCountValid,
+                                        supportingText = if (!isWinnerSetCountValid) {
+                                            "Winner set count must be 1, 3, or 5."
+                                        } else {
+                                            ""
+                                        },
+                                    )
+
                                     if (!isNewEvent) {
                                         NumberInputField(
                                             modifier = Modifier.weight(1f),
@@ -3200,33 +3277,14 @@ fun EventDetails(
                                     } else {
                                         Box(modifier = Modifier.weight(1f))
                                     }
-
-                                    PlatformDropdown(
-                                        selectedValue = editEvent.winnerSetCount.toString(),
-                                        onSelectionChange = { selected ->
-                                            val newValue = selected.toInt()
-                                            onEditTournament {
-                                                copy(
-                                                    winnerSetCount = newValue,
-                                                    winnerBracketPointsToVictory = List(newValue) { 21 }
-                                                )
-                                            }
-                                        },
-                                        options = setCountOptions,
-                                        label = "Winner Set Count",
-                                        modifier = Modifier.weight(1f),
-                                        isError = !isWinnerSetCountValid,
-                                        supportingText = if (!isWinnerSetCountValid) {
-                                            "Winner set count must be 1, 3, or 5."
-                                        } else {
-                                            ""
-                                        },
-                                    )
                                 }
 
                                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                                     val constrainedWinnerSetCount = remember(editEvent.winnerSetCount) {
-                                        maxOf(1, minOf(editEvent.winnerSetCount, 5))
+                                        when (editEvent.winnerSetCount) {
+                                            1, 3, 5 -> editEvent.winnerSetCount
+                                            else -> 1
+                                        }
                                     }
 
                                     val focusRequesters = remember(constrainedWinnerSetCount) {
@@ -3235,13 +3293,12 @@ fun EventDetails(
 
                                     FlowRow(
                                         modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(
-                                            4.dp, Alignment.CenterHorizontally
-                                        ),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                                         verticalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
                                         repeat(constrainedWinnerSetCount) { index ->
                                             PointsTextField(
+                                                modifier = Modifier.fillMaxWidth(0.48f),
                                                 value = editEvent.winnerBracketPointsToVictory.getOrNull(
                                                     index
                                                 )?.toString() ?: "",
@@ -3292,13 +3349,19 @@ fun EventDetails(
                                 }
 
                                 if (editEvent.doubleElimination) {
+                                    val normalizedLoserSetCount = remember(editEvent.loserSetCount) {
+                                        when (editEvent.loserSetCount) {
+                                            1, 3, 5 -> editEvent.loserSetCount
+                                            else -> 1
+                                        }
+                                    }
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                                         verticalAlignment = Alignment.Top,
                                     ) {
                                         PlatformDropdown(
-                                            selectedValue = editEvent.loserSetCount.toString(),
+                                            selectedValue = normalizedLoserSetCount.toString(),
                                             onSelectionChange = { selected ->
                                                 val newValue = selected.toInt()
                                                 onEditTournament {
@@ -3322,7 +3385,10 @@ fun EventDetails(
                                     }
 
                                     val constrainedLoserSetCount = remember(editEvent.loserSetCount) {
-                                        maxOf(1, minOf(editEvent.loserSetCount, 5))
+                                        when (editEvent.loserSetCount) {
+                                            1, 3, 5 -> editEvent.loserSetCount
+                                            else -> 1
+                                        }
                                     }
 
                                     val loserFocusRequesters = remember(constrainedLoserSetCount) {
@@ -3331,13 +3397,12 @@ fun EventDetails(
 
                                     FlowRow(
                                         modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(
-                                            4.dp, Alignment.CenterHorizontally
-                                        ),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                                         verticalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
                                         repeat(constrainedLoserSetCount) { index ->
                                             PointsTextField(
+                                                modifier = Modifier.fillMaxWidth(0.48f),
                                                 value = editEvent.loserBracketPointsToVictory.getOrNull(
                                                     index
                                                 )?.toString() ?: "",
@@ -3394,7 +3459,7 @@ fun EventDetails(
                                 onUpdateSlot = onUpdateLeagueTimeSlot,
                                 onRemoveSlot = onRemoveLeagueTimeSlot,
                                 slotErrors = leagueSlotErrors,
-                                showSlotEditor = editEvent.eventType == EventType.LEAGUE,
+                                showSlotEditor = editEvent.eventType == EventType.LEAGUE || editEvent.eventType == EventType.TOURNAMENT,
                                 slotDivisionOptions = slotDivisionOptions,
                                 lockSlotDivisions = editEvent.singleDivision,
                                 lockedDivisionIds = editEvent.divisions.normalizeDivisionIdentifiers(),
@@ -3413,9 +3478,11 @@ fun EventDetails(
                                     },
                                 )
                             }
-                            if (!isLeagueSlotsValid && editEvent.eventType == EventType.LEAGUE) {
+                            if (!isLeagueSlotsValid &&
+                                (editEvent.eventType == EventType.LEAGUE || editEvent.eventType == EventType.TOURNAMENT)
+                            ) {
                                 Text(
-                                    text = "Fix league timeslot issues before continuing.",
+                                    text = "Fix timeslot issues before continuing.",
                                     color = MaterialTheme.colorScheme.error,
                                 )
                             }

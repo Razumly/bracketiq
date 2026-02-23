@@ -270,7 +270,9 @@ class DefaultCreateEventComponent(
 
     override fun createEvent() {
         scope.launch {
-            val eventDraft = applyRentalConstraints(newEventState.value)
+            val eventDraft = applyRentalConstraints(
+                newEventState.value.applyCreateSelectionRules(_isRentalFlow.value)
+            )
             if (_isRentalFlow.value) {
                 processRentalPaymentBeforeCreate(eventDraft)
             } else {
@@ -292,6 +294,7 @@ class DefaultCreateEventComponent(
             val previous = _newEventState.value
             val updated = previous
                 .update()
+                .applyCreateSelectionRules(_isRentalFlow.value)
                 .withSportRules()
             val normalized = applyRentalConstraints(updated)
 
@@ -334,6 +337,7 @@ class DefaultCreateEventComponent(
             val previous = _newEventState.value
             val updated = previous
                 .update()
+                .applyCreateSelectionRules(_isRentalFlow.value)
                 .withSportRules()
             val normalized = applyRentalConstraints(updated)
 
@@ -555,7 +559,7 @@ class DefaultCreateEventComponent(
                 selectFieldCount(selectedCount)
             }
         }
-        if (type == EventType.LEAGUE && _leagueSlots.value.isEmpty()) {
+        if ((type == EventType.LEAGUE || type == EventType.TOURNAMENT) && _leagueSlots.value.isEmpty()) {
             _leagueSlots.value = listOf(createDefaultLeagueSlot())
         }
     }
@@ -734,7 +738,7 @@ class DefaultCreateEventComponent(
             } else {
                 normalizedEnd
             },
-        ))
+        ).applyCreateSelectionRules(_isRentalFlow.value))
     }
 
     private fun rentalRequiredTemplateIds(): List<String> {
@@ -923,7 +927,10 @@ class DefaultCreateEventComponent(
             )
         }
 
-        if (!_isRentalFlow.value && preparedEvent.eventType == EventType.LEAGUE) {
+        if (
+            !_isRentalFlow.value &&
+            (preparedEvent.eventType == EventType.LEAGUE || preparedEvent.eventType == EventType.TOURNAMENT)
+        ) {
             val slotDrafts = buildLeagueSlotDrafts(
                 event = preparedEvent,
                 fieldIdReplacements = fieldIdReplacements,
@@ -934,7 +941,7 @@ class DefaultCreateEventComponent(
                 slotDrafts.forEach { slotDraft ->
                     val createdSlot = fieldRepository.createTimeSlot(slotDraft).getOrElse { error ->
                         throw IllegalStateException(
-                            error.message ?: "Failed to create a league timeslot.",
+                            error.message ?: "Failed to create a schedule timeslot.",
                             error
                         )
                     }

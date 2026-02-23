@@ -15,6 +15,7 @@ struct DateTimePickerView: View {
     let minDate: Date
     let maxDate: Date
     let getTime: Bool
+    let showDate: Bool
     let onConfirm: (Date) -> Void
     let onDismiss: () -> Void
     
@@ -23,6 +24,7 @@ struct DateTimePickerView: View {
         minDate: Date,
         maxDate: Date,
         getTime: Bool,
+        showDate: Bool,
         onConfirm: @escaping (Date) -> Void,
         onDismiss: @escaping () -> Void
     ) {
@@ -30,19 +32,22 @@ struct DateTimePickerView: View {
         self.minDate = minDate
         self.maxDate = maxDate
         self.getTime = getTime
+        self.showDate = showDate
         self.onConfirm = onConfirm
         self.onDismiss = onDismiss
     }
     
     var body: some View {
         VStack {
-            DatePicker(
-                "",
-                selection: $selectedDate,
-                in: minDate...maxDate,
-                displayedComponents: [.date]
-            )
-            .datePickerStyle(.graphical)
+            if showDate {
+                DatePicker(
+                    "",
+                    selection: $selectedDate,
+                    in: minDate...maxDate,
+                    displayedComponents: [.date]
+                )
+                .datePickerStyle(.graphical)
+            }
             
             if (getTime) {
                 DatePicker(
@@ -73,6 +78,7 @@ class DateTimePickerViewController: UIHostingController<DateTimePickerView> {
         minDate: Date,
         maxDate: Date,
         getTime: Bool,
+        showDate: Bool,
         onConfirm: @escaping (Date) -> Void,
         onDismiss: @escaping () -> Void
     ) {
@@ -83,6 +89,7 @@ class DateTimePickerViewController: UIHostingController<DateTimePickerView> {
             minDate: minDate,
             maxDate: maxDate,
             getTime: getTime,
+            showDate: showDate,
             onConfirm: { date in
                 onConfirm(date)
                 // Don't call onDismiss here since the caller handles dismissal

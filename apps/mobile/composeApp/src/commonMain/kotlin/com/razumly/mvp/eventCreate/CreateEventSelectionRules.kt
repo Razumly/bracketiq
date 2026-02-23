@@ -5,7 +5,7 @@ import com.razumly.mvp.core.data.dataTypes.enums.EventType
 
 internal fun Event.applyCreateSelectionRules(isRentalFlow: Boolean): Event {
     val normalizedType = if (isRentalFlow) EventType.EVENT else eventType
-    return when (normalizedType) {
+    val typeNormalizedEvent = when (normalizedType) {
         EventType.LEAGUE, EventType.TOURNAMENT -> copy(
             eventType = normalizedType,
             teamSignup = true,
@@ -16,4 +16,19 @@ internal fun Event.applyCreateSelectionRules(isRentalFlow: Boolean): Event {
             noFixedEndDateTime = false,
         )
     }
+    return typeNormalizedEvent.copy(
+        singleDivision = true,
+        allowPaymentPlans = false,
+        installmentCount = null,
+        installmentDueDates = emptyList(),
+        installmentAmounts = emptyList(),
+        divisionDetails = typeNormalizedEvent.divisionDetails.map { detail ->
+            detail.copy(
+                allowPaymentPlans = false,
+                installmentCount = null,
+                installmentDueDates = emptyList(),
+                installmentAmounts = emptyList(),
+            )
+        },
+    )
 }

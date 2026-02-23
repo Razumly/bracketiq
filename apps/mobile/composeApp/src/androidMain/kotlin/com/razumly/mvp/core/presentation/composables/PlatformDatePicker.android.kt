@@ -31,12 +31,13 @@ actual fun PlatformDateTimePicker(
     onDismissRequest: () -> Unit,
     showPicker: Boolean,
     getTime: Boolean,
+    showDate: Boolean,
     canSelectPast: Boolean,
     initialDate: Instant?,
 ) {
     if (showPicker) {
-        var showDatePicker by remember { mutableStateOf(true) }
-        var showTimePicker by remember { mutableStateOf(false) }
+        var showDatePicker by remember(showDate) { mutableStateOf(showDate) }
+        var showTimePicker by remember(showDate, getTime) { mutableStateOf(!showDate && getTime) }
         val nowMillis = System.currentTimeMillis()
         val initialMillis = initialDate?.toEpochMilliseconds() ?: nowMillis
         val clampedInitialMillis = if (canSelectPast) {
@@ -100,7 +101,7 @@ actual fun PlatformDateTimePicker(
             }
         }
 
-        if (showTimePicker) {
+        if (showTimePicker && getTime) {
             AlertDialog(
                 onDismissRequest = {
                     showTimePicker = false

@@ -12,6 +12,7 @@ expect fun PlatformDateTimePicker(
     onDismissRequest: () -> Unit,
     showPicker: Boolean,
     getTime: Boolean,
+    showDate: Boolean = true,
     canSelectPast: Boolean,
     initialDate: Instant? = null,
 )

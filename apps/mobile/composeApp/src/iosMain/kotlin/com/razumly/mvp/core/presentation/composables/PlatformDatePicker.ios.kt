@@ -17,6 +17,7 @@ actual fun PlatformDateTimePicker(
     onDismissRequest: () -> Unit,
     showPicker: Boolean,
     getTime: Boolean,
+    showDate: Boolean,
     canSelectPast: Boolean,
     initialDate: Instant?,
 ) {
@@ -36,13 +37,14 @@ actual fun PlatformDateTimePicker(
     val latestOnDateSelected by rememberUpdatedState(onDateSelected)
     val latestOnDismissRequest by rememberUpdatedState(onDismissRequest)
 
-    LaunchedEffect(showPicker, getTime, canSelectPast, clampedInitialDate) {
+    LaunchedEffect(showPicker, getTime, showDate, canSelectPast, clampedInitialDate) {
         if (!showPicker) return@LaunchedEffect
         factory.createNativePlatformDatePicker(
             initialDate = clampedInitialDate,
             minDate = minDate,
             maxDate = maxDate,
             getTime = getTime,
+            showDate = showDate,
             onDateSelected = latestOnDateSelected,
             onDismissRequest = latestOnDismissRequest,
         )
