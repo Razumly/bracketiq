@@ -19,7 +19,7 @@ struct ComposeView: UIViewControllerRepresentable {
     
     func updateUIViewController(_ uiViewController: UIViewController, context: Context) {
         if let url = deepLinkUrl {
-            let deepLinkNav = url.extractDeepLinkNav()
+            _ = url.extractDeepLinkNav()
             // Since we can't call methods on the generated UIViewController,
             // we need to recreate it by forcing SwiftUI to rebuild
             // This is handled by the .id() modifier in the parent
@@ -41,9 +41,6 @@ extension URL {
         switch effectiveSegments.count {
         case 2 where effectiveSegments[0] == "event":
             return RootComponent.DeepLinkNavEvent.init(eventId: effectiveSegments[1])
-            
-        case 2 where effectiveSegments[0] == "tournament":
-            return RootComponent.DeepLinkNavTournament.init(tournamentId: effectiveSegments[1])
             
         case 2 where effectiveSegments[0] == "host" && effectiveSegments[1] == "onboarding":
             let queryItems = URLComponents(url: self, resolvingAgainstBaseURL: false)?.queryItems

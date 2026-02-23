@@ -20,7 +20,7 @@ plugins {
     alias(libs.plugins.secrets)
     id("kotlin-parcelize")
     id("com.google.gms.google-services") version "4.4.3"
-    id("co.touchlab.skie") version "0.10.5"
+    id("co.touchlab.skie") version "0.10.10"
 }
 composeCompiler {
     includeSourceInformation = true

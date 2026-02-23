@@ -14,7 +14,7 @@ struct EventMap: View {
     var component: MapComponent
     var onEventSelected: (Event) -> Void
     var onPlaceSelected: (MVPPlace) -> Void
-    var onPlaceSelectionPoint: (Float, Float) -> Void
+    var onPlaceSelectionPoint: (KotlinFloat, KotlinFloat) -> Void
     var canClickPOI: Bool
     var focusedEvent: Event?
     var focusedLocation: LatLng?
@@ -32,7 +32,7 @@ struct EventMap: View {
         component: MapComponent,
         onEventSelected: @escaping (Event) -> Void,
         onPlaceSelected: @escaping (MVPPlace) -> Void,
-        onPlaceSelectionPoint: @escaping (Float, Float) -> Void,
+        onPlaceSelectionPoint: @escaping (KotlinFloat, KotlinFloat) -> Void,
         canClickPOI: Bool,
         focusedLocation: LatLng?,
         focusedEvent: Event?,
@@ -163,7 +163,7 @@ struct GoogleMapView: UIViewRepresentable {
     let focusedEvent: Event?
     let onEventSelected: (Event) -> Void
     let onPlaceSelected: (MVPPlace) -> Void
-    let onPlaceSelectionPoint: (Float, Float) -> Void
+    let onPlaceSelectionPoint: (KotlinFloat, KotlinFloat) -> Void
     let places: [MVPPlace]
     let revealCenter: CGPoint
     
@@ -200,7 +200,7 @@ struct GoogleMapView: UIViewRepresentable {
             let coord = CLLocationCoordinate2D(latitude: fe.lat, longitude: fe.long)
             let marker = GMSMarker(position: coord)
             marker.title = fe.name
-            marker.snippet = "\(fe.fieldType.name) – $\(fe.price)"
+            marker.snippet = "\(fe.eventType.name) – $\(fe.price)"
             marker.userData = EventMarkerData(event: fe)
             marker.icon = GMSMarker.markerImage(with: .red)
             marker.map = mapView
@@ -215,7 +215,7 @@ struct GoogleMapView: UIViewRepresentable {
                 let coord = CLLocationCoordinate2D(latitude: event.lat, longitude: event.long)
                 let marker = GMSMarker(position: coord)
                 marker.title = event.name
-                marker.snippet = "\(event.fieldType.name) – $\(event.price)"
+                marker.snippet = "\(event.eventType.name) – $\(event.price)"
                 marker.userData = EventMarkerData(event: event)
                 marker.icon = GMSMarker.markerImage(with: .blue)
                 marker.map = mapView
@@ -224,7 +224,7 @@ struct GoogleMapView: UIViewRepresentable {
         
         // Add searched places markers
         for place in places {
-            let coord = CLLocationCoordinate2D(latitude: place.lat, longitude: place.long)
+            let coord = CLLocationCoordinate2D(latitude: place.latitude, longitude: place.longitude)
             let marker = GMSMarker(position: coord)
             marker.title = place.name
             marker.userData = PlaceMarkerData(place: place)
@@ -260,7 +260,7 @@ class Coordinator: NSObject, GMSMapViewDelegate {
     let parent: GoogleMapView
     let onEventSelected: (Event) -> Void
     let onPlaceSelected: (MVPPlace) -> Void
-    let onPlaceSelectionPoint: (Float, Float) -> Void
+    let onPlaceSelectionPoint: (KotlinFloat, KotlinFloat) -> Void
     
     var placeMarkers: [GMSMarker] = []
     var currentPOIMarker: GMSMarker?
@@ -268,7 +268,7 @@ class Coordinator: NSObject, GMSMapViewDelegate {
     init(parent: GoogleMapView,
          onEventSelected: @escaping (Event) -> Void,
          onPlaceSelected: @escaping (MVPPlace) -> Void,
-         onPlaceSelectionPoint: @escaping (Float, Float) -> Void) {
+         onPlaceSelectionPoint: @escaping (KotlinFloat, KotlinFloat) -> Void) {
         self.parent = parent
         self.onEventSelected = onEventSelected
         self.onPlaceSelected = onPlaceSelected
@@ -380,7 +380,7 @@ class Coordinator: NSObject, GMSMapViewDelegate {
         containerView.addSubview(typeLabel)
         
         let fieldLabel = UILabel(frame: CGRect(x: 120, y: 76, width: 108, height: 16))
-        fieldLabel.text = event.fieldType.name
+        fieldLabel.text = event.state
         fieldLabel.font = UIFont.systemFont(ofSize: 12)
         fieldLabel.textColor = UIColor.systemPurple
         fieldLabel.textAlignment = .right
@@ -456,7 +456,10 @@ class Coordinator: NSObject, GMSMapViewDelegate {
 
     private func selectPlace(from marker: GMSMarker, mapView: GMSMapView) -> Bool {
         let selectedPoint = mapView.projection.point(for: marker.position)
-        onPlaceSelectionPoint(Float(selectedPoint.x), Float(selectedPoint.y))
+        onPlaceSelectionPoint(
+            KotlinFloat(float: Float(selectedPoint.x)),
+            KotlinFloat(float: Float(selectedPoint.y))
+        )
 
         if let placeData = marker.userData as? PlaceMarkerData {
             onPlaceSelected(placeData.place)

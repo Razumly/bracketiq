@@ -125,8 +125,7 @@ actual class MapComponent(
             MVPPlace(
                 name = response.displayName.text,
                 id = placeId,
-                lat = response.location.latitude,
-                long = response.location.longitude,
+                coordinates = listOf(response.location.longitude, response.location.latitude),
             )
         } catch (t: Throwable) {
             _error.value = t.message
@@ -222,8 +221,7 @@ actual class MapComponent(
                 MVPPlace(
                     name = place.displayName.text,
                     id = place.id,
-                    lat = place.location.latitude,
-                    long = place.location.longitude,
+                    coordinates = listOf(place.location.longitude, place.location.latitude),
                 )
             }
         } catch (t: Throwable) {

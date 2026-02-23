@@ -114,7 +114,6 @@ struct iOSApp: App {
                         return
                     }
                     updateDeepLink(url)
-                    SharedWebAuthComponent.companion.handleIncomingCookie(url: url.absoluteString)
                 }
         }
     }
@@ -125,7 +124,6 @@ struct iOSApp: App {
         print("Deep link updated: \(url.absoluteString) with ID: \(deepLinkId)")
     }
 }
-
 
 
 

@@ -1,3 +1,5 @@
+@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
+
 package com.razumly.mvp.core.data
 
 import cocoapods.GoogleSignIn.GIDConfiguration
