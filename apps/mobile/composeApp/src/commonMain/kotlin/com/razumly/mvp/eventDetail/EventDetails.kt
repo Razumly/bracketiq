@@ -689,22 +689,30 @@ fun EventDetails(
             divisionEditor = divisionEditor.copy(error = "Division name is required.")
             return
         }
+        val existingDetail = divisionDetailsForSettings.firstOrNull { detail ->
+            divisionsEquivalent(detail.id, divisionEditor.editingId)
+        }
+        val normalizedDivisionName = resolvedDivisionName.normalizeDivisionNameKey()
+        val duplicateByName = divisionDetailsForSettings.firstOrNull { existing ->
+            val isCurrent = existingDetail != null && divisionsEquivalent(existing.id, existingDetail.id)
+            !isCurrent && existing.name.normalizeDivisionNameKey() == normalizedDivisionName
+        }
+        if (duplicateByName != null) {
+            divisionEditor = divisionEditor.copy(
+                error = "Division name must be unique within this event.",
+            )
+            return
+        }
         val normalizedToken = buildDivisionToken(
             gender = normalizedGender,
             skillDivisionTypeId = normalizedSkillDivisionTypeId,
             ageDivisionTypeId = normalizedAgeDivisionTypeId,
         )
-        val nextDivisionId = buildEventDivisionId(editEvent.id, normalizedToken)
-        val duplicate = divisionDetailsForSettings.firstOrNull { existing ->
-            val sameDivision = divisionsEquivalent(existing.id, nextDivisionId)
-            val isCurrent = !divisionEditor.editingId.isNullOrBlank() &&
-                divisionsEquivalent(existing.id, divisionEditor.editingId)
-            sameDivision && !isCurrent
-        }
-        if (duplicate != null) {
-            divisionEditor = divisionEditor.copy(error = "That division already exists in this event.")
-            return
-        }
+        val nextDivisionId = existingDetail?.id ?: buildUniqueDivisionIdForToken(
+            eventId = editEvent.id,
+            divisionToken = normalizedToken,
+            existingDivisionIds = divisionDetailsForSettings.map { detail -> detail.id },
+        )
         val fallbackMaxParticipants = editEvent.maxParticipants.coerceAtLeast(2)
         val normalizedPrice = if (editEvent.singleDivision) {
             editEvent.priceCents.coerceAtLeast(0)
@@ -808,9 +816,6 @@ fun EventDetails(
                 )
                 return
             }
-        }
-        val existingDetail = divisionDetailsForSettings.firstOrNull { detail ->
-            divisionsEquivalent(detail.id, divisionEditor.editingId)
         }
         val nextDetail = (existingDetail ?: DivisionDetail(id = nextDivisionId)).copy(
             id = nextDivisionId,
@@ -4070,6 +4075,7 @@ internal data class ParsedDivisionToken(
 
 internal val DIVISION_TOKEN_PATTERN = Regex("^([mfc])_(age|skill)_(.+)$")
 internal val COMBINED_DIVISION_TOKEN_PATTERN = Regex("^([mfc])_skill_(.+)_age_(.+)$")
+internal val DIVISION_NAME_WHITESPACE_PATTERN = Regex("\\s+")
 
 internal val DIVISION_GENDER_OPTIONS = listOf(
     DropdownOption(value = "M", label = "Men"),
@@ -4252,6 +4258,34 @@ internal fun parseDivisionToken(detail: DivisionDetail): ParsedDivisionToken {
         ageDivisionTypeId = normalizedDetail.ageDivisionTypeId.normalizeDivisionIdentifier()
             .ifBlank { DEFAULT_AGE_DIVISION },
     )
+}
+
+internal fun buildUniqueDivisionIdForToken(
+    eventId: String,
+    divisionToken: String,
+    existingDivisionIds: List<String>,
+): String {
+    val usedDivisionIds = existingDivisionIds
+        .map { divisionId -> divisionId.normalizeDivisionIdentifier() }
+        .filter(String::isNotBlank)
+        .toSet()
+
+    var suffix = 1
+    while (true) {
+        val scopedEventId = if (suffix == 1) eventId else "${eventId}_$suffix"
+        val candidate = buildEventDivisionId(scopedEventId, divisionToken)
+            .normalizeDivisionIdentifier()
+        if (!usedDivisionIds.contains(candidate)) {
+            return candidate
+        }
+        suffix += 1
+    }
+}
+
+internal fun String.normalizeDivisionNameKey(): String {
+    return trim()
+        .lowercase()
+        .replace(DIVISION_NAME_WHITESPACE_PATTERN, " ")
 }
 
 internal fun buildDivisionToken(

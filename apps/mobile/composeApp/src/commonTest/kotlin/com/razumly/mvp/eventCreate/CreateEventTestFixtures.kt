@@ -38,6 +38,8 @@ import com.razumly.mvp.core.data.repositories.IFieldRepository
 import com.razumly.mvp.core.data.repositories.IImagesRepository
 import com.razumly.mvp.core.data.repositories.ISportsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.data.repositories.LeagueDivisionStandings
+import com.razumly.mvp.core.data.repositories.LeagueStandingsConfirmResult
 import com.razumly.mvp.core.data.repositories.ProfileDocumentsBundle
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.data.repositories.ChildRegistrationResult
@@ -325,6 +327,15 @@ internal class CreateEvent_FakeEventRepository(
         team: Team,
         preferredDivisionId: String?,
     ): Result<Unit> = Result.success(Unit)
+    override suspend fun getLeagueDivisionStandings(
+        eventId: String,
+        divisionId: String,
+    ): Result<LeagueDivisionStandings> = Result.failure(IllegalStateException("unused"))
+    override suspend fun confirmLeagueDivisionStandings(
+        eventId: String,
+        divisionId: String,
+        applyReassignment: Boolean,
+    ): Result<LeagueStandingsConfirmResult> = Result.failure(IllegalStateException("unused"))
     override suspend fun removeTeamFromEvent(event: Event, teamWithPlayers: TeamWithPlayers): Result<Unit> =
         Result.success(Unit)
     override suspend fun removeCurrentUserFromEvent(event: Event, targetUserId: String?): Result<Unit> =

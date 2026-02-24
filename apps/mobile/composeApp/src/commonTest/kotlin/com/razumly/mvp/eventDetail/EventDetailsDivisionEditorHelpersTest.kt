@@ -1,5 +1,6 @@
 package com.razumly.mvp.eventDetail
 
+import com.razumly.mvp.core.data.util.buildEventDivisionId
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import kotlin.test.Test
@@ -147,5 +148,28 @@ class EventDetailsDivisionEditorHelpersTest {
         )
 
         assertEquals("U12", label)
+    }
+
+    @Test
+    fun build_unique_division_id_for_token_scopes_suffix_to_event_segment() {
+        val token = "c_skill_open_age_u18"
+        val existingIds = listOf(
+            buildEventDivisionId("event-1", token),
+            buildEventDivisionId("event-1_2", token),
+        )
+
+        val nextId = buildUniqueDivisionIdForToken(
+            eventId = "event-1",
+            divisionToken = token,
+            existingDivisionIds = existingIds,
+        )
+
+        assertEquals(buildEventDivisionId("event-1_3", token), nextId)
+    }
+
+    @Test
+    fun normalize_division_name_key_is_case_and_whitespace_insensitive() {
+        assertEquals("group alpha", "  Group   Alpha ".normalizeDivisionNameKey())
+        assertEquals("group alpha", "group alpha".normalizeDivisionNameKey())
     }
 }

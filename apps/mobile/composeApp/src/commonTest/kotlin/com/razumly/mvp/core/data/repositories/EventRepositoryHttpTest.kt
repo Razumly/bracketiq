@@ -1001,4 +1001,137 @@ class EventRepositoryHttpTest {
         assertFalse(result.requiresParentApproval)
         assertEquals(listOf("child_1"), eventDao.getEventById("e1")?.waitListIds)
     }
+
+    @Test
+    fun getLeagueDivisionStandings_requests_division_query_and_maps_response() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/events/e1/standings", request.url.encodedPath)
+            assertEquals(HttpMethod.Get, request.method)
+            assertEquals("e1__division__advanced", request.url.parameters["divisionId"])
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+
+            respond(
+                content = """
+                    {
+                      "division": {
+                        "divisionId": "e1__division__advanced",
+                        "divisionName": "Advanced",
+                        "standingsConfirmedAt": "2026-02-24T12:00:00.000Z",
+                        "standingsConfirmedBy": "host_1",
+                        "standings": [
+                          {
+                            "position": 1,
+                            "teamId": "team_1",
+                            "teamName": "Team One",
+                            "wins": 3,
+                            "losses": 0,
+                            "draws": 0,
+                            "goalsFor": 9,
+                            "goalsAgainst": 2,
+                            "goalDifference": 7,
+                            "matchesPlayed": 3,
+                            "basePoints": 9,
+                            "finalPoints": 10,
+                            "pointsDelta": 1
+                          }
+                        ],
+                        "validation": {
+                          "mappingErrors": [],
+                          "capacityErrors": []
+                        }
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val result = repo.getLeagueDivisionStandings(
+            eventId = "e1",
+            divisionId = "e1__division__advanced",
+        ).getOrThrow()
+
+        assertEquals("e1__division__advanced", result.divisionId)
+        assertEquals("Advanced", result.divisionName)
+        assertEquals("host_1", result.standingsConfirmedBy)
+        assertEquals(1, result.rows.size)
+        assertEquals("team_1", result.rows.first().teamId)
+        assertEquals(10.0, result.rows.first().finalPoints)
+        assertEquals(1.0, result.rows.first().pointsDelta)
+    }
+
+    @Test
+    fun confirmLeagueDivisionStandings_posts_confirm_payload_and_maps_result() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+        var capturedBody = ""
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/events/e1/standings/confirm", request.url.encodedPath)
+            assertEquals(HttpMethod.Post, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+
+            respond(
+                content = """
+                    {
+                      "division": {
+                        "divisionId": "e1__division__advanced",
+                        "divisionName": "Advanced",
+                        "standingsConfirmedAt": "2026-02-24T12:00:00.000Z",
+                        "standingsConfirmedBy": "host_1",
+                        "standings": [],
+                        "validation": {
+                          "mappingErrors": [],
+                          "capacityErrors": []
+                        }
+                      },
+                      "applyReassignment": false,
+                      "reassignedPlayoffDivisionIds": [],
+                      "seededTeamIds": []
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val result = repo.confirmLeagueDivisionStandings(
+            eventId = "e1",
+            divisionId = "e1__division__advanced",
+            applyReassignment = false,
+        ).getOrThrow()
+
+        assertTrue(capturedBody.contains("\"divisionId\":\"e1__division__advanced\""))
+        assertTrue(capturedBody.contains("\"applyReassignment\":false"))
+        assertFalse(result.applyReassignment)
+        assertEquals("e1__division__advanced", result.division.divisionId)
+    }
 }

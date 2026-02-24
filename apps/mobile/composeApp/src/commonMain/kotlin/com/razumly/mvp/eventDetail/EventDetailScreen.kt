@@ -96,6 +96,7 @@ import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
 import com.razumly.mvp.core.presentation.composables.StripeButton
 import com.razumly.mvp.core.presentation.composables.TeamCard
 import com.razumly.mvp.core.presentation.util.buttonTransitionSpec
+import com.razumly.mvp.core.presentation.util.dateTimeFormat
 import com.razumly.mvp.core.presentation.util.toTitleCase
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
@@ -109,13 +110,14 @@ import com.razumly.mvp.eventDetail.composables.SendNotificationDialog
 import com.razumly.mvp.eventDetail.composables.TeamSelectionDialog
 import com.razumly.mvp.eventDetail.composables.TournamentBracketView
 import com.razumly.mvp.eventMap.MapComponent
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import kotlin.math.absoluteValue
-import kotlin.math.max
-import kotlin.math.min
 import kotlin.math.round
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.hours
 import kotlin.time.ExperimentalTime
+import kotlin.time.Instant
 
 val LocalTournamentComponent =
     compositionLocalOf<EventDetailComponent> { error("No tournament provided") }
@@ -721,6 +723,9 @@ fun EventDetailScreen(
     val organizationTemplates by component.organizationTemplates.collectAsState()
     val organizationTemplatesLoading by component.organizationTemplatesLoading.collectAsState()
     val organizationTemplatesError by component.organizationTemplatesError.collectAsState()
+    val leagueDivisionStandings by component.leagueDivisionStandings.collectAsState()
+    val leagueDivisionStandingsLoading by component.leagueDivisionStandingsLoading.collectAsState()
+    val leagueStandingsConfirming by component.leagueStandingsConfirming.collectAsState()
 
     var isRefundAutomatic by remember { mutableStateOf(false) }
     val isHost by component.isHost.collectAsState()
@@ -738,7 +743,20 @@ fun EventDetailScreen(
         (eventType == EventType.LEAGUE && selectedEvent.event.includePlayoffs)
     val hasScheduleView = selectedEvent.matches.isNotEmpty()
     val hasStandingsView = eventType == EventType.LEAGUE
-    val leagueStandings = remember(
+    val canManageLeagueStandings = remember(
+        currentUser.id,
+        selectedEvent.event.hostId,
+        selectedEvent.event.assistantHostIds,
+    ) {
+        val currentUserId = currentUser.id.trim()
+        currentUserId.isNotBlank() && (
+            selectedEvent.event.hostId == currentUserId ||
+                selectedEvent.event.assistantHostIds.any { assistantHostId ->
+                    assistantHostId == currentUserId
+                }
+            )
+    }
+    val computedLeagueStandings = remember(
         selectedEvent.teams,
         selectedEvent.matches,
         selectedEvent.event.singleDivision,
@@ -759,6 +777,33 @@ fun EventDetailScreen(
             matches = standingsMatches,
             config = selectedEvent.leagueScoringConfig
         )
+    }
+    val leagueStandings = remember(
+        computedLeagueStandings,
+        leagueDivisionStandings,
+        selectedEvent.teams,
+    ) {
+        val remoteRows = leagueDivisionStandings?.rows.orEmpty()
+        if (remoteRows.isEmpty()) {
+            computedLeagueStandings
+        } else {
+            val teamsById = selectedEvent.teams.associateBy { it.team.id }
+            remoteRows.map { row ->
+                TeamStanding(
+                    team = teamsById[row.teamId],
+                    teamId = row.teamId,
+                    teamName = row.teamName,
+                    wins = row.wins,
+                    losses = row.losses,
+                    draws = row.draws,
+                    goalsFor = row.goalsFor,
+                    goalsAgainst = row.goalsAgainst,
+                    baseScore = row.basePoints,
+                    score = row.finalPoints,
+                    pointsDelta = row.pointsDelta,
+                )
+            }
+        }
     }
 
     var showTeamSelectionDialog by remember { mutableStateOf(false) }
@@ -1342,7 +1387,15 @@ fun EventDetailScreen(
                                     LeagueStandingsTab(
                                         standings = leagueStandings,
                                         pointPrecision = selectedEvent.leagueScoringConfig?.pointPrecision,
-                                        showFab = { showFab = it }
+                                        showFab = { showFab = it },
+                                        standingsConfirmedAt = leagueDivisionStandings?.standingsConfirmedAt,
+                                        standingsConfirmedBy = leagueDivisionStandings?.standingsConfirmedBy,
+                                        validationMessages = leagueDivisionStandings?.validationMessages.orEmpty(),
+                                        isLoading = leagueDivisionStandingsLoading,
+                                        isConfirming = leagueStandingsConfirming,
+                                        canConfirmStandings = canManageLeagueStandings,
+                                        onRefresh = component::refreshLeagueStandings,
+                                        onConfirm = component::confirmLeagueStandings,
                                     )
                                 }
 
@@ -1747,34 +1800,129 @@ private fun WithdrawTargetDialog(
 private fun LeagueStandingsTab(
     standings: List<TeamStanding>,
     pointPrecision: Int?,
-    showFab: (Boolean) -> Unit
+    standingsConfirmedAt: Instant?,
+    standingsConfirmedBy: String?,
+    validationMessages: List<String>,
+    isLoading: Boolean,
+    isConfirming: Boolean,
+    canConfirmStandings: Boolean,
+    onRefresh: () -> Unit,
+    onConfirm: (applyReassignment: Boolean) -> Unit,
+    showFab: (Boolean) -> Unit,
 ) {
     LaunchedEffect(standings) {
         showFab(true)
     }
 
-    if (standings.isEmpty()) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                "Standings will appear once scores are reported.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        return
-    }
+    var applyReassignment by rememberSaveable { mutableStateOf(true) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
     ) {
+        if (canConfirmStandings) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = "Standings Confirmation",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = standingsConfirmedAt?.let { confirmedAt ->
+                            buildString {
+                                append("Confirmed: ")
+                                append(formatStandingsConfirmedAt(confirmedAt))
+                                standingsConfirmedBy?.takeIf(String::isNotBlank)?.let { confirmedBy ->
+                                    append(" by ")
+                                    append(confirmedBy)
+                                }
+                            }
+                        } ?: "Not confirmed yet.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(
+                            checked = applyReassignment,
+                            onCheckedChange = { applyReassignment = it },
+                        )
+                        Text(
+                            text = "Apply automatic playoff reassignment",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Button(
+                            onClick = onRefresh,
+                            enabled = !isLoading && !isConfirming,
+                        ) {
+                            Text("Refresh")
+                        }
+                        Button(
+                            onClick = { onConfirm(applyReassignment) },
+                            enabled = !isLoading && !isConfirming && standings.isNotEmpty(),
+                        ) {
+                            Text("Confirm Results")
+                        }
+                    }
+                    if (validationMessages.isNotEmpty()) {
+                        validationMessages.forEach { validationMessage ->
+                            Text(
+                                text = validationMessage,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
+                    if (isLoading || isConfirming) {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
+                }
+            }
+        } else if (isLoading) {
+            LinearProgressIndicator(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+            )
+        }
+
+        if (standings.isEmpty()) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "Standings will appear once scores are reported.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            return
+        }
+
         LeagueStandingsHeader()
         LazyColumn {
-            items(standings, key = { it.team.team.id }) { standing ->
+            items(standings, key = { it.teamId }) { standing ->
                 LeagueStandingRow(
                     standing = standing,
                     pointPrecision = pointPrecision
@@ -1782,6 +1930,11 @@ private fun LeagueStandingsTab(
             }
         }
     }
+}
+
+private fun formatStandingsConfirmedAt(confirmedAt: Instant): String {
+    val localDateTime = confirmedAt.toLocalDateTime(TimeZone.currentSystemDefault())
+    return dateTimeFormat.format(localDateTime)
 }
 
 @Composable
@@ -1854,7 +2007,15 @@ private fun LeagueStandingRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(modifier = Modifier.weight(1.6f)) {
-            TeamCard(team = standing.team)
+            standing.team?.let { teamWithPlayers ->
+                TeamCard(team = teamWithPlayers)
+            } ?: Text(
+                text = standing.teamName.ifBlank { standing.teamId },
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
         Row(
             modifier = Modifier
@@ -1913,13 +2074,17 @@ private fun StandingsCell(
 }
 
 private data class TeamStanding(
-    val team: TeamWithPlayers,
+    val team: TeamWithPlayers?,
+    val teamId: String,
+    val teamName: String,
     val wins: Int,
     val losses: Int,
     val draws: Int,
     val goalsFor: Int,
     val goalsAgainst: Int,
-    val score: Double
+    val baseScore: Double,
+    val score: Double,
+    val pointsDelta: Double,
 ) {
     val goalDifferential: Int get() = goalsFor - goalsAgainst
 }
@@ -1980,19 +2145,23 @@ private fun buildLeagueStandings(
         val stats = accumulators[team.team.id] ?: StandingAccumulator()
         TeamStanding(
             team = team,
+            teamId = team.team.id,
+            teamName = team.team.name ?: team.team.id,
             wins = stats.wins,
             losses = stats.losses,
             draws = stats.draws,
             goalsFor = stats.goalsFor,
             goalsAgainst = stats.goalsAgainst,
-            score = stats.score
+            baseScore = stats.score,
+            score = stats.score,
+            pointsDelta = 0.0,
         )
     }.sortedWith(
         compareByDescending<TeamStanding> { it.score }
             .thenByDescending { it.wins }
             .thenByDescending { it.goalDifferential }
-            .thenBy { it.team.team.seed }
-            .thenBy { it.team.team.name ?: it.team.team.id }
+            .thenBy { it.team?.team?.seed ?: 0 }
+            .thenBy { it.teamName.ifBlank { it.teamId } }
     )
 }
 
@@ -2015,33 +2184,6 @@ private fun StandingAccumulator.applyMatchResult(
         MatchOutcome.WIN -> (config?.pointsForWin ?: DEFAULT_POINTS_FOR_WIN).toDouble()
         MatchOutcome.LOSS -> (config?.pointsForLoss ?: DEFAULT_POINTS_FOR_LOSS).toDouble()
         MatchOutcome.DRAW -> (config?.pointsForDraw ?: DEFAULT_POINTS_FOR_DRAW).toDouble()
-    }
-
-    config?.pointsPerGoalScored?.let { matchPoints += it * goalsFor }
-    config?.pointsPerGoalConceded?.let { matchPoints += it * goalsAgainst }
-    config?.pointsForParticipation?.let { matchPoints += it }
-
-    val goalDiff = goalsFor - goalsAgainst
-    if (goalDiff > 0) {
-        config?.pointsPerGoalDifference?.let { perDiff ->
-            val cappedDiff =
-                config.maxGoalDifferencePoints?.let { min(goalDiff, it) } ?: goalDiff
-            matchPoints += cappedDiff * perDiff
-        }
-    } else if (goalDiff < 0) {
-        config?.pointsPenaltyPerGoalDifference?.let { penalty ->
-            val cappedPenalty =
-                config.maxGoalDifferencePoints?.let { min(goalDiff.absoluteValue, it) }
-                    ?: goalDiff.absoluteValue
-            matchPoints -= cappedPenalty * penalty
-        }
-    }
-
-    config?.maxPointsPerMatch?.toDouble()?.let { maxPoints ->
-        matchPoints = min(matchPoints, maxPoints)
-    }
-    config?.minPointsPerMatch?.toDouble()?.let { minPoints ->
-        matchPoints = max(matchPoints, minPoints)
     }
 
     score += matchPoints

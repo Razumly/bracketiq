@@ -33,6 +33,7 @@ import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.SignerContext
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.data.repositories.LeagueDivisionStandings
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.data.repositories.CreateBillRequest
 import com.razumly.mvp.core.data.util.divisionsEquivalent
@@ -115,6 +116,9 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val organizationTemplates: StateFlow<List<OrganizationTemplateDocument>>
     val organizationTemplatesLoading: StateFlow<Boolean>
     val organizationTemplatesError: StateFlow<String?>
+    val leagueDivisionStandings: StateFlow<LeagueDivisionStandings?>
+    val leagueDivisionStandingsLoading: StateFlow<Boolean>
+    val leagueStandingsConfirming: StateFlow<Boolean>
 
 
     fun onNavigateToChat(user: UserData)
@@ -166,6 +170,8 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun showMatchEditDialog(match: MatchWithRelations)
     fun dismissMatchEditDialog()
     fun updateMatchFromDialog(updatedMatch: MatchWithRelations)
+    fun refreshLeagueStandings()
+    fun confirmLeagueStandings(applyReassignment: Boolean = true)
     fun confirmTextSignature()
     fun dismissTextSignature()
     fun onUploadSelected(photo: GalleryPhotoResult)
@@ -327,6 +333,15 @@ class DefaultEventDetailComponent(
 
     private val _organizationTemplatesError = MutableStateFlow<String?>(null)
     override val organizationTemplatesError = _organizationTemplatesError.asStateFlow()
+
+    private val _leagueDivisionStandings = MutableStateFlow<LeagueDivisionStandings?>(null)
+    override val leagueDivisionStandings = _leagueDivisionStandings.asStateFlow()
+
+    private val _leagueDivisionStandingsLoading = MutableStateFlow(false)
+    override val leagueDivisionStandingsLoading = _leagueDivisionStandingsLoading.asStateFlow()
+
+    private val _leagueStandingsConfirming = MutableStateFlow(false)
+    override val leagueStandingsConfirming = _leagueStandingsConfirming.asStateFlow()
 
     private val eventRelations: StateFlow<EventWithRelations> =
         eventRepository.getEventWithRelationsFlow(event.id).map { result ->
@@ -623,6 +638,33 @@ class DefaultEventDetailComponent(
             }
         }
         scope.launch {
+            combine(selectedEvent, selectedDivision) { eventValue, divisionValue ->
+                val normalizedDivision = divisionValue
+                    ?.normalizeDivisionIdentifier()
+                    ?.takeIf(String::isNotBlank)
+                if (eventValue.eventType != EventType.LEAGUE || normalizedDivision == null) {
+                    null
+                } else {
+                    eventValue.id to normalizedDivision
+                }
+            }
+                .distinctUntilChanged()
+                .collect { selection ->
+                    if (selection == null) {
+                        _leagueDivisionStandings.value = null
+                        _leagueDivisionStandingsLoading.value = false
+                    } else {
+                        _leagueDivisionStandings.value = null
+                        loadLeagueDivisionStandings(
+                            eventId = selection.first,
+                            divisionId = selection.second,
+                            showLoading = true,
+                            reportErrors = false,
+                        )
+                    }
+                }
+        }
+        scope.launch {
             _divisionMatches.collect { generateRounds() }
         }
     }
@@ -695,6 +737,86 @@ class DefaultEventDetailComponent(
                     it.loserNextMatch == null
                 )
             }.associateBy { it.match.id }
+        }
+    }
+
+    private suspend fun loadLeagueDivisionStandings(
+        eventId: String,
+        divisionId: String,
+        showLoading: Boolean,
+        reportErrors: Boolean,
+    ) {
+        if (showLoading) {
+            _leagueDivisionStandingsLoading.value = true
+        }
+        eventRepository.getLeagueDivisionStandings(eventId, divisionId)
+            .onSuccess { standings ->
+                _leagueDivisionStandings.value = standings
+            }
+            .onFailure { throwable ->
+                if (reportErrors) {
+                    _errorState.value = ErrorMessage(
+                        throwable.message ?: "Failed to load league standings.",
+                    )
+                }
+            }
+        if (showLoading) {
+            _leagueDivisionStandingsLoading.value = false
+        }
+    }
+
+    override fun refreshLeagueStandings() {
+        val divisionId = selectedDivision.value?.normalizeDivisionIdentifier()
+            ?.takeIf(String::isNotBlank)
+            ?: return
+        val eventId = selectedEvent.value.id
+        scope.launch {
+            loadLeagueDivisionStandings(
+                eventId = eventId,
+                divisionId = divisionId,
+                showLoading = true,
+                reportErrors = true,
+            )
+        }
+    }
+
+    override fun confirmLeagueStandings(applyReassignment: Boolean) {
+        val event = selectedEvent.value
+        val divisionId = selectedDivision.value?.normalizeDivisionIdentifier()
+            ?.takeIf(String::isNotBlank)
+
+        if (event.eventType != EventType.LEAGUE || divisionId == null) {
+            _errorState.value = ErrorMessage("Select a league division before confirming standings.")
+            return
+        }
+
+        scope.launch {
+            _leagueStandingsConfirming.value = true
+            loadingHandler.showLoading("Confirming standings...")
+
+            eventRepository.confirmLeagueDivisionStandings(
+                eventId = event.id,
+                divisionId = divisionId,
+                applyReassignment = applyReassignment,
+            ).onSuccess { result ->
+                _leagueDivisionStandings.value = result.division
+                matchRepository.getMatchesOfTournament(event.id)
+                eventRepository.getEvent(event.id)
+                _errorState.value = ErrorMessage(
+                    if (result.applyReassignment && result.seededTeamIds.isNotEmpty()) {
+                        "Standings confirmed. Playoff assignments updated."
+                    } else {
+                        "Standings confirmed."
+                    },
+                )
+            }.onFailure { throwable ->
+                _errorState.value = ErrorMessage(
+                    throwable.message ?: "Failed to confirm standings.",
+                )
+            }
+
+            _leagueStandingsConfirming.value = false
+            loadingHandler.hideLoading()
         }
     }
 

@@ -35,6 +35,10 @@ import com.razumly.mvp.core.network.dto.EventsResponseDto
 import com.razumly.mvp.core.network.dto.ProfileScheduleResponseDto
 import com.razumly.mvp.core.network.dto.ScheduleEventRequestDto
 import com.razumly.mvp.core.network.dto.ScheduleEventResponseDto
+import com.razumly.mvp.core.network.dto.StandingsConfirmRequestDto
+import com.razumly.mvp.core.network.dto.StandingsConfirmResponseDto
+import com.razumly.mvp.core.network.dto.StandingsDivisionDto
+import com.razumly.mvp.core.network.dto.StandingsResponseDto
 import com.razumly.mvp.core.network.dto.UpdateEventRequestDto
 import com.razumly.mvp.core.network.dto.toUpdateDto
 import io.ktor.http.encodeURLQueryComponent
@@ -92,6 +96,12 @@ interface IEventRepository : IMVPRepository {
         team: Team,
         preferredDivisionId: String? = null,
     ): Result<Unit>
+    suspend fun getLeagueDivisionStandings(eventId: String, divisionId: String): Result<LeagueDivisionStandings>
+    suspend fun confirmLeagueDivisionStandings(
+        eventId: String,
+        divisionId: String,
+        applyReassignment: Boolean = true,
+    ): Result<LeagueStandingsConfirmResult>
     suspend fun removeTeamFromEvent(event: Event, teamWithPlayers: TeamWithPlayers): Result<Unit>
     suspend fun removeCurrentUserFromEvent(event: Event, targetUserId: String? = null): Result<Unit>
     suspend fun getMySchedule(): Result<UserScheduleSnapshot> = Result.success(UserScheduleSnapshot())
@@ -123,6 +133,39 @@ private data class RegistrationDivisionPayload(
     val divisionTypeId: String? = null,
     val divisionTypeKey: String? = null,
 )
+
+private fun StandingsDivisionDto.toLeagueDivisionStandings(): LeagueDivisionStandings {
+    val confirmedAt = standingsConfirmedAt
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+        ?.let { value -> runCatching { Instant.parse(value) }.getOrNull() }
+    val validationMessages = validation.mappingErrors + validation.capacityErrors
+
+    return LeagueDivisionStandings(
+        divisionId = divisionId,
+        divisionName = divisionName,
+        standingsConfirmedAt = confirmedAt,
+        standingsConfirmedBy = standingsConfirmedBy?.trim()?.takeIf(String::isNotBlank),
+        rows = standings.map { row ->
+            LeagueStandingsRow(
+                position = row.position,
+                teamId = row.teamId,
+                teamName = row.teamName,
+                wins = row.wins,
+                losses = row.losses,
+                draws = row.draws,
+                goalsFor = row.goalsFor,
+                goalsAgainst = row.goalsAgainst,
+                goalDifference = row.goalDifference,
+                matchesPlayed = row.matchesPlayed,
+                basePoints = row.basePoints,
+                finalPoints = row.finalPoints,
+                pointsDelta = row.pointsDelta,
+            )
+        },
+        validationMessages = validationMessages,
+    )
+}
 
 class EventRepository(
     private val databaseService: DatabaseService,
@@ -573,6 +616,49 @@ class EventRepository(
             databaseService.getEventDao.upsertEvent(updated)
             persistEventRelations(updated)
         }
+
+    override suspend fun getLeagueDivisionStandings(
+        eventId: String,
+        divisionId: String,
+    ): Result<LeagueDivisionStandings> = runCatching {
+        val normalizedEventId = eventId.trim()
+        val normalizedDivisionId = divisionId.trim()
+        if (normalizedEventId.isBlank() || normalizedDivisionId.isBlank()) {
+            error("Event id and division id are required.")
+        }
+        val encodedDivisionId = normalizedDivisionId.encodeURLQueryComponent()
+        val response = api.get<StandingsResponseDto>(
+            "api/events/$normalizedEventId/standings?divisionId=$encodedDivisionId",
+        )
+        val division = response.division ?: error("Standings response missing division.")
+        division.toLeagueDivisionStandings()
+    }
+
+    override suspend fun confirmLeagueDivisionStandings(
+        eventId: String,
+        divisionId: String,
+        applyReassignment: Boolean,
+    ): Result<LeagueStandingsConfirmResult> = runCatching {
+        val normalizedEventId = eventId.trim()
+        val normalizedDivisionId = divisionId.trim()
+        if (normalizedEventId.isBlank() || normalizedDivisionId.isBlank()) {
+            error("Event id and division id are required.")
+        }
+        val response = api.post<StandingsConfirmRequestDto, StandingsConfirmResponseDto>(
+            path = "api/events/$normalizedEventId/standings/confirm",
+            body = StandingsConfirmRequestDto(
+                divisionId = normalizedDivisionId,
+                applyReassignment = applyReassignment,
+            ),
+        )
+        val division = response.division ?: error("Standings confirm response missing division.")
+        LeagueStandingsConfirmResult(
+            division = division.toLeagueDivisionStandings(),
+            applyReassignment = response.applyReassignment ?: applyReassignment,
+            reassignedPlayoffDivisionIds = response.reassignedPlayoffDivisionIds,
+            seededTeamIds = response.seededTeamIds,
+        )
+    }
 
     override suspend fun removeTeamFromEvent(
         event: Event,
