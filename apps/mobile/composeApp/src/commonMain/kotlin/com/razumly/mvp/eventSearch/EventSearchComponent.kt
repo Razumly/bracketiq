@@ -29,6 +29,7 @@ import io.github.aakira.napier.Napier
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -50,11 +51,13 @@ interface EventSearchComponent {
     val errorState: StateFlow<ErrorMessage?>
     val isLoading: StateFlow<Boolean>
     val suggestedEvents: StateFlow<List<Event>>
+    val suggestedOrganizations: StateFlow<List<Organization>>
     val currentLocation: StateFlow<LatLng?>
     val isLoadingMore: StateFlow<Boolean>
     val hasMoreEvents: StateFlow<Boolean>
     val filter: StateFlow<EventFilter>
     val organizations: StateFlow<List<Organization>>
+    val allOrganizations: StateFlow<List<Organization>>
     val isLoadingOrganizations: StateFlow<Boolean>
     val rentals: StateFlow<List<Organization>>
     val isLoadingRentals: StateFlow<Boolean>
@@ -74,7 +77,9 @@ interface EventSearchComponent {
     fun viewOrganization(organization: Organization, initialTab: OrganizationDetailTab = OrganizationDetailTab.OVERVIEW)
     fun startRentalCreate(context: RentalCreateContext)
     fun suggestEvents(searchQuery: String)
+    fun suggestOrganizations(searchQuery: String, rentalsOnly: Boolean = false)
     fun updateFilter(update: EventFilter.() -> EventFilter)
+    fun refreshEvents(force: Boolean = false)
     fun refreshOrganizations(force: Boolean = false)
     fun refreshRentals(force: Boolean = false)
     fun loadRentalFieldOptions(fieldIds: List<String>)
@@ -125,6 +130,8 @@ class DefaultEventSearchComponent(
 
     private val _suggestedEvents = MutableStateFlow<List<Event>>(emptyList())
     override val suggestedEvents: StateFlow<List<Event>> = _suggestedEvents.asStateFlow()
+    private val _suggestedOrganizations = MutableStateFlow<List<Organization>>(emptyList())
+    override val suggestedOrganizations: StateFlow<List<Organization>> = _suggestedOrganizations.asStateFlow()
 
     private val _isLoadingMore = MutableStateFlow(false)
     override val isLoadingMore: StateFlow<Boolean> = _isLoadingMore.asStateFlow()
@@ -136,6 +143,8 @@ class DefaultEventSearchComponent(
     override val filter = _filter.asStateFlow()
     private val _organizations = MutableStateFlow<List<Organization>>(emptyList())
     override val organizations: StateFlow<List<Organization>> = _organizations.asStateFlow()
+    private val _allOrganizations = MutableStateFlow<List<Organization>>(emptyList())
+    override val allOrganizations: StateFlow<List<Organization>> = _allOrganizations.asStateFlow()
     private val _isLoadingOrganizations = MutableStateFlow(false)
     override val isLoadingOrganizations: StateFlow<Boolean> = _isLoadingOrganizations.asStateFlow()
     private val _rentals = MutableStateFlow<List<Organization>>(emptyList())
@@ -150,6 +159,8 @@ class DefaultEventSearchComponent(
     override val rentalBusyBlocks: StateFlow<List<RentalBusyBlock>> = _rentalBusyBlocks.asStateFlow()
     private var organizationsLoaded = false
     private var rentalsLoaded = false
+    private var suggestEventsJob: Job? = null
+    private var suggestOrganizationsJob: Job? = null
 
     private lateinit var loadingHandler: LoadingHandler
 
@@ -275,16 +286,54 @@ class DefaultEventSearchComponent(
     }
 
     override fun suggestEvents(searchQuery: String) {
-        scope.launch {
-            if (_currentLocation.value == null) return@launch
-            eventRepository.searchEvents(searchQuery, _currentLocation.value!!)
+        val normalizedQuery = searchQuery.trim()
+        if (normalizedQuery.length < SEARCH_MIN_QUERY_LENGTH) {
+            suggestEventsJob?.cancel()
+            _suggestedEvents.value = emptyList()
+            return
+        }
+
+        suggestEventsJob?.cancel()
+        suggestEventsJob = scope.launch {
+            val userLocation = _currentLocation.value ?: FALLBACK_SEARCH_LOCATION
+            eventRepository.searchEvents(normalizedQuery, userLocation)
                 .onSuccess { (events, _) ->
-                    val activeFilter = _filter.value
-                    _suggestedEvents.value = events.filter { event -> activeFilter.filter(event) }
-                    _isLoading.value = false
+                    _suggestedEvents.value = events.take(SEARCH_SUGGESTION_LIMIT)
                 }.onFailure { e ->
                     _errorState.value = ErrorMessage("Failed to fetch events: ${e.message}")
                 }
+        }
+    }
+
+    override fun suggestOrganizations(searchQuery: String, rentalsOnly: Boolean) {
+        val normalizedQuery = searchQuery.trim()
+        if (normalizedQuery.length < SEARCH_MIN_QUERY_LENGTH) {
+            suggestOrganizationsJob?.cancel()
+            _suggestedOrganizations.value = emptyList()
+            return
+        }
+
+        suggestOrganizationsJob?.cancel()
+        suggestOrganizationsJob = scope.launch {
+            val requestLimit = if (rentalsOnly) {
+                SEARCH_SUGGESTION_LIMIT * 3
+            } else {
+                SEARCH_SUGGESTION_LIMIT
+            }
+
+            billingRepository.searchOrganizations(
+                query = normalizedQuery,
+                limit = requestLimit,
+            ).onSuccess { organizations ->
+                val baseList = if (rentalsOnly) {
+                    organizations.filter { organization -> organization.fieldIds.isNotEmpty() }
+                } else {
+                    organizations
+                }
+                _suggestedOrganizations.value = baseList.take(SEARCH_SUGGESTION_LIMIT)
+            }.onFailure { e ->
+                _errorState.value = ErrorMessage("Failed to fetch organizations: ${e.message}")
+            }
         }
     }
 
@@ -293,26 +342,35 @@ class DefaultEventSearchComponent(
 
         scope.launch {
             _isLoadingMore.value = true
+            try {
+                val radius = _currentRadius.value
+                val currentLocation = _currentLocation.value ?: return@launch
+                val currentBounds =
+                    getBounds(radius, currentLocation.latitude, currentLocation.longitude)
+                val activeFilter = _filter.value
 
-            val radius = _currentRadius.value
-            val currentLocation = _currentLocation.value ?: return@launch
-            val currentBounds =
-                getBounds(radius, currentLocation.latitude, currentLocation.longitude)
-            val activeFilter = _filter.value
-
-            eventRepository.getEventsInBounds(
-                bounds = currentBounds,
-                dateFrom = activeFilter.date.first,
-                dateTo = activeFilter.date.second,
-            )
-                .onSuccess { (_, hasMore) ->
-                    _hasMoreEvents.value = hasMore
-                }
-                .onFailure { e ->
-                    _errorState.value = ErrorMessage("Failed to load more events: ${e.message}")
-                }
-            _isLoadingMore.value = false
+                eventRepository.getEventsInBounds(
+                    bounds = currentBounds,
+                    dateFrom = activeFilter.date.first,
+                    dateTo = activeFilter.date.second,
+                )
+                    .onSuccess { (_, hasMore) ->
+                        _hasMoreEvents.value = hasMore
+                    }
+                    .onFailure { e ->
+                        _errorState.value = ErrorMessage("Failed to load more events: ${e.message}")
+                    }
+            } finally {
+                _isLoadingMore.value = false
+            }
         }
+    }
+
+    override fun refreshEvents(force: Boolean) {
+        if (!force && _isLoadingMore.value) return
+        _hasMoreEvents.value = true
+        eventRepository.resetCursor()
+        loadMoreEvents()
     }
 
     override fun updateFilter(update: EventFilter.() -> EventFilter) {
@@ -544,7 +602,7 @@ class DefaultEventSearchComponent(
 
         _isLoadingOrganizations.value = true
         var organizations: List<Organization> = emptyList()
-        billingRepository.listOrganizations(limit = 200)
+        billingRepository.listOrganizations(limit = 1000)
             .onSuccess { response ->
                 organizations = response
             }
@@ -554,6 +612,8 @@ class DefaultEventSearchComponent(
             }
 
         val sortedOrganizations = organizations.sortedBy { organization -> organization.name.lowercase() }
+        _allOrganizations.value = sortedOrganizations
+
         val distanceFiltered = applyDistanceFilter(sortedOrganizations)
         _organizations.value = distanceFiltered
         organizationsLoaded = true
@@ -596,5 +656,8 @@ class DefaultEventSearchComponent(
 
     companion object {
         const val CLEANUP_KEY = "Cleanup_Search"
+        private val FALLBACK_SEARCH_LOCATION = LatLng(0.0, 0.0)
+        private const val SEARCH_MIN_QUERY_LENGTH = 2
+        private const val SEARCH_SUGGESTION_LIMIT = 8
     }
 }

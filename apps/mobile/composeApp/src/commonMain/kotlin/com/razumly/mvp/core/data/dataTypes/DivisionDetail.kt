@@ -28,4 +28,5 @@ data class DivisionDetail(
     val ageCutoffLabel: String? = null,
     val ageCutoffSource: String? = null,
     val fieldIds: List<String> = emptyList(),
+    val playoffPlacementDivisionIds: List<String> = emptyList(),
 )

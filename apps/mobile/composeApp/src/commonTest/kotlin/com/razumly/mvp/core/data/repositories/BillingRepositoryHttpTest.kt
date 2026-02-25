@@ -295,6 +295,52 @@ class BillingRepositoryHttpTest {
     }
 
     @Test
+    fun searchOrganizations_gets_query_limited_results() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/organizations", request.url.encodedPath)
+            assertEquals("query=indoor%20soccer&limit=8", request.url.encodedQuery)
+            assertEquals(HttpMethod.Get, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+
+            respond(
+                content = """
+                    {
+                      "organizations": [
+                        {
+                          "id": "org_1",
+                          "name": "Indoor Soccer Arena"
+                        },
+                        {
+                          "id": "org_2",
+                          "name": "Indoor Sports Complex"
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = BillingRepository(api, userRepo, BillingRepositoryHttp_UnusedEventRepository, db)
+
+        val organizations = repo.searchOrganizations("indoor soccer", limit = 8).getOrThrow()
+
+        assertEquals(2, organizations.size)
+        assertEquals("org_1", organizations[0].id)
+        assertEquals("Indoor Soccer Arena", organizations[0].name)
+    }
+
+    @Test
     fun createBillingIntent_posts_and_parses_response() = runTest {
         val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
         val userRepo = BillingRepositoryHttp_FakeUserRepository(

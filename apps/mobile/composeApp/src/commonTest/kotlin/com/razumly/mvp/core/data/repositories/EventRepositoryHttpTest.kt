@@ -461,6 +461,61 @@ class EventRepositoryHttpTest {
     }
 
     @Test
+    fun searchEvents_posts_query_with_small_suggestion_limit() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+        var capturedBody = ""
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/events/search", request.url.encodedPath)
+            assertEquals(HttpMethod.Post, request.method)
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+
+            respond(
+                content = """
+                    {
+                      "events": [
+                        {
+                          "id": "event_1",
+                          "name": "Test League",
+                          "hostId": "host_1",
+                          "start": "2026-02-10T00:00:00Z",
+                          "end": "2026-02-10T01:00:00Z",
+                          "coordinates": [-80.0, 25.0],
+                          "eventType": "LEAGUE",
+                          "userIds": [],
+                          "teamIds": []
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val (events, hasMore) = repo.searchEvents("test league", LatLng(25.0, -80.0)).getOrThrow()
+
+        assertTrue(capturedBody.contains("\"query\":\"test league\""))
+        assertTrue(capturedBody.contains("\"limit\":8"))
+        assertEquals(1, events.size)
+        assertTrue(hasMore)
+    }
+
+    @Test
     fun participants_add_and_remove_use_endpoint_and_update_cache() = runTest {
         val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
         val eventDao = EventRepositoryHttp_FakeEventDao()

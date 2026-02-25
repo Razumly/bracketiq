@@ -259,6 +259,48 @@ class EventDtosTest {
     }
 
     @Test
+    fun to_update_dto_preserves_split_league_playoff_mapping_indexes() {
+        val event = Event(
+            id = "event-15b",
+            name = "Mapped League",
+            eventType = EventType.LEAGUE,
+            hostId = "host-15b",
+            start = Instant.fromEpochMilliseconds(1_700_000_000_000),
+            end = Instant.fromEpochMilliseconds(1_700_003_600_000),
+            singleDivision = false,
+            includePlayoffs = true,
+            divisions = listOf("division_a", "playoff_gold"),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = "division_a",
+                    key = "division_a",
+                    name = "Division A",
+                    divisionTypeId = "open",
+                    divisionTypeName = "Open",
+                    ratingType = "SKILL",
+                    gender = "C",
+                    playoffTeamCount = 2,
+                    playoffPlacementDivisionIds = listOf("playoff_gold", ""),
+                ),
+                DivisionDetail(
+                    id = "playoff_gold",
+                    key = "playoff_gold",
+                    name = "Gold Playoff",
+                    divisionTypeId = "open",
+                    divisionTypeName = "Open",
+                    ratingType = "SKILL",
+                    gender = "C",
+                ),
+            ),
+        )
+
+        val dto = event.toUpdateDto()
+        val detail = dto.divisionDetails.first { it.id == "division_a" }
+
+        assertEquals(listOf("playoff_gold", ""), detail.playoffPlacementDivisionIds)
+    }
+
+    @Test
     fun event_api_dto_maps_division_details_without_dropping_ids() {
         val dto = EventApiDto(
             id = "event-11",
@@ -286,6 +328,48 @@ class EventDtosTest {
         assertEquals(listOf("event-11__division__open"), event?.divisions)
         assertEquals("Open", event?.divisionDetails?.firstOrNull()?.name)
         assertEquals(true, event?.noFixedEndDateTime)
+    }
+
+    @Test
+    fun event_api_dto_preserves_split_league_playoff_mapping_in_division_details() {
+        val dto = EventApiDto(
+            id = "event-19",
+            name = "API League",
+            hostId = "host-19",
+            eventType = EventType.LEAGUE.name,
+            includePlayoffs = true,
+            singleDivision = false,
+            start = "2026-02-10T00:00:00Z",
+            end = "2026-02-10T01:00:00Z",
+            divisions = listOf("division_a", "playoff_gold"),
+            divisionDetails = listOf(
+                DivisionDetail(
+                    id = "division_a",
+                    key = "division_a",
+                    name = "Division A",
+                    divisionTypeId = "open",
+                    divisionTypeName = "Open",
+                    ratingType = "SKILL",
+                    gender = "C",
+                    playoffTeamCount = 2,
+                    playoffPlacementDivisionIds = listOf(" playoff_gold ", ""),
+                ),
+                DivisionDetail(
+                    id = "playoff_gold",
+                    key = "playoff_gold",
+                    name = "Gold Playoff",
+                    divisionTypeId = "open",
+                    divisionTypeName = "Open",
+                    ratingType = "SKILL",
+                    gender = "C",
+                ),
+            ),
+        )
+
+        val event = dto.toEventOrNull()
+        val divisionA = event?.divisionDetails?.firstOrNull { it.id == "division_a" }
+
+        assertEquals(listOf("playoff_gold", ""), divisionA?.playoffPlacementDivisionIds)
     }
 
     @Test

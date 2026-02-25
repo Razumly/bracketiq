@@ -396,7 +396,7 @@ class EventRepository(
                 path = "api/events/search",
                 body = EventSearchRequestDto(
                     filters = EventSearchFiltersDto(query = searchQuery),
-                    limit = 50,
+                    limit = 8,
                     offset = 0,
                 ),
             )

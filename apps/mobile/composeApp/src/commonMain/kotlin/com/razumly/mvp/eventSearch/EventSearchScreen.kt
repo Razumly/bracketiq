@@ -88,6 +88,7 @@ import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.composables.NetworkAvatar
+import com.razumly.mvp.core.presentation.composables.PullToRefreshContainer
 import com.razumly.mvp.core.presentation.composables.SearchBox
 import com.razumly.mvp.core.presentation.composables.SearchOverlay
 import com.razumly.mvp.core.presentation.util.dateFormat
@@ -168,6 +169,8 @@ fun EventSearchScreen(
 ) {
     val events by component.events.collectAsState()
     val organizations by component.organizations.collectAsState()
+    val allOrganizations by component.allOrganizations.collectAsState()
+    val organizationSuggestions by component.suggestedOrganizations.collectAsState()
     val isLoadingOrganizations by component.isLoadingOrganizations.collectAsState()
     val rentals by component.rentals.collectAsState()
     val isLoadingRentals by component.isLoadingRentals.collectAsState()
@@ -209,26 +212,25 @@ fun EventSearchScreen(
     var overlayStartOffset by remember { mutableStateOf(0.dp) }
     var overlayWidth by remember { mutableStateOf(0.dp) }
 
-    val filteredRentals = remember(rentals, searchQuery) {
-        rentals.filterByQuery(searchQuery)
+    val organizationLookup = remember(allOrganizations, rentals) {
+        (allOrganizations + rentals).associateBy { organization -> organization.id }
     }
-    val filteredOrganizations = remember(organizations, searchQuery) {
-        organizations.filterByQuery(searchQuery)
+    val organizationPlaces = remember(organizations) {
+        organizations.mapNotNull { organization -> organization.toMvpPlaceOrNull() }
     }
-    val organizationLookup = remember(organizations, rentals) {
-        (organizations + rentals).associateBy { organization -> organization.id }
-    }
-    val organizationPlaces = remember(filteredOrganizations) {
-        filteredOrganizations.mapNotNull { organization -> organization.toMvpPlaceOrNull() }
-    }
-    val rentalPlaces = remember(filteredRentals) {
-        filteredRentals.mapNotNull { organization -> organization.toMvpPlaceOrNull() }
+    val rentalPlaces = remember(rentals) {
+        rentals.mapNotNull { organization -> organization.toMvpPlaceOrNull() }
     }
 
     val currentListScrollingUp = when (selectedTab) {
         DiscoverTab.EVENTS -> eventsScrollingUp
         DiscoverTab.ORGANIZATIONS -> organizationsScrollingUp
         DiscoverTab.RENTALS -> rentalsScrollingUp
+    }
+    val isRefreshingCurrentTab = when (selectedTab) {
+        DiscoverTab.EVENTS -> isLoadingMore
+        DiscoverTab.ORGANIZATIONS -> isLoadingOrganizations
+        DiscoverTab.RENTALS -> isLoadingRentals
     }
 
     val loadingHandler = LocalLoadingHandler.current
@@ -286,8 +288,18 @@ fun EventSearchScreen(
     }
 
     LaunchedEffect(selectedTab, searchQuery) {
-        if (selectedTab == DiscoverTab.EVENTS && searchQuery.isNotBlank()) {
-            component.suggestEvents(searchQuery)
+        val normalizedQuery = searchQuery.trim()
+        if (normalizedQuery.length < 2) {
+            component.suggestEvents("")
+            component.suggestOrganizations("", rentalsOnly = selectedTab == DiscoverTab.RENTALS)
+            return@LaunchedEffect
+        }
+
+        delay(250)
+        when (selectedTab) {
+            DiscoverTab.EVENTS -> component.suggestEvents(normalizedQuery)
+            DiscoverTab.ORGANIZATIONS -> component.suggestOrganizations(normalizedQuery, rentalsOnly = false)
+            DiscoverTab.RENTALS -> component.suggestOrganizations(normalizedQuery, rentalsOnly = true)
         }
     }
 
@@ -297,8 +309,8 @@ fun EventSearchScreen(
         }
     }
 
-    LaunchedEffect(selectedTab, organizations, isLoadingOrganizations) {
-        if (selectedTab == DiscoverTab.ORGANIZATIONS && organizations.isEmpty() && !isLoadingOrganizations) {
+    LaunchedEffect(selectedTab, allOrganizations, isLoadingOrganizations) {
+        if (selectedTab == DiscoverTab.ORGANIZATIONS && allOrganizations.isEmpty() && !isLoadingOrganizations) {
             component.refreshOrganizations()
         }
     }
@@ -377,109 +389,118 @@ fun EventSearchScreen(
             val firstElementPadding = PaddingValues(
                 top = paddingValues.calculateTopPadding().plus(72.dp)
             )
-            Box(
-                Modifier
-                    .hazeSource(hazeState)
-                    .fillMaxSize()
+            PullToRefreshContainer(
+                isRefreshing = isRefreshingCurrentTab,
+                onRefresh = {
+                    when (selectedTab) {
+                        DiscoverTab.EVENTS -> component.refreshEvents(force = true)
+                        DiscoverTab.ORGANIZATIONS -> component.refreshOrganizations(force = true)
+                        DiscoverTab.RENTALS -> component.refreshRentals(force = true)
+                    }
+                },
+                modifier = Modifier.fillMaxSize(),
+                enabled = !showMapCard,
             ) {
-                when (selectedTab) {
-                    DiscoverTab.EVENTS -> {
-                        EventList(
-                            events = events,
-                            firstElementPadding = firstElementPadding,
-                            lastElementPadding = offsetNavPadding,
-                            lazyListState = eventsListState,
-                            isLoadingMore = isLoadingMore,
-                            hasMoreEvents = hasMoreEvents,
-                            onLoadMore = { component.loadMoreEvents() },
-                            onMapClick = { offset, event ->
-                                revealCenter = offset
-                                component.onMapClick(event)
-                                mapComponent.toggleMap()
-                            },
-                            onEventClick = { event ->
-                                component.viewEvent(event)
-                            }
-                        )
-                    }
-
-                    DiscoverTab.ORGANIZATIONS -> {
-                        DiscoverOrganizationList(
-                            organizations = filteredOrganizations,
-                            listState = organizationsListState,
-                            firstElementPadding = firstElementPadding,
-                            lastElementPadding = offsetNavPadding,
-                            emptyMessage = if (isLoadingOrganizations) {
-                                "Loading organizations..."
-                            } else if (searchQuery.isBlank()) {
-                                "No organizations discovered yet."
-                            } else {
-                                "No organizations match your search."
-                            },
-                            onOrganizationClick = { organization ->
-                                component.viewOrganization(organization)
-                            }
-                        )
-                    }
-
-                    DiscoverTab.RENTALS -> {
-                        DiscoverOrganizationList(
-                            organizations = filteredRentals,
-                            listState = rentalsListState,
-                            firstElementPadding = firstElementPadding,
-                            lastElementPadding = offsetNavPadding,
-                            emptyMessage = if (isLoadingRentals) {
-                                "Loading rentals..."
-                            } else if (searchQuery.isBlank()) {
-                                "No rentals discovered nearby yet."
-                            } else {
-                                "No rentals match your search."
-                            },
-                            onOrganizationClick = { organization ->
-                                component.viewOrganization(
-                                    organization,
-                                    com.razumly.mvp.core.presentation.OrganizationDetailTab.RENTALS
-                                )
-                            }
-                        )
-                    }
-                }
-
-                EventMap(
-                    component = mapComponent,
-                    onEventSelected = { event ->
-                        if (selectedTab == DiscoverTab.EVENTS) {
-                            component.viewEvent(event)
+                Box(
+                    Modifier
+                        .hazeSource(hazeState)
+                        .fillMaxSize()
+                ) {
+                    when (selectedTab) {
+                        DiscoverTab.EVENTS -> {
+                            EventList(
+                                events = events,
+                                firstElementPadding = firstElementPadding,
+                                lastElementPadding = offsetNavPadding,
+                                lazyListState = eventsListState,
+                                isLoadingMore = isLoadingMore,
+                                hasMoreEvents = hasMoreEvents,
+                                onLoadMore = { component.loadMoreEvents() },
+                                onMapClick = { offset, event ->
+                                    revealCenter = offset
+                                    component.onMapClick(event)
+                                    mapComponent.toggleMap()
+                                },
+                                onEventClick = { event ->
+                                    component.viewEvent(event)
+                                }
+                            )
                         }
-                    },
-                    onPlaceSelected = { place ->
-                        val organization = organizationLookup[place.id]
-                        when (selectedTab) {
-                            DiscoverTab.ORGANIZATIONS -> {
-                                if (organization != null) {
+
+                        DiscoverTab.ORGANIZATIONS -> {
+                            DiscoverOrganizationList(
+                                organizations = organizations,
+                                listState = organizationsListState,
+                                firstElementPadding = firstElementPadding,
+                                lastElementPadding = offsetNavPadding,
+                                emptyMessage = if (isLoadingOrganizations) {
+                                    "Loading organizations..."
+                                } else {
+                                    "No organizations discovered yet."
+                                },
+                                onOrganizationClick = { organization ->
                                     component.viewOrganization(organization)
                                 }
-                            }
+                            )
+                        }
 
-                            DiscoverTab.RENTALS -> {
-                                if (organization != null) {
+                        DiscoverTab.RENTALS -> {
+                            DiscoverOrganizationList(
+                                organizations = rentals,
+                                listState = rentalsListState,
+                                firstElementPadding = firstElementPadding,
+                                lastElementPadding = offsetNavPadding,
+                                emptyMessage = if (isLoadingRentals) {
+                                    "Loading rentals..."
+                                } else {
+                                    "No rentals discovered nearby yet."
+                                },
+                                onOrganizationClick = { organization ->
                                     component.viewOrganization(
                                         organization,
                                         com.razumly.mvp.core.presentation.OrganizationDetailTab.RENTALS
                                     )
                                 }
-                            }
-
-                            else -> {}
+                            )
                         }
-                    },
-                    canClickPOI = false,
-                    focusedLocation = selectedEvent?.takeIf { selectedTab == DiscoverTab.EVENTS }?.let {
-                        LatLng(it.latitude, it.longitude)
-                    } ?: currentLocation ?: LatLng(0.0, 0.0),
-                    focusedEvent = selectedEvent?.takeIf { selectedTab == DiscoverTab.EVENTS },
-                    revealCenter = revealCenter,
-                )
+                    }
+
+                    EventMap(
+                        component = mapComponent,
+                        onEventSelected = { event ->
+                            if (selectedTab == DiscoverTab.EVENTS) {
+                                component.viewEvent(event)
+                            }
+                        },
+                        onPlaceSelected = { place ->
+                            val organization = organizationLookup[place.id]
+                            when (selectedTab) {
+                                DiscoverTab.ORGANIZATIONS -> {
+                                    if (organization != null) {
+                                        component.viewOrganization(organization)
+                                    }
+                                }
+
+                                DiscoverTab.RENTALS -> {
+                                    if (organization != null) {
+                                        component.viewOrganization(
+                                            organization,
+                                            com.razumly.mvp.core.presentation.OrganizationDetailTab.RENTALS
+                                        )
+                                    }
+                                }
+
+                                else -> {}
+                            }
+                        },
+                        canClickPOI = false,
+                        focusedLocation = selectedEvent?.takeIf { selectedTab == DiscoverTab.EVENTS }?.let {
+                            LatLng(it.latitude, it.longitude)
+                        } ?: currentLocation ?: LatLng(0.0, 0.0),
+                        focusedEvent = selectedEvent?.takeIf { selectedTab == DiscoverTab.EVENTS },
+                        revealCenter = revealCenter,
+                    )
+                }
             }
         }
 
@@ -509,9 +530,6 @@ fun EventSearchScreen(
                     onChange = { query ->
                         searchQuery = query
                         showSearchOverlay = query.isNotEmpty()
-                        if (selectedTab == DiscoverTab.EVENTS) {
-                            component.suggestEvents(query)
-                        }
                     },
                     onSearch = { /* no-op */ },
                     onFocusChange = { isFocused ->
@@ -551,10 +569,15 @@ fun EventSearchScreen(
                 showSearchOverlay = false
             },
             suggestions = {
+                val isQueryReady = searchQuery.trim().length >= 2
                 when (selectedTab) {
                     DiscoverTab.EVENTS -> {
                         LazyColumn(modifier = Modifier.wrapContentSize()) {
-                            if (suggestions.isEmpty()) {
+                            if (!isQueryReady) {
+                                item {
+                                    EmptyDiscoverListItem(message = "Type at least 2 characters.")
+                                }
+                            } else if (suggestions.isEmpty()) {
                                 item {
                                     EmptyDiscoverListItem(message = "No event suggestions found.")
                                 }
@@ -583,12 +606,16 @@ fun EventSearchScreen(
 
                     DiscoverTab.ORGANIZATIONS -> {
                         LazyColumn(modifier = Modifier.wrapContentSize()) {
-                            if (filteredOrganizations.isEmpty()) {
+                            if (!isQueryReady) {
+                                item {
+                                    EmptyDiscoverListItem(message = "Type at least 2 characters.")
+                                }
+                            } else if (organizationSuggestions.isEmpty()) {
                                 item {
                                     EmptyDiscoverListItem(message = "No organization suggestions found.")
                                 }
                             }
-                            items(filteredOrganizations.take(10)) { organization ->
+                            items(organizationSuggestions) { organization ->
                                 DiscoverOrganizationSuggestion(
                                     organization = organization,
                                     onClick = {
@@ -602,12 +629,16 @@ fun EventSearchScreen(
 
                     DiscoverTab.RENTALS -> {
                         LazyColumn(modifier = Modifier.wrapContentSize()) {
-                            if (filteredRentals.isEmpty()) {
+                            if (!isQueryReady) {
+                                item {
+                                    EmptyDiscoverListItem(message = "Type at least 2 characters.")
+                                }
+                            } else if (organizationSuggestions.isEmpty()) {
                                 item {
                                     EmptyDiscoverListItem(message = "No rental suggestions found.")
                                 }
                             }
-                            items(filteredRentals.take(10)) { organization ->
+                            items(organizationSuggestions) { organization ->
                                 DiscoverOrganizationSuggestion(
                                     organization = organization,
                                     onClick = {
@@ -634,19 +665,6 @@ fun EventSearchScreen(
         )
     }
 
-}
-
-private fun List<Organization>.filterByQuery(query: String): List<Organization> {
-    val normalizedQuery = query.trim()
-    if (normalizedQuery.isBlank()) {
-        return sortedBy { organization -> organization.name.lowercase() }
-    }
-
-    return filter { organization ->
-        organization.name.contains(normalizedQuery, ignoreCase = true) ||
-            organization.location?.contains(normalizedQuery, ignoreCase = true) == true ||
-            organization.description?.contains(normalizedQuery, ignoreCase = true) == true
-    }.sortedBy { organization -> organization.name.lowercase() }
 }
 
 private fun Organization.toMvpPlaceOrNull(): MVPPlace? {

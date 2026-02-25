@@ -284,6 +284,8 @@ class DefaultEventDetailComponent(
     private val navigationHandler: INavigationHandler,
 
 ) : EventDetailComponent, PaymentProcessor(), ComponentContext by componentContext {
+    private fun canEditEventDetails(targetEvent: Event): Boolean = targetEvent.organizationId.isNullOrBlank()
+
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
     override val currentUser = userRepository.currentUser.map { it.getOrThrow() }
         .stateIn(scope, SharingStarted.Eagerly, UserData())
@@ -307,7 +309,9 @@ class DefaultEventDetailComponent(
     private val _editedEvent = MutableStateFlow(event)
     override var editedEvent = _editedEvent.asStateFlow()
 
-    private val _isEditing = MutableStateFlow(event.state.equals("TEMPLATE", ignoreCase = true))
+    private val _isEditing = MutableStateFlow(
+        event.state.equals("TEMPLATE", ignoreCase = true) && canEditEventDetails(event)
+    )
     override var isEditing = _isEditing.asStateFlow()
 
     private val _fieldCount = MutableStateFlow(0)
@@ -606,6 +610,10 @@ class DefaultEventDetailComponent(
             matchRepository.subscribeToMatches()
             eventWithRelations.distinctUntilChanged { old, new -> old == new }.filterNotNull()
                 .collect { event ->
+                    if (!canEditEventDetails(event.event) && _isEditing.value) {
+                        _isEditing.value = false
+                        _editedEvent.value = event.event
+                    }
                     _isUserInEvent.value = checkIsUserInEvent(event.event)
                     _isUserInWaitlist.value = checkIsUserWaitListed(event.event)
                     _isUserFreeAgent.value = checkIsUserFreeAgent(event.event)
@@ -1544,6 +1552,12 @@ class DefaultEventDetailComponent(
     }
 
     private fun setEventEditMode(enabled: Boolean) {
+        if (enabled && !canEditEventDetails(selectedEvent.value)) {
+            _errorState.value = ErrorMessage(
+                "Organization-owned events can't be edited on mobile. You can still manage matches here."
+            )
+            return
+        }
         if (_isEditing.value == enabled) {
             return
         }

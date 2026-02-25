@@ -128,6 +128,8 @@ interface IBillingRepository : IMVPRepository {
         startDate: String? = null,
     ): Result<Subscription>
     suspend fun listOrganizations(limit: Int = 100): Result<List<Organization>>
+    suspend fun searchOrganizations(query: String, limit: Int = 10): Result<List<Organization>> =
+        listOrganizations(limit = limit)
     suspend fun getOrganizationsByIds(organizationIds: List<String>): Result<List<Organization>>
     suspend fun listOrganizationTemplates(organizationId: String): Result<List<OrganizationTemplateDocument>>
     suspend fun leaveAndRefundEvent(event: Event, reason: String, targetUserId: String? = null): Result<Unit>
@@ -497,6 +499,18 @@ class BillingRepository(
     override suspend fun listOrganizations(limit: Int): Result<List<Organization>> = runCatching {
         val normalizedLimit = limit.coerceIn(1, 1000)
         val response = api.get<OrganizationsResponseDto>(path = "api/organizations?limit=$normalizedLimit")
+        response.organizations.mapNotNull { it.toOrganizationOrNull() }
+    }
+
+    override suspend fun searchOrganizations(query: String, limit: Int): Result<List<Organization>> = runCatching {
+        val normalizedQuery = query.trim()
+        if (normalizedQuery.isEmpty()) return@runCatching emptyList()
+
+        val normalizedLimit = limit.coerceIn(1, 100)
+        val encodedQuery = normalizedQuery.encodeURLQueryComponent()
+        val response = api.get<OrganizationsResponseDto>(
+            path = "api/organizations?query=$encodedQuery&limit=$normalizedLimit",
+        )
         response.organizations.mapNotNull { it.toOrganizationOrNull() }
     }
 

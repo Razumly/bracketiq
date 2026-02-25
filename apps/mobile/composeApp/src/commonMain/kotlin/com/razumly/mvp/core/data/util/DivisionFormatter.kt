@@ -434,6 +434,7 @@ fun inferDivisionDetail(
         installmentCount = null,
         installmentDueDates = emptyList(),
         installmentAmounts = emptyList(),
+        playoffPlacementDivisionIds = emptyList(),
     )
 }
 
@@ -505,6 +506,9 @@ fun DivisionDetail.normalizeDivisionDetail(eventId: String? = null): DivisionDet
         ?: maxOf(normalizedInstallmentAmounts.size, normalizedInstallmentDueDates.size).takeIf { count -> count > 0 }
     val normalizedAllowPaymentPlans = allowPaymentPlans == true
         && normalizedInstallmentCount != null
+    val normalizedPlayoffPlacementDivisionIds = playoffPlacementDivisionIds.map { divisionId ->
+        divisionId.normalizeDivisionIdentifier()
+    }
 
     return copy(
         id = normalizedId,
@@ -551,6 +555,7 @@ fun DivisionDetail.normalizeDivisionDetail(eventId: String? = null): DivisionDet
             .map(String::trim)
             .filter(String::isNotBlank)
             .distinct(),
+        playoffPlacementDivisionIds = normalizedPlayoffPlacementDivisionIds,
     )
 }
 

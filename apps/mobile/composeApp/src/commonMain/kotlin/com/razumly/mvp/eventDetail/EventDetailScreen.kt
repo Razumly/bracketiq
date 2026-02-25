@@ -743,6 +743,9 @@ fun EventDetailScreen(
         (eventType == EventType.LEAGUE && selectedEvent.event.includePlayoffs)
     val hasScheduleView = selectedEvent.matches.isNotEmpty()
     val hasStandingsView = eventType == EventType.LEAGUE
+    val canEditEventDetails = remember(isHost, selectedEvent.event.organizationId) {
+        isHost && selectedEvent.event.organizationId.isNullOrBlank()
+    }
     val canManageLeagueStandings = remember(
         currentUser.id,
         selectedEvent.event.hostId,
@@ -914,6 +917,7 @@ fun EventDetailScreen(
         selectedDivision,
         selectedEvent.event.divisions,
         selectedEvent.event.divisionDetails,
+        selectedEvent.matches,
     ) {
         val options = mutableListOf<BracketDivisionOption>()
         val seenIds = mutableSetOf<String>()
@@ -938,6 +942,9 @@ fun EventDetailScreen(
         }
         selectedEvent.event.divisions.forEach { divisionId ->
             addOption(divisionId)
+        }
+        selectedEvent.matches.forEach { match ->
+            addOption(match.match.division)
         }
         addOption(selectedDivision)
         options
@@ -1178,14 +1185,14 @@ fun EventDetailScreen(
                                     expanded = showOptionsDropdown,
                                     onDismissRequest = { showOptionsDropdown = false }) {
                                     // Edit option
-                                    if (isHost) {
+                                    if (canEditEventDetails) {
                                         DropdownMenuItem(
                                             text = { Text("Edit") }, onClick = {
                                             component.startEditingEvent()
                                             showOptionsDropdown = false
                                         }, leadingIcon = {
                                             Icon(Icons.Default.Edit, contentDescription = null)
-                                        }, enabled = isHost
+                                        }, enabled = canEditEventDetails
                                         )
                                     }
 

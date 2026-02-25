@@ -12,10 +12,10 @@ data class EventFilter(
     val price: Pair<Double, Double>? = null,
     val date: Pair<Instant, Instant?> = Pair(Clock.System.now(), null),
 ) {
-    fun filter(event: Event): Boolean {
+    fun filter(event: Event, includePastEvents: Boolean = false): Boolean {
         if (eventType != null && event.eventType != eventType) return false
         if (price != null && (event.price < price.first || event.price > price.second)) return false
-        if (event.start < date.first) return false
+        if (!includePastEvents && event.start < date.first) return false
         if (date.second != null && event.start > date.second!!) return false
         return true
     }
