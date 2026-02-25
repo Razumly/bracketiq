@@ -99,26 +99,36 @@ fun MatchCard(
                     } else {
                         val slots = matches.values
                             .asSequence()
-                            .filter { candidate ->
-                                !candidate.match.losersBracket &&
-                                    candidate.previousLeftMatch == null &&
-                                    candidate.previousRightMatch == null
-                            }
                             .flatMap { candidate ->
-                                sequenceOf(
-                                    PlayoffBracketSlot(
+                                if (candidate.match.losersBracket) {
+                                    return@flatMap emptySequence()
+                                }
+                                val leftEntrantSlot =
+                                    candidate.previousLeftMatch == null && candidate.match.previousLeftId == null
+                                val rightEntrantSlot =
+                                    candidate.previousRightMatch == null && candidate.match.previousRightId == null
+                                if (!leftEntrantSlot && !rightEntrantSlot) {
+                                    return@flatMap emptySequence()
+                                }
+
+                                val slots = mutableListOf<PlayoffBracketSlot>()
+                                if (leftEntrantSlot) {
+                                    slots += PlayoffBracketSlot(
                                         matchId = candidate.match.id,
                                         divisionId = candidate.match.division,
-                                        matchOrder = candidate.match.matchId,
+                                        seed = candidate.match.team1Seed ?: candidate.team1?.seed,
                                         slot = BracketTeamSlot.TEAM1,
-                                    ),
-                                    PlayoffBracketSlot(
+                                    )
+                                }
+                                if (rightEntrantSlot) {
+                                    slots += PlayoffBracketSlot(
                                         matchId = candidate.match.id,
                                         divisionId = candidate.match.division,
-                                        matchOrder = candidate.match.matchId,
+                                        seed = candidate.match.team2Seed ?: candidate.team2?.seed,
                                         slot = BracketTeamSlot.TEAM2,
-                                    ),
-                                )
+                                    )
+                                }
+                                slots.asSequence()
                             }
                             .toList()
                         buildLeaguePlayoffPlaceholderAssignments(
@@ -369,7 +379,7 @@ internal data class BracketSlotKey(
 internal data class PlayoffBracketSlot(
     val matchId: String,
     val divisionId: String?,
-    val matchOrder: Int,
+    val seed: Int?,
     val slot: BracketTeamSlot,
 )
 
@@ -414,11 +424,12 @@ internal fun buildLeaguePlayoffPlaceholderAssignments(
         if (labels.isEmpty()) {
             continue
         }
-        val orderedSlots = divisionSlots.sortedWith(
-            compareBy<PlayoffBracketSlot> { it.matchOrder }
-                .thenBy { slot -> if (slot.slot == BracketTeamSlot.TEAM1) 0 else 1 }
-        )
-        orderedSlots.zip(labels).forEach { (slot, label) ->
+        divisionSlots.forEach { slot ->
+            val slotSeed = slot.seed ?: return@forEach
+            if (slotSeed < 1) {
+                return@forEach
+            }
+            val label = labels.getOrNull(slotSeed - 1) ?: return@forEach
             result[BracketSlotKey(slot.matchId, slot.slot)] = label
         }
     }

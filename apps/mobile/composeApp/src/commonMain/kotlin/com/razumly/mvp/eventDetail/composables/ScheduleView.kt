@@ -13,8 +13,8 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -31,7 +31,6 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -60,6 +59,7 @@ import com.kizitonwose.calendar.core.DayPosition
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
+import com.razumly.mvp.core.presentation.util.getScreenHeight
 import com.razumly.mvp.core.presentation.util.getScreenWidth
 import com.razumly.mvp.core.presentation.util.isScrollingUp
 import kotlinx.coroutines.launch
@@ -87,6 +87,7 @@ private const val UNASSIGNED_FIELD_KEY = "__unassigned_field__"
 private const val ALL_FIELDS_KEY = "__all_fields__"
 private const val BRACKET_CARD_HEIGHT_DP = 90
 private const val BRACKET_CARD_VERTICAL_PADDING_DP = 20
+private const val BRACKET_CARD_VERTICAL_PADDING_WITH_REF_DP = 28
 
 @Composable
 fun ScheduleView(
@@ -174,128 +175,148 @@ fun ScheduleView(
     val lazyListState = rememberLazyListState()
     val isScrollingUp by lazyListState.isScrollingUp()
     showFab(isScrollingUp)
+    val agendaViewportHeight = (getScreenHeight() * 0.75f).dp
+    val dayMatches = matchesByDate[selectedDate].orEmpty()
+    val fieldGroups = remember(dayMatches, fieldsById) {
+        buildFieldScheduleGroups(dayMatches, fieldsById)
+    }
+    val selectableFieldKeys = remember(fieldGroups) {
+        fieldGroups.map(FieldScheduleGroup::key).toSet()
+    }
+    LaunchedEffect(selectableFieldKeys) {
+        if (selectedFieldKey != ALL_FIELDS_KEY && selectedFieldKey !in selectableFieldKeys) {
+            selectedFieldKey = ALL_FIELDS_KEY
+        }
+    }
+    val visibleFieldGroups = remember(fieldGroups, selectedFieldKey) {
+        if (selectedFieldKey == ALL_FIELDS_KEY) {
+            fieldGroups
+        } else {
+            fieldGroups.filter { it.key == selectedFieldKey }
+        }
+    }
+    val canLockVisibleMatches =
+        canManageMatches && onToggleLockAllMatches != null && visibleMatchIds.isNotEmpty()
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        HorizontalCalendar(
-            state = calendarState,
-            modifier = Modifier.fillMaxWidth(),
-            monthHeader = { calendarMonth ->
-                val currentMonth = calendarMonth.yearMonth
-                SimpleCalendarTitle(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    currentMonth = currentMonth,
-                    goToPrevious = {
-                        val previous = currentMonth.previousMonth()
-                        if (previous.toMonthIndex() >= startMonth.toMonthIndex()) {
-                            coroutineScope.launch {
-                                calendarState.animateScrollToMonth(previous)
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            state = lazyListState,
+            verticalArrangement = Arrangement.spacedBy(0.dp),
+            contentPadding = navPadding
+        ) {
+            item(key = "schedule_calendar") {
+                HorizontalCalendar(
+                    state = calendarState,
+                    modifier = Modifier.fillMaxWidth(),
+                    monthHeader = { calendarMonth ->
+                        val currentMonth = calendarMonth.yearMonth
+                        SimpleCalendarTitle(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            currentMonth = currentMonth,
+                            goToPrevious = {
+                                val previous = currentMonth.previousMonth()
+                                if (previous.toMonthIndex() >= startMonth.toMonthIndex()) {
+                                    coroutineScope.launch {
+                                        calendarState.animateScrollToMonth(previous)
+                                    }
+                                }
+                            },
+                            goToNext = {
+                                val next = currentMonth.nextMonth()
+                                if (next.toMonthIndex() <= endMonth.toMonthIndex()) {
+                                    coroutineScope.launch {
+                                        calendarState.animateScrollToMonth(next)
+                                    }
+                                }
                             }
-                        }
+                        )
                     },
-                    goToNext = {
-                        val next = currentMonth.nextMonth()
-                        if (next.toMonthIndex() <= endMonth.toMonthIndex()) {
-                            coroutineScope.launch {
-                                calendarState.animateScrollToMonth(next)
-                            }
-                        }
+                    dayContent = { day ->
+                        ScheduleDay(
+                            day = day,
+                            isSelected = day.date == selectedDate,
+                            hasMatches = matchesByDate.containsKey(day.date),
+                            onClick = { selectedDate = day.date }
+                        )
                     }
                 )
-            },
-            dayContent = { day ->
-                ScheduleDay(
-                    day = day,
-                    isSelected = day.date == selectedDate,
-                    hasMatches = matchesByDate.containsKey(day.date),
-                    onClick = { selectedDate = day.date }
-                )
             }
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        val dayMatches = matchesByDate[selectedDate].orEmpty()
-        val fieldGroups = remember(dayMatches, fieldsById) {
-            buildFieldScheduleGroups(dayMatches, fieldsById)
-        }
-        val selectableFieldKeys = remember(fieldGroups) {
-            fieldGroups.map(FieldScheduleGroup::key).toSet()
-        }
-        LaunchedEffect(selectableFieldKeys) {
-            if (selectedFieldKey != ALL_FIELDS_KEY && selectedFieldKey !in selectableFieldKeys) {
-                selectedFieldKey = ALL_FIELDS_KEY
+            item(key = "schedule_calendar_spacer") {
+                Spacer(modifier = Modifier.height(16.dp))
             }
-        }
-        val visibleFieldGroups = remember(fieldGroups, selectedFieldKey) {
-            if (selectedFieldKey == ALL_FIELDS_KEY) {
-                fieldGroups
-            } else {
-                fieldGroups.filter { it.key == selectedFieldKey }
+            item(key = "schedule_day_summary") {
+                DaySummaryHeader(selectedDate, dayMatches.size)
             }
-        }
-        DaySummaryHeader(selectedDate, dayMatches.size)
-
-        Spacer(modifier = Modifier.height(8.dp))
-        val canLockVisibleMatches =
-            canManageMatches && onToggleLockAllMatches != null && visibleMatchIds.isNotEmpty()
-        if (hasTrackedMatches || canLockVisibleMatches) {
-            ScheduleQuickActions(
-                hasTrackedMatches = hasTrackedMatches,
-                showOnlyMyMatches = showOnlyMyMatches,
-                onToggleShowOnlyMyMatches = { showOnlyMyMatches = !showOnlyMyMatches },
-                canLockVisibleMatches = canLockVisibleMatches,
-                allVisibleLocked = allVisibleLocked,
-                onToggleLockAllMatches = {
-                    onToggleLockAllMatches?.invoke(!allVisibleLocked, visibleMatchIds)
-                }
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-        }
-        ScheduleGroupingToggle(
-            selectedMode = groupingMode,
-            onModeSelected = { groupingMode = it }
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        if (dayMatches.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    "No matches scheduled for this day.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        } else {
-            Box(modifier = Modifier.fillMaxSize()) {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    state = lazyListState,
-                    verticalArrangement = Arrangement.spacedBy(0.dp),
-                    contentPadding = navPadding
-                ) {
-                    if (groupingMode == ScheduleGroupingMode.TIME) {
-                        items(dayMatches, key = { it.match.id }) { match ->
-                            ScheduleMatchCard(
-                                match = match,
-                                onClick = { onMatchClick(match) }
-                            )
+            item(key = "schedule_controls") {
+                Spacer(modifier = Modifier.height(8.dp))
+                if (hasTrackedMatches || canLockVisibleMatches) {
+                    ScheduleQuickActions(
+                        hasTrackedMatches = hasTrackedMatches,
+                        showOnlyMyMatches = showOnlyMyMatches,
+                        onToggleShowOnlyMyMatches = { showOnlyMyMatches = !showOnlyMyMatches },
+                        canLockVisibleMatches = canLockVisibleMatches,
+                        allVisibleLocked = allVisibleLocked,
+                        onToggleLockAllMatches = {
+                            onToggleLockAllMatches?.invoke(!allVisibleLocked, visibleMatchIds)
                         }
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+                ScheduleGroupingToggle(
+                    selectedMode = groupingMode,
+                    onModeSelected = { groupingMode = it },
+                    showFieldSelector = isMobileLayout && groupingMode == ScheduleGroupingMode.FIELD && fieldGroups.isNotEmpty(),
+                    fieldGroups = fieldGroups,
+                    selectedFieldKey = selectedFieldKey,
+                    onFieldSelected = { selectedFieldKey = it },
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            if (dayMatches.isEmpty()) {
+                item(key = "schedule_empty_day") {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(if (isMobileLayout) agendaViewportHeight else 320.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "No matches scheduled for this day.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            } else {
+                item(key = "schedule_agenda_content") {
+                    val agendaContentModifier = if (isMobileLayout) {
+                        Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = agendaViewportHeight)
                     } else {
-                        items(visibleFieldGroups, key = { it.key }) { group ->
-                            Column(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalArrangement = Arrangement.spacedBy(0.dp)
-                            ) {
+                        Modifier.fillMaxWidth()
+                    }
+                    Column(
+                        modifier = agendaContentModifier,
+                        verticalArrangement = Arrangement.spacedBy(0.dp)
+                    ) {
+                        if (groupingMode == ScheduleGroupingMode.TIME) {
+                            dayMatches.forEach { match ->
+                                ScheduleMatchCard(
+                                    match = match,
+                                    onClick = { onMatchClick(match) }
+                                )
+                            }
+                        } else {
+                            visibleFieldGroups.forEach { group ->
                                 Text(
                                     text = "${group.label} (${group.matches.size})",
                                     modifier = Modifier.padding(horizontal = 16.dp),
@@ -311,16 +332,6 @@ fun ScheduleView(
                             }
                         }
                     }
-                }
-                if (isMobileLayout && groupingMode == ScheduleGroupingMode.FIELD && fieldGroups.isNotEmpty()) {
-                    FieldSelectorEdgeButton(
-                        fieldGroups = fieldGroups,
-                        selectedFieldKey = selectedFieldKey,
-                        onFieldSelected = { selectedFieldKey = it },
-                        modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .padding(end = 0.dp)
-                    )
                 }
             }
         }
@@ -432,69 +443,71 @@ private fun DaySummaryHeader(date: LocalDate, matchCount: Int) {
 private fun ScheduleGroupingToggle(
     selectedMode: ScheduleGroupingMode,
     onModeSelected: (ScheduleGroupingMode) -> Unit,
+    showFieldSelector: Boolean,
+    fieldGroups: List<FieldScheduleGroup>,
+    selectedFieldKey: String,
+    onFieldSelected: (String) -> Unit,
 ) {
     val scrollState = rememberScrollState()
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(scrollState)
-            .padding(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        FilterChip(
-            selected = selectedMode == ScheduleGroupingMode.TIME,
-            onClick = { onModeSelected(ScheduleGroupingMode.TIME) },
-            label = { Text("By Time") }
-        )
-        FilterChip(
-            selected = selectedMode == ScheduleGroupingMode.FIELD,
-            onClick = { onModeSelected(ScheduleGroupingMode.FIELD) },
-            label = { Text("By Field") }
-        )
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .horizontalScroll(scrollState)
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            FilterChip(
+                selected = selectedMode == ScheduleGroupingMode.TIME,
+                onClick = { onModeSelected(ScheduleGroupingMode.TIME) },
+                label = { Text("By Time") }
+            )
+            FilterChip(
+                selected = selectedMode == ScheduleGroupingMode.FIELD,
+                onClick = { onModeSelected(ScheduleGroupingMode.FIELD) },
+                label = { Text("By Field") }
+            )
+            if (showFieldSelector) {
+                FieldSelectorDropdownChip(
+                    fieldGroups = fieldGroups,
+                    selectedFieldKey = selectedFieldKey,
+                    onFieldSelected = onFieldSelected,
+                )
+            }
+        }
     }
 }
 
 @Composable
-private fun FieldSelectorEdgeButton(
+private fun FieldSelectorDropdownChip(
     fieldGroups: List<FieldScheduleGroup>,
     selectedFieldKey: String,
     onFieldSelected: (String) -> Unit,
-    modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
     val selectedLabel = remember(fieldGroups, selectedFieldKey) {
         fieldGroups.firstOrNull { it.key == selectedFieldKey }?.label ?: "All fields"
     }
 
-    Box(modifier = modifier) {
-        Surface(
-            modifier = Modifier
-                .clip(RoundedCornerShape(topStart = 16.dp, bottomStart = 16.dp))
-                .clickable { expanded = true },
-            shape = RoundedCornerShape(topStart = 16.dp, bottomStart = 16.dp),
-            tonalElevation = 4.dp,
-            shadowElevation = 6.dp,
-            color = MaterialTheme.colorScheme.surfaceVariant
-        ) {
-            Row(
-                modifier = Modifier
-                    .padding(start = 12.dp, end = 6.dp, top = 10.dp, bottom = 10.dp)
-                    .widthIn(max = 136.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
+    Box {
+        FilterChip(
+            selected = selectedFieldKey != ALL_FIELDS_KEY,
+            onClick = { expanded = true },
+            label = {
                 Text(
                     text = selectedLabel,
-                    style = MaterialTheme.typography.labelLarge,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+            },
+            trailingIcon = {
                 Icon(
                     imageVector = Icons.Default.ArrowDropDown,
                     contentDescription = "Select field"
                 )
-            }
-        }
+            },
+        )
 
         DropdownMenu(
             expanded = expanded,
@@ -589,10 +602,19 @@ private fun ScheduleMatchCard(
     match: MatchWithRelations,
     onClick: () -> Unit
 ) {
+    val hasAssignedReferee =
+        !match.match.refereeId.isNullOrBlank() ||
+            !match.match.teamRefereeId.isNullOrBlank() ||
+            match.teamReferee != null
+    val verticalPadding = if (hasAssignedReferee) {
+        BRACKET_CARD_VERTICAL_PADDING_WITH_REF_DP.dp
+    } else {
+        BRACKET_CARD_VERTICAL_PADDING_DP.dp
+    }
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = BRACKET_CARD_VERTICAL_PADDING_DP.dp)
+            .padding(horizontal = 16.dp, vertical = verticalPadding)
     ) {
         MatchCard(
             match = match,

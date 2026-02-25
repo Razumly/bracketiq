@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -72,6 +73,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.font.FontWeight
@@ -93,10 +95,11 @@ import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.composables.PlatformTextField
 import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
+import com.razumly.mvp.core.presentation.composables.PullToRefreshContainer
 import com.razumly.mvp.core.presentation.composables.StripeButton
 import com.razumly.mvp.core.presentation.composables.TeamCard
 import com.razumly.mvp.core.presentation.util.buttonTransitionSpec
-import com.razumly.mvp.core.presentation.util.dateTimeFormat
+import com.razumly.mvp.core.presentation.util.isScrollingUp
 import com.razumly.mvp.core.presentation.util.toTitleCase
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
@@ -110,23 +113,28 @@ import com.razumly.mvp.eventDetail.composables.SendNotificationDialog
 import com.razumly.mvp.eventDetail.composables.TeamSelectionDialog
 import com.razumly.mvp.eventDetail.composables.TournamentBracketView
 import com.razumly.mvp.eventMap.MapComponent
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.toLocalDateTime
+import com.razumly.mvp.icons.Groups
+import com.razumly.mvp.icons.MVPIcons
+import com.razumly.mvp.icons.ProfileActionEvents
+import com.razumly.mvp.icons.TournamentBracket
+import com.razumly.mvp.icons.Trophy
 import kotlin.math.absoluteValue
 import kotlin.math.round
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.hours
 import kotlin.time.ExperimentalTime
-import kotlin.time.Instant
 
 val LocalTournamentComponent =
     compositionLocalOf<EventDetailComponent> { error("No tournament provided") }
 
-private enum class DetailTab(val label: String) {
-    PARTICIPANTS("Participants"),
-    BRACKET("Bracket"),
-    SCHEDULE("Schedule"),
-    LEAGUES("Standings")
+private enum class DetailTab(
+    val label: String,
+    val icon: ImageVector,
+) {
+    PARTICIPANTS("Participants", MVPIcons.Groups),
+    BRACKET("Bracket", MVPIcons.TournamentBracket),
+    SCHEDULE("Schedule", MVPIcons.ProfileActionEvents),
+    LEAGUES("Standings", MVPIcons.Trophy),
 }
 
 private data class JoinOption(
@@ -139,6 +147,15 @@ private data class BracketDivisionOption(
     val id: String,
     val label: String,
 )
+
+private fun List<BracketDivisionOption>.resolveSelectedDivisionId(preferredId: String?): String? {
+    if (isEmpty()) return null
+    val normalizedPreferred = preferredId
+        ?.normalizeDivisionIdentifier()
+        .orEmpty()
+    return firstOrNull { option -> option.id == normalizedPreferred }?.id
+        ?: first().id
+}
 
 @Composable
 private fun EventOverviewSections(
@@ -465,6 +482,10 @@ private fun BracketFloatingBar(
     showBracketToggle: Boolean,
     isLosersBracket: Boolean,
     onBracketToggle: () -> Unit,
+    showConfirmResultsAction: Boolean = false,
+    confirmResultsEnabled: Boolean = false,
+    confirmResultsInProgress: Boolean = false,
+    onConfirmResultsClick: () -> Unit = {},
     onShowDetailsClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -525,11 +546,28 @@ private fun BracketFloatingBar(
                     )
                 }
             }
+            if (showConfirmResultsAction) {
+                Button(
+                    onClick = onConfirmResultsClick,
+                    modifier = Modifier.weight(1f),
+                    enabled = confirmResultsEnabled
+                ) {
+                    Text(
+                        text = if (confirmResultsInProgress) "Confirming..." else "Confirm Results",
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
             Button(
                 onClick = onShowDetailsClick,
                 modifier = Modifier.weight(1f)
             ) {
-                Text("Show Details")
+                Text(
+                    text = "Back to details",
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
     }
@@ -595,7 +633,11 @@ private fun ParticipantsFloatingBar(
                 onClick = onShowDetailsClick,
                 modifier = Modifier.weight(1f)
             ) {
-                Text("Show Details")
+                Text(
+                    text = "Back to details",
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
     }
@@ -759,6 +801,7 @@ fun EventDetailScreen(
                 }
             )
     }
+    val canConfirmLeagueResultsFromDock = hasStandingsView && canManageLeagueStandings
     val computedLeagueStandings = remember(
         selectedEvent.teams,
         selectedEvent.matches,
@@ -819,6 +862,7 @@ fun EventDetailScreen(
     var refundReason by remember { mutableStateOf("") }
     var showNotifyDialog by remember { mutableStateOf(false) }
     var showJoinOptionsSheet by remember { mutableStateOf(false) }
+    var showStandingsConfirmDialog by remember { mutableStateOf(false) }
     var showStickyDockByScroll by remember { mutableStateOf(true) }
     var mapRevealCenter by remember { mutableStateOf(Offset.Zero) }
 
@@ -949,15 +993,50 @@ fun EventDetailScreen(
         addOption(selectedDivision)
         options
     }
+    val playoffDivisionIds = remember(selectedEvent.event.divisionDetails) {
+        selectedEvent.event.divisionDetails
+            .flatMap { detail -> detail.playoffPlacementDivisionIds }
+            .map { divisionId -> divisionId.normalizeDivisionIdentifier() }
+            .filter { normalized -> normalized.isNotBlank() }
+            .toSet()
+    }
+    val isLeaguePlayoffSplit = remember(
+        selectedEvent.event.includePlayoffs,
+        playoffDivisionIds,
+    ) {
+        selectedEvent.event.includePlayoffs && playoffDivisionIds.isNotEmpty()
+    }
+    val leagueDivisionOptions = remember(
+        joinDivisionOptions,
+        playoffDivisionIds,
+        isLeaguePlayoffSplit,
+    ) {
+        if (!isLeaguePlayoffSplit) {
+            joinDivisionOptions
+        } else {
+            joinDivisionOptions
+                .filterNot { option -> option.id in playoffDivisionIds }
+                .ifEmpty { joinDivisionOptions }
+        }
+    }
+    val playoffDivisionOptions = remember(
+        joinDivisionOptions,
+        playoffDivisionIds,
+        isLeaguePlayoffSplit,
+    ) {
+        if (!isLeaguePlayoffSplit) {
+            joinDivisionOptions
+        } else {
+            joinDivisionOptions
+                .filter { option -> option.id in playoffDivisionIds }
+                .ifEmpty { joinDivisionOptions }
+        }
+    }
     val selectedJoinDivisionId = remember(
         selectedDivision,
         joinDivisionOptions,
     ) {
-        val normalizedSelected = selectedDivision
-            ?.normalizeDivisionIdentifier()
-            .orEmpty()
-        joinDivisionOptions.firstOrNull { it.id == normalizedSelected }?.id
-            ?: joinDivisionOptions.firstOrNull()?.id
+        joinDivisionOptions.resolveSelectedDivisionId(selectedDivision)
     }
     val joinOptions = remember(
         isUserInEvent,
@@ -1295,6 +1374,40 @@ fun EventDetailScreen(
                             }
                         }
                         var selectedTab by rememberSaveable { mutableStateOf(DetailTab.PARTICIPANTS) }
+                        val standingsTabDivisionOptions = remember(
+                            joinDivisionOptions,
+                            leagueDivisionOptions,
+                            isLeaguePlayoffSplit,
+                        ) {
+                            if (isLeaguePlayoffSplit) {
+                                leagueDivisionOptions
+                            } else {
+                                joinDivisionOptions
+                            }
+                        }
+                        val bracketTabDivisionOptions = remember(
+                            joinDivisionOptions,
+                            playoffDivisionOptions,
+                            isLeaguePlayoffSplit,
+                        ) {
+                            if (isLeaguePlayoffSplit) {
+                                playoffDivisionOptions
+                            } else {
+                                joinDivisionOptions
+                            }
+                        }
+                        val selectedStandingsDivisionId = remember(
+                            selectedJoinDivisionId,
+                            standingsTabDivisionOptions,
+                        ) {
+                            standingsTabDivisionOptions.resolveSelectedDivisionId(selectedJoinDivisionId)
+                        }
+                        val selectedBracketDivisionId = remember(
+                            selectedJoinDivisionId,
+                            bracketTabDivisionOptions,
+                        ) {
+                            bracketTabDivisionOptions.resolveSelectedDivisionId(selectedJoinDivisionId)
+                        }
                         val participantSections = remember(selectedEvent.event.teamSignup) {
                             if (selectedEvent.event.teamSignup) {
                                 listOf(
@@ -1320,6 +1433,25 @@ fun EventDetailScreen(
                                 selectedTab = availableTabs.first()
                             }
                         }
+                        LaunchedEffect(
+                            selectedTab,
+                            selectedStandingsDivisionId,
+                            selectedBracketDivisionId,
+                            selectedDivision,
+                        ) {
+                            val targetDivisionId = when (selectedTab) {
+                                DetailTab.LEAGUES -> selectedStandingsDivisionId
+                                DetailTab.BRACKET -> selectedBracketDivisionId
+                                DetailTab.PARTICIPANTS,
+                                DetailTab.SCHEDULE,
+                                -> null
+                            }
+                            if (!targetDivisionId.isNullOrBlank() &&
+                                !divisionsEquivalent(selectedDivision, targetDivisionId)
+                            ) {
+                                component.selectDivision(targetDivisionId)
+                            }
+                        }
                         LaunchedEffect(participantSections) {
                             if (selectedParticipantsSection !in participantSections) {
                                 selectedParticipantsSection = participantSections.first()
@@ -1335,7 +1467,20 @@ fun EventDetailScreen(
                                 Tab(
                                     selected = index == selectedTabIndex,
                                     onClick = { selectedTab = tab },
-                                    text = { Text(tab.label) }
+                                    text = {
+                                        Text(
+                                            text = tab.label,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    },
+                                    icon = {
+                                        Icon(
+                                            imageVector = tab.icon,
+                                            contentDescription = null,
+                                        )
+                                    },
                                 )
                             }
                         }
@@ -1395,14 +1540,11 @@ fun EventDetailScreen(
                                         standings = leagueStandings,
                                         pointPrecision = selectedEvent.leagueScoringConfig?.pointPrecision,
                                         showFab = { showFab = it },
-                                        standingsConfirmedAt = leagueDivisionStandings?.standingsConfirmedAt,
-                                        standingsConfirmedBy = leagueDivisionStandings?.standingsConfirmedBy,
                                         validationMessages = leagueDivisionStandings?.validationMessages.orEmpty(),
                                         isLoading = leagueDivisionStandingsLoading,
                                         isConfirming = leagueStandingsConfirming,
                                         canConfirmStandings = canManageLeagueStandings,
                                         onRefresh = component::refreshLeagueStandings,
-                                        onConfirm = component::confirmLeagueStandings,
                                     )
                                 }
 
@@ -1424,8 +1566,8 @@ fun EventDetailScreen(
                             ) {
                                 when (selectedTab) {
                                     DetailTab.BRACKET -> BracketFloatingBar(
-                                        selectedDivisionId = selectedJoinDivisionId,
-                                        divisionOptions = joinDivisionOptions,
+                                        selectedDivisionId = selectedBracketDivisionId,
+                                        divisionOptions = bracketTabDivisionOptions,
                                         onDivisionSelected = component::selectDivision,
                                         showBracketToggle = selectedEvent.event.doubleElimination,
                                         isLosersBracket = losersBracket,
@@ -1433,9 +1575,26 @@ fun EventDetailScreen(
                                         onShowDetailsClick = component::toggleDetails,
                                     )
 
-                                    DetailTab.SCHEDULE, DetailTab.LEAGUES -> BracketFloatingBar(
+                                    DetailTab.SCHEDULE -> BracketFloatingBar(
                                         selectedDivisionId = selectedJoinDivisionId,
                                         divisionOptions = joinDivisionOptions,
+                                        onDivisionSelected = component::selectDivision,
+                                        showBracketToggle = false,
+                                        isLosersBracket = losersBracket,
+                                        onBracketToggle = component::toggleLosersBracket,
+                                        showConfirmResultsAction = canConfirmLeagueResultsFromDock,
+                                        confirmResultsEnabled = canConfirmLeagueResultsFromDock &&
+                                            !leagueDivisionStandingsLoading &&
+                                            !leagueStandingsConfirming &&
+                                            leagueStandings.isNotEmpty(),
+                                        confirmResultsInProgress = leagueStandingsConfirming,
+                                        onConfirmResultsClick = { showStandingsConfirmDialog = true },
+                                        onShowDetailsClick = component::toggleDetails,
+                                    )
+
+                                    DetailTab.LEAGUES -> BracketFloatingBar(
+                                        selectedDivisionId = selectedStandingsDivisionId,
+                                        divisionOptions = standingsTabDivisionOptions,
                                         onDivisionSelected = component::selectDivision,
                                         showBracketToggle = false,
                                         isLosersBracket = losersBracket,
@@ -1599,6 +1758,42 @@ fun EventDetailScreen(
                     dialogState = dialogState,
                     onDismiss = component::dismissChildJoinSelectionDialog,
                     onChildSelected = component::selectChildForJoin,
+                )
+            }
+            if (showStandingsConfirmDialog) {
+                AlertDialog(
+                    onDismissRequest = { showStandingsConfirmDialog = false },
+                    title = { Text("Confirm Results") },
+                    text = {
+                        Text("Update playoff assignments based on these results?")
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                showStandingsConfirmDialog = false
+                                component.confirmLeagueStandings(applyReassignment = true)
+                            }
+                        ) {
+                            Text("Yes")
+                        }
+                    },
+                    dismissButton = {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(
+                                onClick = {
+                                    showStandingsConfirmDialog = false
+                                    component.confirmLeagueStandings(applyReassignment = false)
+                                }
+                            ) {
+                                Text("No")
+                            }
+                            TextButton(
+                                onClick = { showStandingsConfirmDialog = false }
+                            ) {
+                                Text("Cancel")
+                            }
+                        }
+                    },
                 )
             }
             if (showDeleteConfirmation) {
@@ -1807,90 +2002,34 @@ private fun WithdrawTargetDialog(
 private fun LeagueStandingsTab(
     standings: List<TeamStanding>,
     pointPrecision: Int?,
-    standingsConfirmedAt: Instant?,
-    standingsConfirmedBy: String?,
     validationMessages: List<String>,
     isLoading: Boolean,
     isConfirming: Boolean,
     canConfirmStandings: Boolean,
     onRefresh: () -> Unit,
-    onConfirm: (applyReassignment: Boolean) -> Unit,
     showFab: (Boolean) -> Unit,
 ) {
-    LaunchedEffect(standings) {
-        showFab(true)
-    }
+    val standingsListState = rememberLazyListState()
+    val isScrollingUp by standingsListState.isScrollingUp()
+    showFab(if (standings.isEmpty()) true else isScrollingUp)
 
-    var applyReassignment by rememberSaveable { mutableStateOf(true) }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.surface)
+    PullToRefreshContainer(
+        isRefreshing = isLoading,
+        onRefresh = onRefresh,
+        modifier = Modifier.fillMaxSize(),
     ) {
-        if (canConfirmStandings) {
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-            ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.surface)
+        ) {
+            if (canConfirmStandings && (validationMessages.isNotEmpty() || isLoading || isConfirming)) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(12.dp),
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text(
-                        text = "Standings Confirmation",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        text = standingsConfirmedAt?.let { confirmedAt ->
-                            buildString {
-                                append("Confirmed: ")
-                                append(formatStandingsConfirmedAt(confirmedAt))
-                                standingsConfirmedBy?.takeIf(String::isNotBlank)?.let { confirmedBy ->
-                                    append(" by ")
-                                    append(confirmedBy)
-                                }
-                            }
-                        } ?: "Not confirmed yet.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Checkbox(
-                            checked = applyReassignment,
-                            onCheckedChange = { applyReassignment = it },
-                        )
-                        Text(
-                            text = "Apply automatic playoff reassignment",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                    }
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Button(
-                            onClick = onRefresh,
-                            enabled = !isLoading && !isConfirming,
-                        ) {
-                            Text("Refresh")
-                        }
-                        Button(
-                            onClick = { onConfirm(applyReassignment) },
-                            enabled = !isLoading && !isConfirming && standings.isNotEmpty(),
-                        ) {
-                            Text("Confirm Results")
-                        }
-                    }
                     if (validationMessages.isNotEmpty()) {
                         validationMessages.forEach { validationMessage ->
                             Text(
@@ -1904,44 +2043,43 @@ private fun LeagueStandingsTab(
                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                     }
                 }
+            } else if (isLoading) {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                )
             }
-        } else if (isLoading) {
-            LinearProgressIndicator(
+
+            if (standings.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "Standings will appear once scores are reported.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                return@Column
+            }
+
+            LeagueStandingsHeader()
+            LazyColumn(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-            )
-        }
-
-        if (standings.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
+                    .fillMaxSize(),
+                state = standingsListState,
             ) {
-                Text(
-                    "Standings will appear once scores are reported.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            return
-        }
-
-        LeagueStandingsHeader()
-        LazyColumn {
-            items(standings, key = { it.teamId }) { standing ->
-                LeagueStandingRow(
-                    standing = standing,
-                    pointPrecision = pointPrecision
-                )
+                items(standings, key = { it.teamId }) { standing ->
+                    LeagueStandingRow(
+                        standing = standing,
+                        pointPrecision = pointPrecision
+                    )
+                }
             }
         }
     }
-}
-
-private fun formatStandingsConfirmedAt(confirmedAt: Instant): String {
-    val localDateTime = confirmedAt.toLocalDateTime(TimeZone.currentSystemDefault())
-    return dateTimeFormat.format(localDateTime)
 }
 
 @Composable
@@ -1966,7 +2104,7 @@ private fun LeagueStandingsHeader() {
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
-                text = "Score",
+                text = "S",
                 modifier = Modifier.weight(1.2f),
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.Bold,
@@ -2032,7 +2170,7 @@ private fun LeagueStandingRow(
             verticalAlignment = Alignment.CenterVertically
         ) {
             StandingsCell(
-                label = "Score",
+                label = "S",
                 value = standing.score.formatPoints(pointPrecision),
                 modifier = Modifier.weight(1.2f)
             )

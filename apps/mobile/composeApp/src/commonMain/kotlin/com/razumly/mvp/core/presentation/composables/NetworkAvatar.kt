@@ -60,7 +60,7 @@ fun NetworkAvatar(
     val initialsUrl = remember(safeName, sizePx) { buildInitialsAvatarUrl(safeName, sizePx) }
     val normalizedImageUrl = remember(imageRef, sizePx) { resolveImageRef(imageRef, sizePx) }
     var imageModel by remember(normalizedImageUrl, initialsUrl) {
-        mutableStateOf(normalizedImageUrl ?: initialsUrl)
+        mutableStateOf<String?>(normalizedImageUrl ?: initialsUrl)
     }
 
     LaunchedEffect(normalizedImageUrl, initialsUrl) {
@@ -79,33 +79,45 @@ fun NetworkAvatar(
             modifier = Modifier.fillMaxSize(),
         )
 
-        SubcomposeAsyncImage(
-            model = imageModel,
-            contentDescription = contentDescription,
-            modifier = Modifier
-                .fillMaxSize()
-                .clip(CircleShape),
-            contentScale = ContentScale.Crop,
-            onState = { state ->
-                if (state is AsyncImagePainter.State.Error && imageModel != initialsUrl) {
-                    imageModel = initialsUrl
-                }
-            },
-        ) {
-            val state by painter.state.collectAsState()
-            AnimatedVisibility(
-                visible = state is AsyncImagePainter.State.Success,
-                modifier = Modifier.fillMaxSize(),
-                enter = scaleIn(
-                    animationSpec = tween(durationMillis = 250),
-                    initialScale = 0.9f,
-                ),
+        if (!imageModel.isNullOrBlank()) {
+            SubcomposeAsyncImage(
+                model = imageModel,
+                contentDescription = contentDescription,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(CircleShape),
+                contentScale = ContentScale.Crop,
+                onState = { state ->
+                    if (state is AsyncImagePainter.State.Error) {
+                        imageModel = if (imageModel != initialsUrl) initialsUrl else null
+                    }
+                },
             ) {
-                SubcomposeAsyncImageContent(modifier = Modifier.fillMaxSize())
+                val state by painter.state.collectAsState()
+                AnimatedVisibility(
+                    visible = state is AsyncImagePainter.State.Success,
+                    modifier = Modifier.fillMaxSize(),
+                    enter = scaleIn(
+                        animationSpec = tween(durationMillis = 250),
+                        initialScale = 0.9f,
+                    ),
+                ) {
+                    SubcomposeAsyncImageContent(modifier = Modifier.fillMaxSize())
+                }
             }
         }
     }
 }
+
+private fun buildInitialsAvatarUrl(name: String, sizePx: Int): String =
+    buildString {
+        append(apiBaseUrl.trimEnd('/'))
+        append("/api/avatars/initials?name=")
+        append(name.encodeURLQueryComponent())
+        append("&size=")
+        append(sizePx)
+        append("&format=png")
+    }
 
 @Composable
 private fun LocalInitialsAvatar(
@@ -134,15 +146,6 @@ private fun LocalInitialsAvatar(
     }
 }
 
-private fun buildInitialsAvatarUrl(name: String, sizePx: Int): String =
-    buildString {
-        append(apiBaseUrl.trimEnd('/'))
-        append("/api/avatars/initials?name=")
-        append(name.encodeURLQueryComponent())
-        append("&size=")
-        append(sizePx)
-    }
-
 private fun resolveImageRef(imageRef: String?, sizePx: Int): String? {
     val raw = imageRef?.trim().orEmpty()
     if (raw.isBlank()) return null
@@ -156,15 +159,18 @@ private fun resolveImageRef(imageRef: String?, sizePx: Int): String? {
 
 private fun computeInitials(name: String): String {
     val parts = name
-        .split(' ')
+        .split(Regex("\\s+"))
         .map { it.trim() }
         .filter { it.isNotEmpty() }
 
     if (parts.isEmpty()) return "U"
     if (parts.size == 1) {
-        return parts[0].take(2).uppercase()
+        return parts[0].take(3).uppercase()
     }
-    return "${parts[0].first()}${parts[1].first()}".uppercase()
+    return parts.take(3)
+        .mapNotNull { it.firstOrNull()?.toString() }
+        .joinToString(separator = "")
+        .uppercase()
 }
 
 private fun pickColorScheme(name: String): AvatarColorScheme {
