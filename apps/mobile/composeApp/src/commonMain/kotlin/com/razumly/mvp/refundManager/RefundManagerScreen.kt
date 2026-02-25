@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.RefundRequestWithRelations
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.composables.EventCard
+import com.razumly.mvp.core.presentation.composables.PlatformBackButton
 import com.razumly.mvp.core.presentation.composables.PullToRefreshContainer
 import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.util.LocalLoadingHandler
@@ -71,6 +72,12 @@ fun RefundManagerScreen(
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text("Refund Requests") },
+                navigationIcon = {
+                    PlatformBackButton(
+                        onBack = component::onBack,
+                        arrow = true,
+                    )
+                }
             )
         }
     ) { innerPadding ->

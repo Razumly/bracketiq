@@ -2,6 +2,7 @@ package com.razumly.mvp.profile
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -1576,6 +1577,7 @@ fun ProfileSectionScaffold(
     onBack: () -> Unit,
     onRefresh: (() -> Unit)? = null,
     isRefreshing: Boolean = false,
+    scrollContent: Boolean = true,
     content: @Composable () -> Unit,
 ) {
     val navPadding = LocalNavBarPadding.current
@@ -1608,12 +1610,14 @@ fun ProfileSectionScaffold(
             ) {
                 ProfileSectionContent(
                     description = description,
+                    scrollContent = scrollContent,
                     content = content,
                 )
             }
         } else {
             ProfileSectionContent(
                 description = description,
+                scrollContent = scrollContent,
                 content = content,
                 modifier = contentModifier,
             )
@@ -1626,18 +1630,37 @@ fun ProfileSectionContent(
     description: String,
     content: @Composable () -> Unit,
     modifier: Modifier = Modifier,
+    scrollContent: Boolean = true,
 ) {
-    Column(
-        modifier = modifier
-            .padding(16.dp)
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Text(
-            text = description,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        content()
+    if (scrollContent) {
+        Column(
+            modifier = modifier
+                .padding(16.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            content()
+        }
+    } else {
+        Column(
+            modifier = modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Box(
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                content()
+            }
+        }
     }
 }

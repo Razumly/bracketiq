@@ -424,6 +424,7 @@ internal class CreateEvent_FakeMatchRepository : IMatchRepository {
     override suspend fun updateMatchFinished(match: MatchMVP, time: Instant): Result<Unit> = Result.success(Unit)
     override suspend fun getMatchesOfTournament(tournamentId: String): Result<List<MatchMVP>> =
         Result.success(tournamentMatches)
+    override suspend fun deleteMatchesOfTournament(tournamentId: String): Result<Unit> = Result.success(Unit)
     override suspend fun subscribeToMatches(): Result<Unit> = Result.success(Unit)
     override suspend fun unsubscribeFromRealtime(): Result<Unit> = Result.success(Unit)
     override fun setIgnoreMatch(match: MatchMVP?): Result<Unit> = Result.success(Unit)

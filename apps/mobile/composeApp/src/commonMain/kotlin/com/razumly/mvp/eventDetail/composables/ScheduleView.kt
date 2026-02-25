@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -46,34 +47,67 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil3.compose.AsyncImage
 import com.kizitonwose.calendar.compose.HorizontalCalendar
 import com.kizitonwose.calendar.compose.rememberCalendarState
 import com.kizitonwose.calendar.core.CalendarDay
 import com.kizitonwose.calendar.core.DayPosition
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.util.getScreenHeight
+import com.razumly.mvp.core.presentation.util.getImageUrl
 import com.razumly.mvp.core.presentation.util.getScreenWidth
 import com.razumly.mvp.core.presentation.util.isScrollingUp
+import com.razumly.mvp.core.presentation.util.timeFormat
 import kotlinx.coroutines.launch
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.Month
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.YearMonth
+import kotlinx.datetime.format
 import kotlinx.datetime.number
 import kotlinx.datetime.toLocalDateTime
 import kotlin.time.Clock
+import kotlin.time.Duration.Companion.hours
+import kotlin.time.Instant
 
 private enum class ScheduleGroupingMode {
     TIME,
     FIELD,
+}
+
+sealed interface ScheduleItem {
+    val key: String
+    val eventId: String
+    val start: Instant
+    val end: Instant
+
+    data class MatchEntry(
+        val match: MatchWithRelations,
+    ) : ScheduleItem {
+        override val key: String = "match-${match.match.id}"
+        override val eventId: String = match.match.eventId
+        override val start: Instant = match.match.start
+        override val end: Instant = normalizeScheduleEnd(match.match.start, match.match.end)
+    }
+
+    data class EventEntry(
+        val event: Event,
+    ) : ScheduleItem {
+        override val key: String = "event-${event.id}"
+        override val eventId: String = event.id
+        override val start: Instant = event.start
+        override val end: Instant = normalizeScheduleEnd(event.start, event.end)
+    }
 }
 
 private data class FieldScheduleGroup(
@@ -88,23 +122,36 @@ private const val ALL_FIELDS_KEY = "__all_fields__"
 private const val BRACKET_CARD_HEIGHT_DP = 90
 private const val BRACKET_CARD_VERTICAL_PADDING_DP = 20
 private const val BRACKET_CARD_VERTICAL_PADDING_WITH_REF_DP = 28
+private const val EVENT_CARD_IMAGE_WIDTH_DP = 96
 
 @Composable
 fun ScheduleView(
-    matches: List<MatchWithRelations>,
+    items: List<ScheduleItem>,
     fields: List<FieldWithMatches>,
     showFab: (Boolean) -> Unit,
     trackedUserIds: Set<String> = emptySet(),
     canManageMatches: Boolean = false,
     onToggleLockAllMatches: ((Boolean, List<String>) -> Unit)? = null,
     onMatchClick: (MatchWithRelations) -> Unit,
+    onEventClick: (Event) -> Unit = {},
+    hideMatchDivisionLabel: Boolean = false,
+    matchCardContent: @Composable (MatchWithRelations, () -> Unit) -> Unit = { match, onClick ->
+        ScheduleMatchCard(
+            match = match,
+            onClick = onClick,
+            showDivisionLabel = !hideMatchDivisionLabel,
+        )
+    },
+    eventCardContent: @Composable (Event, Instant, Instant, () -> Unit) -> Unit = { event, start, end, onClick ->
+        ScheduleEventCard(event = event, start = start, end = end, onClick = onClick)
+    },
 ) {
-    if (matches.isEmpty()) {
+    if (items.isEmpty()) {
         Box(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center
         ) {
-            Text("No scheduled matches yet.", style = MaterialTheme.typography.bodyMedium)
+            Text("No scheduled entries yet.", style = MaterialTheme.typography.bodyMedium)
         }
         showFab(true)
         return
@@ -112,12 +159,13 @@ fun ScheduleView(
 
     val navPadding = LocalNavBarPadding.current
     val timeZone = remember { TimeZone.currentSystemDefault() }
-    val sortedMatches = remember(matches, timeZone) {
-        matches.sortedBy { it.match.start }
+    val sortedItems = remember(items, timeZone) {
+        items.sortedBy { it.start }
     }
     var showOnlyMyMatches by rememberSaveable { mutableStateOf(false) }
-    val hasTrackedMatches = remember(sortedMatches, trackedUserIds) {
-        trackedUserIds.isNotEmpty() && sortedMatches.any { match ->
+    val hasTrackedMatches = remember(sortedItems, trackedUserIds) {
+        trackedUserIds.isNotEmpty() && sortedItems.any { item ->
+            val match = (item as? ScheduleItem.MatchEntry)?.match ?: return@any false
             matchIncludesTrackedUsers(match, trackedUserIds)
         }
     }
@@ -126,37 +174,51 @@ fun ScheduleView(
             showOnlyMyMatches = false
         }
     }
-    val displayedMatches = remember(sortedMatches, showOnlyMyMatches, trackedUserIds) {
+    val displayedItems = remember(sortedItems, showOnlyMyMatches, trackedUserIds) {
         if (showOnlyMyMatches && trackedUserIds.isNotEmpty()) {
-            sortedMatches.filter { match -> matchIncludesTrackedUsers(match, trackedUserIds) }
+            sortedItems.filter { item ->
+                val match = (item as? ScheduleItem.MatchEntry)?.match ?: return@filter false
+                matchIncludesTrackedUsers(match, trackedUserIds)
+            }
         } else {
-            sortedMatches
+            sortedItems
         }
     }
+    val displayedMatches = remember(displayedItems) {
+        displayedItems.mapNotNull { item -> (item as? ScheduleItem.MatchEntry)?.match }
+    }
     val allVisibleLocked = remember(displayedMatches) {
-        displayedMatches.isNotEmpty() && displayedMatches.all { it.match.locked }
+        displayedMatches.isNotEmpty() && displayedMatches.all { match -> match.match.locked }
     }
     val visibleMatchIds = remember(displayedMatches) {
-        displayedMatches.map { it.match.id }.filter { id -> id.isNotBlank() }
+        displayedMatches.map { match -> match.match.id }.filter { id -> id.isNotBlank() }
     }
-    val matchesByDate = remember(displayedMatches) {
-        displayedMatches.groupBy { it.match.start.toLocalDateTime(timeZone).date }
+    val itemsByDate = remember(displayedItems) {
+        displayedItems.groupBy { item -> item.start.toLocalDateTime(timeZone).date }
     }
     val fieldsById = remember(fields) {
         fields.associateBy { it.field.id }
     }
-    val sortedDates = remember(matchesByDate) { matchesByDate.keys.sorted() }
+    val sortedDates = remember(itemsByDate) { itemsByDate.keys.sorted() }
     val today = remember { Clock.System.now().toLocalDateTime(timeZone).date }
     val defaultDate = remember(sortedDates, today) {
-        sortedDates.firstOrNull { it >= today } ?: sortedDates.first()
+        sortedDates.firstOrNull { it >= today } ?: sortedDates.firstOrNull() ?: today
     }
     var selectedDate by remember(defaultDate) { mutableStateOf(defaultDate) }
     var groupingMode by rememberSaveable { mutableStateOf(ScheduleGroupingMode.TIME) }
     var selectedFieldKey by rememberSaveable { mutableStateOf(ALL_FIELDS_KEY) }
     val isMobileLayout = getScreenWidth() < MOBILE_BREAKPOINT_DP
+    val hasAnyMatches = remember(displayedItems) {
+        displayedItems.any { item -> item is ScheduleItem.MatchEntry }
+    }
+    LaunchedEffect(hasAnyMatches) {
+        if (!hasAnyMatches && groupingMode == ScheduleGroupingMode.FIELD) {
+            groupingMode = ScheduleGroupingMode.TIME
+        }
+    }
     LaunchedEffect(sortedDates) {
-        if (selectedDate !in matchesByDate.keys) {
-            selectedDate = sortedDates.first()
+        if (selectedDate !in itemsByDate.keys) {
+            selectedDate = sortedDates.firstOrNull() ?: today
         }
     }
     LaunchedEffect(groupingMode) {
@@ -164,8 +226,12 @@ fun ScheduleView(
             selectedFieldKey = ALL_FIELDS_KEY
         }
     }
-    val startMonth = remember(sortedDates) { sortedDates.first().toYearMonth() }
-    val endMonth = remember(sortedDates) { sortedDates.last().toYearMonth() }
+    val startMonth = remember(sortedDates, selectedDate) {
+        sortedDates.firstOrNull()?.toYearMonth() ?: selectedDate.toYearMonth()
+    }
+    val endMonth = remember(sortedDates, selectedDate) {
+        sortedDates.lastOrNull()?.toYearMonth() ?: selectedDate.toYearMonth()
+    }
     val calendarState = rememberCalendarState(
         startMonth = startMonth,
         endMonth = endMonth,
@@ -176,7 +242,13 @@ fun ScheduleView(
     val isScrollingUp by lazyListState.isScrollingUp()
     showFab(isScrollingUp)
     val agendaViewportHeight = (getScreenHeight() * 0.75f).dp
-    val dayMatches = matchesByDate[selectedDate].orEmpty()
+    val dayItems = itemsByDate[selectedDate].orEmpty()
+    val dayMatches = remember(dayItems) {
+        dayItems.mapNotNull { item -> (item as? ScheduleItem.MatchEntry)?.match }
+    }
+    val dayEvents = remember(dayItems) {
+        dayItems.mapNotNull { item -> item as? ScheduleItem.EventEntry }
+    }
     val fieldGroups = remember(dayMatches, fieldsById) {
         buildFieldScheduleGroups(dayMatches, fieldsById)
     }
@@ -242,7 +314,7 @@ fun ScheduleView(
                         ScheduleDay(
                             day = day,
                             isSelected = day.date == selectedDate,
-                            hasMatches = matchesByDate.containsKey(day.date),
+                            hasMatches = itemsByDate.containsKey(day.date),
                             onClick = { selectedDate = day.date }
                         )
                     }
@@ -252,7 +324,7 @@ fun ScheduleView(
                 Spacer(modifier = Modifier.height(16.dp))
             }
             item(key = "schedule_day_summary") {
-                DaySummaryHeader(selectedDate, dayMatches.size)
+                DaySummaryHeader(selectedDate, dayItems)
             }
             item(key = "schedule_controls") {
                 Spacer(modifier = Modifier.height(8.dp))
@@ -272,7 +344,11 @@ fun ScheduleView(
                 ScheduleGroupingToggle(
                     selectedMode = groupingMode,
                     onModeSelected = { groupingMode = it },
-                    showFieldSelector = isMobileLayout && groupingMode == ScheduleGroupingMode.FIELD && fieldGroups.isNotEmpty(),
+                    canGroupByField = hasAnyMatches,
+                    showFieldSelector = isMobileLayout &&
+                        hasAnyMatches &&
+                        groupingMode == ScheduleGroupingMode.FIELD &&
+                        fieldGroups.isNotEmpty(),
                     fieldGroups = fieldGroups,
                     selectedFieldKey = selectedFieldKey,
                     onFieldSelected = { selectedFieldKey = it },
@@ -280,7 +356,7 @@ fun ScheduleView(
                 Spacer(modifier = Modifier.height(8.dp))
             }
 
-            if (dayMatches.isEmpty()) {
+            if (dayItems.isEmpty()) {
                 item(key = "schedule_empty_day") {
                     Box(
                         modifier = Modifier
@@ -289,7 +365,7 @@ fun ScheduleView(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            "No matches scheduled for this day.",
+                            "No schedule entries for this day.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -308,14 +384,34 @@ fun ScheduleView(
                         modifier = agendaContentModifier,
                         verticalArrangement = Arrangement.spacedBy(0.dp)
                     ) {
-                        if (groupingMode == ScheduleGroupingMode.TIME) {
-                            dayMatches.forEach { match ->
-                                ScheduleMatchCard(
-                                    match = match,
-                                    onClick = { onMatchClick(match) }
-                                )
+                        if (groupingMode == ScheduleGroupingMode.TIME || !hasAnyMatches) {
+                            dayItems.forEach { item ->
+                                when (item) {
+                                    is ScheduleItem.MatchEntry -> {
+                                        matchCardContent(item.match) { onMatchClick(item.match) }
+                                    }
+
+                                    is ScheduleItem.EventEntry -> {
+                                        eventCardContent(item.event, item.start, item.end) {
+                                            onEventClick(item.event)
+                                        }
+                                    }
+                                }
                             }
                         } else {
+                            if (selectedFieldKey == ALL_FIELDS_KEY && dayEvents.isNotEmpty()) {
+                                Text(
+                                    text = "Events (${dayEvents.size})",
+                                    modifier = Modifier.padding(horizontal = 16.dp),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                dayEvents.forEach { eventEntry ->
+                                    eventCardContent(eventEntry.event, eventEntry.start, eventEntry.end) {
+                                        onEventClick(eventEntry.event)
+                                    }
+                                }
+                            }
                             visibleFieldGroups.forEach { group ->
                                 Text(
                                     text = "${group.label} (${group.matches.size})",
@@ -324,10 +420,7 @@ fun ScheduleView(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 group.matches.forEach { match ->
-                                    ScheduleMatchCard(
-                                        match = match,
-                                        onClick = { onMatchClick(match) }
-                                    )
+                                    matchCardContent(match) { onMatchClick(match) }
                                 }
                             }
                         }
@@ -428,11 +521,18 @@ private fun ScheduleDay(
 }
 
 @Composable
-private fun DaySummaryHeader(date: LocalDate, matchCount: Int) {
+private fun DaySummaryHeader(date: LocalDate, dayItems: List<ScheduleItem>) {
     val formattedDate = remember(date) { formatDate(date) }
-    val matchLabel = if (matchCount == 1) "match" else "matches"
+    val matchCount = remember(dayItems) { dayItems.count { item -> item is ScheduleItem.MatchEntry } }
+    val eventCount = remember(dayItems) { dayItems.count { item -> item is ScheduleItem.EventEntry } }
+    val summary = when {
+        matchCount > 0 && eventCount > 0 -> "${dayItems.size} entries"
+        matchCount > 0 -> "$matchCount ${if (matchCount == 1) "match" else "matches"}"
+        eventCount > 0 -> "$eventCount ${if (eventCount == 1) "event" else "events"}"
+        else -> "0 entries"
+    }
     Text(
-        text = "$formattedDate - $matchCount $matchLabel",
+        text = "$formattedDate - $summary",
         modifier = Modifier.padding(horizontal = 16.dp),
         style = MaterialTheme.typography.titleSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -443,6 +543,7 @@ private fun DaySummaryHeader(date: LocalDate, matchCount: Int) {
 private fun ScheduleGroupingToggle(
     selectedMode: ScheduleGroupingMode,
     onModeSelected: (ScheduleGroupingMode) -> Unit,
+    canGroupByField: Boolean,
     showFieldSelector: Boolean,
     fieldGroups: List<FieldScheduleGroup>,
     selectedFieldKey: String,
@@ -463,17 +564,19 @@ private fun ScheduleGroupingToggle(
                 onClick = { onModeSelected(ScheduleGroupingMode.TIME) },
                 label = { Text("By Time") }
             )
-            FilterChip(
-                selected = selectedMode == ScheduleGroupingMode.FIELD,
-                onClick = { onModeSelected(ScheduleGroupingMode.FIELD) },
-                label = { Text("By Field") }
-            )
-            if (showFieldSelector) {
-                FieldSelectorDropdownChip(
-                    fieldGroups = fieldGroups,
-                    selectedFieldKey = selectedFieldKey,
-                    onFieldSelected = onFieldSelected,
+            if (canGroupByField) {
+                FilterChip(
+                    selected = selectedMode == ScheduleGroupingMode.FIELD,
+                    onClick = { onModeSelected(ScheduleGroupingMode.FIELD) },
+                    label = { Text("By Field") }
                 )
+                if (showFieldSelector) {
+                    FieldSelectorDropdownChip(
+                        fieldGroups = fieldGroups,
+                        selectedFieldKey = selectedFieldKey,
+                        onFieldSelected = onFieldSelected,
+                    )
+                }
             }
         }
     }
@@ -597,10 +700,14 @@ private fun resolveFieldLabel(
     return "Field TBD"
 }
 
+private fun normalizeScheduleEnd(start: Instant, end: Instant?): Instant =
+    end?.takeIf { it > start } ?: start.plus(1.hours)
+
 @Composable
 private fun ScheduleMatchCard(
     match: MatchWithRelations,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    showDivisionLabel: Boolean = true,
 ) {
     val hasAssignedReferee =
         !match.match.refereeId.isNullOrBlank() ||
@@ -621,8 +728,112 @@ private fun ScheduleMatchCard(
             onClick = onClick,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(BRACKET_CARD_HEIGHT_DP.dp)
+                .height(BRACKET_CARD_HEIGHT_DP.dp),
+            showDivisionLabel = showDivisionLabel,
         )
+    }
+}
+
+@Composable
+private fun ScheduleEventCard(
+    event: Event,
+    start: Instant,
+    end: Instant,
+    onClick: () -> Unit,
+) {
+    val timeZone = remember { TimeZone.currentSystemDefault() }
+    val dateTimeLabel = remember(start, end, timeZone) {
+        formatScheduleDateTimeWindow(start = start, end = end, timeZone = timeZone)
+    }
+    val eventImageUrl = remember(event.imageId) {
+        event.imageId
+            .trim()
+            .takeIf { imageId -> imageId.isNotEmpty() }
+            ?.let { imageId -> getImageUrl(fileId = imageId, width = 240, height = 180) }
+    }
+    val location = remember(event.location) { event.location.trim() }
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = BRACKET_CARD_VERTICAL_PADDING_DP.dp)
+    ) {
+        androidx.compose.material3.Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(BRACKET_CARD_HEIGHT_DP.dp),
+            shape = RoundedCornerShape(14.dp),
+            onClick = onClick,
+        ) {
+            Row(modifier = Modifier.fillMaxSize()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .width(EVENT_CARD_IMAGE_WIDTH_DP.dp)
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (eventImageUrl == null) {
+                        Text(
+                            text = "Event",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        AsyncImage(
+                            model = eventImageUrl,
+                            contentDescription = "${event.name} image",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+                Column(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        text = event.name.ifBlank { "Event" },
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (location.isNotEmpty()) {
+                        Text(
+                            text = location,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Text(
+                        text = dateTimeLabel,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun formatScheduleDateTimeWindow(
+    start: Instant,
+    end: Instant,
+    timeZone: TimeZone,
+): String {
+    val localStart = start.toLocalDateTime(timeZone)
+    val localEnd = end.toLocalDateTime(timeZone)
+    val startTimeLabel = localStart.time.format(timeFormat)
+    val endTimeLabel = localEnd.time.format(timeFormat)
+    return if (localStart.date == localEnd.date) {
+        "${formatDate(localStart.date)} • $startTimeLabel - $endTimeLabel"
+    } else {
+        "${formatDate(localStart.date)} $startTimeLabel - ${formatDate(localEnd.date)} $endTimeLabel"
     }
 }
 

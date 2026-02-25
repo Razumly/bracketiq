@@ -60,6 +60,10 @@ class LeagueSportRulesTest : MainDispatcherTest() {
                 setDurationMinutes = 25,
                 matchDurationMinutes = 45,
                 pointsToVictory = listOf(21, 21, 21, 21, 21),
+                winnerSetCount = 5,
+                loserSetCount = 3,
+                winnerBracketPointsToVictory = listOf(25, 21, 21),
+                loserBracketPointsToVictory = listOf(15, 15, 15),
             )
         }
         advance()
@@ -70,6 +74,10 @@ class LeagueSportRulesTest : MainDispatcherTest() {
         assertEquals(null, updated.setDurationMinutes)
         assertEquals(45, updated.matchDurationMinutes)
         assertEquals(emptyList(), updated.pointsToVictory)
+        assertEquals(1, updated.winnerSetCount)
+        assertEquals(1, updated.loserSetCount)
+        assertEquals(listOf(25), updated.winnerBracketPointsToVictory)
+        assertEquals(listOf(15), updated.loserBracketPointsToVictory)
     }
 
     @Test

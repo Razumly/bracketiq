@@ -154,6 +154,8 @@ fun CreateEventScreen(
     val onUpdateAssistantHostIds: (List<String>) -> Unit =
         remember(component) { component::updateAssistantHostIds }
     val onUpdateDoTeamsRef: (Boolean) -> Unit = remember(component) { component::updateDoTeamsRef }
+    val onUpdateTeamRefsMaySwap: (Boolean) -> Unit =
+        remember(component) { component::updateTeamRefsMaySwap }
     val onAddRefereeId: (String) -> Unit = remember(component) { component::addRefereeId }
     val onRemoveRefereeId: (String) -> Unit = remember(component) { component::removeRefereeId }
     val onSetPaymentPlansEnabled: (Boolean) -> Unit =
@@ -269,6 +271,7 @@ fun CreateEventScreen(
                         onUpdateHostId = onUpdateHostId,
                         onUpdateAssistantHostIds = onUpdateAssistantHostIds,
                         onUpdateDoTeamsRef = onUpdateDoTeamsRef,
+                        onUpdateTeamRefsMaySwap = onUpdateTeamRefsMaySwap,
                         onAddRefereeId = onAddRefereeId,
                         onRemoveRefereeId = onRemoveRefereeId,
                         onSetPaymentPlansEnabled = onSetPaymentPlansEnabled,

@@ -50,10 +50,14 @@ import com.kizitonwose.calendar.core.Week
 import com.kizitonwose.calendar.core.WeekDayPosition
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
+import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.timeFormat
+import com.razumly.mvp.eventDetail.composables.ScheduleItem
+import com.razumly.mvp.eventDetail.composables.ScheduleView
 import kotlinx.coroutines.launch
 import kotlinx.datetime.DatePeriod
 import kotlinx.datetime.DayOfWeek
@@ -90,76 +94,33 @@ private data class ScheduleEntry(
 @Composable
 fun ProfileMyScheduleScreen(component: ProfileComponent) {
     val state by component.myScheduleState.collectAsState()
-    val timeZone = remember { TimeZone.currentSystemDefault() }
-    val today = remember(timeZone) { Clock.System.now().toLocalDateTime(timeZone).date }
-    var mode by rememberSaveable { mutableStateOf(ScheduleMode.MONTH) }
-
-    val entries = remember(state.events, state.matches, state.teams, state.fields) {
-        buildScheduleEntries(
+    val scheduleItems = remember(state.events, state.matches, state.teams, state.fields) {
+        buildScheduleItems(
             events = state.events,
             matches = state.matches,
             teams = state.teams,
             fields = state.fields,
         )
     }
-    val entriesByDate = remember(entries, timeZone) {
-        entries.groupBy { entry -> entry.start.toLocalDateTime(timeZone).date }
-    }
-    val sortedDates = remember(entriesByDate) { entriesByDate.keys.sorted() }
-    var selectedDate by remember(sortedDates, today) {
-        mutableStateOf(sortedDates.firstOrNull { date -> date >= today } ?: sortedDates.firstOrNull() ?: today)
+    val scheduleFields = remember(state.fields, state.matches) {
+        buildScheduleFields(
+            fields = state.fields,
+            matches = state.matches,
+        )
     }
 
     LaunchedEffect(component) {
         component.refreshMySchedule()
     }
 
-    LaunchedEffect(sortedDates) {
-        if (selectedDate !in entriesByDate.keys) {
-            selectedDate = sortedDates.firstOrNull() ?: today
-        }
-    }
-
     ProfileSectionScaffold(
         title = "My Schedule",
-        description = "Month/week/day view for events and matches you or your teams are part of.",
+        description = "Shared schedule view for your events and matches.",
         onBack = component::onBackClicked,
         onRefresh = component::refreshMySchedule,
         isRefreshing = state.isLoading,
+        scrollContent = false,
     ) {
-        ScheduleModeSelector(
-            selected = mode,
-            onSelected = { mode = it },
-        )
-
-        when (mode) {
-            ScheduleMode.MONTH -> {
-                MonthDatePicker(
-                    selectedDate = selectedDate,
-                    highlightedDates = entriesByDate.keys,
-                    onSelectedDate = { selectedDate = it },
-                )
-            }
-
-            ScheduleMode.WEEK -> {
-                WeekDatePicker(
-                    selectedDate = selectedDate,
-                    highlightedDates = entriesByDate.keys,
-                    onSelectedDate = { selectedDate = it },
-                )
-            }
-
-            ScheduleMode.DAY -> {
-                DayDatePicker(
-                    selectedDate = selectedDate,
-                    highlightedDates = entriesByDate.keys,
-                    onSelectedDate = { selectedDate = it },
-                )
-            }
-
-            ScheduleMode.AGENDA -> Unit
-        }
-
         state.error?.let { error ->
             Text(
                 text = error,
@@ -168,60 +129,19 @@ fun ProfileMyScheduleScreen(component: ProfileComponent) {
             )
         }
 
-        if (mode == ScheduleMode.AGENDA) {
-            val upcomingEntries = remember(entries) {
-                val now = Clock.System.now()
-                entries.filter { entry -> entry.end >= now }.sortedBy { it.start }
-            }
-
-            Text(
-                text = "Upcoming",
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-
-            if (upcomingEntries.isEmpty()) {
-                Text(
-                    text = "No upcoming schedule entries.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+        ScheduleView(
+            items = scheduleItems,
+            fields = scheduleFields,
+            showFab = {},
+            onMatchClick = { match -> component.openScheduleEvent(match.match.eventId) },
+            onEventClick = { event -> component.openScheduleEvent(event.id) },
+            matchCardContent = { match, onClick ->
+                ProfileScheduleMatchCard(
+                    match = match,
+                    onClick = onClick,
                 )
-            } else {
-                upcomingEntries.forEach { entry ->
-                    ScheduleEntryCard(
-                        entry = entry,
-                        timeZone = timeZone,
-                        onOpenEvent = { component.openScheduleEvent(entry.eventId) },
-                    )
-                }
-            }
-        } else {
-            val dayEntries = remember(entriesByDate, selectedDate) {
-                entriesByDate[selectedDate].orEmpty().sortedBy { it.start }
-            }
-
-            Text(
-                text = selectedDate.format(dateFormat),
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-
-            if (dayEntries.isEmpty()) {
-                Text(
-                    text = "No schedule entries for this day.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
-                dayEntries.forEach { entry ->
-                    ScheduleEntryCard(
-                        entry = entry,
-                        timeZone = timeZone,
-                        onOpenEvent = { component.openScheduleEvent(entry.eventId) },
-                    )
-                }
-            }
-        }
+            },
+        )
     }
 }
 
@@ -405,53 +325,53 @@ private fun DayDatePicker(
 }
 
 @Composable
-private fun ScheduleEntryCard(
-    entry: ScheduleEntry,
-    timeZone: TimeZone,
-    onOpenEvent: () -> Unit,
+private fun ProfileScheduleMatchCard(
+    match: MatchWithRelations,
+    onClick: () -> Unit,
 ) {
+    val team1Name = match.team1?.name?.takeIf { it.isNotBlank() } ?: "TBD"
+    val team2Name = match.team2?.name?.takeIf { it.isNotBlank() } ?: "TBD"
+    val fieldLabel = match.field?.name?.takeIf { it.isNotBlank() } ?: "Field TBD"
+    val divisionLabel = match.match.division?.takeIf { it.isNotBlank() } ?: "Division TBD"
+    val timeZone = remember { TimeZone.currentSystemDefault() }
+    val start = match.match.start
+    val end = match.match.end.takeIf { matchEnd -> matchEnd != null && matchEnd > start } ?: start.plus(1.hours)
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 20.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (entry.kind == "MATCH") {
-                MaterialTheme.colorScheme.surfaceContainerLow
-            } else {
-                MaterialTheme.colorScheme.surfaceContainer
-            },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         ),
         shape = RoundedCornerShape(14.dp),
-        onClick = onOpenEvent,
+        onClick = onClick,
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+                .height(90.dp)
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
         ) {
             Text(
-                text = if (entry.kind == "MATCH") "Match" else "Event",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
-            Text(
-                text = entry.title,
-                style = MaterialTheme.typography.titleMedium,
-                maxLines = 2,
+                text = "$team1Name vs $team2Name",
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            entry.subtitle?.let { subtitle ->
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
             Text(
-                text = formatEntryWindow(entry.start, entry.end, timeZone),
+                text = "$fieldLabel • $divisionLabel",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = formatEntryWindow(start, end, timeZone),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
@@ -578,51 +498,50 @@ private fun WeekHeader(week: Week) {
     }
 }
 
-private fun buildScheduleEntries(
+private fun buildScheduleItems(
     events: List<Event>,
     matches: List<MatchMVP>,
     teams: List<Team>,
     fields: List<Field>,
-): List<ScheduleEntry> {
-    val eventsById = events.associateBy { it.id }
+): List<ScheduleItem> {
     val teamsById = teams.associateBy { it.id }
     val fieldsById = fields.associateBy { it.id }
     val eventIdsWithMatches = matches.map { it.eventId }.toSet()
 
-    val matchEntries = matches.map { match ->
-        val event = eventsById[match.eventId]
-        val eventName = event?.name?.ifBlank { "Event" } ?: "Event"
-        val team1 = match.team1Id?.let { teamsById[it]?.name }?.takeIf { !it.isNullOrBlank() } ?: "TBD"
-        val team2 = match.team2Id?.let { teamsById[it]?.name }?.takeIf { !it.isNullOrBlank() } ?: "TBD"
-        val fieldName = match.fieldId
-            ?.let { fieldId -> fieldsById[fieldId]?.name?.takeIf { !it.isNullOrBlank() } }
-            ?: "Field"
-        ScheduleEntry(
-            id = "match-${match.id}",
-            eventId = match.eventId,
-            title = "$team1 vs $team2",
-            subtitle = "$eventName • $fieldName",
-            start = match.start,
-            end = match.end ?: match.start.plus(1.hours),
-            kind = "MATCH",
+    val matchItems = matches.map { match ->
+        ScheduleItem.MatchEntry(
+            match = MatchWithRelations(
+                match = match,
+                field = match.fieldId?.let { fieldId -> fieldsById[fieldId] },
+                team1 = match.team1Id?.let { teamId -> teamsById[teamId] },
+                team2 = match.team2Id?.let { teamId -> teamsById[teamId] },
+                teamReferee = match.teamRefereeId?.let { teamId -> teamsById[teamId] },
+                winnerNextMatch = null,
+                loserNextMatch = null,
+                previousLeftMatch = null,
+                previousRightMatch = null,
+            ),
         )
     }
 
-    val eventEntries = events
+    val eventItems = events
         .filter { event -> event.id !in eventIdsWithMatches }
-        .map { event ->
-            ScheduleEntry(
-                id = "event-${event.id}",
-                eventId = event.id,
-                title = event.name.ifBlank { "Event" },
-                subtitle = event.location.takeIf { it.isNotBlank() },
-                start = event.start,
-                end = event.end.takeIf { it > event.start } ?: event.start.plus(1.hours),
-                kind = "EVENT",
-            )
-        }
+        .map { event -> ScheduleItem.EventEntry(event = event) }
 
-    return (eventEntries + matchEntries).sortedBy { it.start }
+    return (eventItems + matchItems).sortedBy { it.start }
+}
+
+private fun buildScheduleFields(
+    fields: List<Field>,
+    matches: List<MatchMVP>,
+): List<FieldWithMatches> {
+    val matchesByFieldId = matches.groupBy { match -> match.fieldId }
+    return fields.map { field ->
+        FieldWithMatches(
+            field = field,
+            matches = matchesByFieldId[field.id].orEmpty(),
+        )
+    }
 }
 
 private fun formatEntryWindow(start: Instant, end: Instant, timeZone: TimeZone): String {

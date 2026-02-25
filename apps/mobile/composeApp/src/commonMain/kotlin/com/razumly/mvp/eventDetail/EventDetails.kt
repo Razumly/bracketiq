@@ -210,6 +210,7 @@ fun EventDetails(
     onUpdateHostId: (String) -> Unit = {},
     onUpdateAssistantHostIds: (List<String>) -> Unit = {},
     onUpdateDoTeamsRef: (Boolean) -> Unit = {},
+    onUpdateTeamRefsMaySwap: (Boolean) -> Unit = {},
     onAddRefereeId: (String) -> Unit = {},
     onRemoveRefereeId: (String) -> Unit = {},
     onSetPaymentPlansEnabled: (Boolean) -> Unit = {},
@@ -2307,13 +2308,23 @@ fun EventDetails(
                     animationDelay = 300,
                     viewContent = {
                         DetailKeyValueList(
-                            rows = listOf(
-                                DetailRowSpec(
-                                    "Teams provide referees",
-                                    if (event.doTeamsRef == true) "Yes" else "No",
-                                ),
-                                DetailRowSpec("Selected referees", event.refereeIds.size.toString()),
-                            ),
+                            rows = buildList {
+                                add(
+                                    DetailRowSpec(
+                                        "Teams provide referees",
+                                        if (event.doTeamsRef == true) "Yes" else "No",
+                                    ),
+                                )
+                                if (event.doTeamsRef == true) {
+                                    add(
+                                        DetailRowSpec(
+                                            "Team refs may swap",
+                                            if (event.teamRefsMaySwap == true) "Yes" else "No",
+                                        ),
+                                    )
+                                }
+                                add(DetailRowSpec("Selected referees", event.refereeIds.size.toString()))
+                            },
                         )
                     },
                     editContent = {
@@ -2322,6 +2333,13 @@ fun EventDetails(
                             label = "Teams provide referees",
                             onCheckedChange = onUpdateDoTeamsRef,
                         )
+                        if (editEvent.doTeamsRef == true) {
+                            LabeledCheckboxRow(
+                                checked = editEvent.teamRefsMaySwap == true,
+                                label = "Team refs may swap",
+                                onCheckedChange = onUpdateTeamRefsMaySwap,
+                            )
+                        }
                         Text(
                             text = "Selected referees",
                             style = MaterialTheme.typography.titleSmall,

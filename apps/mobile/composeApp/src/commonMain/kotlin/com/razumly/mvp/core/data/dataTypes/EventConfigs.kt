@@ -41,18 +41,34 @@ fun Event.toLeagueConfig(): LeagueConfig = LeagueConfig(
     doTeamsRef = doTeamsRef ?: false,
 )
 
-fun Event.withLeagueConfig(config: LeagueConfig): Event = copy(
-    gamesPerOpponent = config.gamesPerOpponent,
-    includePlayoffs = config.includePlayoffs,
-    playoffTeamCount = if (config.includePlayoffs) config.playoffTeamCount else null,
-    usesSets = config.usesSets,
-    matchDurationMinutes = if (config.usesSets) null else config.matchDurationMinutes,
-    setDurationMinutes = if (config.usesSets) config.setDurationMinutes else null,
-    setsPerMatch = if (config.usesSets) config.setsPerMatch else null,
-    pointsToVictory = if (config.usesSets) config.pointsToVictory else emptyList(),
-    restTimeMinutes = config.restTimeMinutes,
-    doTeamsRef = config.doTeamsRef,
-)
+fun Event.withLeagueConfig(config: LeagueConfig): Event {
+    val timedMode = !config.usesSets
+    return copy(
+        gamesPerOpponent = config.gamesPerOpponent,
+        includePlayoffs = config.includePlayoffs,
+        playoffTeamCount = if (config.includePlayoffs) config.playoffTeamCount else null,
+        usesSets = config.usesSets,
+        matchDurationMinutes = if (config.usesSets) null else config.matchDurationMinutes,
+        setDurationMinutes = if (config.usesSets) config.setDurationMinutes else null,
+        setsPerMatch = if (config.usesSets) config.setsPerMatch else null,
+        pointsToVictory = if (config.usesSets) config.pointsToVictory else emptyList(),
+        winnerSetCount = if (timedMode) 1 else winnerSetCount,
+        loserSetCount = if (timedMode) 1 else loserSetCount,
+        winnerBracketPointsToVictory = if (timedMode) {
+            winnerBracketPointsToVictory.take(1).ifEmpty { listOf(21) }
+        } else {
+            winnerBracketPointsToVictory
+        },
+        loserBracketPointsToVictory = if (timedMode) {
+            loserBracketPointsToVictory.take(1).ifEmpty { listOf(21) }
+        } else {
+            loserBracketPointsToVictory
+        },
+        restTimeMinutes = config.restTimeMinutes,
+        doTeamsRef = config.doTeamsRef,
+        teamRefsMaySwap = if (config.doTeamsRef) teamRefsMaySwap else false,
+    )
+}
 
 fun Event.toTournamentConfig(): TournamentConfig = TournamentConfig(
     doubleElimination = doubleElimination,

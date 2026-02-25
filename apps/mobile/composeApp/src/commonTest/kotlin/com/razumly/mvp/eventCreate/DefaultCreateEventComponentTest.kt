@@ -39,6 +39,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         advance()
 
         harness.component.updateDoTeamsRef(true)
+        harness.component.updateTeamRefsMaySwap(true)
         harness.component.addRefereeId(" ref-1 ")
         harness.component.addRefereeId("ref-1")
         harness.component.addRefereeId("ref-2")
@@ -49,7 +50,25 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
 
         val updatedEvent = harness.component.newEventState.value
         assertEquals(true, updatedEvent.doTeamsRef)
+        assertEquals(true, updatedEvent.teamRefsMaySwap)
         assertEquals(listOf("ref-2"), updatedEvent.refereeIds)
+    }
+
+    @Test
+    fun disabling_team_refs_clears_team_ref_swap_permission() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        advance()
+
+        harness.component.updateDoTeamsRef(true)
+        harness.component.updateTeamRefsMaySwap(true)
+        advance()
+
+        harness.component.updateDoTeamsRef(false)
+        advance()
+
+        val updatedEvent = harness.component.newEventState.value
+        assertEquals(false, updatedEvent.doTeamsRef)
+        assertEquals(false, updatedEvent.teamRefsMaySwap)
     }
 
     @Test

@@ -6,12 +6,6 @@ import androidx.room.RoomDatabase
 import androidx.sqlite.SQLiteConnection
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import com.razumly.mvp.core.data.DatabaseService
-import com.razumly.mvp.core.data.MIGRATION_80_81
-import com.razumly.mvp.core.data.MIGRATION_81_82
-import com.razumly.mvp.core.data.MIGRATION_82_83
-import com.razumly.mvp.core.data.MIGRATION_83_84
-import com.razumly.mvp.core.data.MIGRATION_84_85
-import com.razumly.mvp.core.data.MIGRATION_87_88
 import com.razumly.mvp.core.data.MVPDatabaseservice
 import io.github.aakira.napier.Napier
 import org.koin.dsl.bind
@@ -29,14 +23,6 @@ actual val roomDBModule = module {
                 context.applicationContext,
                 dbFile.absolutePath
             ).setDriver(BundledSQLiteDriver())
-                .addMigrations(
-                    MIGRATION_80_81,
-                    MIGRATION_81_82,
-                    MIGRATION_82_83,
-                    MIGRATION_83_84,
-                    MIGRATION_84_85,
-                    MIGRATION_87_88
-                )
                 .addCallback(object : RoomDatabase.Callback() {
                     override fun onCreate(connection: SQLiteConnection) {
                         Napier.i(tag = ROOM_DB_LOG_TAG) { "Room database created at ${dbFile.absolutePath}" }
@@ -53,6 +39,7 @@ actual val roomDBModule = module {
                     }
                 })
                 .fallbackToDestructiveMigration(true)
+                .fallbackToDestructiveMigrationOnDowngrade(true)
                 .build()
         }.onFailure { throwable ->
             Napier.e(tag = ROOM_DB_LOG_TAG, throwable = throwable) {

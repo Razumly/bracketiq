@@ -35,6 +35,8 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Share
@@ -83,6 +85,8 @@ import androidx.compose.ui.unit.dp
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.ktx.DynamicScheme
+import com.razumly.mvp.core.data.dataTypes.DivisionDetail
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfig
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
@@ -91,6 +95,7 @@ import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.FeeBreakdown
 import com.razumly.mvp.core.data.util.divisionsEquivalent
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
+import com.razumly.mvp.core.data.util.resolveParticipantCapacity
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.composables.PlatformTextField
@@ -108,6 +113,7 @@ import com.razumly.mvp.eventDetail.composables.MatchEditControls
 import com.razumly.mvp.eventDetail.composables.MatchEditDialog
 import com.razumly.mvp.eventDetail.composables.ParticipantsSection
 import com.razumly.mvp.eventDetail.composables.ParticipantsView
+import com.razumly.mvp.eventDetail.composables.ScheduleItem
 import com.razumly.mvp.eventDetail.composables.ScheduleView
 import com.razumly.mvp.eventDetail.composables.SendNotificationDialog
 import com.razumly.mvp.eventDetail.composables.TeamSelectionDialog
@@ -163,12 +169,25 @@ private fun EventOverviewSections(
     onOpenDetails: () -> Unit,
 ) {
     val event = eventWithRelations.event
-    val capacity = event.maxParticipants.coerceAtLeast(0)
+    val capacity = event.resolveParticipantCapacity()
     val filled = if (event.teamSignup) event.teamIds.size else event.playerIds.size
-    val spotsLeft = (capacity - filled).coerceAtLeast(0)
-    val progress = if (capacity > 0) filled.toFloat() / capacity.toFloat() else 0f
+    val spotsLeft = if (capacity > 0) (capacity - filled).coerceAtLeast(0) else 0
+    val progress = if (capacity > 0) (filled.toFloat() / capacity.toFloat()).coerceIn(0f, 1f) else 0f
     val freeAgentIds = remember(event.freeAgentIds) { event.freeAgentIds.distinct() }
     val waitlistIds = remember(event.waitListIds) { event.waitListIds.distinct() }
+    val divisionCapacitySummaries = remember(
+        event.id,
+        event.teamSignup,
+        event.singleDivision,
+        event.teamIds,
+        event.divisionDetails,
+    ) {
+        buildDivisionCapacitySummaries(
+            event = event,
+            divisionDetails = event.divisionDetails,
+        )
+    }
+    var showDivisionCapacities by rememberSaveable(event.id) { mutableStateOf(false) }
     val playersById = remember(eventWithRelations.players) {
         eventWithRelations.players.associateBy { it.id }
     }
@@ -225,6 +244,56 @@ private fun EventOverviewSections(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                if (divisionCapacitySummaries.isNotEmpty()) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showDivisionCapacities = !showDivisionCapacities },
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.45f)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "Division capacities",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Icon(
+                                imageVector = if (showDivisionCapacities) {
+                                    Icons.Default.KeyboardArrowUp
+                                } else {
+                                    Icons.Default.KeyboardArrowDown
+                                },
+                                contentDescription = if (showDivisionCapacities) {
+                                    "Hide division capacities"
+                                } else {
+                                    "Show division capacities"
+                                },
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    AnimatedVisibility(
+                        visible = showDivisionCapacities,
+                        enter = expandVertically() + fadeIn(),
+                        exit = shrinkVertically() + fadeOut(),
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            divisionCapacitySummaries.forEach { summary ->
+                                DivisionCapacityRow(summary)
+                            }
+                        }
+                    }
+                }
                 if (event.teamSignup && teamsNeedingPlayers.isNotEmpty()) {
                     val minMissing = teamsNeedingPlayers.minOrNull() ?: 0
                     val maxMissing = teamsNeedingPlayers.maxOrNull() ?: 0
@@ -324,6 +393,60 @@ private fun CapacityStat(
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurface
         )
+    }
+}
+
+@Composable
+private fun DivisionCapacityRow(
+    summary: DivisionCapacitySummary,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.35f),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = summary.label,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = if (summary.capacity > 0) {
+                        "${summary.filled}/${summary.capacity}"
+                    } else {
+                        summary.filled.toString()
+                    },
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+            LinearProgressIndicator(
+                progress = { summary.progress },
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                text = if (summary.capacity > 0) {
+                    "${(summary.progress * 100).toInt()}% full • ${summary.left} left"
+                } else {
+                    "No capacity configured"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
@@ -863,6 +986,7 @@ fun EventDetailScreen(
     var showNotifyDialog by remember { mutableStateOf(false) }
     var showJoinOptionsSheet by remember { mutableStateOf(false) }
     var showStandingsConfirmDialog by remember { mutableStateOf(false) }
+    var showBuildBracketConfirmDialog by remember { mutableStateOf(false) }
     var showStickyDockByScroll by remember { mutableStateOf(true) }
     var mapRevealCenter by remember { mutableStateOf(Offset.Zero) }
 
@@ -1161,6 +1285,21 @@ fun EventDetailScreen(
                             onEditEvent = component::editEventField,
                             onEditTournament = component::editTournamentField,
                             onEventTypeSelected = component::onTypeSelected,
+                            onUpdateDoTeamsRef = { doTeamsRef ->
+                                component.editEventField {
+                                    copy(
+                                        doTeamsRef = doTeamsRef,
+                                        teamRefsMaySwap = if (doTeamsRef) teamRefsMaySwap else false,
+                                    )
+                                }
+                            },
+                            onUpdateTeamRefsMaySwap = { teamRefsMaySwap ->
+                                component.editEventField {
+                                    copy(
+                                        teamRefsMaySwap = if (doTeamsRef == true) teamRefsMaySwap else false,
+                                    )
+                                }
+                            },
                             onSelectFieldCount = component::selectFieldCount,
                             onUploadSelected = component::onUploadSelected,
                             onDeleteImage = component::deleteImage,
@@ -1186,6 +1325,15 @@ fun EventDetailScreen(
                                 label = "buttonTransition"
                             ) { editMode ->
                                 if (editMode) {
+                                    val canRescheduleEditedEvent =
+                                        editedEvent.eventType == EventType.LEAGUE ||
+                                            editedEvent.eventType == EventType.TOURNAMENT
+                                    val canBuildBracketsForEditedEvent =
+                                        editedEvent.eventType == EventType.TOURNAMENT ||
+                                            (
+                                                editedEvent.eventType == EventType.LEAGUE &&
+                                                    editedEvent.includePlayoffs
+                                                )
                                     Column(
                                         verticalArrangement = Arrangement.spacedBy(8.dp),
                                         horizontalAlignment = Alignment.CenterHorizontally
@@ -1204,6 +1352,34 @@ fun EventDetailScreen(
                                                 }, colors = buttonColors
                                             ) {
                                                 Text("Cancel")
+                                            }
+                                        }
+                                        if (canBuildBracketsForEditedEvent) {
+                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                Button(
+                                                    onClick = { component.rescheduleEvent() },
+                                                    enabled = isValid,
+                                                    colors = buttonColors,
+                                                    modifier = Modifier.weight(1f),
+                                                ) {
+                                                    Text("Reschedule Event")
+                                                }
+                                                Button(
+                                                    onClick = { showBuildBracketConfirmDialog = true },
+                                                    enabled = isValid,
+                                                    colors = buttonColors,
+                                                    modifier = Modifier.weight(1f),
+                                                ) {
+                                                    Text("Build Bracket(s)")
+                                                }
+                                            }
+                                        } else if (canRescheduleEditedEvent) {
+                                            Button(
+                                                onClick = { component.rescheduleEvent() },
+                                                enabled = isValid,
+                                                colors = buttonColors,
+                                            ) {
+                                                Text("Reschedule Event")
                                             }
                                         }
                                         Button(
@@ -1485,6 +1661,8 @@ fun EventDetailScreen(
                             }
                         }
                         Box(Modifier.fillMaxSize()) {
+                            val hideDivisionLabelInMatchCards =
+                                !selectedEvent.event.singleDivision && !selectedDivision.isNullOrBlank()
                             when (selectedTab) {
                                 DetailTab.BRACKET -> {
                                     TournamentBracketView(
@@ -1498,7 +1676,8 @@ fun EventDetailScreen(
                                         editableMatches = editableMatches,
                                         onEditMatch = { match ->
                                             component.showMatchEditDialog(match)
-                                        }
+                                        },
+                                        hideMatchDivisionLabel = hideDivisionLabelInMatchCards,
                                     )
                                 }
 
@@ -1518,11 +1697,12 @@ fun EventDetailScreen(
                                         }
                                     }
                                     ScheduleView(
-                                        matches = scheduleMatches,
+                                        items = scheduleMatches.map { match -> ScheduleItem.MatchEntry(match) },
                                         fields = eventFields,
                                         showFab = { showFab = it },
                                         trackedUserIds = scheduleTrackedUserIds,
                                         canManageMatches = isEditingMatches,
+                                        hideMatchDivisionLabel = hideDivisionLabelInMatchCards,
                                         onToggleLockAllMatches = { locked, matchIds ->
                                             component.setLockForEditableMatches(matchIds, locked)
                                         },
@@ -1582,13 +1762,6 @@ fun EventDetailScreen(
                                         showBracketToggle = false,
                                         isLosersBracket = losersBracket,
                                         onBracketToggle = component::toggleLosersBracket,
-                                        showConfirmResultsAction = canConfirmLeagueResultsFromDock,
-                                        confirmResultsEnabled = canConfirmLeagueResultsFromDock &&
-                                            !leagueDivisionStandingsLoading &&
-                                            !leagueStandingsConfirming &&
-                                            leagueStandings.isNotEmpty(),
-                                        confirmResultsInProgress = leagueStandingsConfirming,
-                                        onConfirmResultsClick = { showStandingsConfirmDialog = true },
                                         onShowDetailsClick = component::toggleDetails,
                                     )
 
@@ -1599,6 +1772,13 @@ fun EventDetailScreen(
                                         showBracketToggle = false,
                                         isLosersBracket = losersBracket,
                                         onBracketToggle = component::toggleLosersBracket,
+                                        showConfirmResultsAction = canConfirmLeagueResultsFromDock,
+                                        confirmResultsEnabled = canConfirmLeagueResultsFromDock &&
+                                            !leagueDivisionStandingsLoading &&
+                                            !leagueStandingsConfirming &&
+                                            leagueStandings.isNotEmpty(),
+                                        confirmResultsInProgress = leagueStandingsConfirming,
+                                        onConfirmResultsClick = { showStandingsConfirmDialog = true },
                                         onShowDetailsClick = component::toggleDetails,
                                     )
 
@@ -1792,6 +1972,35 @@ fun EventDetailScreen(
                             ) {
                                 Text("Cancel")
                             }
+                        }
+                    },
+                )
+            }
+            if (showBuildBracketConfirmDialog) {
+                AlertDialog(
+                    onDismissRequest = { showBuildBracketConfirmDialog = false },
+                    title = { Text("Build Bracket(s)") },
+                    text = {
+                        Text(
+                            "This rebuilds playoff/tournament bracket(s) from max participant count. " +
+                                "It will reset the bracket and any playoff/tournament match results."
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                showBuildBracketConfirmDialog = false
+                                component.buildBrackets()
+                            }
+                        ) {
+                            Text("Build")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(
+                            onClick = { showBuildBracketConfirmDialog = false }
+                        ) {
+                            Text("Cancel")
                         }
                     },
                 )

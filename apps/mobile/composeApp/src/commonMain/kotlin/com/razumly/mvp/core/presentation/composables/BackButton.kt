@@ -31,6 +31,12 @@ fun BackButton(
     tintColor: Color,
     arrow: Boolean
 ) {
+    val resolvedTintColor = if (tintColor == Color.Unspecified) {
+        MaterialTheme.colorScheme.onSurface
+    } else {
+        tintColor
+    }
+
     Row(
         modifier = modifier
             .clickable(
@@ -45,29 +51,30 @@ fun BackButton(
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                 contentDescription = "Back",
-                tint = tintColor,
+                tint = resolvedTintColor,
                 modifier = Modifier.size(20.dp)
             )
         } else {
             Icon(
                 imageVector = Icons.Default.Close,
                 contentDescription = "Close",
-                tint = tintColor,
+                tint = resolvedTintColor,
                 modifier = Modifier.size(20.dp)
             )
         }
 
-        Spacer(modifier = Modifier.width(4.dp))
-
-        Text(
-            text = text,
-            color = tintColor,
-            style = MaterialTheme.typography.bodyLarge.copy(
-                fontWeight = FontWeight.Normal
-            ),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
+        if (text.isNotBlank()) {
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+                text = text,
+                color = resolvedTintColor,
+                style = MaterialTheme.typography.bodyLarge.copy(
+                    fontWeight = FontWeight.Normal
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
     }
 }
 
@@ -75,9 +82,8 @@ fun BackButton(
 expect fun PlatformBackButton(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
-    text: String = "Back",
-    tintColor: Color = Color(0xFF007AFF),
+    text: String = "",
+    tintColor: Color = Color.Unspecified,
     arrow: Boolean,
 )
-
 

@@ -18,6 +18,8 @@ class EventDtosTest {
             eventType = EventType.LEAGUE,
             hostId = "host-1",
             noFixedEndDateTime = true,
+            doTeamsRef = true,
+            teamRefsMaySwap = true,
             start = Instant.fromEpochMilliseconds(1_700_000_000_000),
             end = Instant.fromEpochMilliseconds(1_700_003_600_000),
         )
@@ -28,6 +30,7 @@ class EventDtosTest {
 
         assertEquals(listOf("template-a", "template-b"), dto.requiredTemplateIds)
         assertEquals(true, dto.noFixedEndDateTime)
+        assertEquals(true, dto.teamRefsMaySwap)
     }
 
     @Test
@@ -393,6 +396,24 @@ class EventDtosTest {
 
         assertEquals(emptyList(), missingAssistantHosts?.assistantHostIds)
         assertEquals(listOf("assistant-1", "assistant-2"), withAssistantHosts?.assistantHostIds)
+    }
+
+    @Test
+    fun event_api_dto_maps_team_ref_swap_setting() {
+        val dto = EventApiDto(
+            id = "event-20",
+            name = "API Event",
+            hostId = "host-20",
+            doTeamsRef = true,
+            teamRefsMaySwap = true,
+            start = "2026-02-10T00:00:00Z",
+            end = "2026-02-10T01:00:00Z",
+        )
+
+        val event = dto.toEventOrNull()
+
+        assertEquals(true, event?.doTeamsRef)
+        assertEquals(true, event?.teamRefsMaySwap)
     }
 
     @Test

@@ -32,6 +32,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
@@ -56,7 +58,10 @@ data class ColorPallete(
 )
 @Composable
 fun MatchCard(
-    match: MatchWithRelations?, onClick: () -> Unit, modifier: Modifier = Modifier
+    match: MatchWithRelations?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    showDivisionLabel: Boolean = true,
 ) {
     val component = LocalTournamentComponent.current
     val teams by component.divisionTeams.collectAsState()
@@ -165,8 +170,16 @@ fun MatchCard(
                         contentColor = localColors.current.onPrimary
                     )
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        MatchInfoSection(match, fields, selectedEvent.divisionDetails)
+                    Row(
+                        modifier = Modifier.padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        MatchInfoSection(
+                            match = match,
+                            fields = fields,
+                            divisionDetails = selectedEvent.divisionDetails,
+                            showDivisionLabel = showDivisionLabel,
+                        )
                         VerticalDivider(color = localColors.current.onPrimary)
                         TeamsSection(
                             team1 = teams[match.match.team1Id],
@@ -174,6 +187,7 @@ fun MatchCard(
                             match = match,
                             matches = matches,
                             playoffPlaceholders = playoffPlaceholderBySlot,
+                            displaySetCount = resolveDisplaySetCount(selectedEvent, match.match),
                         )
                     }
                 }
@@ -217,6 +231,7 @@ private fun MatchInfoSection(
     match: MatchWithRelations,
     fields: List<FieldWithMatches>,
     divisionDetails: List<DivisionDetail>,
+    showDivisionLabel: Boolean,
 ) {
     val fieldLabel = resolveFieldLabel(match, fields)
     val divisionLabel = match.match.division
@@ -235,13 +250,15 @@ private fun MatchInfoSection(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
-        HorizontalDivider(color = localColors.current.onPrimary)
-        Text(
-            "D: $divisionLabel",
-            color = localColors.current.onPrimary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
+        if (showDivisionLabel) {
+            HorizontalDivider(color = localColors.current.onPrimary)
+            Text(
+                "D: $divisionLabel",
+                color = localColors.current.onPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
     }
 }
 
@@ -277,6 +294,7 @@ private fun TeamsSection(
     match: MatchWithRelations,
     matches: Map<String, MatchWithRelations>,
     playoffPlaceholders: Map<BracketSlotKey, String>,
+    displaySetCount: Int,
 ) {
     Column(
         modifier = Modifier.padding(8.dp).fillMaxWidth(),
@@ -286,7 +304,7 @@ private fun TeamsSection(
         val rightMatch = matches[match.previousRightMatch?.id]
         TeamRow(
             team = team1,
-            points = match.match.team1Points,
+            points = match.match.team1Points.take(displaySetCount),
             previousMatch = leftMatch,
             isLosersBracket = match.match.losersBracket,
             playoffPlaceholder = playoffPlaceholders[BracketSlotKey(match.match.id, BracketTeamSlot.TEAM1)],
@@ -294,7 +312,7 @@ private fun TeamsSection(
         HorizontalDivider(thickness = 1.dp, color = localColors.current.onPrimary)
         TeamRow(
             team = team2,
-            points = match.match.team2Points,
+            points = match.match.team2Points.take(displaySetCount),
             previousMatch = rightMatch,
             isLosersBracket = match.match.losersBracket,
             playoffPlaceholder = playoffPlaceholders[BracketSlotKey(match.match.id, BracketTeamSlot.TEAM2)],
@@ -338,6 +356,34 @@ private fun TeamRow(
             )
         }
     }
+}
+
+private fun resolveDisplaySetCount(event: Event, match: MatchMVP): Int {
+    val fallbackSetCount = listOf(
+        match.setResults.size,
+        match.team1Points.size,
+        match.team2Points.size,
+        1,
+    ).maxOrNull() ?: 1
+
+    if (!event.usesSets) {
+        return 1
+    }
+
+    return when {
+        match.losersBracket -> event.loserSetCount.coerceAtLeast(1)
+        event.eventType == EventType.LEAGUE && !isBracketMatch(match) ->
+            (event.setsPerMatch ?: fallbackSetCount).coerceAtLeast(1)
+        else -> event.winnerSetCount.coerceAtLeast(1)
+    }
+}
+
+private fun isBracketMatch(match: MatchMVP): Boolean {
+    return match.losersBracket ||
+        !match.previousLeftId.isNullOrBlank() ||
+        !match.previousRightId.isNullOrBlank() ||
+        !match.winnerNextMatchId.isNullOrBlank() ||
+        !match.loserNextMatchId.isNullOrBlank()
 }
 
 private fun resolveTeamLabel(team: TeamWithPlayers): String {
@@ -415,21 +461,25 @@ internal fun buildLeaguePlayoffPlaceholderAssignments(
 
     val result = mutableMapOf<BracketSlotKey, String>()
     for ((playoffDivisionId, divisionSlots) in slotsByPlayoffDivision) {
-        val labels = buildMappedPlacementLabelsForPlayoffDivision(
+        val labelsByPlacement = buildMappedPlacementLabelsForPlayoffDivision(
             playoffDivisionId = playoffDivisionId,
             mappingDivisionDetails = orderedDetails,
             allDivisionDetails = divisionDetails,
             eventPlayoffTeamCount = eventPlayoffTeamCount,
         )
-        if (labels.isEmpty()) {
+        if (labelsByPlacement.isEmpty()) {
             continue
         }
+        val assignedPerPlacement = mutableMapOf<Int, Int>()
         divisionSlots.forEach { slot ->
             val slotSeed = slot.seed ?: return@forEach
             if (slotSeed < 1) {
                 return@forEach
             }
-            val label = labels.getOrNull(slotSeed - 1) ?: return@forEach
+            val labelsForPlacement = labelsByPlacement[slotSeed] ?: return@forEach
+            val placementOffset = assignedPerPlacement[slotSeed] ?: 0
+            val label = labelsForPlacement.getOrNull(placementOffset) ?: return@forEach
+            assignedPerPlacement[slotSeed] = placementOffset + 1
             result[BracketSlotKey(slot.matchId, slot.slot)] = label
         }
     }
@@ -442,8 +492,8 @@ private fun buildMappedPlacementLabelsForPlayoffDivision(
     mappingDivisionDetails: List<DivisionDetail>,
     allDivisionDetails: List<DivisionDetail>,
     eventPlayoffTeamCount: Int?,
-): List<String> {
-    val labels = mutableListOf<String>()
+): Map<Int, List<String>> {
+    val labelsByPlacement = mutableMapOf<Int, List<String>>()
     val maxPlacementIndex = mappingDivisionDetails.maxOfOrNull { detail ->
         maxOf(
             detail.playoffPlacementDivisionIds.size,
@@ -452,6 +502,7 @@ private fun buildMappedPlacementLabelsForPlayoffDivision(
     } ?: 0
 
     for (placementIndex in 0 until maxPlacementIndex) {
+        val placementLabels = mutableListOf<String>()
         for (detail in mappingDivisionDetails) {
             val placementLimit = detail.playoffTeamCount
                 ?: eventPlayoffTeamCount
@@ -466,11 +517,14 @@ private fun buildMappedPlacementLabelsForPlayoffDivision(
             if (mappedPlayoffDivisionId.isEmpty() || !divisionsEquivalent(mappedPlayoffDivisionId, playoffDivisionId)) {
                 continue
             }
-            labels += "${formatOrdinalPlacement(placementIndex + 1)} place (${resolveDivisionDisplayName(detail, allDivisionDetails)})"
+            placementLabels += "${formatOrdinalPlacement(placementIndex + 1)} place (${resolveDivisionDisplayName(detail, allDivisionDetails)})"
+        }
+        if (placementLabels.isNotEmpty()) {
+            labelsByPlacement[placementIndex + 1] = placementLabels
         }
     }
 
-    return labels
+    return labelsByPlacement
 }
 
 private fun orderDivisionDetailsForMappings(

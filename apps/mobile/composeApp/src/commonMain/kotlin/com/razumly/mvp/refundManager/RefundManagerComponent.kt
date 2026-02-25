@@ -5,6 +5,7 @@ import com.razumly.mvp.core.data.dataTypes.RefundRequest
 import com.razumly.mvp.core.data.dataTypes.RefundRequestWithRelations
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import kotlinx.coroutines.CoroutineScope
@@ -20,6 +21,7 @@ interface RefundManagerComponent {
     val refundsWithRelations: StateFlow<List<RefundRequestWithRelations>>
     val isLoading: StateFlow<Boolean>
 
+    fun onBack()
     fun approveRefund(refundRequest: RefundRequest)
     fun rejectRefund(refundId: String)
     fun setLoadingHandler(loadingHandler: LoadingHandler)
@@ -30,6 +32,7 @@ class DefaultRefundManagerComponent(
     private val componentContext: ComponentContext,
     private val userRepository: IUserRepository,
     private val billingRepository: IBillingRepository,
+    private val navigationHandler: INavigationHandler,
 ) : ComponentContext by componentContext, RefundManagerComponent {
 
     private val scopeMain = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -46,8 +49,8 @@ class DefaultRefundManagerComponent(
 
     private lateinit var loadingHandler: LoadingHandler
 
-    override fun setLoadingHandler(handler: LoadingHandler) {
-        loadingHandler = handler
+    override fun setLoadingHandler(loadingHandler: LoadingHandler) {
+        this.loadingHandler = loadingHandler
     }
 
     init {
@@ -70,11 +73,17 @@ class DefaultRefundManagerComponent(
         loadRefunds()
     }
 
-    override fun approveRefund(refund: RefundRequest) {
+    override fun onBack() {
+        navigationHandler.navigateBack()
+    }
+
+    override fun approveRefund(refundRequest: RefundRequest) {
         scopeIO.launch {
             loadingHandler.showLoading("Approving refund...")
-            billingRepository.approveRefund(refund).onSuccess {
-                _refundsWithRelations.value = _refundsWithRelations.value.filter { it.refundRequest.id != refund.id }
+            billingRepository.approveRefund(refundRequest).onSuccess {
+                _refundsWithRelations.value = _refundsWithRelations.value.filter {
+                    it.refundRequest.id != refundRequest.id
+                }
             }.onFailure {
                 _errorState.value = ErrorMessage(it.message ?: "Error approving refund")
             }

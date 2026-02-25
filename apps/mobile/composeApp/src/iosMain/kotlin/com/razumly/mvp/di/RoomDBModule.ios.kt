@@ -15,6 +15,7 @@ actual val roomDBModule: Module = module {
         try {
             getDatabase()
                 .fallbackToDestructiveMigration(true)
+                .fallbackToDestructiveMigrationOnDowngrade(true)
                 .build().also {
                 Napier.d(tag = "Database") { "Room database successfully initialized" }
             }
@@ -24,4 +25,3 @@ actual val roomDBModule: Module = module {
         }
     } bind DatabaseService::class
 }
-

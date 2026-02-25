@@ -187,11 +187,12 @@ val componentModule = module {
         )
     }
 
-    factory<RefundManagerComponent> { (componentContext: ComponentContext) ->
+    factory<RefundManagerComponent> { (componentContext: ComponentContext, navHandler: INavigationHandler) ->
         DefaultRefundManagerComponent(
             componentContext = componentContext,
             userRepository = get(),
             billingRepository = get(),
+            navigationHandler = navHandler,
         )
     }
 

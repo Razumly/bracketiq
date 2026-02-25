@@ -8,6 +8,7 @@ import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
@@ -29,7 +30,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
-import kotlin.math.ceil
 import kotlin.time.ExperimentalTime
 
 interface MatchContentComponent {
@@ -48,6 +48,7 @@ interface MatchContentComponent {
     fun checkRefStatus()
     fun confirmRefCheckIn()
     fun updateScore(isTeam1: Boolean, increment: Boolean)
+    fun requestSetConfirmation()
     fun confirmSet()
 }
 
@@ -166,40 +167,42 @@ class DefaultMatchContentComponent(
 
     private val _currentUser = userRepository.currentUser.value.getOrThrow()
 
-    private val _currentUserTeam =
+    private val _currentUserTeams =
         teamRepository.getTeamsWithPlayersFlow(_currentUser.id).map { teamResults ->
             teamResults.getOrElse {
                 _errorState.value = it.message
                 emptyList()
-            }.find { team ->
-                event.value?.id != null && event.value!!.teamIds.contains(team.team.id)
             }
-        }.stateIn(scope, SharingStarted.Eagerly, null)
+        }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
-    private var maxSets = 0
+    private var maxSets = 1
 
-    private var setsNeeded = 0
+    private var setsNeeded = 1
 
     init {
         scope.launch {
-            event.collect { tournament ->
-                tournament?.let { t ->
-                    maxSets = if (matchWithTeams.value.match.losersBracket) {
-                        t.loserSetCount
-                    } else {
-                        t.winnerSetCount
-                    }
-                    setsNeeded = ceil((maxSets.toDouble()) / 2).toInt()
+            event.collect {
+                val normalizedMatch = updateMatchStructureForCurrentContext(matchWithTeams.value.match)
+                _matchFinished.value = isMatchOver(normalizedMatch)
+                if (!_matchFinished.value) {
+                    _currentSet.value = resolveCurrentSetIndex(normalizedMatch.setResults)
                 }
+                checkRefStatus()
             }
         }
         scope.launch {
             matchRepository.setIgnoreMatch(selectedMatch.match)
             matchWithTeams.collect {
-                _matchFinished.value = isMatchOver(it.match)
+                val normalizedMatch = updateMatchStructureForCurrentContext(it.match)
+                _matchFinished.value = isMatchOver(normalizedMatch)
                 if (!_matchFinished.value) {
-                    _currentSet.value = it.match.setResults.indexOfFirst { result -> result == 0 }
+                    _currentSet.value = resolveCurrentSetIndex(normalizedMatch.setResults)
                 }
+                checkRefStatus()
+            }
+        }
+        scope.launch {
+            _currentUserTeams.collect {
                 checkRefStatus()
             }
         }
@@ -214,16 +217,45 @@ class DefaultMatchContentComponent(
     }
 
     override fun checkRefStatus() {
-        _isRef.value = _currentUser.teamIds.contains(matchWithTeams.value.ref?.team?.id) == true
-        _showRefCheckInDialog.value = refCheckedIn.value != true
+        val currentMatch = matchWithTeams.value.match
+        val teamRefereeId = normalizeOptionalId(currentMatch.teamRefereeId)
+        val teamIds = currentUserTeamIds().toSet()
+        val isAssignedTeamRef = teamRefereeId != null && teamIds.contains(teamRefereeId)
+        val isAssignedUserRef = normalizeOptionalId(currentMatch.refereeId) == _currentUser.id
+        val checkedIn = currentMatch.refereeCheckedIn == true
+
+        _isRef.value = isAssignedTeamRef || isAssignedUserRef
+        _refCheckedIn.value = checkedIn
+        _showRefCheckInDialog.value = !checkedIn && (_isRef.value || canCurrentUserSwapIntoRef(currentMatch))
     }
 
     override fun confirmRefCheckIn() {
         scope.launch {
+            val currentMatch = matchWithTeams.value.match
+            val teamIds = currentUserTeamIds().toSet()
+            val currentTeamRefereeId = normalizeOptionalId(currentMatch.teamRefereeId)
+            val currentUserTeamRef = resolveCurrentUserParticipatingTeamId(currentMatch)
+            val isAssignedTeamRef =
+                currentTeamRefereeId != null && teamIds.contains(currentTeamRefereeId)
+            val isAssignedUserRef = normalizeOptionalId(currentMatch.refereeId) == _currentUser.id
+            val canSwap = canCurrentUserSwapIntoRef(currentMatch)
+
+            val nextTeamRefereeId = when {
+                isAssignedTeamRef -> currentTeamRefereeId
+                canSwap -> currentUserTeamRef
+                else -> currentTeamRefereeId
+            }
+
+            if (!isAssignedTeamRef && !isAssignedUserRef && !canSwap) {
+                dismissRefDialog()
+                _errorState.value = "Only participating teams can referee this match."
+                return@launch
+            }
+
             val updatedMatch = matchWithTeams.value.copy(
-                match = matchWithTeams.value.match.copy(
+                match = currentMatch.copy(
                     refereeCheckedIn = true,
-                    teamRefereeId = _currentUserTeam.value?.team?.id
+                    teamRefereeId = nextTeamRefereeId
                 ),
             )
             matchRepository.updateMatch(updatedMatch.match).onSuccess {
@@ -236,77 +268,151 @@ class DefaultMatchContentComponent(
         }
     }
 
+    private fun currentUserTeamIds(): List<String> {
+        val repositoryTeamIds = _currentUserTeams.value
+            .map { team -> team.team.id.trim() }
+            .filter(String::isNotBlank)
+        if (repositoryTeamIds.isNotEmpty()) {
+            return repositoryTeamIds
+        }
+        return _currentUser.teamIds
+            .map { teamId -> teamId.trim() }
+            .filter(String::isNotBlank)
+    }
+
+    private fun resolveCurrentUserParticipatingTeamId(match: MatchMVP): String? {
+        val participantTeamIds = setOfNotNull(
+            normalizeOptionalId(match.team1Id),
+            normalizeOptionalId(match.team2Id),
+        )
+        if (participantTeamIds.isEmpty()) {
+            return null
+        }
+        return currentUserTeamIds().firstOrNull { teamId -> participantTeamIds.contains(teamId) }
+    }
+
+    private fun canCurrentUserSwapIntoRef(match: MatchMVP): Boolean {
+        if (event.value?.doTeamsRef != true) {
+            return false
+        }
+        if (event.value?.teamRefsMaySwap != true) {
+            return false
+        }
+        val participantTeamId = resolveCurrentUserParticipatingTeamId(match) ?: return false
+        return participantTeamId != normalizeOptionalId(match.teamRefereeId)
+    }
+
+    private fun normalizeOptionalId(rawId: String?): String? {
+        val normalized = rawId?.trim()
+        return normalized?.takeIf(String::isNotBlank)
+    }
+
     override fun updateScore(isTeam1: Boolean, increment: Boolean) {
+        if (!isRef.value || refCheckedIn.value != true || matchFinished.value) {
+            return
+        }
+
         val currentMatch = matchWithTeams.value
-        if (increment && checkSetCompletion(currentMatch.match)) {
+        val scoringMatch = updateMatchStructureForCurrentContext(currentMatch.match)
+        val setIndex = currentSet.value.coerceIn(0, maxSets - 1)
+
+        if (increment && checkSetCompletion(scoringMatch)) {
             return
         }
 
         val currentPoints = if (isTeam1) {
-            currentMatch.match.team1Points.toMutableList()
+            scoringMatch.team1Points.toMutableList()
         } else {
-            currentMatch.match.team2Points.toMutableList()
+            scoringMatch.team2Points.toMutableList()
         }
 
         if (increment) {
-            currentPoints[currentSet.value]++
-        } else if (!increment && currentPoints[currentSet.value] > 0) {
-            currentPoints[currentSet.value]--
+            currentPoints[setIndex]++
+        } else if (!increment && currentPoints[setIndex] > 0) {
+            currentPoints[setIndex]--
         }
 
-        val optimisticMatch = if (isTeam1) {
-            currentMatch.copy(
-                match = currentMatch.match.copy(team1Points = currentPoints)
-            )
+        val updatedScoringMatch = if (isTeam1) {
+            scoringMatch.copy(team1Points = currentPoints)
         } else {
-            currentMatch.copy(
-                match = currentMatch.match.copy(team2Points = currentPoints)
-            )
+            scoringMatch.copy(team2Points = currentPoints)
         }
+        val optimisticMatch = currentMatch.copy(match = updatedScoringMatch)
 
         _optimisticMatch.value = optimisticMatch
 
-        if (checkSetCompletion(optimisticMatch.match)) {
-            syncMatchImmediately(optimisticMatch.match)
+        if (checkSetCompletion(updatedScoringMatch)) {
+            syncMatchImmediately(updatedScoringMatch)
         } else {
-            queueDatabaseUpdate(optimisticMatch.match)
+            queueDatabaseUpdate(updatedScoringMatch)
         }
     }
 
 
+    override fun requestSetConfirmation() {
+        if (matchFinished.value || !isRef.value || refCheckedIn.value != true) return
+
+        val scoringMatch = updateMatchStructureForCurrentContext(matchWithTeams.value.match)
+        val setIndex = currentSet.value.coerceIn(0, maxSets - 1)
+        val team1Score = scoringMatch.team1Points.getOrElse(setIndex) { 0 }
+        val team2Score = scoringMatch.team2Points.getOrElse(setIndex) { 0 }
+
+        if (team1Score == team2Score) {
+            _errorState.value = "Set score cannot be tied."
+            return
+        }
+
+        _showSetConfirmDialog.value = true
+    }
+
+
     override fun confirmSet() {
+        if (matchFinished.value || !isRef.value || refCheckedIn.value != true) {
+            _showSetConfirmDialog.value = false
+            return
+        }
         _showSetConfirmDialog.value = false
 
         scope.launch {
             val currentMatch = matchWithTeams.value
-            val setResults = currentMatch.match.setResults.toMutableList()
-            val team1Won =
-                currentMatch.match.team1Points[currentSet.value] > currentMatch.match.team2Points[currentSet.value]
+            val scoringMatch = updateMatchStructureForCurrentContext(currentMatch.match)
+            val setIndex = currentSet.value.coerceIn(0, maxSets - 1)
+            val team1Score = scoringMatch.team1Points.getOrElse(setIndex) { 0 }
+            val team2Score = scoringMatch.team2Points.getOrElse(setIndex) { 0 }
 
-            setResults[currentSet.value] = if (team1Won) 1 else 2
+            if (team1Score == team2Score) {
+                _errorState.value = "Set score cannot be tied."
+                return@launch
+            }
+
+            val setResults = scoringMatch.setResults.toMutableList()
+            val team1Won = team1Score > team2Score
+
+            setResults[setIndex] = if (team1Won) 1 else 2
+
+            val updatedScoringMatch = scoringMatch.copy(setResults = setResults)
 
             val updatedMatch = currentMatch.copy(
-                match = currentMatch.match.copy(setResults = setResults)
+                match = updatedScoringMatch
             )
 
             _optimisticMatch.value = updatedMatch
 
-            if (isMatchOver(updatedMatch.match)) {
+            if (isMatchOver(updatedScoringMatch)) {
                 _matchFinished.value = true
-                updatedMatch.match.end?.let { endTime ->
-                    // For match completion, sync everything immediately
-                    matchRepository.updateMatchFinished(updatedMatch.match, endTime).onSuccess {
-                        _optimisticMatch.value = null // Clear optimistic state
-                    }.onFailure { error ->
-                        _errorState.value = "Failed to finish match: ${error.message}"
-                    }
+                val endTime = updatedScoringMatch.end ?: updatedScoringMatch.start
+                // For match completion, sync everything immediately
+                matchRepository.updateMatchFinished(updatedScoringMatch, endTime).onSuccess {
+                    _optimisticMatch.value = null // Clear optimistic state
+                }.onFailure { error ->
+                    _errorState.value = "Failed to finish match: ${error.message}"
                 }
             } else {
                 if (currentSet.value + 1 < maxSets) {
                     _currentSet.value++
                 }
 
-                syncMatchImmediately(updatedMatch.match)
+                syncMatchImmediately(updatedScoringMatch)
             }
         }
     }
@@ -358,14 +464,18 @@ class DefaultMatchContentComponent(
     }
 
     private fun isMatchOver(match: MatchMVP): Boolean {
-        val team1Wins = match.setResults.count { it == 1 }
-        val team2Wins = match.setResults.count { it == 2 }
+        val relevantResults = match.setResults.take(maxSets.coerceAtLeast(1))
+        val team1Wins = relevantResults.count { it == 1 }
+        val team2Wins = relevantResults.count { it == 2 }
         return team1Wins >= setsNeeded || team2Wins >= setsNeeded
     }
 
     private fun checkSetCompletion(match: MatchMVP): Boolean {
-        val team1Score = match.team1Points[currentSet.value]
-        val team2Score = match.team2Points[currentSet.value]
+        if (event.value?.usesSets == false) return false
+
+        val setIndex = currentSet.value.coerceIn(0, maxSets - 1)
+        val team1Score = match.team1Points.getOrElse(setIndex) { 0 }
+        val team2Score = match.team2Points.getOrElse(setIndex) { 0 }
 
         if (team1Score == team2Score || matchFinished.value) return false
 
@@ -373,13 +483,9 @@ class DefaultMatchContentComponent(
         val leaderScore = if (isTeam1Leader) team1Score else team2Score
         val followerScore = if (isTeam1Leader) team2Score else team1Score
 
-        val pointsToVictory = if (match.losersBracket) {
-            event.value?.loserBracketPointsToVictory?.get(currentSet.value)
-        } else {
-            event.value?.winnerBracketPointsToVictory?.get(currentSet.value)
-        }
+        val pointsToVictory = resolvePointsToVictory(match, setIndex) ?: return false
 
-        val winBy2 = leaderScore - followerScore >= 2 && leaderScore >= pointsToVictory!!
+        val winBy2 = leaderScore - followerScore >= 2 && leaderScore >= pointsToVictory
 
         if (winBy2) {
             _showSetConfirmDialog.value = true
@@ -387,5 +493,105 @@ class DefaultMatchContentComponent(
         }
 
         return false
+    }
+
+    private fun updateMatchStructureForCurrentContext(match: MatchMVP): MatchMVP {
+        maxSets = resolveExpectedSetCount(match)
+        setsNeeded = ((maxSets + 1) / 2).coerceAtLeast(1)
+        return normalizeMatchForSetCount(match, maxSets)
+    }
+
+    private fun resolveExpectedSetCount(match: MatchMVP): Int {
+        val fallbackSetCount = listOf(
+            match.setResults.size,
+            match.team1Points.size,
+            match.team2Points.size,
+            1,
+        ).maxOrNull() ?: 1
+
+        val currentEvent = event.value ?: return fallbackSetCount
+        if (!currentEvent.usesSets) {
+            return 1
+        }
+
+        val isBracketMatch = isBracketMatch(match)
+        return when {
+            match.losersBracket -> currentEvent.loserSetCount.coerceAtLeast(1)
+            currentEvent.eventType == EventType.LEAGUE && !isBracketMatch -> {
+                (currentEvent.setsPerMatch ?: fallbackSetCount).coerceAtLeast(1)
+            }
+            else -> currentEvent.winnerSetCount.coerceAtLeast(1)
+        }
+    }
+
+    private fun isBracketMatch(match: MatchMVP): Boolean {
+        return match.losersBracket ||
+            !match.previousLeftId.isNullOrBlank() ||
+            !match.previousRightId.isNullOrBlank() ||
+            !match.winnerNextMatchId.isNullOrBlank() ||
+            !match.loserNextMatchId.isNullOrBlank()
+    }
+
+    private fun normalizeMatchForSetCount(match: MatchMVP, setCount: Int): MatchMVP {
+        val normalizedTeam1 = normalizeScoreList(match.team1Points, setCount)
+        val normalizedTeam2 = normalizeScoreList(match.team2Points, setCount)
+        val normalizedResults = normalizeResultList(match.setResults, setCount)
+
+        if (
+            normalizedTeam1 == match.team1Points &&
+            normalizedTeam2 == match.team2Points &&
+            normalizedResults == match.setResults
+        ) {
+            return match
+        }
+
+        return match.copy(
+            team1Points = normalizedTeam1,
+            team2Points = normalizedTeam2,
+            setResults = normalizedResults,
+        )
+    }
+
+    private fun normalizeScoreList(values: List<Int>, setCount: Int): List<Int> {
+        val normalized = values.take(setCount).toMutableList()
+        while (normalized.size < setCount) {
+            normalized.add(0)
+        }
+        return normalized
+    }
+
+    private fun normalizeResultList(values: List<Int>, setCount: Int): List<Int> {
+        val normalized = values
+            .take(setCount)
+            .map { value -> if (value == 1 || value == 2) value else 0 }
+            .toMutableList()
+        while (normalized.size < setCount) {
+            normalized.add(0)
+        }
+        return normalized
+    }
+
+    private fun resolveCurrentSetIndex(setResults: List<Int>): Int {
+        val firstIncomplete = setResults.indexOfFirst { result -> result == 0 }
+        return when {
+            firstIncomplete >= 0 -> firstIncomplete
+            setResults.isEmpty() -> 0
+            else -> setResults.lastIndex.coerceAtLeast(0)
+        }
+    }
+
+    private fun resolvePointsToVictory(match: MatchMVP, setIndex: Int): Int? {
+        val currentEvent = event.value ?: return null
+        if (!currentEvent.usesSets) return null
+
+        val points = when {
+            currentEvent.eventType == EventType.LEAGUE && !isBracketMatch(match) ->
+                currentEvent.pointsToVictory.getOrNull(setIndex)
+            match.losersBracket ->
+                currentEvent.loserBracketPointsToVictory.getOrNull(setIndex)
+            else ->
+                currentEvent.winnerBracketPointsToVictory.getOrNull(setIndex)
+        }
+        return points?.takeIf { it > 0 }
     }
 }

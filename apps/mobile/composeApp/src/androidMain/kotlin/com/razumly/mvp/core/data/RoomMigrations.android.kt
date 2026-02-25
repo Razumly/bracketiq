@@ -101,6 +101,26 @@ val MIGRATION_87_88 = object : Migration(87, 88) {
     }
 }
 
+val MIGRATION_88_89 = object : Migration(88, 89) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        migrationSql88To89.forEach { sql ->
+            runCatching {
+                db.execSQL(sql)
+            }
+        }
+    }
+
+    override fun migrate(connection: SQLiteConnection) {
+        migrationSql88To89.forEach { sql ->
+            runCatching {
+                connection.prepare(sql).use { statement ->
+                    statement.step()
+                }
+            }
+        }
+    }
+}
+
 private val migrationSql80To81 = listOf(
     "ALTER TABLE `Event` DROP COLUMN `fieldType`",
     "ALTER TABLE `Field` DROP COLUMN `type`",
@@ -150,4 +170,8 @@ private val migrationSql84To85 = listOf(
 private val migrationSql87To88 = listOf(
     "ALTER TABLE `MatchMVP` ADD COLUMN `team1Seed` INTEGER",
     "ALTER TABLE `MatchMVP` ADD COLUMN `team2Seed` INTEGER",
+)
+
+private val migrationSql88To89 = listOf(
+    "ALTER TABLE `Event` ADD COLUMN `teamRefsMaySwap` INTEGER",
 )

@@ -12,6 +12,8 @@ private val decimalTokenRegex = Regex("^(\\d+)_(\\d+)$")
 private val plusTokenRegex = Regex("^(\\d+)plus$")
 private val trailingUTokenRegex = Regex("^(\\d+)u$")
 private val leadingUTokenRegex = Regex("^u(\\d+)$")
+private val wordSkillRegex = Regex("\\bskill\\b")
+private val wordAgeRegex = Regex("\\bage\\b")
 private const val DIVISION_MARKER = "__division__"
 
 const val DEFAULT_DIVISION = "open"
@@ -73,6 +75,15 @@ data class ParsedDivisionTypeSelection(
 )
 
 private fun String.cleanDivisionText(): String = trim().replace(whitespaceRegex, " ")
+
+private fun String.looksLikeLegacyDivisionMetadataLabel(): Boolean {
+    val normalized = cleanDivisionText().lowercase()
+    if (normalized.isEmpty()) return false
+    val includesSkillAgeWords =
+        wordSkillRegex.containsMatchIn(normalized) && wordAgeRegex.containsMatchIn(normalized)
+    val includesSkillAgeTokenPattern = normalized.contains("skill_") && normalized.contains("_age_")
+    return includesSkillAgeWords || includesSkillAgeTokenPattern
+}
 
 private fun normalizeDivisionToken(raw: String): String {
     val normalized = raw.cleanDivisionText()
@@ -387,8 +398,14 @@ fun String.toDivisionDisplayLabel(
             divisionsEquivalent(detail.id, normalized) || divisionsEquivalent(detail.key, normalized)
         }
         val explicit = detail?.name?.trim()
-        if (!explicit.isNullOrEmpty()) {
+        if (!explicit.isNullOrEmpty() && !explicit.looksLikeLegacyDivisionMetadataLabel()) {
             return explicit
+        }
+        val explicitTypeName = detail?.divisionTypeName?.trim()
+        if (!explicitTypeName.isNullOrEmpty() &&
+            !explicitTypeName.looksLikeLegacyDivisionMetadataLabel()
+        ) {
+            return explicitTypeName
         }
     }
     val inference = inferDivisionMetadata(normalized)
@@ -556,6 +573,10 @@ fun DivisionDetail.normalizeDivisionDetail(eventId: String? = null): DivisionDet
             .filter(String::isNotBlank)
             .distinct(),
         playoffPlacementDivisionIds = normalizedPlayoffPlacementDivisionIds,
+        teamIds = teamIds
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .distinct(),
     )
 }
 

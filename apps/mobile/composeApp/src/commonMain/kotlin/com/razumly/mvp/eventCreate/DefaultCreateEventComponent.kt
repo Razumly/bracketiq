@@ -80,6 +80,7 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     fun updateHostId(hostId: String)
     fun updateAssistantHostIds(assistantHostIds: List<String>)
     fun updateDoTeamsRef(doTeamsRef: Boolean)
+    fun updateTeamRefsMaySwap(teamRefsMaySwap: Boolean)
     fun addRefereeId(refereeId: String)
     fun removeRefereeId(refereeId: String)
     fun setPaymentPlansEnabled(enabled: Boolean)
@@ -307,6 +308,23 @@ class DefaultCreateEventComponent(
         }
     }
 
+    private fun updateEventFieldWithoutSelectionRules(update: Event.() -> Event) {
+        scope.launch {
+            val previous = _newEventState.value
+            val updated = previous
+                .update()
+                .withSportRules()
+            val normalized = applyRentalConstraints(updated)
+            val sportChanged = previous.sportId != normalized.sportId
+
+            _newEventState.value = normalized
+            if (sportChanged) {
+                _leagueScoringConfig.value = defaultLeagueScoringConfigForSport(normalized.sportId)
+            }
+            syncLocalFieldsForEvent(normalized)
+        }
+    }
+
     override fun onUploadSelected(photo: GalleryPhotoResult) {
         scope.launch {
             loadingHandler.showLoading("Uploading image...")
@@ -375,7 +393,20 @@ class DefaultCreateEventComponent(
     }
 
     override fun updateDoTeamsRef(doTeamsRef: Boolean) {
-        updateEventField { copy(doTeamsRef = doTeamsRef) }
+        updateEventField {
+            copy(
+                doTeamsRef = doTeamsRef,
+                teamRefsMaySwap = if (doTeamsRef) teamRefsMaySwap else false,
+            )
+        }
+    }
+
+    override fun updateTeamRefsMaySwap(teamRefsMaySwap: Boolean) {
+        updateEventField {
+            copy(
+                teamRefsMaySwap = if (doTeamsRef == true) teamRefsMaySwap else false,
+            )
+        }
     }
 
     override fun addRefereeId(refereeId: String) {
@@ -395,7 +426,7 @@ class DefaultCreateEventComponent(
     }
 
     override fun setPaymentPlansEnabled(enabled: Boolean) {
-        updateEventField {
+        updateEventFieldWithoutSelectionRules {
             if (!enabled) {
                 copy(
                     allowPaymentPlans = false,
@@ -418,7 +449,7 @@ class DefaultCreateEventComponent(
 
     override fun setInstallmentCount(count: Int) {
         val targetCount = count.coerceAtLeast(1)
-        updateEventField {
+        updateEventFieldWithoutSelectionRules {
             val (amounts, dueDates) = normalizeInstallments(targetCount)
             copy(
                 allowPaymentPlans = true,
@@ -431,11 +462,11 @@ class DefaultCreateEventComponent(
 
     override fun updateInstallmentAmount(index: Int, amountCents: Int) {
         if (index < 0) return
-        updateEventField {
+        updateEventFieldWithoutSelectionRules {
             val targetCount = currentInstallmentCount().coerceAtLeast(index + 1).coerceAtLeast(1)
             val (amounts, dueDates) = normalizeInstallments(targetCount)
             if (index !in amounts.indices) {
-                return@updateEventField this
+                return@updateEventFieldWithoutSelectionRules this
             }
             val updatedAmounts = amounts.toMutableList().apply {
                 this[index] = amountCents.coerceAtLeast(0)
@@ -451,11 +482,11 @@ class DefaultCreateEventComponent(
 
     override fun updateInstallmentDueDate(index: Int, dueDate: String) {
         if (index < 0) return
-        updateEventField {
+        updateEventFieldWithoutSelectionRules {
             val targetCount = currentInstallmentCount().coerceAtLeast(index + 1).coerceAtLeast(1)
             val (amounts, dueDates) = normalizeInstallments(targetCount)
             if (index !in dueDates.indices) {
-                return@updateEventField this
+                return@updateEventFieldWithoutSelectionRules this
             }
             val updatedDueDates = dueDates.toMutableList().apply {
                 this[index] = dueDate.trim()
@@ -470,7 +501,7 @@ class DefaultCreateEventComponent(
     }
 
     override fun addInstallmentRow() {
-        updateEventField {
+        updateEventFieldWithoutSelectionRules {
             val targetCount = currentInstallmentCount().coerceAtLeast(0) + 1
             val (amounts, dueDates) = normalizeInstallments(targetCount)
             copy(
@@ -484,11 +515,11 @@ class DefaultCreateEventComponent(
 
     override fun removeInstallmentRow(index: Int) {
         if (index < 0) return
-        updateEventField {
+        updateEventFieldWithoutSelectionRules {
             val targetCount = currentInstallmentCount().coerceAtLeast(1)
             val (amounts, dueDates) = normalizeInstallments(targetCount)
             if (index !in amounts.indices || index !in dueDates.indices) {
-                return@updateEventField this
+                return@updateEventFieldWithoutSelectionRules this
             }
             val updatedAmounts = amounts.toMutableList().apply { removeAt(index) }
             val updatedDueDates = dueDates.toMutableList().apply { removeAt(index) }
@@ -1130,6 +1161,10 @@ class DefaultCreateEventComponent(
                 setDurationMinutes = null,
                 pointsToVictory = emptyList(),
                 matchDurationMinutes = matchDurationMinutes ?: 60,
+                winnerSetCount = 1,
+                loserSetCount = 1,
+                winnerBracketPointsToVictory = winnerBracketPointsToVictory.take(1).ifEmpty { listOf(21) },
+                loserBracketPointsToVictory = loserBracketPointsToVictory.take(1).ifEmpty { listOf(21) },
             )
         }
     }

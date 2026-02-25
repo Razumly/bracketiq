@@ -46,7 +46,8 @@ fun TournamentBracketView(
     onMatchClick: (MatchWithRelations) -> Unit = {},
     isEditingMatches: Boolean = false,
     editableMatches: List<MatchWithRelations> = emptyList(),
-    onEditMatch: ((MatchWithRelations) -> Unit)? = null
+    onEditMatch: ((MatchWithRelations) -> Unit)? = null,
+    hideMatchDivisionLabel: Boolean = false,
 ) {
     val component = LocalTournamentComponent.current
     val losersBracket by component.losersBracket.collectAsState()
@@ -209,7 +210,8 @@ fun TournamentBracketView(
                                                     }
                                                 }
                                             },
-                                            modifier = Modifier.height(cardHeight.dp).width(width.dp)
+                                            modifier = Modifier.height(cardHeight.dp).width(width.dp),
+                                            showDivisionLabel = !hideMatchDivisionLabel,
                                         )
                                     }
                                 }

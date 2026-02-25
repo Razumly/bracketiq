@@ -272,7 +272,8 @@ class RootComponent(
         )
 
         is AppConfig.MatchDetail -> Child.MatchContent(
-            _koin.get { parametersOf(componentContext, config.match, config.event) }
+            component = _koin.get { parametersOf(componentContext, config.match, config.event) },
+            mapComponent = _koin.get { parametersOf(componentContext) },
         )
 
         AppConfig.ChatList -> Child.ChatList(
@@ -309,7 +310,7 @@ class RootComponent(
         )
 
         AppConfig.RefundManager -> Child.RefundManager(
-            _koin.get { parametersOf(componentContext) }
+            _koin.get { parametersOf(componentContext, this@RootComponent) }
         )
 
         AppConfig.ProfileDetails -> Child.ProfileDetails(
@@ -322,7 +323,10 @@ class RootComponent(
         data class Search(val component: EventSearchComponent, val mapComponent: MapComponent) : Child()
         data class EventContent(val component: EventDetailComponent, val mapComponent: MapComponent) : Child()
         data class OrganizationDetail(val component: OrganizationDetailComponent) : Child()
-        data class MatchContent(val component: MatchContentComponent) : Child()
+        data class MatchContent(
+            val component: MatchContentComponent,
+            val mapComponent: MapComponent,
+        ) : Child()
         data class ChatList(val component: ChatListComponent) : Child()
         data class Chat(val component: ChatGroupComponent) : Child()
         data class Create(val component: CreateEventComponent, val mapComponent: MapComponent) : Child()

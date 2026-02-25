@@ -146,6 +146,8 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun editEventField(update: Event.() -> Event)
     fun editTournamentField(update: Event.() -> Event)
     fun updateEvent()
+    fun rescheduleEvent()
+    fun buildBrackets()
     fun createTemplateFromCurrentEvent()
     fun publishEvent()
     fun deleteEvent()
@@ -773,10 +775,16 @@ class DefaultEventDetailComponent(
         }
     }
 
-    override fun refreshLeagueStandings() {
-        val divisionId = selectedDivision.value?.normalizeDivisionIdentifier()
+    private fun resolveLeagueStandingsDivisionId(): String? =
+        _leagueDivisionStandings.value?.divisionId
+            ?.normalizeDivisionIdentifier()
             ?.takeIf(String::isNotBlank)
-            ?: return
+            ?: selectedDivision.value
+                ?.normalizeDivisionIdentifier()
+                ?.takeIf(String::isNotBlank)
+
+    override fun refreshLeagueStandings() {
+        val divisionId = resolveLeagueStandingsDivisionId() ?: return
         val eventId = selectedEvent.value.id
         scope.launch {
             loadLeagueDivisionStandings(
@@ -790,8 +798,7 @@ class DefaultEventDetailComponent(
 
     override fun confirmLeagueStandings(applyReassignment: Boolean) {
         val event = selectedEvent.value
-        val divisionId = selectedDivision.value?.normalizeDivisionIdentifier()
-            ?.takeIf(String::isNotBlank)
+        val divisionId = resolveLeagueStandingsDivisionId()
 
         if (event.eventType != EventType.LEAGUE || divisionId == null) {
             _errorState.value = ErrorMessage("Select a league division before confirming standings.")
@@ -1589,6 +1596,83 @@ class DefaultEventDetailComponent(
         }
     }
 
+    override fun rescheduleEvent() {
+        scope.launch {
+            loadingHandler.showLoading("Rescheduling event...")
+            var shouldExitEditMode = false
+            runCatching {
+                val updated = eventRepository.updateEvent(_editedEvent.value).getOrThrow()
+                val temporarilyLockedMatches = if (shouldPreserveCompletedMatches(updated)) {
+                    lockCompletedMatchesForReschedule(updated.id)
+                } else {
+                    emptyList()
+                }
+                try {
+                    eventRepository.scheduleEvent(updated.id).getOrThrow()
+                } finally {
+                    if (temporarilyLockedMatches.isNotEmpty()) {
+                        matchRepository.updateMatchesBulk(
+                            temporarilyLockedMatches.map { match -> match.copy(locked = false) },
+                        ).onFailure { error ->
+                            Napier.w(
+                                message = "Failed to restore temporary lock state after reschedule.",
+                                throwable = error,
+                            )
+                        }
+                    }
+                }
+                matchRepository.getMatchesOfTournament(updated.id).getOrThrow()
+                shouldExitEditMode = true
+            }.onFailure { throwable ->
+                _errorState.value = ErrorMessage(
+                    throwable.message ?: "Failed to reschedule event.",
+                )
+            }
+            loadingHandler.hideLoading()
+            if (shouldExitEditMode) {
+                cancelEditingEvent()
+                _errorState.value = ErrorMessage("Event rescheduled.")
+            }
+        }
+    }
+
+    override fun buildBrackets() {
+        scope.launch {
+            loadingHandler.showLoading("Building bracket(s)...")
+            var shouldExitEditMode = false
+            runCatching {
+                val updated = eventRepository.updateEvent(_editedEvent.value).getOrThrow()
+                val participantCount = updated.maxParticipants.takeIf { maxParticipants ->
+                    maxParticipants > 0
+                }
+                matchRepository.deleteMatchesOfTournament(updated.id).getOrThrow()
+                eventRepository.scheduleEvent(updated.id, participantCount).getOrThrow()
+
+                val scheduledMatches = matchRepository.getMatchesOfTournament(updated.id).getOrThrow()
+                val bracketMatches = scheduledMatches.filter { match ->
+                    shouldResetBracketMatch(updated, match)
+                }
+                if (bracketMatches.isNotEmpty()) {
+                    matchRepository.updateMatchesBulk(
+                        bracketMatches.map { match -> match.toEmptyBracketMatch() },
+                    ).getOrThrow()
+                }
+
+                matchRepository.getMatchesOfTournament(updated.id).getOrThrow()
+                shouldExitEditMode = true
+            }.onFailure { throwable ->
+                _errorState.value = ErrorMessage(
+                    throwable.message ?: "Failed to build bracket(s).",
+                )
+            }
+            loadingHandler.hideLoading()
+            if (shouldExitEditMode) {
+                cancelEditingEvent()
+                _errorState.value = ErrorMessage("Bracket build completed.")
+            }
+        }
+    }
+
     override fun createTemplateFromCurrentEvent() {
         scope.launch {
             val sourceEvent = if (_isEditing.value) _editedEvent.value else selectedEvent.value
@@ -2189,6 +2273,59 @@ class DefaultEventDetailComponent(
 
         dismissMatchEditDialog()
     }
+
+    private suspend fun lockCompletedMatchesForReschedule(eventId: String): List<MatchMVP> {
+        val matches = matchRepository.getMatchesOfTournament(eventId).getOrThrow()
+        val completedUnlockedMatches = matches.filter { match ->
+            !match.locked && isMatchCompleted(match)
+        }
+        if (completedUnlockedMatches.isNotEmpty()) {
+            matchRepository.updateMatchesBulk(
+                completedUnlockedMatches.map { match -> match.copy(locked = true) },
+            ).getOrThrow()
+        }
+        return completedUnlockedMatches
+    }
+
+    private fun shouldPreserveCompletedMatches(event: Event): Boolean {
+        return event.eventType == EventType.TOURNAMENT ||
+            (event.eventType == EventType.LEAGUE && event.includePlayoffs)
+    }
+
+    private fun shouldResetBracketMatch(event: Event, match: MatchMVP): Boolean {
+        return when {
+            event.eventType == EventType.TOURNAMENT -> true
+            event.eventType == EventType.LEAGUE && event.includePlayoffs -> isBracketMatch(match)
+            else -> false
+        }
+    }
+
+    private fun isBracketMatch(match: MatchMVP): Boolean {
+        return !match.previousLeftId.isNullOrBlank() ||
+            !match.previousRightId.isNullOrBlank() ||
+            !match.winnerNextMatchId.isNullOrBlank() ||
+            !match.loserNextMatchId.isNullOrBlank()
+    }
+
+    private fun isMatchCompleted(match: MatchMVP): Boolean {
+        val setResults = match.setResults
+        if (setResults.isEmpty()) {
+            return false
+        }
+        val teamOneWins = setResults.count { result -> result == 1 }
+        val teamTwoWins = setResults.count { result -> result == 2 }
+        val setsToWin = (setResults.size + 1) / 2
+        return teamOneWins >= setsToWin || teamTwoWins >= setsToWin
+    }
+
+    private fun MatchMVP.toEmptyBracketMatch(): MatchMVP = copy(
+        refereeId = null,
+        teamRefereeId = null,
+        team1Points = emptyList(),
+        team2Points = emptyList(),
+        setResults = emptyList(),
+        locked = false,
+    )
 
     private suspend fun waitForUserInEventWithTimeout(
         timeoutS: Duration = 30.seconds, checkIntervalS: Duration = 1.seconds

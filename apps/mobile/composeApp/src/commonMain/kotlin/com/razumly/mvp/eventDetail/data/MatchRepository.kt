@@ -33,6 +33,7 @@ interface IMatchRepository : IMVPRepository {
     fun getMatchesOfTournamentFlow(tournamentId: String): Flow<Result<List<MatchWithRelations>>>
     suspend fun updateMatchFinished(match: MatchMVP, time: Instant): Result<Unit>
     suspend fun getMatchesOfTournament(tournamentId: String): Result<List<MatchMVP>>
+    suspend fun deleteMatchesOfTournament(tournamentId: String): Result<Unit>
     suspend fun subscribeToMatches(): Result<Unit>
     suspend fun unsubscribeFromRealtime(): Result<Unit>
     fun setIgnoreMatch(match: MatchMVP?): Result<Unit>
@@ -200,6 +201,15 @@ class MatchRepository(
         }, saveData = { matches ->
             databaseService.getMatchDao.upsertMatches(matches)
         }, deleteData = { databaseService.getMatchDao.deleteMatchesById(it) })
+
+    override suspend fun deleteMatchesOfTournament(tournamentId: String): Result<Unit> = runCatching {
+        val normalizedId = tournamentId.trim()
+        if (normalizedId.isEmpty()) {
+            error("Delete matches requires a tournament id")
+        }
+        api.deleteNoResponse("api/events/$normalizedId/matches")
+        databaseService.getMatchDao.deleteMatchesOfTournament(normalizedId)
+    }
 
     override suspend fun subscribeToMatches(): Result<Unit> {
         return Result.success(Unit)

@@ -180,7 +180,7 @@ private fun AppContent(
                 }
 
                 is RootComponent.Child.MatchContent -> {
-                    MatchDetailScreen(instance.component)
+                    MatchDetailScreen(instance.component, instance.mapComponent)
                 }
 
                 is RootComponent.Child.ChatList -> {
