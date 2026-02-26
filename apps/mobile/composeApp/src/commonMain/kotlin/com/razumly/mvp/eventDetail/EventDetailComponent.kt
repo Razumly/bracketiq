@@ -2047,7 +2047,7 @@ class DefaultEventDetailComponent(
             val shouldFilterDivision = !event.singleDivision && (divisionId != null || divisionKey != null)
             teams.count { teamWithPlayers ->
                 val team = teamWithPlayers.team
-                !team.isPlaceholderSlot() && (
+                !team.isPlaceholderSlot(event.eventType) && (
                     !shouldFilterDivision ||
                         (divisionId != null && divisionsEquivalent(team.division, divisionId)) ||
                         (divisionKey != null && divisionsEquivalent(team.division, divisionKey))

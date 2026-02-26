@@ -172,7 +172,7 @@ private fun EventOverviewSections(
     val event = eventWithRelations.event
     val capacity = event.resolveParticipantCapacity()
     val filled = if (event.teamSignup) {
-        eventWithRelations.teams.count { teamWithPlayers -> !teamWithPlayers.team.isPlaceholderSlot() }
+        eventWithRelations.teams.count { teamWithPlayers -> !teamWithPlayers.team.isPlaceholderSlot(event.eventType) }
     } else {
         event.playerIds.size
     }
@@ -203,7 +203,7 @@ private fun EventOverviewSections(
     val unresolvedFreeAgentCount = (freeAgentIds.size - freeAgentUsers.size).coerceAtLeast(0)
     val teamsNeedingPlayers = remember(eventWithRelations.teams, event.teamSizeLimit) {
         eventWithRelations.teams
-            .filter { teamWithPlayers -> !teamWithPlayers.team.isPlaceholderSlot() }
+            .filter { teamWithPlayers -> !teamWithPlayers.team.isPlaceholderSlot(event.eventType) }
             .mapNotNull { team ->
                 val missing = (event.teamSizeLimit - team.team.playerIds.size).coerceAtLeast(0)
                 missing.takeIf { it > 0 }

@@ -45,7 +45,7 @@ internal fun buildDivisionCapacitySummaries(
 
     val registeredTeamIdSet = teams
         .map { teamWithPlayers -> teamWithPlayers.team }
-        .filter { team -> !team.isPlaceholderSlot() }
+        .filter { team -> !team.isPlaceholderSlot(event.eventType) }
         .map { team -> team.id.trim() }
         .filter(String::isNotBlank)
         .toSet()
