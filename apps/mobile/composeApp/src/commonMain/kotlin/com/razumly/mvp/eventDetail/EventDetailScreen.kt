@@ -910,14 +910,51 @@ fun EventDetailScreen(
     val isCaptain by component.isUserCaptain.collectAsState()
     val isDark = isSystemInDarkTheme()
     val isEditingMatches by component.isEditingMatches.collectAsState()
+    val isTemplateEvent = selectedEvent.event.state.equals("TEMPLATE", ignoreCase = true)
     val eventType = selectedEvent.event.eventType
     val isTournamentEvent = eventType == EventType.TOURNAMENT
     val hasBracketView = isTournamentEvent ||
         (eventType == EventType.LEAGUE && selectedEvent.event.includePlayoffs)
     val hasScheduleView = selectedEvent.matches.isNotEmpty()
     val hasStandingsView = eventType == EventType.LEAGUE
-    val canEditEventDetails = remember(isHost, selectedEvent.event.organizationId) {
-        isHost && selectedEvent.event.organizationId.isNullOrBlank()
+    val isAssistantHost = remember(currentUser.id, selectedEvent.event.assistantHostIds) {
+        val currentUserId = currentUser.id.trim()
+        currentUserId.isNotBlank() && selectedEvent.event.assistantHostIds.any { assistantHostId ->
+            assistantHostId == currentUserId
+        }
+    }
+    val isOrganizationManager = remember(
+        currentUser.id,
+        selectedEvent.organization?.ownerId,
+        selectedEvent.organization?.hostIds,
+    ) {
+        val currentUserId = currentUser.id.trim()
+        currentUserId.isNotBlank() && (
+            selectedEvent.organization?.ownerId == currentUserId ||
+                selectedEvent.organization?.hostIds?.any { hostId -> hostId == currentUserId } == true
+            )
+    }
+    val canManageTemplate = remember(isHost, isAssistantHost, isOrganizationManager) {
+        isHost || isAssistantHost || isOrganizationManager
+    }
+    val canEditEventDetails = remember(
+        isHost,
+        isTemplateEvent,
+        canManageTemplate,
+        selectedEvent.event.organizationId,
+    ) {
+        if (isTemplateEvent) {
+            canManageTemplate
+        } else {
+            isHost && selectedEvent.event.organizationId.isNullOrBlank()
+        }
+    }
+    val canDeleteEvent = remember(isHost, isTemplateEvent, canManageTemplate) {
+        if (isTemplateEvent) {
+            canManageTemplate
+        } else {
+            isHost
+        }
     }
     val canManageLeagueStandings = remember(
         currentUser.id,
@@ -1513,7 +1550,7 @@ fun EventDetailScreen(
                                             })
                                     }
 
-                                    if (isHost) {
+                                    if (canDeleteEvent) {
                                         DropdownMenuItem(
                                             text = { Text("Delete") }, onClick = {
                                             showDeleteConfirmation = true
@@ -2016,10 +2053,12 @@ fun EventDetailScreen(
             if (showDeleteConfirmation) {
                 AlertDialog(
                     onDismissRequest = { showDeleteConfirmation = false },
-                    title = { Text("Delete Event") },
+                    title = { Text(if (isTemplateEvent) "Delete Template" else "Delete Event") },
                     text = {
                         Text(
-                            if (selectedEvent.event.price > 0) {
+                            if (isTemplateEvent) {
+                                "Are you sure you want to delete this template? This action cannot be undone."
+                            } else if (selectedEvent.event.price > 0) {
                                 "Are you sure you want to delete this event? All participants will receive a full refund. This action cannot be undone."
                             } else {
                                 "Are you sure you want to delete this event? This action cannot be undone."

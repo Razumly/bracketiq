@@ -287,7 +287,10 @@ class DefaultEventDetailComponent(
     private val navigationHandler: INavigationHandler,
 
 ) : EventDetailComponent, PaymentProcessor(), ComponentContext by componentContext {
-    private fun canEditEventDetails(targetEvent: Event): Boolean = targetEvent.organizationId.isNullOrBlank()
+    private fun canEditEventDetails(targetEvent: Event): Boolean {
+        return targetEvent.organizationId.isNullOrBlank() ||
+            targetEvent.state.equals("TEMPLATE", ignoreCase = true)
+    }
 
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
     override val currentUser = userRepository.currentUser.map { it.getOrThrow() }
@@ -1820,8 +1823,10 @@ class DefaultEventDetailComponent(
 
     override fun deleteEvent() {
         scope.launch {
-            if (selectedEvent.value.price == 0.0) {
-                loadingHandler.showLoading("Deleting Event ...")
+            val currentEvent = selectedEvent.value
+            val isTemplateEvent = currentEvent.state.equals("TEMPLATE", ignoreCase = true)
+            if (isTemplateEvent || currentEvent.price == 0.0) {
+                loadingHandler.showLoading(if (isTemplateEvent) "Deleting Template ..." else "Deleting Event ...")
                 eventRepository.deleteEvent(selectedEvent.value.id).onFailure {
                     _errorState.value = ErrorMessage(it.message ?: "")
                 }
