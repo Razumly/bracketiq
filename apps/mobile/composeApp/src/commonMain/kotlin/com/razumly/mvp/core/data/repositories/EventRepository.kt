@@ -16,6 +16,7 @@ import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
 import com.razumly.mvp.core.data.util.divisionsEquivalent
+import com.razumly.mvp.core.data.util.isPlaceholderSlot
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.util.calcDistance
@@ -806,12 +807,7 @@ class EventRepository(
         )
     }
 
-    private fun isEventAtCapacity(event: Event, preferredDivisionId: String? = null): Boolean {
-        val participantCount = if (event.teamSignup) {
-            event.teamIds.size
-        } else {
-            event.playerIds.size
-        }
+    private suspend fun isEventAtCapacity(event: Event, preferredDivisionId: String? = null): Boolean {
         val maxParticipants = if (event.singleDivision) {
             event.maxParticipants
         } else {
@@ -820,6 +816,31 @@ class EventRepository(
 
         if (maxParticipants <= 0) {
             return false
+        }
+
+        val participantCount = if (event.teamSignup) {
+            val teamIds = event.teamIds
+                .map(String::trim)
+                .filter(String::isNotBlank)
+            if (teamIds.isEmpty()) {
+                0
+            } else {
+                val teams = teamRepository.getTeamsWithPlayers(teamIds).getOrElse { emptyList() }
+                val selectedDivision = if (event.singleDivision) null else resolveSelectedDivisionDetail(event, preferredDivisionId)
+                val divisionId = selectedDivision?.id?.normalizeDivisionIdentifier()?.takeIf(String::isNotBlank)
+                val divisionKey = selectedDivision?.key?.normalizeDivisionIdentifier()?.takeIf(String::isNotBlank)
+                val shouldFilterDivision = !event.singleDivision && (divisionId != null || divisionKey != null)
+                teams.count { teamWithPlayers ->
+                    val team = teamWithPlayers.team
+                    !team.isPlaceholderSlot() && (
+                        !shouldFilterDivision ||
+                            (divisionId != null && divisionsEquivalent(team.division, divisionId)) ||
+                            (divisionKey != null && divisionsEquivalent(team.division, divisionKey))
+                    )
+                }
+            }
+        } else {
+            event.playerIds.size
         }
         return participantCount >= maxParticipants
     }

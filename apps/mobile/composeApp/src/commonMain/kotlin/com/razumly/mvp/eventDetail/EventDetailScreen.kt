@@ -94,6 +94,7 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.FeeBreakdown
 import com.razumly.mvp.core.data.util.divisionsEquivalent
+import com.razumly.mvp.core.data.util.isPlaceholderSlot
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.data.util.resolveParticipantCapacity
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
@@ -170,7 +171,11 @@ private fun EventOverviewSections(
 ) {
     val event = eventWithRelations.event
     val capacity = event.resolveParticipantCapacity()
-    val filled = if (event.teamSignup) event.teamIds.size else event.playerIds.size
+    val filled = if (event.teamSignup) {
+        eventWithRelations.teams.count { teamWithPlayers -> !teamWithPlayers.team.isPlaceholderSlot() }
+    } else {
+        event.playerIds.size
+    }
     val spotsLeft = if (capacity > 0) (capacity - filled).coerceAtLeast(0) else 0
     val progress = if (capacity > 0) (filled.toFloat() / capacity.toFloat()).coerceIn(0f, 1f) else 0f
     val freeAgentIds = remember(event.freeAgentIds) { event.freeAgentIds.distinct() }
@@ -179,12 +184,13 @@ private fun EventOverviewSections(
         event.id,
         event.teamSignup,
         event.singleDivision,
-        event.teamIds,
+        eventWithRelations.teams,
         event.divisionDetails,
     ) {
         buildDivisionCapacitySummaries(
             event = event,
             divisionDetails = event.divisionDetails,
+            teams = eventWithRelations.teams,
         )
     }
     var showDivisionCapacities by rememberSaveable(event.id) { mutableStateOf(false) }
@@ -196,11 +202,13 @@ private fun EventOverviewSections(
     }
     val unresolvedFreeAgentCount = (freeAgentIds.size - freeAgentUsers.size).coerceAtLeast(0)
     val teamsNeedingPlayers = remember(eventWithRelations.teams, event.teamSizeLimit) {
-        eventWithRelations.teams.mapNotNull { team ->
-            val missing = (event.teamSizeLimit - team.team.playerIds.size).coerceAtLeast(0)
-            missing.takeIf { it > 0 }
+        eventWithRelations.teams
+            .filter { teamWithPlayers -> !teamWithPlayers.team.isPlaceholderSlot() }
+            .mapNotNull { team ->
+                val missing = (event.teamSizeLimit - team.team.playerIds.size).coerceAtLeast(0)
+                missing.takeIf { it > 0 }
+            }
         }
-    }
 
     Column(
         modifier = Modifier.fillMaxWidth(),

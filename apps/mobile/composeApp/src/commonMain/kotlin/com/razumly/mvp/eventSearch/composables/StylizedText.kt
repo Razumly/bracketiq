@@ -6,19 +6,28 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.sp
 import com.razumly.mvp.eventSearch.util.TextPattern
 import com.razumly.mvp.eventSearch.util.TextPatterns
 
 @Composable
-fun StylizedText(text: String, patterns: TextPatterns) {
+fun StylizedText(
+    text: String,
+    patterns: TextPatterns,
+    modifier: Modifier = Modifier,
+    maxLines: Int = Int.MAX_VALUE,
+    overflow: TextOverflow = TextOverflow.Clip,
+) {
     Text(
-        buildAnnotatedString {
+        modifier = modifier,
+        text = buildAnnotatedString {
             var remainingText = text
             while (remainingText.isNotEmpty()) {
                 val matchResult = findLongestMatchingPattern(remainingText, patterns)
@@ -85,7 +94,9 @@ fun StylizedText(text: String, patterns: TextPatterns) {
                 }
             }
         },
-        color = MaterialTheme.colorScheme.background
+        color = MaterialTheme.colorScheme.background,
+        maxLines = maxLines,
+        overflow = overflow,
     )
 }
 

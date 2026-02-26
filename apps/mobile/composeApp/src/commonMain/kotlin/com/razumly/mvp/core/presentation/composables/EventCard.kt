@@ -35,6 +35,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
@@ -84,6 +86,20 @@ fun EventCard(
             "$startStr - $endStr"
         } else {
             startStr
+        }
+    }
+    val prizeText = remember(event.prize) {
+        event.prize.trim().takeIf { it.isNotEmpty() }
+    }
+    val divisionSummaryText = remember(event.divisions, event.divisionDetails) {
+        val divisionLabels = event.divisions
+            .toDivisionDisplayLabels(event.divisionDetails)
+            .map { label -> label.removeStandaloneSkillWord() }
+            .filter { label -> label.isNotBlank() }
+        when {
+            divisionLabels.size > 1 -> "Divisions: Multiple"
+            divisionLabels.size == 1 -> "Division: ${divisionLabels.first()}"
+            else -> "Division: TBD"
         }
     }
 
@@ -146,7 +162,9 @@ fun EventCard(
                     text = event.name,
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.background
+                    color = MaterialTheme.colorScheme.background,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
 
@@ -163,24 +181,48 @@ fun EventCard(
                 Text(
                     text = event.location,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.background
+                    color = MaterialTheme.colorScheme.background,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
 
-            StylizedText(event.eventType.name.toTitleCase(), patterns)
-            StylizedText(
-                if (event.teamSignup) "Team registration" else "Individual registration",
-                patterns,
-            )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                val formattedDivisions = event.divisions.toDivisionDisplayLabels(event.divisionDetails).joinToString(", ")
-                StylizedText("Divisions: $formattedDivisions", patterns)
-                Text(
-                    text = "Prize: " + event.prize,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.background
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                StylizedText(
+                    text = event.eventType.name.toTitleCase(),
+                    patterns = patterns,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
+                prizeText?.let { value ->
+                    Text(
+                        text = "Prize: $value",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.background,
+                        modifier = Modifier.weight(1f),
+                        textAlign = TextAlign.End,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
+            StylizedText(
+                text = if (event.teamSignup) "Team registration" else "Individual registration",
+                patterns = patterns,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            StylizedText(
+                text = divisionSummaryText,
+                patterns = patterns,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
             HorizontalDivider(thickness = 2.dp)
 
             Row(
@@ -189,14 +231,27 @@ fun EventCard(
                 Text(
                     text = dateRangeText,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.background
+                    color = MaterialTheme.colorScheme.background,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
                 Text(
                     text = event.price.moneyFormat(),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.background
+                    color = MaterialTheme.colorScheme.background,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         }
     }
+}
+
+private val standaloneSkillWordRegex = Regex("\\bskill\\b", RegexOption.IGNORE_CASE)
+private val whitespaceRegex = Regex("\\s+")
+
+private fun String.removeStandaloneSkillWord(): String {
+    return replace(standaloneSkillWordRegex, " ")
+        .replace(whitespaceRegex, " ")
+        .trim()
 }

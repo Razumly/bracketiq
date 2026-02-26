@@ -10,6 +10,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import com.razumly.mvp.core.presentation.composables.HorizontalDivider
+import com.razumly.mvp.core.presentation.util.toTeamDisplayLabel
 import com.razumly.mvp.eventDetail.TeamPosition
 import com.razumly.mvp.eventDetail.TeamSelectionDialogState
 
@@ -46,7 +47,7 @@ fun TeamSelectionDialog(
                 items(dialogState.availableTeams) { team ->
                     ListItem(
                         headlineContent = {
-                            Text(team.team.name ?: "Team ${team.team.id}")
+                            Text(team.toTeamDisplayLabel())
                         },
                         supportingContent = {
                             Text("${team.players.size} players")

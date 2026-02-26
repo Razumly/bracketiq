@@ -37,6 +37,7 @@ import com.razumly.mvp.core.data.repositories.LeagueDivisionStandings
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.data.repositories.CreateBillRequest
 import com.razumly.mvp.core.data.util.divisionsEquivalent
+import com.razumly.mvp.core.data.util.isPlaceholderSlot
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.presentation.INavigationHandler
@@ -496,9 +497,9 @@ class DefaultEventDetailComponent(
         flowOf(teams.filter { it.team.teamSize == event.teamSizeLimit && it.team.captainId == currentUser.value.id })
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
-    override val isEventFull = combine(selectedEvent, selectedDivision) { selected, division ->
-        checkEventIsFull(selected, division)
-    }.stateIn(scope, SharingStarted.Eagerly, checkEventIsFull(event, null))
+    override val isEventFull = combine(eventWithRelations, selectedDivision) { relations, division ->
+        checkEventIsFull(relations.event, relations.teams, division)
+    }.stateIn(scope, SharingStarted.Eagerly, checkEventIsFull(event, emptyList(), null))
 
     private val _isUserInEvent: MutableStateFlow<Boolean> =
         MutableStateFlow(checkIsUserInEvent(event))
@@ -1602,25 +1603,7 @@ class DefaultEventDetailComponent(
             var shouldExitEditMode = false
             runCatching {
                 val updated = eventRepository.updateEvent(_editedEvent.value).getOrThrow()
-                val temporarilyLockedMatches = if (shouldPreserveCompletedMatches(updated)) {
-                    lockCompletedMatchesForReschedule(updated.id)
-                } else {
-                    emptyList()
-                }
-                try {
-                    eventRepository.scheduleEvent(updated.id).getOrThrow()
-                } finally {
-                    if (temporarilyLockedMatches.isNotEmpty()) {
-                        matchRepository.updateMatchesBulk(
-                            temporarilyLockedMatches.map { match -> match.copy(locked = false) },
-                        ).onFailure { error ->
-                            Napier.w(
-                                message = "Failed to restore temporary lock state after reschedule.",
-                                throwable = error,
-                            )
-                        }
-                    }
-                }
+                eventRepository.scheduleEvent(updated.id).getOrThrow()
                 matchRepository.getMatchesOfTournament(updated.id).getOrThrow()
                 shouldExitEditMode = true
             }.onFailure { throwable ->
@@ -1876,7 +1859,11 @@ class DefaultEventDetailComponent(
             return false
         }
         val userTeamIds = currentUserTeamIds()
-        return event.teamIds.any { teamId -> userTeamIds.contains(teamId) }
+        return eventWithRelations.value.teams.any { teamWithPlayers ->
+            val team = teamWithPlayers.team
+            val parentTeamId = team.parentTeamId?.trim()?.takeIf(String::isNotBlank)
+            (parentTeamId != null && userTeamIds.contains(parentTeamId)) || userTeamIds.contains(team.id)
+        }
     }
 
     private fun checkIsUserCaptain(): Boolean {
@@ -1942,7 +1929,11 @@ class DefaultEventDetailComponent(
             event.teamSignup && userId == currentUser.value.id -> {
                 val userTeamIds = currentUserTeamIds()
                 when {
-                    event.teamIds.any { teamId -> userTeamIds.contains(teamId) } ->
+                    eventWithRelations.value.teams.any { teamWithPlayers ->
+                        val team = teamWithPlayers.team
+                        val parentTeamId = team.parentTeamId?.trim()?.takeIf(String::isNotBlank)
+                        (parentTeamId != null && userTeamIds.contains(parentTeamId)) || userTeamIds.contains(team.id)
+                    } ->
                         WithdrawTargetMembership.PARTICIPANT
                     event.waitList.any { teamId -> userTeamIds.contains(teamId) } ->
                         WithdrawTargetMembership.WAITLIST
@@ -2034,21 +2025,38 @@ class DefaultEventDetailComponent(
         )
     }
 
-    private fun checkEventIsFull(event: Event, preferredDivisionId: String?): Boolean {
-        val participantCount = if (event.teamSignup) {
-            event.teamIds.size
-        } else {
-            event.playerIds.size
-        }
+    private fun checkEventIsFull(
+        event: Event,
+        teams: List<TeamWithPlayers>,
+        preferredDivisionId: String?,
+    ): Boolean {
+        val selectedDivision = resolveSelectedDivisionDetail(event, preferredDivisionId)
         val maxParticipants = if (event.singleDivision) {
             event.maxParticipants
         } else {
-            resolveSelectedDivisionDetail(event, preferredDivisionId)?.maxParticipants ?: event.maxParticipants
+            selectedDivision?.maxParticipants ?: event.maxParticipants
         }
 
         if (maxParticipants <= 0) {
             return false
         }
+
+        val participantCount = if (event.teamSignup) {
+            val divisionId = selectedDivision?.id?.normalizeDivisionIdentifier()?.takeIf(String::isNotBlank)
+            val divisionKey = selectedDivision?.key?.normalizeDivisionIdentifier()?.takeIf(String::isNotBlank)
+            val shouldFilterDivision = !event.singleDivision && (divisionId != null || divisionKey != null)
+            teams.count { teamWithPlayers ->
+                val team = teamWithPlayers.team
+                !team.isPlaceholderSlot() && (
+                    !shouldFilterDivision ||
+                        (divisionId != null && divisionsEquivalent(team.division, divisionId)) ||
+                        (divisionKey != null && divisionsEquivalent(team.division, divisionKey))
+                )
+            }
+        } else {
+            event.playerIds.size
+        }
+
         return participantCount >= maxParticipants
     }
 
@@ -2274,24 +2282,6 @@ class DefaultEventDetailComponent(
         dismissMatchEditDialog()
     }
 
-    private suspend fun lockCompletedMatchesForReschedule(eventId: String): List<MatchMVP> {
-        val matches = matchRepository.getMatchesOfTournament(eventId).getOrThrow()
-        val completedUnlockedMatches = matches.filter { match ->
-            !match.locked && isMatchCompleted(match)
-        }
-        if (completedUnlockedMatches.isNotEmpty()) {
-            matchRepository.updateMatchesBulk(
-                completedUnlockedMatches.map { match -> match.copy(locked = true) },
-            ).getOrThrow()
-        }
-        return completedUnlockedMatches
-    }
-
-    private fun shouldPreserveCompletedMatches(event: Event): Boolean {
-        return event.eventType == EventType.TOURNAMENT ||
-            (event.eventType == EventType.LEAGUE && event.includePlayoffs)
-    }
-
     private fun shouldResetBracketMatch(event: Event, match: MatchMVP): Boolean {
         return when {
             event.eventType == EventType.TOURNAMENT -> true
@@ -2305,17 +2295,6 @@ class DefaultEventDetailComponent(
             !match.previousRightId.isNullOrBlank() ||
             !match.winnerNextMatchId.isNullOrBlank() ||
             !match.loserNextMatchId.isNullOrBlank()
-    }
-
-    private fun isMatchCompleted(match: MatchMVP): Boolean {
-        val setResults = match.setResults
-        if (setResults.isEmpty()) {
-            return false
-        }
-        val teamOneWins = setResults.count { result -> result == 1 }
-        val teamTwoWins = setResults.count { result -> result == 2 }
-        val setsToWin = (setResults.size + 1) / 2
-        return teamOneWins >= setsToWin || teamTwoWins >= setsToWin
     }
 
     private fun MatchMVP.toEmptyBracketMatch(): MatchMVP = copy(

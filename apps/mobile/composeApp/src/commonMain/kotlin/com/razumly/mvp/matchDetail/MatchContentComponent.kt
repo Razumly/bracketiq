@@ -223,10 +223,11 @@ class DefaultMatchContentComponent(
         val isAssignedTeamRef = teamRefereeId != null && teamIds.contains(teamRefereeId)
         val isAssignedUserRef = normalizeOptionalId(currentMatch.refereeId) == _currentUser.id
         val checkedIn = currentMatch.refereeCheckedIn == true
+        val canSwapIntoRef = !checkedIn && canCurrentUserSwapIntoRef(currentMatch)
 
         _isRef.value = isAssignedTeamRef || isAssignedUserRef
         _refCheckedIn.value = checkedIn
-        _showRefCheckInDialog.value = !checkedIn && (_isRef.value || canCurrentUserSwapIntoRef(currentMatch))
+        _showRefCheckInDialog.value = !checkedIn && (_isRef.value || canSwapIntoRef)
     }
 
     override fun confirmRefCheckIn() {
@@ -234,34 +235,54 @@ class DefaultMatchContentComponent(
             val currentMatch = matchWithTeams.value.match
             val teamIds = currentUserTeamIds().toSet()
             val currentTeamRefereeId = normalizeOptionalId(currentMatch.teamRefereeId)
-            val currentUserTeamRef = resolveCurrentUserParticipatingTeamId(currentMatch)
             val isAssignedTeamRef =
                 currentTeamRefereeId != null && teamIds.contains(currentTeamRefereeId)
             val isAssignedUserRef = normalizeOptionalId(currentMatch.refereeId) == _currentUser.id
             val canSwap = canCurrentUserSwapIntoRef(currentMatch)
+            val checkedIn = currentMatch.refereeCheckedIn == true
 
-            val nextTeamRefereeId = when {
-                isAssignedTeamRef -> currentTeamRefereeId
-                canSwap -> currentUserTeamRef
-                else -> currentTeamRefereeId
+            if (checkedIn) {
+                dismissRefDialog()
+                _refCheckedIn.value = true
+                return@launch
             }
 
             if (!isAssignedTeamRef && !isAssignedUserRef && !canSwap) {
                 dismissRefDialog()
-                _errorState.value = "Only participating teams can referee this match."
+                _errorState.value = "Only teams in this event can referee this match."
+                return@launch
+            }
+
+            if (isAssignedTeamRef || isAssignedUserRef) {
+                val updatedMatch = matchWithTeams.value.copy(
+                    match = currentMatch.copy(refereeCheckedIn = true),
+                )
+                matchRepository.updateMatch(updatedMatch.match).onSuccess {
+                    dismissRefDialog()
+                    _refCheckedIn.value = true
+                    _isRef.value = true
+                }.onFailure {
+                    _errorState.value = it.message
+                }
+                return@launch
+            }
+
+            val currentUserEventTeamId = resolveCurrentUserEventTeamId(currentMatch)
+            if (currentUserEventTeamId == null) {
+                _errorState.value = "Only teams in this event can referee this match."
                 return@launch
             }
 
             val updatedMatch = matchWithTeams.value.copy(
                 match = currentMatch.copy(
-                    refereeCheckedIn = true,
-                    teamRefereeId = nextTeamRefereeId
+                    teamRefereeId = currentUserEventTeamId,
+                    refereeCheckedIn = false,
                 ),
             )
             matchRepository.updateMatch(updatedMatch.match).onSuccess {
-                dismissRefDialog()
-                _refCheckedIn.value = true
                 _isRef.value = true
+                _refCheckedIn.value = false
+                _showRefCheckInDialog.value = true
             }.onFailure {
                 _errorState.value = it.message
             }
@@ -272,12 +293,10 @@ class DefaultMatchContentComponent(
         val repositoryTeamIds = _currentUserTeams.value
             .map { team -> team.team.id.trim() }
             .filter(String::isNotBlank)
-        if (repositoryTeamIds.isNotEmpty()) {
-            return repositoryTeamIds
-        }
-        return _currentUser.teamIds
+        val profileTeamIds = _currentUser.teamIds
             .map { teamId -> teamId.trim() }
             .filter(String::isNotBlank)
+        return (repositoryTeamIds + profileTeamIds).distinct()
     }
 
     private fun resolveCurrentUserParticipatingTeamId(match: MatchMVP): String? {
@@ -291,6 +310,22 @@ class DefaultMatchContentComponent(
         return currentUserTeamIds().firstOrNull { teamId -> participantTeamIds.contains(teamId) }
     }
 
+    private fun resolveCurrentUserEventTeamId(match: MatchMVP): String? {
+        val userTeamIds = currentUserTeamIds()
+        val eventTeamIds = event.value
+            ?.teamIds
+            ?.mapNotNull(::normalizeOptionalId)
+            ?.toSet()
+            .orEmpty()
+
+        if (eventTeamIds.isNotEmpty()) {
+            return userTeamIds.firstOrNull { teamId -> eventTeamIds.contains(teamId) }
+        }
+
+        // Fallback for stale event snapshots where teamIds may not yet be populated.
+        return resolveCurrentUserParticipatingTeamId(match)
+    }
+
     private fun canCurrentUserSwapIntoRef(match: MatchMVP): Boolean {
         if (event.value?.doTeamsRef != true) {
             return false
@@ -298,8 +333,11 @@ class DefaultMatchContentComponent(
         if (event.value?.teamRefsMaySwap != true) {
             return false
         }
-        val participantTeamId = resolveCurrentUserParticipatingTeamId(match) ?: return false
-        return participantTeamId != normalizeOptionalId(match.teamRefereeId)
+        if (match.refereeCheckedIn == true) {
+            return false
+        }
+        val eventTeamId = resolveCurrentUserEventTeamId(match) ?: return false
+        return eventTeamId != normalizeOptionalId(match.teamRefereeId)
     }
 
     private fun normalizeOptionalId(rawId: String?): String? {

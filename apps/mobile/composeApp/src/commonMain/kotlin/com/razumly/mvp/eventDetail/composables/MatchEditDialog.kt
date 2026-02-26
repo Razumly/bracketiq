@@ -48,6 +48,7 @@ import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
 import com.razumly.mvp.core.presentation.composables.PlatformTextField
+import com.razumly.mvp.core.presentation.util.toTeamDisplayLabel
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.format
@@ -197,9 +198,11 @@ private fun MatchEditDialogContent(
 
             item {
                 IndividualScoreInputSection(
-                    team1Name = teams.find { it.team.id == editedMatch.match.team1Id }?.team?.name
+                    team1Name = teams.find { it.team.id == editedMatch.match.team1Id }
+                        ?.toTeamDisplayLabel()
                         ?: "Team 1",
-                    team2Name = teams.find { it.team.id == editedMatch.match.team2Id }?.team?.name
+                    team2Name = teams.find { it.team.id == editedMatch.match.team2Id }
+                        ?.toTeamDisplayLabel()
                         ?: "Team 2",
                     team1Scores = editedMatch.match.team1Points,
                     team2Scores = editedMatch.match.team2Points,
@@ -448,7 +451,7 @@ fun TeamSelectionField(
         expanded = expanded, onExpandedChange = onExpandedChange, modifier = modifier
     ) {
         PlatformTextField(
-            value = selectedTeam?.team?.name ?: "Select ${label.lowercase()}",
+            value = selectedTeam?.toTeamDisplayLabel() ?: "Select ${label.lowercase()}",
             onValueChange = {},
             modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable, true)
                 .fillMaxWidth(),
@@ -464,7 +467,7 @@ fun TeamSelectionField(
             teams.forEach { team ->
                 DropdownMenuItem(text = {
                     Column {
-                        Text(team.team.name ?: "Team ${team.team.id}")
+                        Text(team.toTeamDisplayLabel())
                         Text(
                             text = "${team.players.size} players",
                             style = MaterialTheme.typography.bodySmall,
