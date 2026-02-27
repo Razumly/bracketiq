@@ -152,8 +152,6 @@ private fun StandingsDivisionDto.toLeagueDivisionStandings(): LeagueDivisionStan
                 position = row.position,
                 teamId = row.teamId,
                 teamName = row.teamName,
-                wins = row.wins,
-                losses = row.losses,
                 draws = row.draws,
                 goalsFor = row.goalsFor,
                 goalsAgainst = row.goalsAgainst,

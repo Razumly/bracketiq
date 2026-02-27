@@ -351,10 +351,7 @@ private fun createTeam(
     playerIds: List<String> = listOf(captainId),
 ): Team = Team(
     id = id,
-    seed = 0,
     division = "OPEN",
-    wins = 0,
-    losses = 0,
     name = id,
     captainId = captainId,
     playerIds = playerIds,

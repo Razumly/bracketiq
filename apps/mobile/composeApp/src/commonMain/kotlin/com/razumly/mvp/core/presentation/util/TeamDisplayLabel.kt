@@ -34,10 +34,5 @@ fun TeamWithPlayers.toTeamDisplayLabel(): String {
         return playerNames.joinToString(" & ")
     }
 
-    return if (team.seed >= 0) {
-        "Team ${team.seed + 1}"
-    } else {
-        "Team"
-    }
+    return "Team"
 }
-

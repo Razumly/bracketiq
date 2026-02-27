@@ -7,8 +7,6 @@ data class StandingsRowDto(
     val position: Int = 0,
     val teamId: String = "",
     val teamName: String = "",
-    val wins: Int = 0,
-    val losses: Int = 0,
     val draws: Int = 0,
     val goalsFor: Int = 0,
     val goalsAgainst: Int = 0,

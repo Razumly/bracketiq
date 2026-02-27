@@ -486,7 +486,7 @@ private fun TeamPreviewChip(
     teamSizeLimit: Int,
     onClick: () -> Unit
 ) {
-    val teamName = team.team.name?.takeIf { it.isNotBlank() } ?: "Team ${team.team.seed + 1}"
+    val teamName = team.team.name?.takeIf { it.isNotBlank() } ?: "Team"
     Surface(
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
@@ -1007,8 +1007,6 @@ fun EventDetailScreen(
                     team = teamsById[row.teamId],
                     teamId = row.teamId,
                     teamName = row.teamName,
-                    wins = row.wins,
-                    losses = row.losses,
                     draws = row.draws,
                     goalsFor = row.goalsFor,
                     goalsAgainst = row.goalsAgainst,
@@ -2361,23 +2359,7 @@ private fun LeagueStandingsHeader() {
         ) {
             Text(
                 text = "S",
-                modifier = Modifier.weight(1.2f),
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = "W",
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = "L",
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1.4f),
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
@@ -2385,7 +2367,7 @@ private fun LeagueStandingsHeader() {
             )
             Text(
                 text = "D",
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1.2f),
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
@@ -2428,22 +2410,12 @@ private fun LeagueStandingRow(
             StandingsCell(
                 label = "S",
                 value = standing.score.formatPoints(pointPrecision),
-                modifier = Modifier.weight(1.2f)
-            )
-            StandingsCell(
-                label = "W",
-                value = standing.wins.toString(),
-                modifier = Modifier.weight(1f)
-            )
-            StandingsCell(
-                label = "L",
-                value = standing.losses.toString(),
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1.4f)
             )
             StandingsCell(
                 label = "D",
                 value = standing.draws.toString(),
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1.2f)
             )
         }
     }
@@ -2478,8 +2450,6 @@ private data class TeamStanding(
     val team: TeamWithPlayers?,
     val teamId: String,
     val teamName: String,
-    val wins: Int,
-    val losses: Int,
     val draws: Int,
     val goalsFor: Int,
     val goalsAgainst: Int,
@@ -2491,8 +2461,6 @@ private data class TeamStanding(
 }
 
 private data class StandingAccumulator(
-    var wins: Int = 0,
-    var losses: Int = 0,
     var draws: Int = 0,
     var goalsFor: Int = 0,
     var goalsAgainst: Int = 0,
@@ -2548,8 +2516,6 @@ private fun buildLeagueStandings(
             team = team,
             teamId = team.team.id,
             teamName = team.team.name ?: team.team.id,
-            wins = stats.wins,
-            losses = stats.losses,
             draws = stats.draws,
             goalsFor = stats.goalsFor,
             goalsAgainst = stats.goalsAgainst,
@@ -2559,9 +2525,7 @@ private fun buildLeagueStandings(
         )
     }.sortedWith(
         compareByDescending<TeamStanding> { it.score }
-            .thenByDescending { it.wins }
             .thenByDescending { it.goalDifferential }
-            .thenBy { it.team?.team?.seed ?: 0 }
             .thenBy { it.teamName.ifBlank { it.teamId } }
     )
 }
@@ -2576,8 +2540,8 @@ private fun StandingAccumulator.applyMatchResult(
     this.goalsAgainst += goalsAgainst
 
     when (outcome) {
-        MatchOutcome.WIN -> wins++
-        MatchOutcome.LOSS -> losses++
+        MatchOutcome.WIN -> Unit
+        MatchOutcome.LOSS -> Unit
         MatchOutcome.DRAW -> draws++
     }
 

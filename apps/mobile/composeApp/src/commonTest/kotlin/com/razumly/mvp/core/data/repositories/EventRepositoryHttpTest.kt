@@ -829,10 +829,7 @@ class EventRepositoryHttpTest {
         var capturedBody = ""
 
         val team = Team(
-            seed = 1,
             division = "open",
-            wins = 0,
-            losses = 0,
             name = "Team One",
             captainId = "u1",
             managerId = "u1",

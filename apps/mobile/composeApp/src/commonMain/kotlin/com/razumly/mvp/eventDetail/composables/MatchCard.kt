@@ -121,7 +121,7 @@ fun MatchCard(
                                     slots += PlayoffBracketSlot(
                                         matchId = candidate.match.id,
                                         divisionId = candidate.match.division,
-                                        seed = candidate.match.team1Seed ?: candidate.team1?.seed,
+                                        seed = candidate.match.team1Seed,
                                         slot = BracketTeamSlot.TEAM1,
                                     )
                                 }
@@ -129,7 +129,7 @@ fun MatchCard(
                                     slots += PlayoffBracketSlot(
                                         matchId = candidate.match.id,
                                         divisionId = candidate.match.division,
-                                        seed = candidate.match.team2Seed ?: candidate.team2?.seed,
+                                        seed = candidate.match.team2Seed,
                                         slot = BracketTeamSlot.TEAM2,
                                     )
                                 }

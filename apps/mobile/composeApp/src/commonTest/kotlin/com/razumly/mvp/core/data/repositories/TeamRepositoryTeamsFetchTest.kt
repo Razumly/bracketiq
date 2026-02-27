@@ -283,10 +283,7 @@ class TeamRepositoryTeamsFetchTest {
                         {
                           "id": "t1",
                           "name": "Team 1",
-                          "seed": 0,
                           "division": null,
-                          "wins": 0,
-                          "losses": 0,
                           "playerIds": ["u1"],
                           "captainId": "u1",
                           "pending": [],

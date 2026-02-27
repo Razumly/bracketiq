@@ -121,10 +121,7 @@ class DivisionCapacitySummaryTest {
 
     private fun buildTeamWithPlayers(teamId: String): TeamWithPlayers = TeamWithPlayers(
         team = Team(
-            seed = 1,
             division = "open",
-            wins = 0,
-            losses = 0,
             name = teamId,
             captainId = "captain-$teamId",
             teamSize = 2,

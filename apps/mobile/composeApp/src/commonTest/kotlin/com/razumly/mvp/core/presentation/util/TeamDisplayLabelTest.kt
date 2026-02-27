@@ -15,7 +15,6 @@ class TeamDisplayLabelTest {
             team = Team(captainId = captain.id).copy(
                 id = "team_1",
                 name = "  The Rockets  ",
-                seed = 0,
                 playerIds = listOf(captain.id),
             ),
             captain = captain,
@@ -33,7 +32,6 @@ class TeamDisplayLabelTest {
             team = Team(captainId = alice.id).copy(
                 id = "team_2",
                 name = "   ",
-                seed = 0,
                 playerIds = listOf(alice.id, bob.id),
             ),
             captain = alice,
@@ -44,20 +42,19 @@ class TeamDisplayLabelTest {
     }
 
     @Test
-    fun to_team_display_label_falls_back_to_seed_based_team_number_when_no_name_or_players() {
+    fun to_team_display_label_falls_back_to_generic_team_label_when_no_name_or_players() {
         val captain = user(id = "captain", firstName = "Captain", lastName = "One")
         val team = buildTeamWithPlayers(
             team = Team(captainId = captain.id).copy(
                 id = "team_3",
                 name = null,
-                seed = 2,
                 playerIds = listOf(captain.id),
             ),
             captain = captain,
             players = emptyList(),
         )
 
-        assertEquals("Team 3", team.toTeamDisplayLabel())
+        assertEquals("Team", team.toTeamDisplayLabel())
     }
 
     private fun buildTeamWithPlayers(
@@ -94,4 +91,3 @@ class TeamDisplayLabelTest {
         )
     }
 }
-
