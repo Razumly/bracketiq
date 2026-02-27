@@ -9,8 +9,6 @@
 /* Begin PBXBuildFile section */
 		058557BB273AAA24004C7B11 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 058557BA273AAA24004C7B11 /* Assets.xcassets */; };
 		058557D9273AAEEB004C7B11 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 058557D8273AAEEB004C7B11 /* Preview Assets.xcassets */; };
-		1E0CF9B12DD5601E00A89255 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1E0CF9B02DD5601E00A89255 /* FirebaseCore */; };
-		1E0CF9B32DD5601E00A89255 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = 1E0CF9B22DD5601E00A89255 /* FirebaseMessaging */; };
 		1E7A95CA2E0A1775001C2FA0 /* StripePaymentSheet in Frameworks */ = {isa = PBXBuildFile; productRef = 1E7A95C92E0A1775001C2FA0 /* StripePaymentSheet */; };
 		1E7DB94E2DEF5BC8006E07CF /* NativeDatePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E7DB94D2DEF5BC8006E07CF /* NativeDatePicker.swift */; };
 		1E7DB9522DEF5D83006E07CF /* IOSNativeViewFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E7DB9512DEF5D83006E07CF /* IOSNativeViewFactory.swift */; };
@@ -54,8 +52,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				1ECBBF652DD83E680048A444 /* GoogleMaps in Frameworks */,
-				1E0CF9B32DD5601E00A89255 /* FirebaseMessaging in Frameworks */,
-				1E0CF9B12DD5601E00A89255 /* FirebaseCore in Frameworks */,
 				923483DAACDF50F9697B66B3 /* Pods_iosApp.framework in Frameworks */,
 				1E7A95CA2E0A1775001C2FA0 /* StripePaymentSheet in Frameworks */,
 			);
@@ -193,7 +189,6 @@
 			);
 			mainGroup = 7555FF72242A565900829871;
 			packageReferences = (
-				1E0CF9AF2DD5601E00A89255 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
 				1ECBBF632DD83E680048A444 /* XCRemoteSwiftPackageReference "ios-maps-sdk" */,
 				1E7A95C82E0A16C0001C2FA0 /* XCRemoteSwiftPackageReference "stripe-ios-spm" */,
 			);
@@ -561,14 +556,6 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		1E0CF9AF2DD5601E00A89255 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/firebase/firebase-ios-sdk.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 11.12.0;
-			};
-		};
 		1E7A95C82E0A16C0001C2FA0 /* XCRemoteSwiftPackageReference "stripe-ios-spm" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/stripe/stripe-ios-spm";
@@ -588,16 +575,6 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		1E0CF9B02DD5601E00A89255 /* FirebaseCore */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 1E0CF9AF2DD5601E00A89255 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
-			productName = FirebaseCore;
-		};
-		1E0CF9B22DD5601E00A89255 /* FirebaseMessaging */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 1E0CF9AF2DD5601E00A89255 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
-			productName = FirebaseMessaging;
-		};
 		1E7A95C92E0A1775001C2FA0 /* StripePaymentSheet */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 1E7A95C82E0A16C0001C2FA0 /* XCRemoteSwiftPackageReference "stripe-ios-spm" */;

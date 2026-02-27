@@ -183,7 +183,8 @@ struct GoogleMapView: UIViewRepresentable {
         mapView.isMyLocationEnabled = true
         mapView.delegate = context.coordinator
         mapView.mapType = .normal
-        mapView.settings.consumesGesturesInView = false
+        // Keep taps inside the map so marker/info-window presses are not passed through.
+        mapView.settings.consumesGesturesInView = true
         mapView.settings.scrollGestures = true
         mapView.settings.zoomGestures = true
         
@@ -191,6 +192,11 @@ struct GoogleMapView: UIViewRepresentable {
     }
     
     func updateUIView(_ mapView: GMSMapView, context: Context) {
+        context.coordinator.parent = self
+        context.coordinator.onEventSelected = onEventSelected
+        context.coordinator.onPlaceSelected = onPlaceSelected
+        context.coordinator.onPlaceSelectionPoint = onPlaceSelectionPoint
+
         // Clear existing markers
         mapView.clear()
         context.coordinator.clearAllMarkers()
@@ -257,10 +263,10 @@ struct GoogleMapView: UIViewRepresentable {
 }
 
 class Coordinator: NSObject, GMSMapViewDelegate {
-    let parent: GoogleMapView
-    let onEventSelected: (Event) -> Void
-    let onPlaceSelected: (MVPPlace) -> Void
-    let onPlaceSelectionPoint: (KotlinFloat, KotlinFloat) -> Void
+    var parent: GoogleMapView
+    var onEventSelected: (Event) -> Void
+    var onPlaceSelected: (MVPPlace) -> Void
+    var onPlaceSelectionPoint: (KotlinFloat, KotlinFloat) -> Void
     
     var placeMarkers: [GMSMarker] = []
     var currentPOIMarker: GMSMarker?
@@ -465,16 +471,23 @@ class Coordinator: NSObject, GMSMapViewDelegate {
             onPlaceSelected(placeData.place)
             return true
         } else if let poiData = marker.userData as? POIMarkerData {
+            let fallbackPlace = parent.component.buildFallbackPlace(
+                name: poiData.name,
+                placeId: poiData.placeId,
+                latitude: marker.position.latitude,
+                longitude: marker.position.longitude
+            )
             Task {
                 do {
                     let place = try await parent.component.getPlace(placeId: poiData.placeId)
-                    if let place = place {
-                        await MainActor.run {
-                            self.onPlaceSelected(place)
-                        }
+                    let resolvedPlace = place ?? fallbackPlace
+                    await MainActor.run {
+                        self.onPlaceSelected(resolvedPlace)
                     }
                 } catch {
-                    print("Error getting place details: \(error)")
+                    await MainActor.run {
+                        self.onPlaceSelected(fallbackPlace)
+                    }
                 }
             }
             return true

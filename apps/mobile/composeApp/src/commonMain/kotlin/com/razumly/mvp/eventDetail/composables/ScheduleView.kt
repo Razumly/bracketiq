@@ -96,8 +96,8 @@ sealed interface ScheduleItem {
     ) : ScheduleItem {
         override val key: String = "match-${match.match.id}"
         override val eventId: String = match.match.eventId
-        override val start: Instant = match.match.start
-        override val end: Instant = normalizeScheduleEnd(match.match.start, match.match.end)
+        override val start: Instant = match.match.start ?: match.match.end ?: Clock.System.now()
+        override val end: Instant = normalizeScheduleEnd(start, match.match.end)
     }
 
     data class EventEntry(

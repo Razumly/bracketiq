@@ -167,6 +167,8 @@ private fun List<BracketDivisionOption>.resolveSelectedDivisionId(preferredId: S
 @Composable
 private fun EventOverviewSections(
     eventWithRelations: EventWithFullRelations,
+    teamsAndParticipantsLoading: Boolean,
+    matchesLoading: Boolean,
     onOpenDetails: () -> Unit,
 ) {
     val event = eventWithRelations.event
@@ -201,6 +203,7 @@ private fun EventOverviewSections(
         freeAgentIds.mapNotNull(playersById::get)
     }
     val unresolvedFreeAgentCount = (freeAgentIds.size - freeAgentUsers.size).coerceAtLeast(0)
+    val openDetailsLoading = teamsAndParticipantsLoading || matchesLoading
     val teamsNeedingPlayers = remember(eventWithRelations.teams, event.teamSizeLimit) {
         eventWithRelations.teams
             .filter { teamWithPlayers -> !teamWithPlayers.team.isPlaceholderSlot(event.eventType) }
@@ -314,72 +317,96 @@ private fun EventOverviewSections(
             }
         }
         if (event.teamSignup) {
-            SectionHeader(
-                title = "Teams (${eventWithRelations.teams.size})",
-                action = "See all",
-                onAction = onOpenDetails
-            )
-            if (eventWithRelations.teams.isEmpty()) {
+            if (teamsAndParticipantsLoading) {
+                SectionHeader(
+                    title = "Teams",
+                    action = "Loading",
+                    onAction = {},
+                    actionEnabled = false,
+                )
                 Text(
-                    text = "No teams yet.",
+                    text = "Loading teams and participants...",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             } else {
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(
-                        eventWithRelations.teams.take(4),
-                        key = { teamWithPlayers -> teamWithPlayers.team.id }
-                    ) { team ->
-                        TeamPreviewChip(
-                            team = team,
-                            teamSizeLimit = event.teamSizeLimit,
-                            onClick = onOpenDetails
-                        )
+                SectionHeader(
+                    title = "Teams (${eventWithRelations.teams.size})",
+                    action = "See all",
+                    onAction = onOpenDetails
+                )
+                if (eventWithRelations.teams.isEmpty()) {
+                    Text(
+                        text = "No teams yet.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(
+                            eventWithRelations.teams.take(4),
+                            key = { teamWithPlayers -> teamWithPlayers.team.id }
+                        ) { team ->
+                            TeamPreviewChip(
+                                team = team,
+                                teamSizeLimit = event.teamSizeLimit,
+                                onClick = onOpenDetails
+                            )
+                        }
                     }
                 }
-            }
-            SectionHeader(
-                title = "Free Agents (${freeAgentIds.size})",
-                action = "See all",
-                onAction = onOpenDetails
-            )
-            if (freeAgentIds.isEmpty()) {
-                Text(
-                    text = "No free agents yet.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                SectionHeader(
+                    title = "Free Agents (${freeAgentIds.size})",
+                    action = "See all",
+                    onAction = onOpenDetails
                 )
-            } else {
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(freeAgentUsers.take(8), key = { user -> user.id }) { user ->
-                        FreeAgentPreview(user = user, onClick = onOpenDetails)
-                    }
-                    if (unresolvedFreeAgentCount > 0) {
-                        item {
-                            Surface(
-                                shape = RoundedCornerShape(16.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                                modifier = Modifier.clickable(onClick = onOpenDetails)
-                            ) {
-                                Text(
-                                    text = "+$unresolvedFreeAgentCount",
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
+                if (freeAgentIds.isEmpty()) {
+                    Text(
+                        text = "No free agents yet.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(freeAgentUsers.take(8), key = { user -> user.id }) { user ->
+                            FreeAgentPreview(user = user, onClick = onOpenDetails)
+                        }
+                        if (unresolvedFreeAgentCount > 0) {
+                            item {
+                                Surface(
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                    modifier = Modifier.clickable(onClick = onOpenDetails)
+                                ) {
+                                    Text(
+                                        text = "+$unresolvedFreeAgentCount",
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
         }
-        TextButton(onClick = onOpenDetails, modifier = Modifier.align(Alignment.End)) {
-            Text("View participants & schedule")
+        TextButton(
+            onClick = onOpenDetails,
+            enabled = !openDetailsLoading,
+            modifier = Modifier.align(Alignment.End),
+        ) {
+            Text(
+                if (openDetailsLoading) {
+                    "Loading participants & schedule..."
+                } else {
+                    "View participants & schedule"
+                }
+            )
         }
     }
 }
@@ -463,6 +490,7 @@ private fun SectionHeader(
     title: String,
     action: String,
     onAction: () -> Unit,
+    actionEnabled: Boolean = true,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -474,9 +502,28 @@ private fun SectionHeader(
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.SemiBold
         )
-        TextButton(onClick = onAction) {
+        TextButton(onClick = onAction, enabled = actionEnabled) {
             Text(action)
         }
+    }
+}
+
+@Composable
+private fun DetailTabLoadingState(message: String) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp, vertical = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
+    ) {
+        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
     }
 }
 
@@ -613,6 +660,9 @@ private fun BracketFloatingBar(
     showBracketToggle: Boolean,
     isLosersBracket: Boolean,
     onBracketToggle: () -> Unit,
+    primaryActionLabel: String? = null,
+    onPrimaryActionClick: (() -> Unit)? = null,
+    primaryActionEnabled: Boolean = true,
     showConfirmResultsAction: Boolean = false,
     confirmResultsEnabled: Boolean = false,
     confirmResultsInProgress: Boolean = false,
@@ -685,6 +735,19 @@ private fun BracketFloatingBar(
                 ) {
                     Text(
                         text = if (confirmResultsInProgress) "Confirming..." else "Confirm Results",
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            if (!primaryActionLabel.isNullOrBlank() && onPrimaryActionClick != null) {
+                Button(
+                    onClick = onPrimaryActionClick,
+                    modifier = Modifier.weight(1f),
+                    enabled = primaryActionEnabled,
+                ) {
+                    Text(
+                        text = primaryActionLabel,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -877,6 +940,8 @@ fun EventDetailScreen(
     val scheduleTrackedUserIds by component.scheduleTrackedUserIds.collectAsState()
     val validTeams by component.validTeams.collectAsState()
     val showDetails by component.showDetails.collectAsState()
+    val eventTeamsAndParticipantsLoading by component.eventTeamsAndParticipantsLoading.collectAsState()
+    val eventMatchesLoading by component.eventMatchesLoading.collectAsState()
     val editedEvent by component.editedEvent.collectAsState()
     val showMap by mapComponent.showMap.collectAsState()
     val showFeeBreakdown by component.showFeeBreakdown.collectAsState()
@@ -915,7 +980,9 @@ fun EventDetailScreen(
     val isTournamentEvent = eventType == EventType.TOURNAMENT
     val hasBracketView = isTournamentEvent ||
         (eventType == EventType.LEAGUE && selectedEvent.event.includePlayoffs)
-    val hasScheduleView = selectedEvent.matches.isNotEmpty()
+    val hasScheduleView = eventType == EventType.LEAGUE ||
+        eventType == EventType.TOURNAMENT ||
+        selectedEvent.matches.isNotEmpty()
     val hasStandingsView = eventType == EventType.LEAGUE
     val isAssistantHost = remember(currentUser.id, selectedEvent.event.assistantHostIds) {
         val currentUserId = currentUser.id.trim()
@@ -1161,11 +1228,19 @@ fun EventDetailScreen(
         options
     }
     val playoffDivisionIds = remember(selectedEvent.event.divisionDetails) {
-        selectedEvent.event.divisionDetails
-            .flatMap { detail -> detail.playoffPlacementDivisionIds }
-            .map { divisionId -> divisionId.normalizeDivisionIdentifier() }
-            .filter { normalized -> normalized.isNotBlank() }
-            .toSet()
+        buildSet {
+            selectedEvent.event.divisionDetails
+                .flatMap { detail -> detail.playoffPlacementDivisionIds }
+                .map { divisionId -> divisionId.normalizeDivisionIdentifier() }
+                .filter { normalized -> normalized.isNotBlank() }
+                .forEach { normalized -> add(normalized) }
+
+            selectedEvent.event.divisionDetails
+                .filter { detail -> detail.kind?.trim()?.equals("PLAYOFF", ignoreCase = true) == true }
+                .map { detail -> detail.id.normalizeDivisionIdentifier() }
+                .filter { normalized -> normalized.isNotBlank() }
+                .forEach { normalized -> add(normalized) }
+        }
     }
     val isLeaguePlayoffSplit = remember(
         selectedEvent.event.includePlayoffs,
@@ -1436,6 +1511,8 @@ fun EventDetailScreen(
                                 } else {
                                     EventOverviewSections(
                                         eventWithRelations = selectedEvent,
+                                        teamsAndParticipantsLoading = eventTeamsAndParticipantsLoading,
+                                        matchesLoading = eventMatchesLoading,
                                         onOpenDetails = component::viewEvent
                                     )
                                 }
@@ -1720,43 +1797,57 @@ fun EventDetailScreen(
                                         onEditMatch = { match ->
                                             component.showMatchEditDialog(match)
                                         },
+                                        onAddMatchFromAnchor = { anchorMatchId, slot ->
+                                            component.addBracketMatchFromAnchor(anchorMatchId, slot)
+                                        },
                                         hideMatchDivisionLabel = hideDivisionLabelInMatchCards,
                                     )
                                 }
 
                                 DetailTab.SCHEDULE -> {
-                                    val allScheduleMatches = if (isEditingMatches) {
-                                        editableMatches
+                                    if (eventMatchesLoading) {
+                                        showFab = false
+                                        DetailTabLoadingState("Loading schedule matches...")
                                     } else {
-                                        selectedEvent.matches
-                                    }
-                                    val scheduleMatches = if (
-                                        selectedEvent.event.singleDivision || selectedDivision.isNullOrBlank()
-                                    ) {
-                                        allScheduleMatches
-                                    } else {
-                                        allScheduleMatches.filter { match ->
-                                            divisionsEquivalent(match.match.division, selectedDivision)
+                                        val allScheduleMatches = if (isEditingMatches) {
+                                            editableMatches
+                                        } else {
+                                            selectedEvent.matches
                                         }
-                                    }
-                                    ScheduleView(
-                                        items = scheduleMatches.map { match -> ScheduleItem.MatchEntry(match) },
-                                        fields = eventFields,
-                                        showFab = { showFab = it },
-                                        trackedUserIds = scheduleTrackedUserIds,
-                                        canManageMatches = isEditingMatches,
-                                        hideMatchDivisionLabel = hideDivisionLabelInMatchCards,
-                                        onToggleLockAllMatches = { locked, matchIds ->
-                                            component.setLockForEditableMatches(matchIds, locked)
-                                        },
-                                        onMatchClick = { match ->
-                                            if (isEditingMatches) {
-                                                component.showMatchEditDialog(match)
-                                            } else {
-                                                component.matchSelected(match)
+                                        val scheduleMatches = if (
+                                            selectedEvent.event.singleDivision || selectedDivision.isNullOrBlank()
+                                        ) {
+                                            allScheduleMatches
+                                        } else {
+                                            allScheduleMatches.filter { match ->
+                                                divisionsEquivalent(match.match.division, selectedDivision)
                                             }
                                         }
-                                    )
+                                        val scheduledMatches = scheduleMatches.filter { match ->
+                                            match.match.start != null
+                                        }
+                                        ScheduleView(
+                                            items = scheduledMatches.map { match -> ScheduleItem.MatchEntry(match) },
+                                            fields = eventFields,
+                                            showFab = { showFab = it },
+                                            trackedUserIds = scheduleTrackedUserIds,
+                                            canManageMatches = isEditingMatches,
+                                            hideMatchDivisionLabel = hideDivisionLabelInMatchCards,
+                                            onToggleLockAllMatches = { locked, matchIds ->
+                                                component.setLockForEditableMatches(matchIds, locked)
+                                            },
+                                            onMatchClick = { match ->
+                                                if (isEditingMatches) {
+                                                    component.showMatchEditDialog(
+                                                        match = match,
+                                                        creationContext = MatchCreateContext.SCHEDULE,
+                                                    )
+                                                } else {
+                                                    component.matchSelected(match)
+                                                }
+                                            }
+                                        )
+                                    }
                                 }
                                 DetailTab.LEAGUES -> {
                                     LeagueStandingsTab(
@@ -1772,11 +1863,16 @@ fun EventDetailScreen(
                                 }
 
                                 DetailTab.PARTICIPANTS -> {
-                                    ParticipantsView(
-                                        showFab = { showFab = it },
-                                        section = selectedParticipantsSection,
-                                        onNavigateToChat = component::onNavigateToChat
-                                    )
+                                    if (eventTeamsAndParticipantsLoading) {
+                                        showFab = false
+                                        DetailTabLoadingState("Loading teams and participants...")
+                                    } else {
+                                        ParticipantsView(
+                                            showFab = { showFab = it },
+                                            section = selectedParticipantsSection,
+                                            onNavigateToChat = component::onNavigateToChat
+                                        )
+                                    }
                                 }
                             }
                             androidx.compose.animation.AnimatedVisibility(
@@ -1795,6 +1891,9 @@ fun EventDetailScreen(
                                         showBracketToggle = selectedEvent.event.doubleElimination,
                                         isLosersBracket = losersBracket,
                                         onBracketToggle = component::toggleLosersBracket,
+                                        primaryActionLabel = if (isEditingMatches) "Add Match" else null,
+                                        onPrimaryActionClick = if (isEditingMatches) component::addBracketMatch else null,
+                                        primaryActionEnabled = isEditingMatches,
                                         onShowDetailsClick = component::toggleDetails,
                                     )
 
@@ -1805,6 +1904,9 @@ fun EventDetailScreen(
                                         showBracketToggle = false,
                                         isLosersBracket = losersBracket,
                                         onBracketToggle = component::toggleLosersBracket,
+                                        primaryActionLabel = if (isEditingMatches) "Add Match" else null,
+                                        onPrimaryActionClick = if (isEditingMatches) component::addScheduleMatch else null,
+                                        primaryActionEnabled = isEditingMatches,
                                         onShowDetailsClick = component::toggleDetails,
                                     )
 
@@ -1939,8 +2041,13 @@ fun EventDetailScreen(
                     match = dialogState.match,
                     teams = dialogState.teams,
                     fields = dialogState.fields,
+                    allMatches = dialogState.allMatches,
+                    eventType = dialogState.eventType,
+                    isCreateMode = dialogState.isCreateMode,
+                    creationContext = dialogState.creationContext,
                     onDismissRequest = component::dismissMatchEditDialog,
-                    onConfirm = component::updateMatchFromDialog
+                    onConfirm = component::updateMatchFromDialog,
+                    onDelete = component::deleteMatchFromDialog,
                 )
             }
             if (showTeamSelectionDialog) {

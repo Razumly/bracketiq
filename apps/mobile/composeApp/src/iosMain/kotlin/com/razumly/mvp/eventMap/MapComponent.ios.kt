@@ -133,6 +133,17 @@ actual class MapComponent(
         }
     }
 
+    fun buildFallbackPlace(
+        name: String,
+        placeId: String,
+        latitude: Double,
+        longitude: Double,
+    ): MVPPlace = MVPPlace(
+        name = name,
+        id = placeId,
+        coordinates = listOf(longitude, latitude),
+    )
+
     /**
      * Autocomplete suggestions via the Place Autocomplete Web Service.
      */

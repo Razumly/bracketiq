@@ -42,7 +42,7 @@ fun TeamDetailsDialog(
             Column(
                 modifier = Modifier.padding(24.dp)
             ) {
-                val knownUsers = (team.players + team.pendingPlayers + listOf(team.captain))
+                val knownUsers = (team.players + team.pendingPlayers + listOfNotNull(team.captain))
                     .associateBy { it.id }
                 val managerId = team.team.managerId ?: team.team.captainId
                 val managerLabel = knownUsers[managerId]?.displayName ?: managerId

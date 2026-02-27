@@ -365,6 +365,7 @@ actual fun EventMap(
                         state = focusedMarkerState,
                         icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED),
                         onClick = { marker -> false },
+                        onInfoWindowClick = { onEventSelected(event) },
                     ) { marker ->
                         MapEventCard(
                             event = event, modifier = Modifier.wrapContentSize()

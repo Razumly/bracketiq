@@ -1378,15 +1378,16 @@ class DefaultCreateEventComponent(
 
                 matches.any { match ->
                     val fieldId = match.fieldId?.trim()
+                    val matchStart = match.start ?: return@any false
                     val matchEnd = match.end
                     !fieldId.isNullOrBlank() &&
                         selectedFieldSet.contains(fieldId) &&
                         matchEnd != null &&
-                        matchEnd > match.start &&
+                        matchEnd > matchStart &&
                         rangesOverlap(
                             firstStart = selectedStart,
                             firstEnd = selectedEnd,
-                            secondStart = match.start,
+                            secondStart = matchStart,
                             secondEnd = matchEnd,
                         )
                 }

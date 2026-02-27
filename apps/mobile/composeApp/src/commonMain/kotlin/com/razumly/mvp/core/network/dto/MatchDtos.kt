@@ -44,9 +44,8 @@ data class MatchApiDto(
         val resolvedId = id ?: legacyId
         val resolvedMatchId = matchId
         val resolvedEventId = eventId
-        val resolvedStart = start
         if (resolvedId.isNullOrBlank() || resolvedMatchId == null) return null
-        if (resolvedEventId.isNullOrBlank() || resolvedStart.isNullOrBlank()) return null
+        if (resolvedEventId.isNullOrBlank()) return null
 
         return MatchMVP(
             id = resolvedId,
@@ -58,7 +57,7 @@ data class MatchApiDto(
             eventId = resolvedEventId,
             refereeId = refereeId,
             fieldId = fieldId,
-            start = Instant.parse(resolvedStart),
+            start = start?.let { Instant.parse(it) },
             end = end?.let { Instant.parse(it) },
             division = division?.normalizeDivisionLabel(),
             team1Points = team1Points ?: emptyList(),
@@ -108,6 +107,10 @@ data class MatchUpdateDto(
     val matchId: Int? = null,
     val finalize: Boolean? = null,
     val time: String? = null,
+    val start: String? = null,
+    val end: String? = null,
+    val division: String? = null,
+    val losersBracket: Boolean? = null,
     val locked: Boolean? = null,
 )
 
@@ -131,12 +134,54 @@ data class BulkMatchUpdateEntryDto(
     val loserNextMatchId: String? = null,
     val side: String? = null,
     val refereeCheckedIn: Boolean? = null,
+    val start: String? = null,
+    val end: String? = null,
+    val division: String? = null,
+    val losersBracket: Boolean? = null,
     val locked: Boolean? = null,
 )
 
 @Serializable
 data class BulkMatchUpdateRequestDto(
-    val matches: List<BulkMatchUpdateEntryDto>,
+    val matches: List<BulkMatchUpdateEntryDto>? = null,
+    val creates: List<BulkMatchCreateEntryDto>? = null,
+    val deletes: List<String>? = null,
+)
+
+@Serializable
+data class BulkMatchCreateEntryDto(
+    val clientId: String,
+    val creationContext: String = "bracket",
+    val autoPlaceholderTeam: Boolean = true,
+    val matchId: Int? = null,
+    val team1Points: List<Int>? = null,
+    val team2Points: List<Int>? = null,
+    val setResults: List<Int>? = null,
+    val team1Id: String? = null,
+    val team2Id: String? = null,
+    val team1Seed: Int? = null,
+    val team2Seed: Int? = null,
+    val refereeId: String? = null,
+    val teamRefereeId: String? = null,
+    val fieldId: String? = null,
+    val previousLeftId: String? = null,
+    val previousRightId: String? = null,
+    val winnerNextMatchId: String? = null,
+    val loserNextMatchId: String? = null,
+    val side: String? = null,
+    val refereeCheckedIn: Boolean? = null,
+    val start: String? = null,
+    val end: String? = null,
+    val division: String? = null,
+    val losersBracket: Boolean? = null,
+    val locked: Boolean? = null,
+)
+
+@Serializable
+data class BulkMatchesResponseDto(
+    val matches: List<MatchApiDto> = emptyList(),
+    val created: Map<String, String> = emptyMap(),
+    val deleted: List<String> = emptyList(),
 )
 
 fun MatchMVP.toBulkMatchUpdateEntryDto(): BulkMatchUpdateEntryDto = BulkMatchUpdateEntryDto(
@@ -158,5 +203,41 @@ fun MatchMVP.toBulkMatchUpdateEntryDto(): BulkMatchUpdateEntryDto = BulkMatchUpd
     loserNextMatchId = loserNextMatchId,
     side = side,
     refereeCheckedIn = refereeCheckedIn,
+    start = start?.toString(),
+    end = end?.toString(),
+    division = division,
+    losersBracket = losersBracket,
+    locked = locked,
+)
+
+fun MatchMVP.toBulkMatchCreateEntryDto(
+    clientId: String,
+    creationContext: String,
+    autoPlaceholderTeam: Boolean,
+): BulkMatchCreateEntryDto = BulkMatchCreateEntryDto(
+    clientId = clientId,
+    creationContext = creationContext,
+    autoPlaceholderTeam = autoPlaceholderTeam,
+    matchId = matchId,
+    team1Points = team1Points,
+    team2Points = team2Points,
+    setResults = setResults,
+    team1Id = team1Id,
+    team2Id = team2Id,
+    team1Seed = team1Seed,
+    team2Seed = team2Seed,
+    refereeId = refereeId,
+    teamRefereeId = teamRefereeId,
+    fieldId = fieldId,
+    previousLeftId = previousLeftId,
+    previousRightId = previousRightId,
+    winnerNextMatchId = winnerNextMatchId,
+    loserNextMatchId = loserNextMatchId,
+    side = side,
+    refereeCheckedIn = refereeCheckedIn,
+    start = start?.toString(),
+    end = end?.toString(),
+    division = division,
+    losersBracket = losersBracket,
     locked = locked,
 )

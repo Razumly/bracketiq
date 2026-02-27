@@ -3705,7 +3705,9 @@ fun EventDetails(
 
     EventMap(
         component = mapComponent,
-        onEventSelected = { showImageSelector = true },
+        onEventSelected = { _ ->
+            mapComponent.toggleMap()
+        },
         onPlaceSelected = { place ->
             if (editView) {
                 onPlaceSelected(place)
@@ -3724,7 +3726,7 @@ fun EventDetails(
         } else {
             currentLocation ?: LatLng(0.0, 0.0)
         },
-        focusedEvent = if (event.location.isNotBlank()) {
+        focusedEvent = if (!editView && event.location.isNotBlank()) {
             event
         } else {
             null

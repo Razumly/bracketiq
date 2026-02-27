@@ -25,6 +25,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
@@ -68,9 +69,21 @@ class TeamRepository(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    override fun getTeamsFlow(ids: List<String>): Flow<Result<List<TeamWithPlayers>>> =
-        databaseService.getTeamDao.getTeamsWithPlayersFlowByIds(ids)
+    override fun getTeamsFlow(ids: List<String>): Flow<Result<List<TeamWithPlayers>>> {
+        val teamIds = ids.distinct().filter(String::isNotBlank)
+        if (teamIds.isEmpty()) {
+            return flowOf(Result.success(emptyList()))
+        }
+
+        val localFlow = databaseService.getTeamDao.getTeamsWithPlayersFlowByIds(teamIds)
             .map { teams -> Result.success(teams) }
+
+        scope.launch {
+            getTeams(teamIds)
+        }
+
+        return localFlow
+    }
 
     override suspend fun getTeams(ids: List<String>): Result<List<Team>> {
         val teamIds = ids.distinct().filter(String::isNotBlank)

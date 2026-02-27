@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
@@ -18,6 +19,10 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -37,6 +42,7 @@ import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.util.getScreenWidth
 import com.razumly.mvp.core.presentation.util.isScrollingUp
 import com.razumly.mvp.core.util.ceilDiv
+import com.razumly.mvp.eventDetail.BracketAddSlot
 import com.razumly.mvp.eventDetail.LocalTournamentComponent
 import kotlinx.coroutines.flow.distinctUntilChanged
 
@@ -47,6 +53,7 @@ fun TournamentBracketView(
     isEditingMatches: Boolean = false,
     editableMatches: List<MatchWithRelations> = emptyList(),
     onEditMatch: ((MatchWithRelations) -> Unit)? = null,
+    onAddMatchFromAnchor: ((anchorMatchId: String, slot: BracketAddSlot) -> Unit)? = null,
     hideMatchDivisionLabel: Boolean = false,
 ) {
     val component = LocalTournamentComponent.current
@@ -69,6 +76,10 @@ fun TournamentBracketView(
     val cardContainerHeight = cardHeight + cardPadding
     var boxHeight by remember { mutableStateOf(Dp.Unspecified) }
     val width = getScreenWidth() / 1.5
+    val showAddControls = isEditingMatches && onAddMatchFromAnchor != null
+    val leftControlPadding = if (showAddControls) 28.dp else 0.dp
+    val cardWidthDp = width.dp
+    val cardContainerWidth = cardWidthDp + leftControlPadding + if (showAddControls) 20.dp else 0.dp
     var maxHeightIndex by remember { mutableIntStateOf(0) }
     val navBarPadding = LocalNavBarPadding.current.calculateBottomPadding()
     var prevColumnScroll by remember { mutableStateOf(columnScrollState.value) }
@@ -199,20 +210,90 @@ fun TournamentBracketView(
                                             match
                                         }
 
-                                        MatchCard(
-                                            match = displayMatch,
-                                            onClick = {
-                                                if (displayMatch != null) {
-                                                    if (isEditingMatches) {
-                                                        onEditMatch?.invoke(displayMatch)
-                                                    } else {
-                                                        onMatchClick(displayMatch)
+                                        Box(
+                                            modifier = Modifier
+                                                .height(cardHeight.dp)
+                                                .width(cardContainerWidth)
+                                        ) {
+                                            if (displayMatch != null) {
+                                                val matchModel = displayMatch.match
+                                                val hasPreviousLeft = !matchModel.previousLeftId.isNullOrBlank()
+                                                val hasPreviousRight = !matchModel.previousRightId.isNullOrBlank()
+                                                val canExtendFinal =
+                                                    matchModel.winnerNextMatchId.isNullOrBlank() &&
+                                                        matchModel.loserNextMatchId.isNullOrBlank()
+
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxSize()
+                                                        .padding(start = leftControlPadding)
+                                                ) {
+                                                    MatchCard(
+                                                        match = displayMatch,
+                                                        onClick = {
+                                                            if (isEditingMatches) {
+                                                                onEditMatch?.invoke(displayMatch)
+                                                            } else {
+                                                                onMatchClick(displayMatch)
+                                                            }
+                                                        },
+                                                        modifier = Modifier
+                                                            .height(cardHeight.dp)
+                                                            .width(cardWidthDp),
+                                                        showDivisionLabel = !hideMatchDivisionLabel,
+                                                    )
+                                                }
+
+                                                if (showAddControls && !hasPreviousLeft) {
+                                                    IconButton(
+                                                        onClick = {
+                                                            onAddMatchFromAnchor?.invoke(
+                                                                displayMatch.match.id,
+                                                                BracketAddSlot.PREVIOUS_LEFT,
+                                                            )
+                                                        },
+                                                        modifier = Modifier.align(Alignment.TopStart)
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.Add,
+                                                            contentDescription = "Add previous left match",
+                                                        )
                                                     }
                                                 }
-                                            },
-                                            modifier = Modifier.height(cardHeight.dp).width(width.dp),
-                                            showDivisionLabel = !hideMatchDivisionLabel,
-                                        )
+                                                if (showAddControls && !hasPreviousRight) {
+                                                    IconButton(
+                                                        onClick = {
+                                                            onAddMatchFromAnchor?.invoke(
+                                                                displayMatch.match.id,
+                                                                BracketAddSlot.PREVIOUS_RIGHT,
+                                                            )
+                                                        },
+                                                        modifier = Modifier.align(Alignment.BottomStart)
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.Add,
+                                                            contentDescription = "Add previous right match",
+                                                        )
+                                                    }
+                                                }
+                                                if (showAddControls && canExtendFinal) {
+                                                    IconButton(
+                                                        onClick = {
+                                                            onAddMatchFromAnchor?.invoke(
+                                                                displayMatch.match.id,
+                                                                BracketAddSlot.FINAL_WINNER_NEXT,
+                                                            )
+                                                        },
+                                                        modifier = Modifier.align(Alignment.CenterEnd)
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.Add,
+                                                            contentDescription = "Add match after final",
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }

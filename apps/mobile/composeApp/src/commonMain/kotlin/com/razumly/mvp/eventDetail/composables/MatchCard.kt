@@ -97,51 +97,27 @@ fun MatchCard(
                 ) {
                     if (
                         selectedEvent.eventType != EventType.LEAGUE ||
-                        !selectedEvent.includePlayoffs ||
-                        selectedEvent.singleDivision
+                        !selectedEvent.includePlayoffs
                     ) {
                         emptyMap()
                     } else {
-                        val slots = matches.values
-                            .asSequence()
-                            .flatMap { candidate ->
-                                if (candidate.match.losersBracket) {
-                                    return@flatMap emptySequence()
-                                }
-                                val leftEntrantSlot =
-                                    candidate.previousLeftMatch == null && candidate.match.previousLeftId == null
-                                val rightEntrantSlot =
-                                    candidate.previousRightMatch == null && candidate.match.previousRightId == null
-                                if (!leftEntrantSlot && !rightEntrantSlot) {
-                                    return@flatMap emptySequence()
-                                }
-
-                                val slots = mutableListOf<PlayoffBracketSlot>()
-                                if (leftEntrantSlot) {
-                                    slots += PlayoffBracketSlot(
-                                        matchId = candidate.match.id,
-                                        divisionId = candidate.match.division,
-                                        seed = candidate.match.team1Seed,
-                                        slot = BracketTeamSlot.TEAM1,
-                                    )
-                                }
-                                if (rightEntrantSlot) {
-                                    slots += PlayoffBracketSlot(
-                                        matchId = candidate.match.id,
-                                        divisionId = candidate.match.division,
-                                        seed = candidate.match.team2Seed,
-                                        slot = BracketTeamSlot.TEAM2,
-                                    )
-                                }
-                                slots.asSequence()
-                            }
-                            .toList()
-                        buildLeaguePlayoffPlaceholderAssignments(
-                            eventDivisions = selectedEvent.divisions,
-                            divisionDetails = selectedEvent.divisionDetails,
-                            eventPlayoffTeamCount = selectedEvent.playoffTeamCount,
-                            slots = slots,
-                        )
+                        val slots = buildLeaguePlayoffEntrantSlots(matches)
+                        if (selectedEvent.singleDivision) {
+                            buildSingleDivisionPlayoffPlaceholderAssignments(
+                                slots = slots,
+                                playoffTeamCount = selectedEvent.playoffTeamCount
+                                    ?: selectedEvent.divisionDetails
+                                        .firstOrNull()
+                                        ?.playoffTeamCount,
+                            )
+                        } else {
+                            buildLeaguePlayoffPlaceholderAssignments(
+                                eventDivisions = selectedEvent.divisions,
+                                divisionDetails = selectedEvent.divisionDetails,
+                                eventPlayoffTeamCount = selectedEvent.playoffTeamCount,
+                                slots = slots,
+                            )
+                        }
                     }
                 }
                 val matchDateTimeLabel = formatMatchDateTimeLabel(match.match.start)
@@ -300,8 +276,16 @@ private fun TeamsSection(
         modifier = Modifier.padding(8.dp).fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        val leftMatch = matches[match.previousLeftMatch?.id]
-        val rightMatch = matches[match.previousRightMatch?.id]
+        val leftMatch = resolvePreviousMatch(
+            relationMatchId = match.previousLeftMatch?.id,
+            fallbackMatchId = match.match.previousLeftId,
+            matches = matches,
+        )
+        val rightMatch = resolvePreviousMatch(
+            relationMatchId = match.previousRightMatch?.id,
+            fallbackMatchId = match.match.previousRightId,
+            matches = matches,
+        )
         TeamRow(
             team = team1,
             points = match.match.team1Points.take(displaySetCount),
@@ -429,6 +413,113 @@ internal data class PlayoffBracketSlot(
     val slot: BracketTeamSlot,
 )
 
+internal fun buildLeaguePlayoffEntrantSlots(
+    matches: Map<String, MatchWithRelations>,
+): List<PlayoffBracketSlot> {
+    if (matches.isEmpty()) {
+        return emptyList()
+    }
+
+    return matches.values.asSequence().flatMap { candidate ->
+        if (candidate.match.losersBracket) {
+            return@flatMap emptySequence()
+        }
+
+        val leftHasResolvablePrevious = hasResolvablePreviousMatch(
+            relationMatch = candidate.previousLeftMatch,
+            fallbackMatchId = candidate.match.previousLeftId,
+            matches = matches,
+        )
+        val rightHasResolvablePrevious = hasResolvablePreviousMatch(
+            relationMatch = candidate.previousRightMatch,
+            fallbackMatchId = candidate.match.previousRightId,
+            matches = matches,
+        )
+        val leftEntrantSlot = !leftHasResolvablePrevious
+        val rightEntrantSlot = !rightHasResolvablePrevious
+        if (!leftEntrantSlot && !rightEntrantSlot) {
+            return@flatMap emptySequence()
+        }
+
+        val slots = mutableListOf<PlayoffBracketSlot>()
+        if (leftEntrantSlot) {
+            slots += PlayoffBracketSlot(
+                matchId = candidate.match.id,
+                divisionId = candidate.match.division,
+                seed = candidate.match.team1Seed,
+                slot = BracketTeamSlot.TEAM1,
+            )
+        }
+        if (rightEntrantSlot) {
+            slots += PlayoffBracketSlot(
+                matchId = candidate.match.id,
+                divisionId = candidate.match.division,
+                seed = candidate.match.team2Seed,
+                slot = BracketTeamSlot.TEAM2,
+            )
+        }
+        slots.asSequence()
+    }.toList()
+}
+
+private fun hasResolvablePreviousMatch(
+    relationMatch: MatchMVP?,
+    fallbackMatchId: String?,
+    matches: Map<String, MatchWithRelations>,
+): Boolean {
+    if (relationMatch != null) {
+        return true
+    }
+    val normalizedId = fallbackMatchId
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+        ?: return false
+    return matches.containsKey(normalizedId)
+}
+
+private fun resolvePreviousMatch(
+    relationMatchId: String?,
+    fallbackMatchId: String?,
+    matches: Map<String, MatchWithRelations>,
+): MatchWithRelations? {
+    val relationId = relationMatchId
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+    if (relationId != null) {
+        matches[relationId]?.let { return it }
+    }
+    val fallbackId = fallbackMatchId
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+        ?: return null
+    return matches[fallbackId]
+}
+
+internal fun buildSingleDivisionPlayoffPlaceholderAssignments(
+    slots: List<PlayoffBracketSlot>,
+    playoffTeamCount: Int?,
+): Map<BracketSlotKey, String> {
+    if (slots.isEmpty()) {
+        return emptyMap()
+    }
+
+    val maxSeed = playoffTeamCount?.coerceAtLeast(0) ?: return emptyMap()
+    if (maxSeed == 0) {
+        return emptyMap()
+    }
+
+    val assignments = mutableMapOf<BracketSlotKey, String>()
+    slots.forEach { slot ->
+        val seed = slot.seed ?: return@forEach
+        if (seed < 1 || seed > maxSeed) {
+            return@forEach
+        }
+        assignments[BracketSlotKey(slot.matchId, slot.slot)] =
+            "${formatOrdinalPlacement(seed)} place"
+    }
+    return assignments
+}
+
 internal fun buildLeaguePlayoffPlaceholderAssignments(
     eventDivisions: List<String>,
     divisionDetails: List<DivisionDetail>,
@@ -470,17 +561,48 @@ internal fun buildLeaguePlayoffPlaceholderAssignments(
         if (labelsByPlacement.isEmpty()) {
             continue
         }
+        val orderedSlots = divisionSlots.sortedWith(
+            compareBy<PlayoffBracketSlot>(
+                { it.seed ?: Int.MAX_VALUE },
+                { it.matchId },
+                { it.slot.ordinal },
+            ),
+        )
         val assignedPerPlacement = mutableMapOf<Int, Int>()
-        divisionSlots.forEach { slot ->
-            val slotSeed = slot.seed ?: return@forEach
-            if (slotSeed < 1) {
+        val unresolvedSlots = mutableListOf<PlayoffBracketSlot>()
+
+        orderedSlots.forEach { slot ->
+            val slotSeed = slot.seed
+            if (slotSeed == null || slotSeed < 1) {
+                unresolvedSlots += slot
                 return@forEach
             }
-            val labelsForPlacement = labelsByPlacement[slotSeed] ?: return@forEach
+            val labelsForPlacement = labelsByPlacement[slotSeed]
+            if (labelsForPlacement.isNullOrEmpty()) {
+                unresolvedSlots += slot
+                return@forEach
+            }
             val placementOffset = assignedPerPlacement[slotSeed] ?: 0
-            val label = labelsForPlacement.getOrNull(placementOffset) ?: return@forEach
+            val label = labelsForPlacement.getOrNull(placementOffset)
+            if (label == null) {
+                unresolvedSlots += slot
+                return@forEach
+            }
             assignedPerPlacement[slotSeed] = placementOffset + 1
             result[BracketSlotKey(slot.matchId, slot.slot)] = label
+        }
+
+        if (unresolvedSlots.isNotEmpty()) {
+            val remainingLabels = labelsByPlacement
+                .entries
+                .sortedBy { it.key }
+                .flatMap { entry ->
+                    val consumedCount = assignedPerPlacement[entry.key] ?: 0
+                    entry.value.drop(consumedCount)
+                }
+            unresolvedSlots.zip(remainingLabels).forEach { (slot, label) ->
+                result[BracketSlotKey(slot.matchId, slot.slot)] = label
+            }
         }
     }
 
@@ -581,7 +703,10 @@ internal fun formatOrdinalPlacement(position: Int): String {
     return "$value$suffix"
 }
 
-private fun formatMatchDateTimeLabel(start: Instant): String {
+private fun formatMatchDateTimeLabel(start: Instant?): String {
+    if (start == null) {
+        return "TBD"
+    }
     val localDateTime = start.toLocalDateTime(TimeZone.currentSystemDefault())
     val month = localDateTime.date.monthNumber.toString().padStart(2, '0')
     val day = localDateTime.date.dayOfMonth.toString().padStart(2, '0')

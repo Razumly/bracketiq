@@ -30,6 +30,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
+import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 
 interface MatchContentComponent {
@@ -438,7 +439,7 @@ class DefaultMatchContentComponent(
 
             if (isMatchOver(updatedScoringMatch)) {
                 _matchFinished.value = true
-                val endTime = updatedScoringMatch.end ?: updatedScoringMatch.start
+                val endTime = updatedScoringMatch.end ?: updatedScoringMatch.start ?: Clock.System.now()
                 // For match completion, sync everything immediately
                 matchRepository.updateMatchFinished(updatedScoringMatch, endTime).onSuccess {
                     _optimisticMatch.value = null // Clear optimistic state

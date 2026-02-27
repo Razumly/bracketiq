@@ -5,6 +5,7 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class DivisionDetail(
     val id: String,
+    val kind: String? = null,
     val key: String = "",
     val name: String = "",
     val divisionTypeId: String = "",

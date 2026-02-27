@@ -53,6 +53,7 @@ import com.razumly.mvp.core.presentation.RentalCreateContext
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.util.LoadingState
 import com.razumly.mvp.eventDetail.data.IMatchRepository
+import com.razumly.mvp.eventDetail.data.StagedMatchCreate
 import dev.icerock.moko.geo.LatLng
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -417,7 +418,11 @@ internal class CreateEvent_FakeMatchRepository : IMatchRepository {
         flowOf(Result.failure(IllegalStateException("unused")))
     override suspend fun updateMatch(match: MatchMVP): Result<Unit> = Result.success(Unit)
 
-    override suspend fun updateMatchesBulk(matches: List<MatchMVP>): Result<List<MatchMVP>> =
+    override suspend fun updateMatchesBulk(
+        matches: List<MatchMVP>,
+        creates: List<StagedMatchCreate>,
+        deletes: List<String>,
+    ): Result<List<MatchMVP>> =
         Result.success(matches)
     override fun getMatchesOfTournamentFlow(tournamentId: String): Flow<Result<List<MatchWithRelations>>> =
         flowOf(Result.success(emptyList()))
