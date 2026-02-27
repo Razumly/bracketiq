@@ -77,6 +77,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import coil3.compose.AsyncImagePainter
+import coil3.compose.rememberAsyncImagePainter
 import com.kizitonwose.calendar.compose.WeekCalendar
 import com.kizitonwose.calendar.compose.weekcalendar.rememberWeekCalendarState
 import com.kizitonwose.calendar.core.Week
@@ -93,6 +95,7 @@ import com.razumly.mvp.core.presentation.composables.SearchBox
 import com.razumly.mvp.core.presentation.composables.SearchOverlay
 import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
+import com.razumly.mvp.core.presentation.util.getImageUrl
 import com.razumly.mvp.core.presentation.util.isScrollingUp
 import com.razumly.mvp.core.presentation.util.moneyFormat
 import com.razumly.mvp.core.presentation.util.toTitleCase
@@ -160,6 +163,8 @@ private data class RentalBusyRange(
     val startMinutes: Int,
     val endMinutes: Int,
 )
+
+private const val DISCOVER_ORGANIZATION_PLACEHOLDER_COUNT = 4
 
 @OptIn(ExperimentalHazeMaterialsApi::class)
 @Composable
@@ -430,14 +435,11 @@ fun EventSearchScreen(
                         DiscoverTab.ORGANIZATIONS -> {
                             DiscoverOrganizationList(
                                 organizations = organizations,
+                                isLoading = isLoadingOrganizations,
                                 listState = organizationsListState,
                                 firstElementPadding = firstElementPadding,
                                 lastElementPadding = offsetNavPadding,
-                                emptyMessage = if (isLoadingOrganizations) {
-                                    "Loading organizations..."
-                                } else {
-                                    "No organizations discovered yet."
-                                },
+                                emptyMessage = "No organizations discovered yet.",
                                 onOrganizationClick = { organization ->
                                     component.viewOrganization(organization)
                                 }
@@ -447,14 +449,11 @@ fun EventSearchScreen(
                         DiscoverTab.RENTALS -> {
                             DiscoverOrganizationList(
                                 organizations = rentals,
+                                isLoading = isLoadingRentals,
                                 listState = rentalsListState,
                                 firstElementPadding = firstElementPadding,
                                 lastElementPadding = offsetNavPadding,
-                                emptyMessage = if (isLoadingRentals) {
-                                    "Loading rentals..."
-                                } else {
-                                    "No rentals discovered nearby yet."
-                                },
+                                emptyMessage = "No rentals discovered nearby yet.",
                                 onOrganizationClick = { organization ->
                                     component.viewOrganization(
                                         organization,
@@ -683,6 +682,7 @@ private fun Organization.toMvpPlaceOrNull(): MVPPlace? {
 @Composable
 private fun DiscoverOrganizationList(
     organizations: List<Organization>,
+    isLoading: Boolean,
     listState: LazyListState,
     firstElementPadding: PaddingValues,
     lastElementPadding: PaddingValues,
@@ -693,13 +693,30 @@ private fun DiscoverOrganizationList(
         state = listState,
     ) {
         if (organizations.isEmpty()) {
-            item {
-                EmptyDiscoverListItem(
-                    message = emptyMessage,
-                    modifier = Modifier
-                        .padding(firstElementPadding)
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
-                )
+            if (isLoading) {
+                items(DISCOVER_ORGANIZATION_PLACEHOLDER_COUNT) { index ->
+                    val padding = when (index) {
+                        0 -> firstElementPadding
+                        DISCOVER_ORGANIZATION_PLACEHOLDER_COUNT - 1 -> lastElementPadding
+                        else -> PaddingValues()
+                    }
+
+                    DiscoverOrganizationCardPlaceholder(
+                        modifier = Modifier
+                            .padding(padding)
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                            .fillMaxWidth()
+                    )
+                }
+            } else {
+                item {
+                    EmptyDiscoverListItem(
+                        message = emptyMessage,
+                        modifier = Modifier
+                            .padding(firstElementPadding)
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                    )
+                }
             }
             return@LazyColumn
         }
@@ -729,67 +746,152 @@ private fun DiscoverOrganizationCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val logoModel = remember(organization.logoId) {
+        organization.logoId
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.let { logoId -> getImageUrl(fileId = logoId, width = 72, height = 72) }
+    }
+    val logoPainter = rememberAsyncImagePainter(model = logoModel)
+    val logoState by logoPainter.state.collectAsState()
+    val showPlaceholder = logoModel != null && logoState is AsyncImagePainter.State.Loading
+
     Card(
-        modifier = modifier.clickable(onClick = onClick)
+        modifier = if (showPlaceholder) modifier else modifier.clickable(onClick = onClick)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp)
-        ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
+        if (showPlaceholder) {
+            DiscoverOrganizationCardPlaceholderContent()
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp)
             ) {
-                NetworkAvatar(
-                    displayName = organization.name.ifBlank { "Organization" },
-                    imageRef = organization.logoId,
-                    size = 36.dp,
-                    contentDescription = "Organization logo",
-                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    NetworkAvatar(
+                        displayName = organization.name.ifBlank { "Organization" },
+                        imageRef = organization.logoId,
+                        size = 36.dp,
+                        contentDescription = "Organization logo",
+                    )
+                    Text(
+                        text = organization.name.ifBlank { "Organization" },
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                organization.location?.takeIf { it.isNotBlank() }?.let { location ->
+                    Text(
+                        text = location,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                organization.description?.takeIf { it.isNotBlank() }?.let { description ->
+                    Text(
+                        text = description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+
+                val fieldCount = organization.fieldIds.size
+                val detailsText = if (fieldCount == 1) {
+                    "1 rentable field"
+                } else {
+                    "$fieldCount rentable fields"
+                }
+
                 Text(
-                    text = organization.name.ifBlank { "Organization" },
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    text = detailsText,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(top = 8.dp)
                 )
             }
+        }
+    }
+}
 
-            organization.location?.takeIf { it.isNotBlank() }?.let { location ->
-                Text(
-                    text = location,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
+@Composable
+private fun DiscoverOrganizationCardPlaceholder(
+    modifier: Modifier = Modifier,
+) {
+    Card(modifier = modifier) {
+        DiscoverOrganizationCardPlaceholderContent()
+    }
+}
 
-            organization.description?.takeIf { it.isNotBlank() }?.let { description ->
-                Text(
-                    text = description,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 4.dp)
-                )
-            }
+@Composable
+private fun DiscoverOrganizationCardPlaceholderContent() {
+    val placeholderColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f)
 
-            val fieldCount = organization.fieldIds.size
-            val detailsText = if (fieldCount == 1) {
-                "1 rentable field"
-            } else {
-                "$fieldCount rentable fields"
-            }
-
-            Text(
-                text = detailsText,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(top = 8.dp)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .background(
+                        color = placeholderColor,
+                        shape = RoundedCornerShape(18.dp)
+                    )
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.55f)
+                    .height(20.dp)
+                    .background(
+                        color = placeholderColor,
+                        shape = RoundedCornerShape(6.dp)
+                    )
             )
         }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(0.5f)
+                .height(16.dp)
+                .background(
+                    color = placeholderColor,
+                    shape = RoundedCornerShape(6.dp)
+                )
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(0.85f)
+                .height(14.dp)
+                .background(
+                    color = placeholderColor,
+                    shape = RoundedCornerShape(6.dp)
+                )
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(0.38f)
+                .height(14.dp)
+                .background(
+                    color = placeholderColor,
+                    shape = RoundedCornerShape(6.dp)
+                )
+        )
     }
 }
 

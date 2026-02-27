@@ -134,12 +134,10 @@ fun ScheduleView(
     onToggleLockAllMatches: ((Boolean, List<String>) -> Unit)? = null,
     onMatchClick: (MatchWithRelations) -> Unit,
     onEventClick: (Event) -> Unit = {},
-    hideMatchDivisionLabel: Boolean = false,
     matchCardContent: @Composable (MatchWithRelations, () -> Unit) -> Unit = { match, onClick ->
         ScheduleMatchCard(
             match = match,
             onClick = onClick,
-            showDivisionLabel = !hideMatchDivisionLabel,
         )
     },
     eventCardContent: @Composable (Event, Instant, Instant, () -> Unit) -> Unit = { event, start, end, onClick ->
@@ -707,7 +705,6 @@ private fun normalizeScheduleEnd(start: Instant, end: Instant?): Instant =
 private fun ScheduleMatchCard(
     match: MatchWithRelations,
     onClick: () -> Unit,
-    showDivisionLabel: Boolean = true,
 ) {
     val hasAssignedReferee =
         !match.match.refereeId.isNullOrBlank() ||
@@ -729,7 +726,6 @@ private fun ScheduleMatchCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(BRACKET_CARD_HEIGHT_DP.dp),
-            showDivisionLabel = showDivisionLabel,
         )
     }
 }

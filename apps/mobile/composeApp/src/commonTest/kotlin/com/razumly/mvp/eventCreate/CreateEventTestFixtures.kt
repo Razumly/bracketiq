@@ -303,11 +303,16 @@ internal class CreateEvent_FakeEventRepository(
         bounds: Bounds,
         dateFrom: Instant?,
         dateTo: Instant?,
+        limit: Int,
+        offset: Int,
+        includeDistanceFilter: Boolean,
     ): Result<Pair<List<Event>, Boolean>> = getEventsInBounds(bounds)
 
     override suspend fun searchEvents(
         searchQuery: String,
         userLocation: LatLng,
+        limit: Int,
+        offset: Int,
     ): Result<Pair<List<Event>, Boolean>> = Result.success(Pair(emptyList(), true))
 
     override fun getEventsByHostFlow(hostId: String): Flow<Result<List<Event>>> =

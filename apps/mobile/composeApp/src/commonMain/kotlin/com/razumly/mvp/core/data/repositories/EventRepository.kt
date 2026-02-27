@@ -74,10 +74,15 @@ interface IEventRepository : IMVPRepository {
         bounds: Bounds,
         dateFrom: Instant? = null,
         dateTo: Instant? = null,
+        limit: Int = 50,
+        offset: Int = 0,
+        includeDistanceFilter: Boolean = true,
     ): Result<Pair<List<Event>, Boolean>>
     suspend fun searchEvents(
         searchQuery: String,
-        userLocation: LatLng
+        userLocation: LatLng,
+        limit: Int = 8,
+        offset: Int = 0,
     ): Result<Pair<List<Event>, Boolean>>
     fun getEventsByHostFlow(hostId: String): Flow<Result<List<Event>>>
     fun getEventTemplatesByHostFlow(hostId: String): Flow<Result<List<Event>>> =
@@ -173,6 +178,7 @@ class EventRepository(
     private val userRepository: IUserRepository,
 ) : IEventRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val eventPageSize = 50
 
     init {
         scope.launch {
@@ -350,53 +356,79 @@ class EventRepository(
     }
 
     override suspend fun getEventsInBounds(bounds: Bounds): Result<Pair<List<Event>, Boolean>> {
-        return getEventsInBounds(bounds = bounds, dateFrom = null, dateTo = null)
+        return getEventsInBounds(
+            bounds = bounds,
+            dateFrom = null,
+            dateTo = null,
+            limit = eventPageSize,
+            offset = 0,
+            includeDistanceFilter = true,
+        )
     }
 
     override suspend fun getEventsInBounds(
         bounds: Bounds,
         dateFrom: Instant?,
         dateTo: Instant?,
+        limit: Int,
+        offset: Int,
+        includeDistanceFilter: Boolean,
     ): Result<Pair<List<Event>, Boolean>> {
         return runCatching {
+            val normalizedLimit = limit.coerceIn(1, 500)
+            val normalizedOffset = offset.coerceAtLeast(0)
+            val filters = EventSearchFiltersDto(
+                maxDistance = bounds.radiusMiles.takeIf { includeDistanceFilter },
+                userLocation = if (includeDistanceFilter) {
+                    EventSearchUserLocationDto(
+                        lat = bounds.center.latitude,
+                        long = bounds.center.longitude,
+                    )
+                } else {
+                    null
+                },
+                dateFrom = dateFrom?.toString(),
+                dateTo = dateTo?.toString(),
+            )
             val res = api.post<EventSearchRequestDto, EventsResponseDto>(
                 path = "api/events/search",
                 body = EventSearchRequestDto(
-                    filters = EventSearchFiltersDto(
-                        maxDistance = bounds.radiusMiles,
-                        userLocation = EventSearchUserLocationDto(
-                            lat = bounds.center.latitude,
-                            long = bounds.center.longitude,
-                        ),
-                        dateFrom = dateFrom?.toString(),
-                        dateTo = dateTo?.toString(),
-                    ),
-                    limit = 200,
-                    offset = 0,
+                    filters = filters,
+                    limit = normalizedLimit,
+                    offset = normalizedOffset,
                 ),
             )
 
             val events = res.events.mapNotNull { it.toEventOrNull() }
             databaseService.getEventDao.upsertEvents(events)
+            val orderedEvents = if (includeDistanceFilter) {
+                events.sortedBy { calcDistance(bounds.center, LatLng(it.lat, it.long)) }
+            } else {
+                events
+            }
 
             Pair(
-                events.sortedBy { calcDistance(bounds.center, LatLng(it.lat, it.long)) },
-                true,
+                orderedEvents,
+                events.size == normalizedLimit,
             )
         }
     }
 
     override suspend fun searchEvents(
         searchQuery: String,
-        userLocation: LatLng
+        userLocation: LatLng,
+        limit: Int,
+        offset: Int,
     ): Result<Pair<List<Event>, Boolean>> {
         return runCatching {
+            val normalizedLimit = limit.coerceIn(1, 500)
+            val normalizedOffset = offset.coerceAtLeast(0)
             val res = api.post<EventSearchRequestDto, EventsResponseDto>(
                 path = "api/events/search",
                 body = EventSearchRequestDto(
                     filters = EventSearchFiltersDto(query = searchQuery),
-                    limit = 8,
-                    offset = 0,
+                    limit = normalizedLimit,
+                    offset = normalizedOffset,
                 ),
             )
 
@@ -405,7 +437,7 @@ class EventRepository(
 
             Pair(
                 events.sortedBy { calcDistance(userLocation, LatLng(it.lat, it.long)) },
-                true,
+                events.size == normalizedLimit,
             )
         }
     }

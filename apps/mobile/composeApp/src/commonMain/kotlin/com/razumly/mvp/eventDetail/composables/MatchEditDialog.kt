@@ -460,7 +460,7 @@ private fun MatchEditDialogContent(
                     },
                     modifier = Modifier.weight(1f),
                 ) {
-                    Text(if (isCreateMode) "Discard Match" else "Delete Match")
+                    Text("Delete")
                 }
             }
             TextButton(
@@ -531,7 +531,7 @@ private fun MatchEditDialogContent(
                     onDismissRequest()
                 }, modifier = Modifier.weight(1f)
             ) {
-                Text(if (isCreateMode) "Create Match" else "Save Changes")
+                Text("Save")
             }
         }
     }

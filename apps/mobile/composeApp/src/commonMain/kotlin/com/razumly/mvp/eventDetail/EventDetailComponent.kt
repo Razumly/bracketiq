@@ -19,6 +19,7 @@ import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
+import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.FeeBreakdown
@@ -116,6 +117,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val isEditingMatches: StateFlow<Boolean>
     val editableMatches: StateFlow<List<MatchWithRelations>>
     val editableRounds: StateFlow<List<List<MatchWithRelations?>>>
+    val sports: StateFlow<List<Sport>>
     val showTeamSelectionDialog: StateFlow<TeamSelectionDialogState?>
     val showMatchEditDialog: StateFlow<MatchEditDialogState?>
     val joinChoiceDialog: StateFlow<JoinChoiceDialogState?>
@@ -457,12 +459,32 @@ class DefaultEventDetailComponent(
         )
 
     private val _sports = MutableStateFlow<List<Sport>>(emptyList())
+    override val sports = _sports.asStateFlow()
 
     override val selectedEvent: StateFlow<Event> =
         eventRelations.map { it.event }.stateIn(scope, SharingStarted.Eagerly, event)
 
     override val isHost = selectedEvent.map { it.hostId == currentUser.value.id }
         .stateIn(scope, SharingStarted.Eagerly, false)
+
+    private val eventTimeSlots: StateFlow<List<TimeSlot>> = selectedEvent.flatMapLatest { selected ->
+        val slotIds = selected.timeSlotIds
+            .map { slotId -> slotId.trim() }
+            .filter(String::isNotBlank)
+            .distinct()
+        if (slotIds.isEmpty()) {
+            flowOf(emptyList())
+        } else {
+            flow {
+                val slots = fieldRepository.getTimeSlots(slotIds)
+                    .onFailure { error ->
+                        Napier.w("Failed to refresh time slots for event ${selected.id}: ${error.message}")
+                    }
+                    .getOrElse { emptyList() }
+                emit(slots)
+            }
+        }
+    }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     override val eventWithRelations = eventRelations.flatMapLatest { relations ->
         val hostFallbackFlow = if (relations.host != null || relations.event.hostId.isBlank()) {
@@ -487,12 +509,14 @@ class DefaultEventDetailComponent(
                 }
             },
             _sports,
-            hostFallbackFlow
-        ) { matches, teams, sports, hostFallback ->
+            hostFallbackFlow,
+            eventTimeSlots,
+        ) { matches, teams, sports, hostFallback, timeSlots ->
             val sport = relations.event.sportId
                 ?.takeIf(String::isNotBlank)
                 ?.let { sportId -> sports.firstOrNull { it.id == sportId } }
             relations.toEventWithFullRelations(matches, teams).copy(
+                timeSlots = timeSlots,
                 sport = sport,
                 host = relations.host ?: hostFallback
             )
@@ -518,8 +542,10 @@ class DefaultEventDetailComponent(
             relations.matches
                 .mapNotNull { match -> match.match.fieldId?.trim()?.takeIf(String::isNotBlank) }
         },
-    ) { selected, matchFieldIds ->
-        (selected.fieldIds + matchFieldIds)
+        eventTimeSlots,
+    ) { selected, matchFieldIds, timeSlots ->
+        val slotFieldIds = timeSlots.flatMap { slot -> slot.normalizedScheduledFieldIds() }
+        (selected.fieldIds + matchFieldIds + slotFieldIds)
             .map { fieldId -> fieldId.trim() }
             .filter(String::isNotBlank)
             .distinct()
@@ -794,7 +820,12 @@ class DefaultEventDetailComponent(
     private fun loadSports() {
         scope.launch {
             sportsRepository.getSports()
-                .onSuccess { _sports.value = it }
+                .onSuccess {
+                    _sports.value = it
+                    if (_isEditing.value) {
+                        _editedEvent.value = _editedEvent.value.withSportRules()
+                    }
+                }
                 .onFailure {
                     _errorState.value = ErrorMessage("Failed to load sports: ${it.message ?: ""}")
                 }
@@ -859,6 +890,9 @@ class DefaultEventDetailComponent(
                     it.loserNextMatch == null
                 )
             }.associateBy { it.match.id }
+        }
+        if (_isEditingMatches.value) {
+            refreshEditableRounds()
         }
     }
 
@@ -970,6 +1004,9 @@ class DefaultEventDetailComponent(
     override fun toggleLosersBracket() {
         _losersBracket.value = !_losersBracket.value
         generateRounds()
+        if (_isEditingMatches.value) {
+            refreshEditableRounds()
+        }
     }
 
     override fun onUploadSelected(photo: GalleryPhotoResult) {
@@ -1733,16 +1770,25 @@ class DefaultEventDetailComponent(
             return
         }
         // Initialize or reset the draft from the latest selected event when mode changes.
-        _editedEvent.value = selectedEvent.value
+        val selected = selectedEvent.value
+        _editedEvent.value = if (enabled && _sports.value.isNotEmpty()) {
+            selected.withSportRules()
+        } else {
+            selected
+        }
         _isEditing.value = enabled
     }
 
     override fun editEventField(update: Event.() -> Event) {
-        _editedEvent.value = _editedEvent.value.update()
+        _editedEvent.value = _editedEvent.value
+            .update()
+            .withSportRules()
     }
 
     override fun editTournamentField(update: Event.() -> Event) {
-        _editedEvent.value = _editedEvent.value.update()
+        _editedEvent.value = _editedEvent.value
+            .update()
+            .withSportRules()
     }
 
     override fun updateEvent() {
@@ -1898,6 +1944,89 @@ class DefaultEventDetailComponent(
 
     override fun onTypeSelected(type: EventType) {
         editEventField { copy(eventType = type) }
+    }
+
+    private fun usesSetScoringForSport(sportId: String?): Boolean = sportId
+        ?.let { selectedSportId -> _sports.value.firstOrNull { it.id == selectedSportId } }
+        ?.usePointsPerSetWin
+        ?: false
+
+    private fun Event.withSportRules(): Event {
+        val requiresSets = usesSetScoringForSport(sportId)
+        return when (eventType) {
+            EventType.EVENT -> this
+            EventType.LEAGUE -> applyLeagueSportRules(requiresSets)
+            EventType.TOURNAMENT -> applyTournamentSportRules(requiresSets)
+        }
+    }
+
+    private fun Event.applyLeagueSportRules(requiresSets: Boolean): Event {
+        return if (requiresSets) {
+            val allowedSetCounts = setOf(1, 3, 5)
+            val normalizedSets = setsPerMatch?.takeIf { allowedSetCounts.contains(it) } ?: 1
+            val normalizedPoints = pointsToVictory
+                .take(normalizedSets)
+                .toMutableList()
+                .apply {
+                    while (size < normalizedSets) add(21)
+                }
+            copy(
+                usesSets = true,
+                setsPerMatch = normalizedSets,
+                setDurationMinutes = setDurationMinutes ?: 20,
+                pointsToVictory = normalizedPoints,
+                matchDurationMinutes = matchDurationMinutes ?: 60,
+            )
+        } else {
+            copy(
+                usesSets = false,
+                setsPerMatch = null,
+                setDurationMinutes = null,
+                pointsToVictory = emptyList(),
+                matchDurationMinutes = matchDurationMinutes ?: 60,
+                winnerSetCount = 1,
+                loserSetCount = 1,
+                winnerBracketPointsToVictory = winnerBracketPointsToVictory.take(1).ifEmpty { listOf(21) },
+                loserBracketPointsToVictory = loserBracketPointsToVictory.take(1).ifEmpty { listOf(21) },
+            )
+        }
+    }
+
+    private fun Event.applyTournamentSportRules(requiresSets: Boolean): Event {
+        return if (!requiresSets) {
+            copy(
+                usesSets = false,
+                setDurationMinutes = null,
+                matchDurationMinutes = matchDurationMinutes ?: 60,
+                winnerSetCount = 1,
+                loserSetCount = 1,
+                winnerBracketPointsToVictory = winnerBracketPointsToVictory.take(1).ifEmpty { listOf(21) },
+                loserBracketPointsToVictory = loserBracketPointsToVictory.take(1).ifEmpty { listOf(21) },
+            )
+        } else {
+            val allowedSetCounts = setOf(1, 3, 5)
+            val winnerSets = winnerSetCount.takeIf { allowedSetCounts.contains(it) } ?: 1
+            val loserSets = loserSetCount.takeIf { allowedSetCounts.contains(it) } ?: 1
+            copy(
+                usesSets = true,
+                setDurationMinutes = setDurationMinutes ?: 20,
+                matchDurationMinutes = matchDurationMinutes ?: 60,
+                winnerSetCount = winnerSets,
+                loserSetCount = loserSets,
+                winnerBracketPointsToVictory = winnerBracketPointsToVictory
+                    .take(winnerSets)
+                    .toMutableList()
+                    .apply {
+                        while (size < winnerSets) add(21)
+                    },
+                loserBracketPointsToVictory = loserBracketPointsToVictory
+                    .take(loserSets)
+                    .toMutableList()
+                    .apply {
+                        while (size < loserSets) add(21)
+                    },
+            )
+        }
     }
 
     private fun generateRounds() {
@@ -2290,12 +2419,35 @@ class DefaultEventDetailComponent(
             return
         }
 
-        val matchesById = editable.associateBy { match -> match.match.id }
+        val activeDivision = selectedDivision.value
+        val divisionScopedMatches = if (!selectedEvent.value.singleDivision && !activeDivision.isNullOrEmpty()) {
+            editable.filter { relation ->
+                divisionsEquivalent(relation.match.division, activeDivision)
+            }
+        } else {
+            editable
+        }
+
+        val bracketMatches = divisionScopedMatches.filter { relation ->
+            val match = relation.match
+            !normalizeToken(match.previousLeftId).isNullOrBlank() ||
+                !normalizeToken(match.previousRightId).isNullOrBlank() ||
+                !normalizeToken(match.winnerNextMatchId).isNullOrBlank() ||
+                !normalizeToken(match.loserNextMatchId).isNullOrBlank()
+        }
+
+        if (bracketMatches.isEmpty()) {
+            _editableRounds.value = emptyList()
+            return
+        }
+
+        val matchesById = bracketMatches.associateBy { match -> match.match.id }
         val rounds = mutableListOf<List<MatchWithRelations?>>()
         val visited = mutableSetOf<String>()
 
-        val finalRound = editable.filter { match ->
-            match.match.winnerNextMatchId.isNullOrBlank() && match.match.loserNextMatchId.isNullOrBlank()
+        val finalRound = bracketMatches.filter { match ->
+            normalizeToken(match.match.winnerNextMatchId).isNullOrBlank() &&
+                normalizeToken(match.match.loserNextMatchId).isNullOrBlank()
         }.filter { match ->
             validEditableMatch(match, matchesById)
         }
@@ -2308,25 +2460,26 @@ class DefaultEventDetailComponent(
         var currentRound: List<MatchWithRelations?> = finalRound
         while (currentRound.isNotEmpty()) {
             val nextRound = mutableListOf<MatchWithRelations?>()
+
+            fun resolvePreviousMatch(matchId: String?): MatchWithRelations? {
+                if (matchId == null || !visited.add(matchId)) {
+                    return null
+                }
+                val candidate = matchesById[matchId] ?: return null
+                return candidate.takeIf { validEditableMatch(candidate, matchesById) }
+            }
+
             currentRound.filterNotNull().forEach { match ->
+                if (!validEditableMatch(match, matchesById)) {
+                    nextRound += listOf(null, null)
+                    return@forEach
+                }
+
                 val leftId = normalizeToken(match.match.previousLeftId)
                 val rightId = normalizeToken(match.match.previousRightId)
 
-                if (leftId == null) {
-                    nextRound += null
-                } else if (visited.add(leftId)) {
-                    nextRound += matchesById[leftId]
-                } else {
-                    nextRound += null
-                }
-
-                if (rightId == null) {
-                    nextRound += null
-                } else if (visited.add(rightId)) {
-                    nextRound += matchesById[rightId]
-                } else {
-                    nextRound += null
-                }
+                nextRound += resolvePreviousMatch(leftId)
+                nextRound += resolvePreviousMatch(rightId)
             }
 
             if (nextRound.any { it != null }) {

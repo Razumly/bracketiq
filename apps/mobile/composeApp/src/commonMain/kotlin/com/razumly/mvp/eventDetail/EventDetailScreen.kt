@@ -10,6 +10,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -17,12 +18,15 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -36,6 +40,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Place
@@ -66,21 +72,27 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
@@ -109,8 +121,6 @@ import com.razumly.mvp.core.presentation.util.isScrollingUp
 import com.razumly.mvp.core.presentation.util.toTitleCase
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
-import com.razumly.mvp.eventDetail.composables.CollapsableHeader
-import com.razumly.mvp.eventDetail.composables.MatchEditControls
 import com.razumly.mvp.eventDetail.composables.MatchEditDialog
 import com.razumly.mvp.eventDetail.composables.ParticipantsSection
 import com.razumly.mvp.eventDetail.composables.ParticipantsView
@@ -130,6 +140,7 @@ import kotlin.math.round
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.hours
 import kotlin.time.ExperimentalTime
+import kotlinx.coroutines.launch
 
 val LocalTournamentComponent =
     compositionLocalOf<EventDetailComponent> { error("No tournament provided") }
@@ -657,12 +668,19 @@ private fun BracketFloatingBar(
     selectedDivisionId: String?,
     divisionOptions: List<BracketDivisionOption>,
     onDivisionSelected: (String) -> Unit,
-    showBracketToggle: Boolean,
-    isLosersBracket: Boolean,
-    onBracketToggle: () -> Unit,
+    showBracketToggle: Boolean = false,
+    isLosersBracket: Boolean = false,
+    onBracketToggle: () -> Unit = {},
+    showMatchEditAction: Boolean = false,
+    isEditingMatches: Boolean = false,
+    onStartMatchEdit: (() -> Unit)? = null,
+    onCancelMatchEdit: (() -> Unit)? = null,
+    onCommitMatchEdit: (() -> Unit)? = null,
     primaryActionLabel: String? = null,
     onPrimaryActionClick: (() -> Unit)? = null,
     primaryActionEnabled: Boolean = true,
+    primaryActionColors: ButtonColors? = null,
+    showPrimaryActionFirst: Boolean = false,
     showConfirmResultsAction: Boolean = false,
     confirmResultsEnabled: Boolean = false,
     confirmResultsInProgress: Boolean = false,
@@ -677,17 +695,24 @@ private fun BracketFloatingBar(
         tonalElevation = 3.dp,
         shadowElevation = 6.dp
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Box(modifier = Modifier.weight(1f)) {
+        ScrollableFloatingDockRow {
+            if (showPrimaryActionFirst && !primaryActionLabel.isNullOrBlank() && onPrimaryActionClick != null) {
+                Button(
+                    onClick = onPrimaryActionClick,
+                    enabled = primaryActionEnabled,
+                    colors = primaryActionColors ?: ButtonDefaults.buttonColors(),
+                ) {
+                    Text(
+                        text = primaryActionLabel,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            Box {
                 Button(
                     onClick = { isDivisionMenuExpanded = true },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.widthIn(min = 120.dp),
                     enabled = divisionOptions.isNotEmpty()
                 ) {
                     Text(text = "Division")
@@ -716,21 +741,31 @@ private fun BracketFloatingBar(
                 }
             }
             if (showBracketToggle) {
-                Button(
-                    onClick = onBracketToggle,
-                    modifier = Modifier.weight(1f)
-                ) {
+                Button(onClick = onBracketToggle) {
                     Text(
                         text = if (isLosersBracket) "Losers Bracket" else "Winners Bracket",
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
                     )
+                }
+            }
+            if (showMatchEditAction) {
+                if (isEditingMatches && onCommitMatchEdit != null && onCancelMatchEdit != null) {
+                    Button(onClick = onCommitMatchEdit) {
+                        Text("Save Matches")
+                    }
+                    Button(onClick = onCancelMatchEdit) {
+                        Text("Cancel Edit")
+                    }
+                } else if (!isEditingMatches && onStartMatchEdit != null) {
+                    Button(onClick = onStartMatchEdit) {
+                        Text("Edit Matches")
+                    }
                 }
             }
             if (showConfirmResultsAction) {
                 Button(
                     onClick = onConfirmResultsClick,
-                    modifier = Modifier.weight(1f),
                     enabled = confirmResultsEnabled
                 ) {
                     Text(
@@ -740,11 +775,14 @@ private fun BracketFloatingBar(
                     )
                 }
             }
-            if (!primaryActionLabel.isNullOrBlank() && onPrimaryActionClick != null) {
+            if (!showPrimaryActionFirst &&
+                !primaryActionLabel.isNullOrBlank() &&
+                onPrimaryActionClick != null
+            ) {
                 Button(
                     onClick = onPrimaryActionClick,
-                    modifier = Modifier.weight(1f),
                     enabled = primaryActionEnabled,
+                    colors = primaryActionColors ?: ButtonDefaults.buttonColors(),
                 ) {
                     Text(
                         text = primaryActionLabel,
@@ -755,7 +793,6 @@ private fun BracketFloatingBar(
             }
             Button(
                 onClick = onShowDetailsClick,
-                modifier = Modifier.weight(1f)
             ) {
                 Text(
                     text = "Back to details",
@@ -764,6 +801,112 @@ private fun BracketFloatingBar(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun ScrollableFloatingDockRow(
+    modifier: Modifier = Modifier,
+    content: @Composable RowScope.() -> Unit,
+) {
+    val scrollState = rememberScrollState()
+    val coroutineScope = rememberCoroutineScope()
+    var rowSize by remember { mutableStateOf(IntSize.Zero) }
+    val density = LocalDensity.current
+    val showLeftIndicator by remember { derivedStateOf { scrollState.value > 0 } }
+    val showRightIndicator by remember { derivedStateOf { scrollState.value < scrollState.maxValue } }
+    val rowHeight = with(density) { rowSize.height.toDp() }
+
+    Box(modifier = modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(scrollState)
+                .onSizeChanged { rowSize = it }
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            content = content,
+        )
+        DockEdgeFade(
+            visible = showLeftIndicator && rowSize.height > 0,
+            isLeft = true,
+            height = rowHeight,
+            modifier = Modifier.align(Alignment.CenterStart),
+        )
+        DockEdgeFade(
+            visible = showRightIndicator && rowSize.height > 0,
+            isLeft = false,
+            height = rowHeight,
+            modifier = Modifier.align(Alignment.CenterEnd),
+        )
+        DockScrollIndicator(
+            visible = showLeftIndicator,
+            icon = Icons.Default.KeyboardArrowLeft,
+            contentDescription = "Scroll dock left",
+            onClick = {
+                coroutineScope.launch {
+                    val target = (scrollState.value - 220).coerceAtLeast(0)
+                    scrollState.animateScrollTo(target)
+                }
+            },
+            modifier = Modifier.align(Alignment.CenterStart),
+        )
+        DockScrollIndicator(
+            visible = showRightIndicator,
+            icon = Icons.Default.KeyboardArrowRight,
+            contentDescription = "Scroll dock right",
+            onClick = {
+                coroutineScope.launch {
+                    val target = (scrollState.value + 220).coerceAtMost(scrollState.maxValue)
+                    scrollState.animateScrollTo(target)
+                }
+            },
+            modifier = Modifier.align(Alignment.CenterEnd),
+        )
+    }
+}
+
+@Composable
+private fun DockEdgeFade(
+    visible: Boolean,
+    isLeft: Boolean,
+    height: androidx.compose.ui.unit.Dp,
+    modifier: Modifier = Modifier,
+) {
+    if (!visible) return
+    val surfaceColor = MaterialTheme.colorScheme.surface
+    val colors = if (isLeft) {
+        listOf(surfaceColor, surfaceColor.copy(alpha = 0f))
+    } else {
+        listOf(surfaceColor.copy(alpha = 0f), surfaceColor)
+    }
+    Box(
+        modifier = modifier
+            .height(height)
+            .width(28.dp)
+            .background(Brush.horizontalGradient(colors))
+    )
+}
+
+@Composable
+private fun DockScrollIndicator(
+    visible: Boolean,
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (!visible) return
+    IconButton(
+        onClick = onClick,
+        modifier = modifier.padding(horizontal = 2.dp)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -782,17 +925,11 @@ private fun ParticipantsFloatingBar(
         tonalElevation = 3.dp,
         shadowElevation = 6.dp
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Box(modifier = Modifier.weight(1f)) {
+        ScrollableFloatingDockRow {
+            Box {
                 Button(
                     onClick = { isSectionMenuExpanded = true },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.widthIn(min = 120.dp)
                 ) {
                     Text(
                         text = selectedSection.label,
@@ -825,7 +962,6 @@ private fun ParticipantsFloatingBar(
             }
             Button(
                 onClick = onShowDetailsClick,
-                modifier = Modifier.weight(1f)
             ) {
                 Text(
                     text = "Back to details",
@@ -936,6 +1072,7 @@ fun EventDetailScreen(
     val popupHandler = LocalPopupHandler.current
     val loadingHandler = LocalLoadingHandler.current
     val selectedEvent by component.eventWithRelations.collectAsState()
+    val sports by component.sports.collectAsState()
     val currentUser by component.currentUser.collectAsState()
     val scheduleTrackedUserIds by component.scheduleTrackedUserIds.collectAsState()
     val validTeams by component.validTeams.collectAsState()
@@ -1037,6 +1174,7 @@ fun EventDetailScreen(
             )
     }
     val canConfirmLeagueResultsFromDock = hasStandingsView && canManageLeagueStandings
+    val canManageMatchEditingFromDock = isHost
     val computedLeagueStandings = remember(
         selectedEvent.teams,
         selectedEvent.matches,
@@ -1280,6 +1418,15 @@ fun EventDetailScreen(
     ) {
         joinDivisionOptions.resolveSelectedDivisionId(selectedDivision)
     }
+    val editableFieldsForDetails = remember(eventFields) {
+        eventFields
+            .map { relation -> relation.field }
+            .sortedBy { field -> field.fieldNumber }
+    }
+    val leagueTimeSlotsForDetails = remember(selectedEvent.timeSlots) {
+        selectedEvent.timeSlots
+            .sortedBy { slot -> slot.startTimeMinutes ?: Int.MAX_VALUE }
+    }
     val joinOptions = remember(
         isUserInEvent,
         isEventFull,
@@ -1403,6 +1550,12 @@ fun EventDetailScreen(
                             onEditEvent = component::editEventField,
                             onEditTournament = component::editTournamentField,
                             onEventTypeSelected = component::onTypeSelected,
+                            onSportSelected = { sportId ->
+                                component.editEventField {
+                                    copy(sportId = sportId.takeIf(String::isNotBlank))
+                                }
+                            },
+                            sports = sports,
                             onUpdateDoTeamsRef = { doTeamsRef ->
                                 component.editEventField {
                                     copy(
@@ -1418,6 +1571,8 @@ fun EventDetailScreen(
                                     )
                                 }
                             },
+                            editableFields = editableFieldsForDetails,
+                            leagueTimeSlots = leagueTimeSlotsForDetails,
                             onSelectFieldCount = component::selectFieldCount,
                             onUploadSelected = component::onUploadSelected,
                             onDeleteImage = component::deleteImage,
@@ -1652,15 +1807,6 @@ fun EventDetailScreen(
                     exit = shrinkVertically(shrinkTowards = Alignment.Top)
                 ) {
                     Column(Modifier.padding(innerPadding).padding(top = 32.dp)) {
-                        CollapsableHeader(component)
-                        if (isHost && isTournamentEvent) {
-                            MatchEditControls(
-                                isEditing = isEditingMatches,
-                                onStartEdit = component::startEditingMatches,
-                                onCancelEdit = component::cancelEditingMatches,
-                                onCommitEdit = component::commitMatchChanges
-                            )
-                        }
                         val availableTabs = remember(hasBracketView, hasScheduleView, hasStandingsView) {
                             buildList {
                                 add(DetailTab.PARTICIPANTS)
@@ -1781,8 +1927,6 @@ fun EventDetailScreen(
                             }
                         }
                         Box(Modifier.fillMaxSize()) {
-                            val hideDivisionLabelInMatchCards =
-                                !selectedEvent.event.singleDivision && !selectedDivision.isNullOrBlank()
                             when (selectedTab) {
                                 DetailTab.BRACKET -> {
                                     TournamentBracketView(
@@ -1797,10 +1941,6 @@ fun EventDetailScreen(
                                         onEditMatch = { match ->
                                             component.showMatchEditDialog(match)
                                         },
-                                        onAddMatchFromAnchor = { anchorMatchId, slot ->
-                                            component.addBracketMatchFromAnchor(anchorMatchId, slot)
-                                        },
-                                        hideMatchDivisionLabel = hideDivisionLabelInMatchCards,
                                     )
                                 }
 
@@ -1832,7 +1972,6 @@ fun EventDetailScreen(
                                             showFab = { showFab = it },
                                             trackedUserIds = scheduleTrackedUserIds,
                                             canManageMatches = isEditingMatches,
-                                            hideMatchDivisionLabel = hideDivisionLabelInMatchCards,
                                             onToggleLockAllMatches = { locked, matchIds ->
                                                 component.setLockForEditableMatches(matchIds, locked)
                                             },
@@ -1891,9 +2030,31 @@ fun EventDetailScreen(
                                         showBracketToggle = selectedEvent.event.doubleElimination,
                                         isLosersBracket = losersBracket,
                                         onBracketToggle = component::toggleLosersBracket,
-                                        primaryActionLabel = if (isEditingMatches) "Add Match" else null,
-                                        onPrimaryActionClick = if (isEditingMatches) component::addBracketMatch else null,
+                                        showMatchEditAction = canManageMatchEditingFromDock,
+                                        isEditingMatches = isEditingMatches,
+                                        onStartMatchEdit = component::startEditingMatches,
+                                        onCancelMatchEdit = component::cancelEditingMatches,
+                                        onCommitMatchEdit = component::commitMatchChanges,
+                                        primaryActionLabel = if (isEditingMatches && canManageMatchEditingFromDock) {
+                                            "Add Match"
+                                        } else {
+                                            null
+                                        },
+                                        onPrimaryActionClick = if (isEditingMatches && canManageMatchEditingFromDock) {
+                                            component::addBracketMatch
+                                        } else {
+                                            null
+                                        },
                                         primaryActionEnabled = isEditingMatches,
+                                        primaryActionColors = if (isEditingMatches && canManageMatchEditingFromDock) {
+                                            ButtonDefaults.buttonColors(
+                                                containerColor = Color(0xFF2E7D32),
+                                                contentColor = Color.White,
+                                            )
+                                        } else {
+                                            null
+                                        },
+                                        showPrimaryActionFirst = true,
                                         onShowDetailsClick = component::toggleDetails,
                                     )
 
@@ -1901,12 +2062,31 @@ fun EventDetailScreen(
                                         selectedDivisionId = selectedJoinDivisionId,
                                         divisionOptions = joinDivisionOptions,
                                         onDivisionSelected = component::selectDivision,
-                                        showBracketToggle = false,
-                                        isLosersBracket = losersBracket,
-                                        onBracketToggle = component::toggleLosersBracket,
-                                        primaryActionLabel = if (isEditingMatches) "Add Match" else null,
-                                        onPrimaryActionClick = if (isEditingMatches) component::addScheduleMatch else null,
+                                        showMatchEditAction = canManageMatchEditingFromDock,
+                                        isEditingMatches = isEditingMatches,
+                                        onStartMatchEdit = component::startEditingMatches,
+                                        onCancelMatchEdit = component::cancelEditingMatches,
+                                        onCommitMatchEdit = component::commitMatchChanges,
+                                        primaryActionLabel = if (isEditingMatches && canManageMatchEditingFromDock) {
+                                            "Add Match"
+                                        } else {
+                                            null
+                                        },
+                                        onPrimaryActionClick = if (isEditingMatches && canManageMatchEditingFromDock) {
+                                            component::addScheduleMatch
+                                        } else {
+                                            null
+                                        },
                                         primaryActionEnabled = isEditingMatches,
+                                        primaryActionColors = if (isEditingMatches && canManageMatchEditingFromDock) {
+                                            ButtonDefaults.buttonColors(
+                                                containerColor = Color(0xFF2E7D32),
+                                                contentColor = Color.White,
+                                            )
+                                        } else {
+                                            null
+                                        },
+                                        showPrimaryActionFirst = true,
                                         onShowDetailsClick = component::toggleDetails,
                                     )
 
@@ -1914,9 +2094,6 @@ fun EventDetailScreen(
                                         selectedDivisionId = selectedStandingsDivisionId,
                                         divisionOptions = standingsTabDivisionOptions,
                                         onDivisionSelected = component::selectDivision,
-                                        showBracketToggle = false,
-                                        isLosersBracket = losersBracket,
-                                        onBracketToggle = component::toggleLosersBracket,
                                         showConfirmResultsAction = canConfirmLeagueResultsFromDock,
                                         confirmResultsEnabled = canConfirmLeagueResultsFromDock &&
                                             !leagueDivisionStandingsLoading &&

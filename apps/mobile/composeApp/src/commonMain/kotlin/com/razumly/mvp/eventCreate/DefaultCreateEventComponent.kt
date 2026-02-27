@@ -1172,6 +1172,9 @@ class DefaultCreateEventComponent(
     private fun Event.applyTournamentSportRules(requiresSets: Boolean): Event {
         return if (!requiresSets) {
             copy(
+                usesSets = false,
+                setDurationMinutes = null,
+                matchDurationMinutes = matchDurationMinutes ?: 60,
                 winnerSetCount = 1,
                 loserSetCount = 1,
                 winnerBracketPointsToVictory = winnerBracketPointsToVictory.take(1).ifEmpty { listOf(21) },
@@ -1182,6 +1185,9 @@ class DefaultCreateEventComponent(
             val winnerSets = winnerSetCount.takeIf { allowedSetCounts.contains(it) } ?: 1
             val loserSets = loserSetCount.takeIf { allowedSetCounts.contains(it) } ?: 1
             copy(
+                usesSets = true,
+                setDurationMinutes = setDurationMinutes ?: 20,
+                matchDurationMinutes = matchDurationMinutes ?: 60,
                 winnerSetCount = winnerSets,
                 loserSetCount = loserSets,
                 winnerBracketPointsToVictory = winnerBracketPointsToVictory

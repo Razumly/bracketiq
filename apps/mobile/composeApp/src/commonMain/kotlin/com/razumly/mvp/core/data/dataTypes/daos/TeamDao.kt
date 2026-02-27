@@ -89,7 +89,7 @@ interface TeamDao {
     @RewriteQueriesToDropUnusedColumns
     @Transaction
     @Query("SELECT * FROM Team WHERE id = :teamId")
-    fun getTeamWithPlayersFlow(teamId: String): Flow<TeamWithRelations>
+    fun getTeamWithPlayersFlow(teamId: String): Flow<TeamWithRelations?>
 
     @RewriteQueriesToDropUnusedColumns
     @Transaction

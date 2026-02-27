@@ -273,7 +273,12 @@ class TeamRepository(
         )
 
     override fun getTeamWithPlayersFlow(id: String): Flow<Result<TeamWithRelations>> {
-        val localFlow = databaseService.getTeamDao.getTeamWithPlayersFlow(id).map { Result.success(it) }
+        val localFlow = databaseService.getTeamDao.getTeamWithPlayersFlow(id).map { team ->
+            team?.let { Result.success(it) }
+                ?: Result.failure(
+                    NoSuchElementException("Team $id is not available in local cache yet.")
+                )
+        }
         scope.launch { getTeamWithPlayers(id) }
         return localFlow
     }

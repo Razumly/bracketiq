@@ -61,7 +61,6 @@ fun MatchCard(
     match: MatchWithRelations?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    showDivisionLabel: Boolean = true,
 ) {
     val component = LocalTournamentComponent.current
     val teams by component.divisionTeams.collectAsState()
@@ -153,8 +152,6 @@ fun MatchCard(
                         MatchInfoSection(
                             match = match,
                             fields = fields,
-                            divisionDetails = selectedEvent.divisionDetails,
-                            showDivisionLabel = showDivisionLabel,
                         )
                         VerticalDivider(color = localColors.current.onPrimary)
                         TeamsSection(
@@ -206,14 +203,8 @@ private fun FloatingBox(modifier: Modifier, color: Color, content: @Composable (
 private fun MatchInfoSection(
     match: MatchWithRelations,
     fields: List<FieldWithMatches>,
-    divisionDetails: List<DivisionDetail>,
-    showDivisionLabel: Boolean,
 ) {
     val fieldLabel = resolveFieldLabel(match, fields)
-    val divisionLabel = match.match.division
-        ?.toDivisionDisplayLabel(divisionDetails)
-        .orEmpty()
-        .ifBlank { "TBD" }
     Column(
         modifier = Modifier.padding(8.dp).width(IntrinsicSize.Max),
         verticalArrangement = Arrangement.SpaceEvenly
@@ -226,15 +217,6 @@ private fun MatchInfoSection(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
-        if (showDivisionLabel) {
-            HorizontalDivider(color = localColors.current.onPrimary)
-            Text(
-                "D: $divisionLabel",
-                color = localColors.current.onPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
     }
 }
 

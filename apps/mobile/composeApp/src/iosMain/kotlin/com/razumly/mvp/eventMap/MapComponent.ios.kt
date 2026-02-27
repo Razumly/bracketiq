@@ -74,7 +74,11 @@ actual class MapComponent(
 
     init {
         scope.launch {
-            locationTracker.startTracking()
+            runCatching {
+                locationTracker.startTracking()
+            }.onFailure { error ->
+                Napier.w("Location tracking disabled: ${error.message}")
+            }
         }
 
         instanceKeeper.put(
@@ -83,8 +87,12 @@ actual class MapComponent(
         )
 
         scope.launch {
-            locationTracker.getLocationsFlow().collect {
-                _currentLocation.value = it
+            try {
+                locationTracker.getLocationsFlow().collect {
+                    _currentLocation.value = it
+                }
+            } catch (error: Exception) {
+                Napier.w("Location updates unavailable: ${error.message}")
             }
         }
     }

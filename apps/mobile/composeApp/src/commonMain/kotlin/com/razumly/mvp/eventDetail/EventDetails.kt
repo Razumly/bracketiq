@@ -1030,7 +1030,7 @@ fun EventDetails(
         }
     }
 
-    LaunchedEffect(editEvent.fieldCount) {
+    LaunchedEffect(editEvent.fieldCount, editableFields.size) {
         val normalized = editEvent.fieldCount ?: editableFields.size
         if (normalized != fieldCount) {
             fieldCount = normalized
@@ -1106,6 +1106,15 @@ fun EventDetails(
             } else {
                 isLeagueDurationValid = (editEvent.matchDurationMinutes ?: 0) >= 15
                 isLeaguePointsValid = true
+            }
+        } else if (editEvent.eventType == EventType.TOURNAMENT) {
+            isLeagueGamesValid = true
+            isLeaguePlayoffTeamsValid = true
+            isLeaguePointsValid = true
+            isLeagueDurationValid = if (editEvent.usesSets) {
+                (editEvent.setDurationMinutes ?: 0) >= 5
+            } else {
+                (editEvent.matchDurationMinutes ?: 0) >= 15
             }
         } else {
             isLeagueGamesValid = true
@@ -2479,6 +2488,21 @@ fun EventDetails(
                                     }
 
                                     EventType.TOURNAMENT -> {
+                                        if (event.usesSets) {
+                                            add(
+                                                DetailRowSpec(
+                                                    "Set duration",
+                                                    "${event.setDurationMinutes ?: 20} minutes",
+                                                ),
+                                            )
+                                        } else {
+                                            add(
+                                                DetailRowSpec(
+                                                    "Match duration",
+                                                    "${event.matchDurationMinutes ?: 60} minutes",
+                                                ),
+                                            )
+                                        }
                                         add(
                                             DetailRowSpec(
                                                 "Bracket",
@@ -2547,7 +2571,7 @@ fun EventDetails(
                             LabeledCheckboxRow(
                                 checked = if (isNewEvent) true else editEvent.singleDivision,
                                 label = "Single Division",
-                                enabled = !isNewEvent,
+                                enabled = false,
                                 onCheckedChange = { checked ->
                                     if (isNewEvent) {
                                         return@LabeledCheckboxRow
@@ -3119,7 +3143,7 @@ fun EventDetails(
 
                 })
 
-                if (isNewEvent && editEvent.eventType == EventType.LEAGUE) {
+                if (editEvent.eventType == EventType.LEAGUE) {
                     animatedCardSection(
                         sectionId = "league_scoring",
                         sectionTitle = "League Scoring Config",
@@ -3151,7 +3175,7 @@ fun EventDetails(
                     )
                 }
 
-                if (isNewEvent && (editEvent.eventType == EventType.LEAGUE || editEvent.eventType == EventType.TOURNAMENT)) {
+                if (editEvent.eventType == EventType.LEAGUE || editEvent.eventType == EventType.TOURNAMENT) {
                     animatedCardSection(
                         sectionId = "facility_schedule",
                         sectionTitle = "Schedule Config",
@@ -3264,6 +3288,48 @@ fun EventDetails(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     verticalAlignment = Alignment.Top,
                                 ) {
+                                    NumberInputField(
+                                        modifier = Modifier.weight(1f),
+                                        value = if (editEvent.usesSets) {
+                                            (editEvent.setDurationMinutes ?: 20).toString()
+                                        } else {
+                                            (editEvent.matchDurationMinutes ?: 60).toString()
+                                        },
+                                        onValueChange = { newValue ->
+                                            if (newValue.all { it.isDigit() }) {
+                                                onEditTournament {
+                                                    if (editEvent.usesSets) {
+                                                        copy(setDurationMinutes = newValue.toIntOrNull())
+                                                    } else {
+                                                        copy(matchDurationMinutes = newValue.toIntOrNull() ?: 0)
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        label = if (editEvent.usesSets) {
+                                            "Set Duration (min)"
+                                        } else {
+                                            "Match Duration (min)"
+                                        },
+                                        isError = !isLeagueDurationValid,
+                                        supportingText = if (!isLeagueDurationValid) {
+                                            if (editEvent.usesSets) {
+                                                "Set duration must be at least 5 minutes."
+                                            } else {
+                                                "Match duration must be at least 15 minutes."
+                                            }
+                                        } else {
+                                            ""
+                                        },
+                                    )
+                                    Box(modifier = Modifier.weight(1f))
+                                }
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.Top,
+                                ) {
                                     val normalizedWinnerSetCount = remember(editEvent.winnerSetCount) {
                                         when (editEvent.winnerSetCount) {
                                             1, 3, 5 -> editEvent.winnerSetCount
@@ -3293,30 +3359,7 @@ fun EventDetails(
                                         },
                                     )
 
-                                    if (!isNewEvent) {
-                                        NumberInputField(
-                                            modifier = Modifier.weight(1f),
-                                            value = fieldCount.toString(),
-                                            onValueChange = { newValue ->
-                                                if (newValue.all { it.isDigit() }) {
-                                                    if (newValue.isBlank()) {
-                                                        fieldCount = 0
-                                                        onSelectFieldCount(0)
-                                                    } else {
-                                                        fieldCount = newValue.toInt()
-                                                        onSelectFieldCount(newValue.toInt())
-                                                    }
-                                                }
-                                            },
-                                            label = "Field Count",
-                                            isError = !isFieldCountValid,
-                                            supportingText = if (!isFieldCountValid) stringResource(
-                                                Res.string.value_too_low, 1
-                                            ) else "",
-                                        )
-                                    } else {
-                                        Box(modifier = Modifier.weight(1f))
-                                    }
+                                    Box(modifier = Modifier.weight(1f))
                                 }
 
                                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {

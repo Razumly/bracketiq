@@ -206,14 +206,15 @@ fun filterValidNextMatchCandidates(
     nodes: List<BracketNode>,
     lane: BracketLane,
 ): List<String> {
-    val sourceNode = nodes.firstOrNull { node -> node.id == sourceId } ?: return emptyList()
+    val normalizedSourceId = normalizeRef(sourceId) ?: return emptyList()
+    val sourceNode = nodes.firstOrNull { node -> node.id == normalizedSourceId } ?: return emptyList()
     val otherLaneTarget = when (lane) {
         BracketLane.WINNER -> normalizeRef(sourceNode.loserNextMatchId)
         BracketLane.LOSER -> normalizeRef(sourceNode.winnerNextMatchId)
     }
 
     return nodes.map { it.id }.filter { candidateId ->
-        if (candidateId == sourceId) {
+        if (candidateId == normalizedSourceId) {
             return@filter false
         }
         if (otherLaneTarget != null && otherLaneTarget == candidateId) {
@@ -221,7 +222,7 @@ fun filterValidNextMatchCandidates(
         }
 
         val mutated = nodes.map { node ->
-            if (node.id != sourceId) {
+            if (node.id != normalizedSourceId) {
                 node
             } else {
                 when (lane) {
@@ -232,6 +233,6 @@ fun filterValidNextMatchCandidates(
         }
 
         val result = validateAndNormalizeBracketGraph(mutated)
-        result.ok && (result.incomingCountById[candidateId] ?: 0) <= 2
+        (result.incomingCountById[candidateId] ?: 0) <= 2
     }
 }
