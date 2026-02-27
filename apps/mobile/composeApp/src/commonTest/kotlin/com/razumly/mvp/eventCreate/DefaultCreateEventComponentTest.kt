@@ -334,7 +334,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         assertEquals(1, harness.eventRepository.createEventCalls.size)
         assertEquals(1, harness.onEventCreatedCount)
         assertEquals(2, harness.fieldRepository.createdFields.size)
-        assertEquals(2, harness.fieldRepository.createdTimeSlots.size)
+        assertEquals(1, harness.fieldRepository.createdTimeSlots.size)
 
         val createCall = harness.eventRepository.createEventCalls.single()
         val createdFieldIds = harness.fieldRepository.createdFields.map { it.id }
@@ -345,8 +345,9 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         assertEquals(listOf("a"), harness.fieldRepository.createdFields[0].divisions)
         assertEquals(listOf("b", "open"), harness.fieldRepository.createdFields[1].divisions)
         assertEquals(createdFieldIds.first(), createdSlots[0].scheduledFieldId)
-        assertEquals(createdFieldIds.first(), createdSlots[1].scheduledFieldId)
-        assertEquals(listOf(1, 3), createdSlots.mapNotNull { it.dayOfWeek }.sorted())
+        assertEquals(listOf(createdFieldIds.first()), createdSlots[0].scheduledFieldIds)
+        assertEquals(1, createdSlots[0].dayOfWeek)
+        assertEquals(listOf(1, 3), createdSlots[0].daysOfWeek)
         assertEquals(3, createCall.leagueScoringConfig?.pointsForWin)
         assertEquals(emptyList(), createCall.requiredTemplateIds)
     }
@@ -391,7 +392,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun given_league_creation_with_multi_field_slot_selection_when_submitted_then_slot_expands_for_each_day_and_field() = runTest(testDispatcher) {
+    fun given_league_creation_with_multi_field_slot_selection_when_submitted_then_slot_is_persisted_canonically() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         harness.component.setLoadingHandler(harness.loadingHandler)
         advance()
@@ -428,16 +429,11 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
 
         val createdSlots = harness.fieldRepository.createdTimeSlots
         val createdFieldIds = harness.fieldRepository.createdFields.map { field -> field.id }
-        assertEquals(4, createdSlots.size)
-        assertEquals(
-            setOf(
-                Pair(1, createdFieldIds[0]),
-                Pair(3, createdFieldIds[0]),
-                Pair(1, createdFieldIds[1]),
-                Pair(3, createdFieldIds[1]),
-            ),
-            createdSlots.map { slot -> Pair(slot.dayOfWeek, slot.scheduledFieldId) }.toSet(),
-        )
+        assertEquals(1, createdSlots.size)
+        assertEquals(1, createdSlots[0].dayOfWeek)
+        assertEquals(listOf(1, 3), createdSlots[0].daysOfWeek)
+        assertEquals(createdFieldIds[0], createdSlots[0].scheduledFieldId)
+        assertEquals(createdFieldIds, createdSlots[0].scheduledFieldIds)
     }
 
     @Test

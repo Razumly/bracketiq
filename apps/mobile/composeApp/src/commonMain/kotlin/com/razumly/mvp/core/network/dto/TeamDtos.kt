@@ -11,10 +11,7 @@ data class TeamApiDto(
     val id: String? = null,
     @SerialName("\$id") val legacyId: String? = null,
     val name: String? = null,
-    val seed: Int? = null,
     val division: String? = null,
-    val wins: Int? = null,
-    val losses: Int? = null,
     val playerIds: List<String>? = null,
     val captainId: String? = null,
     val managerId: String? = null,
@@ -42,10 +39,7 @@ data class TeamApiDto(
         val resolvedTeamSize = (teamSize ?: 0).takeIf { it > 0 } ?: 2
 
         return Team(
-            seed = seed ?: 0,
             division = (division ?: DEFAULT_DIVISION).normalizeDivisionLabel(),
-            wins = wins ?: 0,
-            losses = losses ?: 0,
             name = name,
             captainId = resolvedCaptainId,
             managerId = managerId ?: resolvedCaptainId,
@@ -77,10 +71,7 @@ data class TeamsResponseDto(
 @Serializable
 data class TeamUpdateDto(
     val name: String? = null,
-    val seed: Int? = null,
     val division: String? = null,
-    val wins: Int? = null,
-    val losses: Int? = null,
     val playerIds: List<String>? = null,
     val captainId: String? = null,
     val managerId: String? = null,
@@ -109,10 +100,7 @@ data class UpdateTeamRequestDto(
 fun Team.toUpdateDto(): TeamUpdateDto {
     return TeamUpdateDto(
         name = name,
-        seed = seed,
         division = division,
-        wins = wins,
-        losses = losses,
         playerIds = playerIds,
         captainId = captainId,
         managerId = managerId,

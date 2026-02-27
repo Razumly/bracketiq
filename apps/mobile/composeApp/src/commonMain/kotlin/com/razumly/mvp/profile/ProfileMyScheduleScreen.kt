@@ -332,10 +332,14 @@ private fun ProfileScheduleMatchCard(
     val team1Name = match.team1?.name?.takeIf { it.isNotBlank() } ?: "TBD"
     val team2Name = match.team2?.name?.takeIf { it.isNotBlank() } ?: "TBD"
     val fieldLabel = match.field?.name?.takeIf { it.isNotBlank() } ?: "Field TBD"
-    val divisionLabel = match.match.division?.takeIf { it.isNotBlank() } ?: "Division TBD"
     val timeZone = remember { TimeZone.currentSystemDefault() }
     val start = match.match.start
-    val end = match.match.end.takeIf { matchEnd -> matchEnd != null && matchEnd > start } ?: start.plus(1.hours)
+    val timeLabel = if (start == null) {
+        "TBD"
+    } else {
+        val end = match.match.end.takeIf { matchEnd -> matchEnd != null && matchEnd > start } ?: start.plus(1.hours)
+        formatEntryWindow(start, end, timeZone)
+    }
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -360,14 +364,14 @@ private fun ProfileScheduleMatchCard(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = "$fieldLabel • $divisionLabel",
+                text = fieldLabel,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = formatEntryWindow(start, end, timeZone),
+                text = timeLabel,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,

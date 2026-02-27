@@ -26,6 +26,9 @@ data class TournamentConfig(
     val prize: String = "",
     val fieldCount: Int = 1,
     val restTimeMinutes: Int = 0,
+    val usesSets: Boolean = false,
+    val matchDurationMinutes: Int = 60,
+    val setDurationMinutes: Int? = null,
 )
 
 fun Event.toLeagueConfig(): LeagueConfig = LeagueConfig(
@@ -87,6 +90,9 @@ fun Event.toTournamentConfig(): TournamentConfig = TournamentConfig(
     prize = prize,
     fieldCount = (fieldCount ?: 1).coerceAtLeast(1),
     restTimeMinutes = (restTimeMinutes ?: 0).coerceAtLeast(0),
+    usesSets = usesSets,
+    matchDurationMinutes = matchDurationMinutes ?: 60,
+    setDurationMinutes = setDurationMinutes,
 )
 
 fun Event.withTournamentConfig(config: TournamentConfig): Event = copy(
@@ -98,4 +104,7 @@ fun Event.withTournamentConfig(config: TournamentConfig): Event = copy(
     prize = config.prize,
     fieldCount = config.fieldCount.coerceAtLeast(1),
     restTimeMinutes = config.restTimeMinutes.coerceAtLeast(0),
+    usesSets = config.usesSets,
+    matchDurationMinutes = if (config.usesSets) null else config.matchDurationMinutes.coerceAtLeast(15),
+    setDurationMinutes = if (config.usesSets) config.setDurationMinutes?.coerceAtLeast(5) else null,
 )

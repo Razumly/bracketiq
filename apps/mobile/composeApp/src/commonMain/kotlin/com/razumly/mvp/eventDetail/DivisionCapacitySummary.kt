@@ -2,6 +2,8 @@ package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
+import com.razumly.mvp.core.data.util.isPlaceholderSlot
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 
@@ -35,13 +37,16 @@ private fun resolveDivisionIdentifier(detail: DivisionDetail): String {
 internal fun buildDivisionCapacitySummaries(
     event: Event,
     divisionDetails: List<DivisionDetail>,
+    teams: List<TeamWithPlayers>,
 ): List<DivisionCapacitySummary> {
     if (!event.teamSignup || event.singleDivision || divisionDetails.isEmpty()) {
         return emptyList()
     }
 
-    val eventTeamIdSet = event.teamIds
-        .map(String::trim)
+    val registeredTeamIdSet = teams
+        .map { teamWithPlayers -> teamWithPlayers.team }
+        .filter { team -> !team.isPlaceholderSlot(event.eventType) }
+        .map { team -> team.id.trim() }
         .filter(String::isNotBlank)
         .toSet()
     val assignedTeamIds = mutableSetOf<String>()
@@ -54,11 +59,7 @@ internal fun buildDivisionCapacitySummaries(
             .map(String::trim)
             .filter(String::isNotBlank)
             .toSet()
-        val filteredDivisionTeamIds = if (eventTeamIdSet.isEmpty()) {
-            divisionTeamIds
-        } else {
-            divisionTeamIds.filterTo(linkedSetOf()) { teamId -> teamId in eventTeamIdSet }
-        }
+        val filteredDivisionTeamIds = divisionTeamIds.filterTo(linkedSetOf()) { teamId -> teamId in registeredTeamIdSet }
         assignedTeamIds += filteredDivisionTeamIds
 
         val capacity = detail.maxParticipants?.coerceAtLeast(0) ?: 0
@@ -75,11 +76,7 @@ internal fun buildDivisionCapacitySummaries(
 
     if (summaries.isEmpty()) return emptyList()
 
-    val unresolvedTeamCount = if (eventTeamIdSet.isEmpty()) {
-        0
-    } else {
-        (eventTeamIdSet.size - assignedTeamIds.size).coerceAtLeast(0)
-    }
+    val unresolvedTeamCount = (registeredTeamIdSet.size - assignedTeamIds.size).coerceAtLeast(0)
     return if (unresolvedTeamCount > 0) {
         summaries + DivisionCapacitySummary(
             id = "unassigned",

@@ -21,7 +21,7 @@ data class MatchMVP (
     val refereeId: String? = null,
     val fieldId: String? = null,
     @Contextual
-    val start: Instant,
+    val start: Instant? = null,
     val end: Instant? = null,
     val division: String? = null,
     var team1Points: List<Int> = emptyList(),
@@ -49,7 +49,7 @@ data class MatchMVP (
             eventId = eventId,
             refereeId = refereeId,
             fieldId = fieldId,
-            start = start.toString(),
+            start = start?.toString(),
             end = end?.toString(),
             division = division,
             team1Points = team1Points,

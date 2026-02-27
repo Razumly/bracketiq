@@ -100,6 +100,9 @@ class LeagueSportRulesTest : MainDispatcherTest() {
         advance()
 
         val updated = harness.component.newEventState.value
+        assertFalse(updated.usesSets)
+        assertEquals(null, updated.setDurationMinutes)
+        assertEquals(60, updated.matchDurationMinutes)
         assertEquals(1, updated.winnerSetCount)
         assertEquals(1, updated.loserSetCount)
         assertEquals(listOf(30), updated.winnerBracketPointsToVictory)
@@ -126,6 +129,9 @@ class LeagueSportRulesTest : MainDispatcherTest() {
         advance()
 
         val updated = harness.component.newEventState.value
+        assertTrue(updated.usesSets)
+        assertEquals(20, updated.setDurationMinutes)
+        assertEquals(60, updated.matchDurationMinutes)
         assertEquals(1, updated.winnerSetCount)
         assertEquals(5, updated.loserSetCount)
         assertEquals(listOf(25), updated.winnerBracketPointsToVictory)

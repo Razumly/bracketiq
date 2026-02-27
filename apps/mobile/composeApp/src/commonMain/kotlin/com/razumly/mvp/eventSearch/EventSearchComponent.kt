@@ -27,21 +27,11 @@ import dev.icerock.moko.geo.LatLng
 import dev.icerock.moko.geo.LocationTracker
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.debounce
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.filterNotNull
-import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlin.time.ExperimentalTime
 
@@ -122,9 +112,6 @@ class DefaultEventSearchComponent(
     private val _isLoading = MutableStateFlow(false)
     override val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
-    private val _locationStateFlow =
-        locationTracker.getLocationsFlow().stateIn(scope, SharingStarted.Eagerly, null)
-
     private val _currentLocation = MutableStateFlow<LatLng?>(null)
     override val currentLocation = _currentLocation.asStateFlow()
 
@@ -141,6 +128,9 @@ class DefaultEventSearchComponent(
 
     private val _filter = MutableStateFlow(EventFilter())
     override val filter = _filter.asStateFlow()
+    private val _rawEvents = MutableStateFlow<List<Event>>(emptyList())
+    private val _events = MutableStateFlow<List<Event>>(emptyList())
+    override val events: StateFlow<List<Event>> = _events.asStateFlow()
     private val _organizations = MutableStateFlow<List<Organization>>(emptyList())
     override val organizations: StateFlow<List<Organization>> = _organizations.asStateFlow()
     private val _allOrganizations = MutableStateFlow<List<Organization>>(emptyList())
@@ -161,31 +151,13 @@ class DefaultEventSearchComponent(
     private var rentalsLoaded = false
     private var suggestEventsJob: Job? = null
     private var suggestOrganizationsJob: Job? = null
+    private var eventOffset = 0
 
     private lateinit var loadingHandler: LoadingHandler
 
     override fun setLoadingHandler(handler: LoadingHandler) {
         loadingHandler = handler
     }
-
-    @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
-    override val events = combine(
-        _currentLocation.filterNotNull(),
-        _currentRadius,
-        _filter
-    ) { location, radius, eventFilter ->
-        getBounds(radius, location.latitude, location.longitude) to eventFilter
-    }.debounce(200L).flatMapLatest { (bounds, eventFilter) ->
-        eventRepository.getEventsInBoundsFlow(bounds).map { result ->
-            result.getOrElse {
-                _errorState.value = ErrorMessage("Failed to fetch events: ${it.message}")
-                Napier.e("Failed to fetch events: ${it.message}")
-                emptyList()
-            }.filter { event ->
-                eventFilter.filter(event)
-            }
-        }
-    }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     private val _selectedEvent = MutableStateFlow<Event?>(null)
     override val selectedEvent: StateFlow<Event?> = _selectedEvent.asStateFlow()
@@ -217,51 +189,43 @@ class DefaultEventSearchComponent(
         }
 
         scope.launch {
-            locationTracker.startTracking()
+            runCatching {
+                locationTracker.startTracking()
+            }.onFailure { error ->
+                Napier.w("Location tracking disabled: ${error.message}")
+            }
         }
 
         instanceKeeper.put(CLEANUP_KEY, Cleanup(locationTracker))
 
         scope.launch {
-            _locationStateFlow.collect {
-                try {
-                    if (it == null) {
-                        return@collect
-                    }
-                    if (_currentLocation.value == null) {
-                        _currentLocation.value = it
-                        eventRepository.resetCursor()
-                        loadMoreEvents()
+            try {
+                locationTracker.getLocationsFlow().collect { trackedLocation ->
+                    val previousLocation = _currentLocation.value
+                    _currentLocation.value = trackedLocation
+
+                    if (previousLocation == null ||
+                        calcDistance(previousLocation, trackedLocation) > 50
+                    ) {
                         refreshOrganizations(force = true)
                         refreshRentals(force = true)
                     }
-                    if (calcDistance(_currentLocation.value!!, it) > 50) {
-                        _currentLocation.value = it
-                        loadMoreEvents()
-                        refreshOrganizations(force = true)
-                        refreshRentals(force = true)
-                    }
-                } catch (e: Exception) {
-                    _errorState.value = ErrorMessage("Failed to track location: ${e.message}")
                 }
+            } catch (e: Exception) {
+                Napier.w("Location updates unavailable: ${e.message}")
             }
         }
 
         scope.launch {
             currentRadius.collect {
-                if (_locationStateFlow.value != null) {
-                    try {
-                        loadMoreEvents()
-                        refreshOrganizations(force = true)
-                        refreshRentals(force = true)
-                    } catch (e: Exception) {
-                        _errorState.value = ErrorMessage("Failed to update events: ${e.message}")
-                    }
-                }
+                refreshOrganizations(force = true)
+                refreshRentals(force = true)
             }
         }
 
-        refreshRentals()
+        refreshEvents(force = true)
+        refreshOrganizations(force = true)
+        refreshRentals(force = true)
     }
 
     override fun selectRadius(radius: Double) {
@@ -296,9 +260,14 @@ class DefaultEventSearchComponent(
         suggestEventsJob?.cancel()
         suggestEventsJob = scope.launch {
             val userLocation = _currentLocation.value ?: FALLBACK_SEARCH_LOCATION
-            eventRepository.searchEvents(normalizedQuery, userLocation)
+            eventRepository.searchEvents(
+                searchQuery = normalizedQuery,
+                userLocation = userLocation,
+                limit = SEARCH_SUGGESTION_LIMIT,
+                offset = 0,
+            )
                 .onSuccess { (events, _) ->
-                    _suggestedEvents.value = events.take(SEARCH_SUGGESTION_LIMIT)
+                    _suggestedEvents.value = events
                 }.onFailure { e ->
                     _errorState.value = ErrorMessage("Failed to fetch events: ${e.message}")
                 }
@@ -343,19 +312,24 @@ class DefaultEventSearchComponent(
         scope.launch {
             _isLoadingMore.value = true
             try {
-                val radius = _currentRadius.value
-                val currentLocation = _currentLocation.value ?: return@launch
-                val currentBounds =
-                    getBounds(radius, currentLocation.latitude, currentLocation.longitude)
                 val activeFilter = _filter.value
+                val currentLocation = _currentLocation.value ?: FALLBACK_SEARCH_LOCATION
+                val currentBounds =
+                    getBounds(_currentRadius.value, currentLocation.latitude, currentLocation.longitude)
 
                 eventRepository.getEventsInBounds(
                     bounds = currentBounds,
                     dateFrom = activeFilter.date.first,
                     dateTo = activeFilter.date.second,
+                    limit = EVENTS_PAGE_SIZE,
+                    offset = eventOffset,
+                    includeDistanceFilter = false,
                 )
-                    .onSuccess { (_, hasMore) ->
+                    .onSuccess { (eventsPage, hasMore) ->
+                        eventOffset += eventsPage.size
                         _hasMoreEvents.value = hasMore
+                        _rawEvents.value = mergeEvents(_rawEvents.value, eventsPage)
+                        _events.value = applyEventFilter(_rawEvents.value, activeFilter)
                     }
                     .onFailure { e ->
                         _errorState.value = ErrorMessage("Failed to load more events: ${e.message}")
@@ -369,6 +343,9 @@ class DefaultEventSearchComponent(
     override fun refreshEvents(force: Boolean) {
         if (!force && _isLoadingMore.value) return
         _hasMoreEvents.value = true
+        eventOffset = 0
+        _rawEvents.value = emptyList()
+        _events.value = emptyList()
         eventRepository.resetCursor()
         loadMoreEvents()
     }
@@ -379,10 +356,10 @@ class DefaultEventSearchComponent(
         _filter.value = updated
 
         val dateRangeChanged = previous.date != updated.date
-        if (dateRangeChanged && _locationStateFlow.value != null) {
-            _hasMoreEvents.value = true
-            eventRepository.resetCursor()
-            loadMoreEvents()
+        if (dateRangeChanged) {
+            refreshEvents(force = true)
+        } else {
+            _events.value = applyEventFilter(_rawEvents.value, updated)
         }
     }
 
@@ -508,16 +485,17 @@ class DefaultEventSearchComponent(
                                         .getOrElse { emptyList() }
                                         .mapNotNull { match ->
                                             val fieldId = match.fieldId?.trim()
+                                            val matchStart = match.start ?: return@mapNotNull null
                                             val matchEnd = match.end
                                             if (fieldId.isNullOrBlank()) return@mapNotNull null
                                             if (!selectedFieldSet.contains(fieldId)) return@mapNotNull null
-                                            if (matchEnd == null || matchEnd <= match.start) return@mapNotNull null
+                                            if (matchEnd == null || matchEnd <= matchStart) return@mapNotNull null
 
                                             RentalBusyBlock(
                                                 eventId = event.id,
                                                 eventName = event.name.ifBlank { "Reserved match" },
                                                 fieldId = fieldId,
-                                                start = match.start,
+                                                start = matchStart,
                                                 end = matchEnd,
                                             )
                                         }
@@ -544,6 +522,18 @@ class DefaultEventSearchComponent(
 
     override fun clearRentalBusyBlocks() {
         _rentalBusyBlocks.value = emptyList()
+    }
+
+    private fun applyEventFilter(source: List<Event>, filter: EventFilter): List<Event> {
+        return source.filter { event -> filter.filter(event) }
+    }
+
+    private fun mergeEvents(existing: List<Event>, incoming: List<Event>): List<Event> {
+        if (incoming.isEmpty()) return existing
+        val merged = LinkedHashMap<String, Event>(existing.size + incoming.size)
+        existing.forEach { event -> merged[event.id] = event }
+        incoming.forEach { event -> merged[event.id] = event }
+        return merged.values.toList()
     }
 
     private suspend fun loadRentalOrganizations(force: Boolean = false) {
@@ -657,7 +647,8 @@ class DefaultEventSearchComponent(
     companion object {
         const val CLEANUP_KEY = "Cleanup_Search"
         private val FALLBACK_SEARCH_LOCATION = LatLng(0.0, 0.0)
+        private const val EVENTS_PAGE_SIZE = 50
         private const val SEARCH_MIN_QUERY_LENGTH = 2
-        private const val SEARCH_SUGGESTION_LIMIT = 8
+        private const val SEARCH_SUGGESTION_LIMIT = 50
     }
 }

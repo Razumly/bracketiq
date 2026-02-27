@@ -140,8 +140,16 @@ private object BillingRepositoryHttp_UnusedEventRepository : IEventRepository {
         bounds: com.razumly.mvp.core.data.dataTypes.Bounds,
         dateFrom: kotlin.time.Instant?,
         dateTo: kotlin.time.Instant?,
+        limit: Int,
+        offset: Int,
+        includeDistanceFilter: Boolean,
     ): Result<Pair<List<Event>, Boolean>> = error("unused")
-    override suspend fun searchEvents(searchQuery: String, userLocation: dev.icerock.moko.geo.LatLng): Result<Pair<List<Event>, Boolean>> = error("unused")
+    override suspend fun searchEvents(
+        searchQuery: String,
+        userLocation: dev.icerock.moko.geo.LatLng,
+        limit: Int,
+        offset: Int,
+    ): Result<Pair<List<Event>, Boolean>> = error("unused")
     override fun getEventsByHostFlow(hostId: String): Flow<Result<List<Event>>> = error("unused")
     override suspend fun deleteEvent(eventId: String): Result<Unit> = error("unused")
     override suspend fun addCurrentUserToEvent(

@@ -37,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -63,6 +64,12 @@ import com.razumly.mvp.eventSearch.isRangeCoveredByRentalAvailability
 import com.razumly.mvp.eventSearch.rangeOverlapsBusyBlockOnDate
 import com.razumly.mvp.eventSearch.rangesOverlap
 import com.razumly.mvp.eventSearch.resolveRentalSelection
+import com.razumly.mvp.icons.Indoor
+import com.razumly.mvp.icons.MVPIcons
+import com.razumly.mvp.icons.ProfileActionDetails
+import com.razumly.mvp.icons.ProfileActionEvents
+import com.razumly.mvp.icons.ProfileActionPayments
+import com.razumly.mvp.icons.ProfileActionTeams
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import kotlin.time.Clock
@@ -218,7 +225,20 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                     Tab(
                         selected = selectedTab.ordinal == index,
                         onClick = { selectedTab = tab },
-                        text = { Text(tab.label()) }
+                        text = {
+                            Text(
+                                text = tab.label(),
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        },
+                        icon = {
+                            Icon(
+                                imageVector = tab.icon(),
+                                contentDescription = null,
+                            )
+                        },
                     )
                 }
             }
@@ -433,6 +453,16 @@ private fun OrganizationDetailTab.label(): String {
         OrganizationDetailTab.TEAMS -> "Teams"
         OrganizationDetailTab.RENTALS -> "Rentals"
         OrganizationDetailTab.STORE -> "Store"
+    }
+}
+
+private fun OrganizationDetailTab.icon(): ImageVector {
+    return when (this) {
+        OrganizationDetailTab.OVERVIEW -> MVPIcons.ProfileActionDetails
+        OrganizationDetailTab.EVENTS -> MVPIcons.ProfileActionEvents
+        OrganizationDetailTab.TEAMS -> MVPIcons.ProfileActionTeams
+        OrganizationDetailTab.RENTALS -> MVPIcons.Indoor
+        OrganizationDetailTab.STORE -> MVPIcons.ProfileActionPayments
     }
 }
 

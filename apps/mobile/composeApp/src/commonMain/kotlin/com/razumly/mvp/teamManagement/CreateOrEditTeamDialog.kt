@@ -271,7 +271,7 @@ fun CreateOrEditTeamDialog(
     ) {
         buildMap {
             putAll(staffUsersById)
-            put(team.captain.id, team.captain)
+            team.captain?.let { captain -> put(captain.id, captain) }
             playersInTeam.forEach { put(it.id, it) }
             invitedPlayers.forEach { put(it.id, it) }
             friends.forEach { put(it.id, it) }

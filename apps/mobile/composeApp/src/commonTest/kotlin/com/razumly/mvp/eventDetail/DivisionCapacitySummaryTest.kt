@@ -2,6 +2,9 @@ package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
+import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.util.buildCombinedDivisionTypeId
 import com.razumly.mvp.core.data.util.buildEventDivisionId
 import kotlin.test.Test
@@ -36,10 +39,15 @@ class DivisionCapacitySummaryTest {
             divisions = listOf(u17DivisionId, u15DivisionId),
             divisionDetails = divisionDetails,
         )
+        val teams = listOf(
+            buildTeamWithPlayers(teamId = "team-1"),
+            buildTeamWithPlayers(teamId = "team-2"),
+        )
 
         val summaries = buildDivisionCapacitySummaries(
             event = event,
             divisionDetails = divisionDetails,
+            teams = teams,
         )
 
         val filledByDivision = summaries.associate { summary -> summary.id to summary.filled }
@@ -75,10 +83,15 @@ class DivisionCapacitySummaryTest {
             divisions = listOf(u17DivisionId, u15DivisionId),
             divisionDetails = divisionDetails,
         )
+        val teams = listOf(
+            buildTeamWithPlayers(teamId = "team-1"),
+            buildTeamWithPlayers(teamId = "team-2"),
+        )
 
         val summaries = buildDivisionCapacitySummaries(
             event = event,
             divisionDetails = divisionDetails,
+            teams = teams,
         )
 
         val filledByDivision = summaries.associate { summary -> summary.id to summary.filled }
@@ -104,5 +117,18 @@ class DivisionCapacitySummaryTest {
         ageDivisionTypeId = ageDivisionTypeId,
         maxParticipants = 8,
         teamIds = teamIds,
+    )
+
+    private fun buildTeamWithPlayers(teamId: String): TeamWithPlayers = TeamWithPlayers(
+        team = Team(
+            division = "open",
+            name = teamId,
+            captainId = "captain-$teamId",
+            teamSize = 2,
+            id = teamId,
+        ),
+        captain = UserData(),
+        players = emptyList(),
+        pendingPlayers = emptyList(),
     )
 }

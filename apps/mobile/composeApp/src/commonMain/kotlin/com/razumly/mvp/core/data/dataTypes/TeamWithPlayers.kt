@@ -13,7 +13,7 @@ data class TeamWithPlayers(
 
     @Relation(
         parentColumn = "captainId", entityColumn = "id"
-    ) val captain: UserData,
+    ) val captain: UserData?,
 
     @Relation(
         parentColumn = "id", entityColumn = "id", associateBy = Junction(

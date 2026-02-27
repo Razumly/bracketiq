@@ -8,7 +8,7 @@ import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 fun TeamCard(team: TeamWithPlayers, modifier: Modifier = Modifier) {
     UnifiedCard(
         entity = team.team,
-        subtitle = "Captain: ${team.captain.displayName} | ${team.team.playerIds.size}/${team.team.teamSize} players",
+        subtitle = "Captain: ${team.captain?.displayName ?: "Unknown"} | ${team.team.playerIds.size}/${team.team.teamSize} players",
         modifier = modifier
     )
 }

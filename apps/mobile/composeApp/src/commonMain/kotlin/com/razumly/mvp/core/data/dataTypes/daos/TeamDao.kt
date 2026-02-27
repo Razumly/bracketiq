@@ -31,12 +31,16 @@ interface TeamDao {
     @Query("SELECT * FROM Team WHERE playerIds LIKE '%' || :userId || '%'")
     suspend fun getTeamsForUser(userId: String): List<Team>
 
+    @RewriteQueriesToDropUnusedColumns
+    @Transaction
     @Query("SELECT * FROM Team WHERE playerIds LIKE '%' || :userId || '%'")
     fun getTeamsForUserFlow(userId: String): Flow<List<TeamWithPlayers>>
 
     @Query("SELECT * FROM Team WHERE pending LIKE '%' || :userId || '%'")
     suspend fun getTeamInvitesForUser(userId: String): List<Team>
 
+    @RewriteQueriesToDropUnusedColumns
+    @Transaction
     @Query("SELECT * FROM Team WHERE pending LIKE '%' || :userId || '%'")
     fun getTeamInvitesForUserFlow(userId: String): Flow<List<TeamWithPlayers>>
 
@@ -85,7 +89,7 @@ interface TeamDao {
     @RewriteQueriesToDropUnusedColumns
     @Transaction
     @Query("SELECT * FROM Team WHERE id = :teamId")
-    fun getTeamWithPlayersFlow(teamId: String): Flow<TeamWithRelations>
+    fun getTeamWithPlayersFlow(teamId: String): Flow<TeamWithRelations?>
 
     @RewriteQueriesToDropUnusedColumns
     @Transaction

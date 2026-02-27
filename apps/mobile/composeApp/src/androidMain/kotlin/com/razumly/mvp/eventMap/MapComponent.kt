@@ -21,7 +21,6 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.util.getBounds
-import com.razumly.mvp.core.util.getCurrentLocation
 import dev.icerock.moko.geo.LocationTracker
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CoroutineScope
@@ -99,8 +98,26 @@ actual class MapComponent(
             }
         }
         scope.launch {
-            locationTracker.startTracking()
-            _currentLocation.value = locationTracker.getCurrentLocation()
+            runCatching {
+                locationTracker.startTracking()
+            }.onFailure { error ->
+                Napier.w(
+                    message = "Location tracking disabled: ${error.message}",
+                    tag = logTag,
+                )
+                return@launch
+            }
+
+            runCatching {
+                locationTracker.getLocationsFlow().collect { trackedLocation ->
+                    _currentLocation.value = trackedLocation
+                }
+            }.onFailure { error ->
+                Napier.w(
+                    message = "Location updates unavailable: ${error.message}",
+                    tag = logTag,
+                )
+            }
         }
     }
 

@@ -8,10 +8,7 @@ import kotlinx.serialization.Transient
 @Serializable
 data class TeamDTO (
     var name: String?,
-    var seed: Int,
     var division: String,
-    var wins: Int,
-    var losses: Int,
     val playerIds: List<String> = emptyList(),
     val captainId: String,
     val managerId: String? = null,
@@ -37,10 +34,7 @@ data class TeamDTO (
 fun TeamDTO.toTeam(id: String): Team {
     return Team(
         name = name,
-        seed = seed,
         division = division.normalizeDivisionLabel(),
-        wins = wins,
-        losses = losses,
         playerIds = playerIds,
         captainId = captainId,
         managerId = managerId,

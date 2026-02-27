@@ -115,6 +115,7 @@ import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
 import com.razumly.mvp.core.presentation.util.getImageUrl
 import com.razumly.mvp.core.presentation.util.getScreenHeight
+import com.razumly.mvp.core.presentation.util.getScreenWidth
 import com.razumly.mvp.core.presentation.util.moneyFormat
 import com.razumly.mvp.core.presentation.util.MoneyInputUtils
 import com.razumly.mvp.core.presentation.util.teamSizeFormat
@@ -159,6 +160,7 @@ import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 
 val localImageScheme = compositionLocalOf<DynamicScheme> { error("No color scheme provided") }
+private const val MOBILE_EVENT_DETAILS_BREAKPOINT_DP = 600
 
 private enum class UserPickerTarget {
     HOST,
@@ -228,6 +230,7 @@ fun EventDetails(
 ) {
     val event = eventWithRelations.event
     val host = eventWithRelations.host
+    val isMobileEventDetailsLayout = getScreenWidth() < MOBILE_EVENT_DETAILS_BREAKPOINT_DP
     var isValid by remember { mutableStateOf(false) }
     var showStartPicker by remember { mutableStateOf(false) }
     var showEndPicker by remember { mutableStateOf(false) }
@@ -1027,7 +1030,7 @@ fun EventDetails(
         }
     }
 
-    LaunchedEffect(editEvent.fieldCount) {
+    LaunchedEffect(editEvent.fieldCount, editableFields.size) {
         val normalized = editEvent.fieldCount ?: editableFields.size
         if (normalized != fieldCount) {
             fieldCount = normalized
@@ -1103,6 +1106,15 @@ fun EventDetails(
             } else {
                 isLeagueDurationValid = (editEvent.matchDurationMinutes ?: 0) >= 15
                 isLeaguePointsValid = true
+            }
+        } else if (editEvent.eventType == EventType.TOURNAMENT) {
+            isLeagueGamesValid = true
+            isLeaguePlayoffTeamsValid = true
+            isLeaguePointsValid = true
+            isLeagueDurationValid = if (editEvent.usesSets) {
+                (editEvent.setDurationMinutes ?: 0) >= 5
+            } else {
+                (editEvent.matchDurationMinutes ?: 0) >= 15
             }
         } else {
             isLeagueGamesValid = true
@@ -1824,145 +1836,237 @@ fun EventDetails(
                             modifier = Modifier.fillMaxWidth(),
                         )
 
-                        Text(
-                            text = "Hosts",
-                            style = MaterialTheme.typography.titleSmall,
-                            color = Color(localImageScheme.current.onSurface),
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = "Primary host: $resolvedHostDisplay",
-                                modifier = Modifier.weight(1f),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = Color(localImageScheme.current.onSurface),
-                            )
-                            TextButton(
-                                onClick = {
-                                    pickerError = null
-                                    userPickerTarget = UserPickerTarget.HOST
-                                },
+                        val teamCapacityInputs: @Composable () -> Unit = {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.Top,
                             ) {
-                                Text("Select host")
+                                NumberInputField(
+                                    modifier = Modifier.weight(1f),
+                                    value = editEvent.maxParticipants.toString(),
+                                    label = if (editEvent.singleDivision) {
+                                        maxParticipantsLabel
+                                    } else {
+                                        "Default $maxParticipantsLabel"
+                                    },
+                                    enabled = true,
+                                    onValueChange = { newValue ->
+                                        if (newValue.all { it.isDigit() }) {
+                                            if (newValue.isBlank()) {
+                                                onEditEvent { copy(maxParticipants = 0) }
+                                            } else {
+                                                onEditEvent { copy(maxParticipants = newValue.toInt()) }
+                                            }
+                                        }
+                                    },
+                                    isError = !isMaxParticipantsValid,
+                                    errorMessage = if (isMaxParticipantsValid) "" else stringResource(
+                                        Res.string.value_too_low, 2
+                                    ),
+                                    supportingText = if (editEvent.singleDivision) {
+                                        null
+                                    } else {
+                                        "Used as the default capacity for new divisions."
+                                    },
+                                )
+                                NumberInputField(
+                                    modifier = Modifier.weight(1f),
+                                    value = editEvent.teamSizeLimit.toString(),
+                                    label = "Team Size Limit",
+                                    onValueChange = { newValue ->
+                                        if (newValue.all { it.isDigit() }) {
+                                            if (newValue.isBlank()) {
+                                                onEditEvent { copy(teamSizeLimit = 0) }
+                                            } else {
+                                                onEditEvent { copy(teamSizeLimit = newValue.toInt()) }
+                                            }
+                                        }
+                                    },
+                                    isError = !isTeamSizeValid,
+                                    supportingText = if (!isTeamSizeValid) {
+                                        "Team size must be at least 1."
+                                    } else {
+                                        ""
+                                    },
+                                )
                             }
                         }
-                        Column(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
+                        val leaguePlayoffInputs: @Composable () -> Unit = {
+                            if (editEvent.eventType == EventType.LEAGUE) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.Top,
+                                ) {
+                                    Box(modifier = Modifier.weight(1f)) {
+                                        LabeledCheckboxRow(
+                                            checked = editEvent.includePlayoffs,
+                                            label = "Include Playoffs",
+                                            onCheckedChange = { checked ->
+                                                val fallbackMaxParticipants =
+                                                    editEvent.maxParticipants.coerceAtLeast(2)
+                                                val fallbackSingleDivisionPlayoffCount = (
+                                                    editEvent.playoffTeamCount
+                                                        ?: divisionDetailsForSettings.firstOrNull()?.playoffTeamCount
+                                                        ?: fallbackMaxParticipants
+                                                    ).coerceAtLeast(2)
+                                                onEditEvent {
+                                                    val nextDivisionDetails = mergeDivisionDetailsForDivisions(
+                                                        divisions = divisions,
+                                                        existingDetails = divisionDetails,
+                                                        eventId = id,
+                                                    ).map { detail ->
+                                                        when {
+                                                            !checked -> detail.copy(playoffTeamCount = null)
+                                                            singleDivision -> detail.copy(
+                                                                playoffTeamCount = fallbackSingleDivisionPlayoffCount,
+                                                            )
+                                                            else -> detail.copy(
+                                                                playoffTeamCount = (
+                                                                    detail.playoffTeamCount
+                                                                        ?: (detail.maxParticipants ?: fallbackMaxParticipants)
+                                                                    ).coerceAtLeast(2),
+                                                            )
+                                                        }
+                                                    }
+                                                    copy(
+                                                        includePlayoffs = checked,
+                                                        playoffTeamCount = if (checked) {
+                                                            fallbackSingleDivisionPlayoffCount
+                                                        } else {
+                                                            null
+                                                        },
+                                                        divisionDetails = nextDivisionDetails,
+                                                    )
+                                                }
+                                            },
+                                        )
+                                    }
+                                    NumberInputField(
+                                        modifier = Modifier.weight(1f),
+                                        value = editEvent.playoffTeamCount?.toString().orEmpty(),
+                                        label = if (editEvent.singleDivision) {
+                                            "Playoff Team Count"
+                                        } else {
+                                            "Default Playoff Team Count"
+                                        },
+                                        enabled = editEvent.includePlayoffs,
+                                        onValueChange = { newValue ->
+                                            if (!editEvent.includePlayoffs) return@NumberInputField
+                                            if (!newValue.all { it.isDigit() }) return@NumberInputField
+                                            onEditEvent {
+                                                copy(playoffTeamCount = newValue.toIntOrNull()?.coerceAtLeast(2))
+                                            }
+                                        },
+                                        isError = editEvent.includePlayoffs &&
+                                            (editEvent.playoffTeamCount ?: 0) < 2,
+                                        errorMessage = "Required when playoffs are enabled",
+                                        supportingText = if (editEvent.singleDivision) {
+                                            null
+                                        } else {
+                                            "Used as the default playoff team count for new divisions."
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                        val hostInputs: @Composable () -> Unit = {
                             Text(
-                                text = "Assistant hosts",
-                                style = MaterialTheme.typography.bodyMedium,
+                                text = "Hosts",
+                                style = MaterialTheme.typography.titleSmall,
                                 color = Color(localImageScheme.current.onSurface),
                             )
-                            if (assistantHostIds.isEmpty()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
                                 Text(
-                                    text = "No assistant hosts selected.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color(localImageScheme.current.onSurfaceVariant),
+                                    text = "Primary host: $resolvedHostDisplay",
+                                    modifier = Modifier.weight(1f),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Color(localImageScheme.current.onSurface),
                                 )
-                            } else {
-                                assistantHostIds.forEach { assistantHostId ->
-                                    val assistantLabel = knownUsersById[assistantHostId]?.let(::userDisplayName)
-                                        ?: assistantHostId
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        Text(
-                                            text = assistantLabel,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = Color(localImageScheme.current.onSurface),
-                                        )
-                                        TextButton(
-                                            onClick = {
-                                                onUpdateAssistantHostIds(
-                                                    assistantHostIds.filterNot { existing -> existing == assistantHostId },
-                                                )
-                                            },
+                                TextButton(
+                                    onClick = {
+                                        pickerError = null
+                                        userPickerTarget = UserPickerTarget.HOST
+                                    },
+                                ) {
+                                    Text("Select host")
+                                }
+                            }
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Text(
+                                    text = "Assistant hosts",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Color(localImageScheme.current.onSurface),
+                                )
+                                if (assistantHostIds.isEmpty()) {
+                                    Text(
+                                        text = "No assistant hosts selected.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color(localImageScheme.current.onSurfaceVariant),
+                                    )
+                                } else {
+                                    assistantHostIds.forEach { assistantHostId ->
+                                        val assistantLabel = knownUsersById[assistantHostId]?.let(::userDisplayName)
+                                            ?: assistantHostId
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically,
                                         ) {
                                             Text(
-                                                text = "Remove",
-                                                color = MaterialTheme.colorScheme.error,
+                                                text = assistantLabel,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = Color(localImageScheme.current.onSurface),
                                             )
+                                            TextButton(
+                                                onClick = {
+                                                    onUpdateAssistantHostIds(
+                                                        assistantHostIds.filterNot { existing -> existing == assistantHostId },
+                                                    )
+                                                },
+                                            ) {
+                                                Text(
+                                                    text = "Remove",
+                                                    color = MaterialTheme.colorScheme.error,
+                                                )
+                                            }
                                         }
                                     }
                                 }
+                                TextButton(
+                                    onClick = {
+                                        pickerError = null
+                                        userPickerTarget = UserPickerTarget.ASSISTANT_HOST
+                                    },
+                                ) {
+                                    Text("Add assistant host")
+                                }
                             }
-                            TextButton(
-                                onClick = {
-                                    pickerError = null
-                                    userPickerTarget = UserPickerTarget.ASSISTANT_HOST
-                                },
-                            ) {
-                                Text("Add assistant host")
+                            if (pickerError != null) {
+                                Text(
+                                    text = pickerError.orEmpty(),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
                             }
-                        }
-                        if (pickerError != null) {
-                            Text(
-                                text = pickerError.orEmpty(),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error,
-                            )
                         }
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.Top,
-                        ) {
-                            NumberInputField(
-                                modifier = Modifier.weight(1f),
-                                value = editEvent.maxParticipants.toString(),
-                                label = if (editEvent.singleDivision) {
-                                    maxParticipantsLabel
-                                } else {
-                                    "Default $maxParticipantsLabel"
-                                },
-                                enabled = true,
-                                onValueChange = { newValue ->
-                                    if (newValue.all { it.isDigit() }) {
-                                        if (newValue.isBlank()) {
-                                            onEditEvent { copy(maxParticipants = 0) }
-                                        } else {
-                                            onEditEvent { copy(maxParticipants = newValue.toInt()) }
-                                        }
-                                    }
-                                },
-                                isError = !isMaxParticipantsValid,
-                                errorMessage = if (isMaxParticipantsValid) "" else stringResource(
-                                    Res.string.value_too_low, 2
-                                ),
-                                supportingText = if (editEvent.singleDivision) {
-                                    null
-                                } else {
-                                    "Used as the default capacity for new divisions."
-                                },
-                            )
-                            NumberInputField(
-                                modifier = Modifier.weight(1f),
-                                value = editEvent.teamSizeLimit.toString(),
-                                label = "Team Size Limit",
-                                onValueChange = { newValue ->
-                                    if (newValue.all { it.isDigit() }) {
-                                        if (newValue.isBlank()) {
-                                            onEditEvent { copy(teamSizeLimit = 0) }
-                                        } else {
-                                            onEditEvent { copy(teamSizeLimit = newValue.toInt()) }
-                                        }
-                                    }
-                                },
-                                isError = !isTeamSizeValid,
-                                supportingText = if (!isTeamSizeValid) {
-                                    "Team size must be at least 1."
-                                } else {
-                                    ""
-                                },
-                            )
+                        if (isMobileEventDetailsLayout) {
+                            teamCapacityInputs()
+                            leaguePlayoffInputs()
+                            hostInputs()
+                        } else {
+                            hostInputs()
+                            teamCapacityInputs()
+                            leaguePlayoffInputs()
                         }
 
                         Row(
@@ -1994,84 +2098,6 @@ fun EventDetails(
                                 },
                                 isError = false,
                             )
-                        }
-
-                        if (editEvent.eventType == EventType.LEAGUE) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.Top,
-                            ) {
-                                Box(modifier = Modifier.weight(1f)) {
-                                    LabeledCheckboxRow(
-                                        checked = editEvent.includePlayoffs,
-                                        label = "Include Playoffs",
-                                        onCheckedChange = { checked ->
-                                            val fallbackMaxParticipants =
-                                                editEvent.maxParticipants.coerceAtLeast(2)
-                                            val fallbackSingleDivisionPlayoffCount = (
-                                                editEvent.playoffTeamCount
-                                                    ?: divisionDetailsForSettings.firstOrNull()?.playoffTeamCount
-                                                    ?: fallbackMaxParticipants
-                                                ).coerceAtLeast(2)
-                                            onEditEvent {
-                                                val nextDivisionDetails = mergeDivisionDetailsForDivisions(
-                                                    divisions = divisions,
-                                                    existingDetails = divisionDetails,
-                                                    eventId = id,
-                                                ).map { detail ->
-                                                    when {
-                                                        !checked -> detail.copy(playoffTeamCount = null)
-                                                        singleDivision -> detail.copy(
-                                                            playoffTeamCount = fallbackSingleDivisionPlayoffCount,
-                                                        )
-                                                        else -> detail.copy(
-                                                            playoffTeamCount = (
-                                                                detail.playoffTeamCount
-                                                                    ?: (detail.maxParticipants ?: fallbackMaxParticipants)
-                                                                ).coerceAtLeast(2),
-                                                        )
-                                                    }
-                                                }
-                                                copy(
-                                                    includePlayoffs = checked,
-                                                    playoffTeamCount = if (checked) {
-                                                        fallbackSingleDivisionPlayoffCount
-                                                    } else {
-                                                        null
-                                                    },
-                                                    divisionDetails = nextDivisionDetails,
-                                                )
-                                            }
-                                        },
-                                    )
-                                }
-                                NumberInputField(
-                                    modifier = Modifier.weight(1f),
-                                    value = editEvent.playoffTeamCount?.toString().orEmpty(),
-                                    label = if (editEvent.singleDivision) {
-                                        "Playoff Team Count"
-                                    } else {
-                                        "Default Playoff Team Count"
-                                    },
-                                    enabled = editEvent.includePlayoffs,
-                                    onValueChange = { newValue ->
-                                        if (!editEvent.includePlayoffs) return@NumberInputField
-                                        if (!newValue.all { it.isDigit() }) return@NumberInputField
-                                        onEditEvent {
-                                            copy(playoffTeamCount = newValue.toIntOrNull()?.coerceAtLeast(2))
-                                        }
-                                    },
-                                    isError = editEvent.includePlayoffs &&
-                                        (editEvent.playoffTeamCount ?: 0) < 2,
-                                    errorMessage = "Required when playoffs are enabled",
-                                    supportingText = if (editEvent.singleDivision) {
-                                        null
-                                    } else {
-                                        "Used as the default playoff team count for new divisions."
-                                    },
-                                )
-                            }
                         }
 
                         if (!hostHasAccount) {
@@ -2462,6 +2488,21 @@ fun EventDetails(
                                     }
 
                                     EventType.TOURNAMENT -> {
+                                        if (event.usesSets) {
+                                            add(
+                                                DetailRowSpec(
+                                                    "Set duration",
+                                                    "${event.setDurationMinutes ?: 20} minutes",
+                                                ),
+                                            )
+                                        } else {
+                                            add(
+                                                DetailRowSpec(
+                                                    "Match duration",
+                                                    "${event.matchDurationMinutes ?: 60} minutes",
+                                                ),
+                                            )
+                                        }
                                         add(
                                             DetailRowSpec(
                                                 "Bracket",
@@ -2530,7 +2571,7 @@ fun EventDetails(
                             LabeledCheckboxRow(
                                 checked = if (isNewEvent) true else editEvent.singleDivision,
                                 label = "Single Division",
-                                enabled = !isNewEvent,
+                                enabled = false,
                                 onCheckedChange = { checked ->
                                     if (isNewEvent) {
                                         return@LabeledCheckboxRow
@@ -3102,7 +3143,7 @@ fun EventDetails(
 
                 })
 
-                if (isNewEvent && editEvent.eventType == EventType.LEAGUE) {
+                if (editEvent.eventType == EventType.LEAGUE) {
                     animatedCardSection(
                         sectionId = "league_scoring",
                         sectionTitle = "League Scoring Config",
@@ -3134,7 +3175,7 @@ fun EventDetails(
                     )
                 }
 
-                if (isNewEvent && (editEvent.eventType == EventType.LEAGUE || editEvent.eventType == EventType.TOURNAMENT)) {
+                if (editEvent.eventType == EventType.LEAGUE || editEvent.eventType == EventType.TOURNAMENT) {
                     animatedCardSection(
                         sectionId = "facility_schedule",
                         sectionTitle = "Schedule Config",
@@ -3247,6 +3288,48 @@ fun EventDetails(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     verticalAlignment = Alignment.Top,
                                 ) {
+                                    NumberInputField(
+                                        modifier = Modifier.weight(1f),
+                                        value = if (editEvent.usesSets) {
+                                            (editEvent.setDurationMinutes ?: 20).toString()
+                                        } else {
+                                            (editEvent.matchDurationMinutes ?: 60).toString()
+                                        },
+                                        onValueChange = { newValue ->
+                                            if (newValue.all { it.isDigit() }) {
+                                                onEditTournament {
+                                                    if (editEvent.usesSets) {
+                                                        copy(setDurationMinutes = newValue.toIntOrNull())
+                                                    } else {
+                                                        copy(matchDurationMinutes = newValue.toIntOrNull() ?: 0)
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        label = if (editEvent.usesSets) {
+                                            "Set Duration (min)"
+                                        } else {
+                                            "Match Duration (min)"
+                                        },
+                                        isError = !isLeagueDurationValid,
+                                        supportingText = if (!isLeagueDurationValid) {
+                                            if (editEvent.usesSets) {
+                                                "Set duration must be at least 5 minutes."
+                                            } else {
+                                                "Match duration must be at least 15 minutes."
+                                            }
+                                        } else {
+                                            ""
+                                        },
+                                    )
+                                    Box(modifier = Modifier.weight(1f))
+                                }
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.Top,
+                                ) {
                                     val normalizedWinnerSetCount = remember(editEvent.winnerSetCount) {
                                         when (editEvent.winnerSetCount) {
                                             1, 3, 5 -> editEvent.winnerSetCount
@@ -3276,30 +3359,7 @@ fun EventDetails(
                                         },
                                     )
 
-                                    if (!isNewEvent) {
-                                        NumberInputField(
-                                            modifier = Modifier.weight(1f),
-                                            value = fieldCount.toString(),
-                                            onValueChange = { newValue ->
-                                                if (newValue.all { it.isDigit() }) {
-                                                    if (newValue.isBlank()) {
-                                                        fieldCount = 0
-                                                        onSelectFieldCount(0)
-                                                    } else {
-                                                        fieldCount = newValue.toInt()
-                                                        onSelectFieldCount(newValue.toInt())
-                                                    }
-                                                }
-                                            },
-                                            label = "Field Count",
-                                            isError = !isFieldCountValid,
-                                            supportingText = if (!isFieldCountValid) stringResource(
-                                                Res.string.value_too_low, 1
-                                            ) else "",
-                                        )
-                                    } else {
-                                        Box(modifier = Modifier.weight(1f))
-                                    }
+                                    Box(modifier = Modifier.weight(1f))
                                 }
 
                                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -3688,7 +3748,9 @@ fun EventDetails(
 
     EventMap(
         component = mapComponent,
-        onEventSelected = { showImageSelector = true },
+        onEventSelected = { _ ->
+            mapComponent.toggleMap()
+        },
         onPlaceSelected = { place ->
             if (editView) {
                 onPlaceSelected(place)
@@ -3707,7 +3769,7 @@ fun EventDetails(
         } else {
             currentLocation ?: LatLng(0.0, 0.0)
         },
-        focusedEvent = if (event.location.isNotBlank()) {
+        focusedEvent = if (!editView && event.location.isNotBlank()) {
             event
         } else {
             null

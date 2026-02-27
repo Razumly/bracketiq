@@ -325,7 +325,7 @@ class DefaultTeamManagementComponent(
     }
 
     private fun buildKnownUsers(team: TeamWithPlayers): Map<String, UserData> = buildMap {
-        put(team.captain.id, team.captain)
+        team.captain?.let { captain -> put(captain.id, captain) }
         team.players.forEach { put(it.id, it) }
         team.pendingPlayers.forEach { put(it.id, it) }
     }

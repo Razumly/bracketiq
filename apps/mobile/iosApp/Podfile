@@ -5,7 +5,8 @@ use_frameworks!
 target 'iosApp' do
   # This points at the .podspec that Gradle generates for your shared module
   pod 'composeApp', :path => '../composeApp'
+  pod 'FirebaseCore'
+  pod 'FirebaseMessaging'
 
   # (Your other pod dependencies go here…)
 end
-

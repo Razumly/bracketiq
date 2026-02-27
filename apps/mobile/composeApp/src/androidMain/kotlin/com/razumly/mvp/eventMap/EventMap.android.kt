@@ -67,6 +67,7 @@ actual fun EventMap(
 ) {
     val scope = rememberCoroutineScope()
     val showMap by component.showMap.collectAsState()
+    val trackedLocation by component.currentLocation.collectAsState()
     var searchedPlaces by remember { mutableStateOf<List<Place>>(emptyList()) }
     val events by component.events.collectAsState()
     val places by component.places.collectAsState()
@@ -191,7 +192,7 @@ actual fun EventMap(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(top = 160.dp),
                 cameraPositionState = cameraPositionState,
-                properties = MapProperties(isMyLocationEnabled = true),
+                properties = MapProperties(isMyLocationEnabled = trackedLocation != null),
                 uiSettings = MapUiSettings(zoomControlsEnabled = false),
                 onPOIClick = { poi ->
                     if (canClickPOI && !isAnimating) {
@@ -365,6 +366,7 @@ actual fun EventMap(
                         state = focusedMarkerState,
                         icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED),
                         onClick = { marker -> false },
+                        onInfoWindowClick = { onEventSelected(event) },
                     ) { marker ->
                         MapEventCard(
                             event = event, modifier = Modifier.wrapContentSize()

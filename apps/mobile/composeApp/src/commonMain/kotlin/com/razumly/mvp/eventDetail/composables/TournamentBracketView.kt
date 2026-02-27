@@ -47,7 +47,6 @@ fun TournamentBracketView(
     isEditingMatches: Boolean = false,
     editableMatches: List<MatchWithRelations> = emptyList(),
     onEditMatch: ((MatchWithRelations) -> Unit)? = null,
-    hideMatchDivisionLabel: Boolean = false,
 ) {
     val component = LocalTournamentComponent.current
     val losersBracket by component.losersBracket.collectAsState()
@@ -69,6 +68,7 @@ fun TournamentBracketView(
     val cardContainerHeight = cardHeight + cardPadding
     var boxHeight by remember { mutableStateOf(Dp.Unspecified) }
     val width = getScreenWidth() / 1.5
+    val cardWidthDp = width.dp
     var maxHeightIndex by remember { mutableIntStateOf(0) }
     val navBarPadding = LocalNavBarPadding.current.calculateBottomPadding()
     var prevColumnScroll by remember { mutableStateOf(columnScrollState.value) }
@@ -199,20 +199,27 @@ fun TournamentBracketView(
                                             match
                                         }
 
-                                        MatchCard(
-                                            match = displayMatch,
-                                            onClick = {
-                                                if (displayMatch != null) {
-                                                    if (isEditingMatches) {
-                                                        onEditMatch?.invoke(displayMatch)
-                                                    } else {
-                                                        onMatchClick(displayMatch)
-                                                    }
-                                                }
-                                            },
-                                            modifier = Modifier.height(cardHeight.dp).width(width.dp),
-                                            showDivisionLabel = !hideMatchDivisionLabel,
-                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .height(cardHeight.dp)
+                                                .width(cardWidthDp)
+                                        ) {
+                                            if (displayMatch != null) {
+                                                MatchCard(
+                                                    match = displayMatch,
+                                                    onClick = {
+                                                        if (isEditingMatches) {
+                                                            onEditMatch?.invoke(displayMatch)
+                                                        } else {
+                                                            onMatchClick(displayMatch)
+                                                        }
+                                                    },
+                                                    modifier = Modifier
+                                                        .height(cardHeight.dp)
+                                                        .width(cardWidthDp),
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }

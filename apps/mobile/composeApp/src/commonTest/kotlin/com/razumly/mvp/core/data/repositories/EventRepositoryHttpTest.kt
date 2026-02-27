@@ -141,7 +141,7 @@ private class EventRepositoryHttp_FakeTeamDao : TeamDao {
     override suspend fun deleteTeamPlayerCrossRefsByTeamId(teamId: String) {}
     override suspend fun deleteTeamPendingPlayerCrossRefsByTeamId(teamId: String) {}
     override suspend fun getTeamWithPlayers(teamId: String): TeamWithPlayers = error("unused")
-    override fun getTeamWithPlayersFlow(teamId: String): Flow<TeamWithRelations> = error("unused")
+    override fun getTeamWithPlayersFlow(teamId: String): Flow<TeamWithRelations?> = error("unused")
     override suspend fun getTeamsWithPlayers(teamIds: List<String>): List<TeamWithRelations> = error("unused")
     override fun getTeamsWithPlayersFlowByIds(ids: List<String>): Flow<List<TeamWithPlayers>> = flowOf(emptyList())
     override suspend fun upsertTeamWithRelations(team: Team) {}
@@ -408,7 +408,7 @@ class EventRepositoryHttpTest {
 
         val result = repo.getEventsInBounds(bounds).getOrThrow()
         assertEquals(1, result.first.size)
-        assertTrue(result.second)
+        assertFalse(result.second)
         assertEquals("e1", eventDao.getEventById("e1")?.id)
     }
 
@@ -458,6 +458,123 @@ class EventRepositoryHttpTest {
 
         assertTrue(capturedBody.contains("\"dateFrom\":\"2025-02-01T00:00:00Z\""))
         assertTrue(capturedBody.contains("\"dateTo\":\"2025-02-28T23:59:59Z\""))
+    }
+
+    @Test
+    fun getEventsInBounds_uses_limit_offset_and_reports_hasMore_from_page_size() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+        val capturedBodies = mutableListOf<String>()
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/events/search", request.url.encodedPath)
+            assertEquals(HttpMethod.Post, request.method)
+            val body = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+            capturedBodies += body
+
+            val responseJson = when {
+                body.contains("\"offset\":0") -> {
+                    """
+                        {
+                          "events": [
+                            {
+                              "id": "e1",
+                              "name": "Event One",
+                              "hostId": "h1",
+                              "start": "2026-02-10T00:00:00Z",
+                              "end": "2026-02-10T01:00:00Z",
+                              "coordinates": [-80.0, 25.0],
+                              "eventType": "EVENT",
+                              "userIds": [],
+                              "teamIds": []
+                            },
+                            {
+                              "id": "e2",
+                              "name": "Event Two",
+                              "hostId": "h1",
+                              "start": "2026-02-11T00:00:00Z",
+                              "end": "2026-02-11T01:00:00Z",
+                              "coordinates": [-80.0, 25.0],
+                              "eventType": "EVENT",
+                              "userIds": [],
+                              "teamIds": []
+                            }
+                          ]
+                        }
+                    """.trimIndent()
+                }
+
+                body.contains("\"offset\":2") -> {
+                    """
+                        {
+                          "events": [
+                            {
+                              "id": "e3",
+                              "name": "Event Three",
+                              "hostId": "h1",
+                              "start": "2026-02-12T00:00:00Z",
+                              "end": "2026-02-12T01:00:00Z",
+                              "coordinates": [-80.0, 25.0],
+                              "eventType": "EVENT",
+                              "userIds": [],
+                              "teamIds": []
+                            }
+                          ]
+                        }
+                    """.trimIndent()
+                }
+
+                else -> """{ "events": [] }"""
+            }
+
+            respond(
+                content = responseJson,
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+        val bounds = Bounds(
+            north = 0.0,
+            east = 0.0,
+            south = 0.0,
+            west = 0.0,
+            center = LatLng(25.0, -80.0),
+            radiusMiles = 100.0,
+        )
+
+        val firstPage = repo.getEventsInBounds(
+            bounds = bounds,
+            limit = 2,
+            offset = 0,
+            includeDistanceFilter = false,
+        ).getOrThrow()
+        val secondPage = repo.getEventsInBounds(
+            bounds = bounds,
+            limit = 2,
+            offset = 2,
+            includeDistanceFilter = false,
+        ).getOrThrow()
+
+        assertEquals(2, firstPage.first.size)
+        assertTrue(firstPage.second)
+        assertEquals(1, secondPage.first.size)
+        assertFalse(secondPage.second)
+        assertTrue(capturedBodies.first().contains("\"limit\":2"))
+        assertTrue(capturedBodies.first().contains("\"offset\":0"))
+        assertTrue(capturedBodies.last().contains("\"offset\":2"))
     }
 
     @Test
@@ -512,7 +629,7 @@ class EventRepositoryHttpTest {
         assertTrue(capturedBody.contains("\"query\":\"test league\""))
         assertTrue(capturedBody.contains("\"limit\":8"))
         assertEquals(1, events.size)
-        assertTrue(hasMore)
+        assertFalse(hasMore)
     }
 
     @Test
@@ -829,10 +946,7 @@ class EventRepositoryHttpTest {
         var capturedBody = ""
 
         val team = Team(
-            seed = 1,
             division = "open",
-            wins = 0,
-            losses = 0,
             name = "Team One",
             captainId = "u1",
             managerId = "u1",

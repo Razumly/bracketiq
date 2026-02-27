@@ -175,7 +175,7 @@ class RootComponent(
                 Napier.w("Location permission always denied")
             } catch (denied: DeniedException) {
                 Napier.w("Location permission denied")
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 Napier.w("Location permission failed: ${e.message}")
             }
 
@@ -185,7 +185,7 @@ class RootComponent(
                 Napier.w("Notification permission always denied")
             } catch (denied: DeniedException) {
                 Napier.w("Notification permission denied")
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 Napier.w("Notification permission failed: ${e.message}")
             }
         }

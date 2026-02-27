@@ -74,7 +74,11 @@ actual class MapComponent(
 
     init {
         scope.launch {
-            locationTracker.startTracking()
+            runCatching {
+                locationTracker.startTracking()
+            }.onFailure { error ->
+                Napier.w("Location tracking disabled: ${error.message}")
+            }
         }
 
         instanceKeeper.put(
@@ -83,8 +87,12 @@ actual class MapComponent(
         )
 
         scope.launch {
-            locationTracker.getLocationsFlow().collect {
-                _currentLocation.value = it
+            try {
+                locationTracker.getLocationsFlow().collect {
+                    _currentLocation.value = it
+                }
+            } catch (error: Exception) {
+                Napier.w("Location updates unavailable: ${error.message}")
             }
         }
     }
@@ -132,6 +140,17 @@ actual class MapComponent(
             null
         }
     }
+
+    fun buildFallbackPlace(
+        name: String,
+        placeId: String,
+        latitude: Double,
+        longitude: Double,
+    ): MVPPlace = MVPPlace(
+        name = name,
+        id = placeId,
+        coordinates = listOf(longitude, latitude),
+    )
 
     /**
      * Autocomplete suggestions via the Place Autocomplete Web Service.

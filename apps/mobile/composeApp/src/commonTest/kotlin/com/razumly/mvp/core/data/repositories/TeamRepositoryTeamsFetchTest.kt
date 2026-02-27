@@ -29,10 +29,12 @@ import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 private class InMemoryAuthTokenStore(
     private var token: String = "",
@@ -91,8 +93,8 @@ private class FakeTeamDao : TeamDao {
     override suspend fun getTeamWithPlayers(teamId: String): com.razumly.mvp.core.data.dataTypes.TeamWithPlayers =
         error("unused")
 
-    override fun getTeamWithPlayersFlow(teamId: String): Flow<com.razumly.mvp.core.data.dataTypes.TeamWithRelations> =
-        error("unused")
+    override fun getTeamWithPlayersFlow(teamId: String): Flow<com.razumly.mvp.core.data.dataTypes.TeamWithRelations?> =
+        flowOf(null)
 
     override suspend fun getTeamsWithPlayers(teamIds: List<String>): List<com.razumly.mvp.core.data.dataTypes.TeamWithRelations> =
         error("unused")
@@ -283,10 +285,7 @@ class TeamRepositoryTeamsFetchTest {
                         {
                           "id": "t1",
                           "name": "Team 1",
-                          "seed": 0,
                           "division": null,
-                          "wins": 0,
-                          "losses": 0,
                           "playerIds": ["u1"],
                           "captainId": "u1",
                           "pending": [],
@@ -316,5 +315,31 @@ class TeamRepositoryTeamsFetchTest {
         assertEquals("t1", cached.first().id)
 
         assertEquals(listOf("u1"), userRepo.lastGetUsersInput)
+    }
+
+    @Test
+    fun getTeamWithPlayersFlow_emits_failure_when_team_missing_from_cache() = runTest {
+        val tokenStore = InMemoryAuthTokenStore("t123")
+        val teamDao = FakeTeamDao()
+        val db = FakeDatabaseService(teamDao)
+        val userRepo = FakeUserRepository()
+
+        val engine = MockEngine { _ ->
+            respond(
+                content = """{"error":"not found"}""",
+                status = HttpStatusCode.NotFound,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = TeamRepository(api, db, userRepo, FakePushNotificationsRepository)
+
+        val firstEmission = repo.getTeamWithPlayersFlow("missing-team").first()
+        assertTrue(firstEmission.isFailure)
     }
 }

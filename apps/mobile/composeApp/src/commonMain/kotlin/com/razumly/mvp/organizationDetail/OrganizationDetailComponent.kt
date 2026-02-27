@@ -479,16 +479,17 @@ class DefaultOrganizationDetailComponent(
                                     .getOrElse { emptyList() }
                                     .mapNotNull { match ->
                                         val fieldId = match.fieldId?.trim()
+                                        val matchStart = match.start ?: return@mapNotNull null
                                         val matchEnd = match.end
                                         if (fieldId.isNullOrBlank()) return@mapNotNull null
                                         if (!selectedFieldSet.contains(fieldId)) return@mapNotNull null
-                                        if (matchEnd == null || matchEnd <= match.start) return@mapNotNull null
+                                        if (matchEnd == null || matchEnd <= matchStart) return@mapNotNull null
 
                                         RentalBusyBlock(
                                             eventId = event.id,
                                             eventName = event.name.ifBlank { "Reserved match" },
                                             fieldId = fieldId,
-                                            start = match.start,
+                                            start = matchStart,
                                             end = matchEnd,
                                         )
                                     }

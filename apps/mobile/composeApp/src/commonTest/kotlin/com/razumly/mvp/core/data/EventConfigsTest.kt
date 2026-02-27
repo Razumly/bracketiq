@@ -2,7 +2,9 @@ package com.razumly.mvp.core.data
 
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.LeagueConfig
+import com.razumly.mvp.core.data.dataTypes.TournamentConfig
 import com.razumly.mvp.core.data.dataTypes.withLeagueConfig
+import com.razumly.mvp.core.data.dataTypes.withTournamentConfig
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -77,5 +79,46 @@ class EventConfigsTest {
 
         assertEquals(false, updated.doTeamsRef)
         assertEquals(false, updated.teamRefsMaySwap)
+    }
+
+    @Test
+    fun withTournamentConfig_timed_mode_clears_set_duration_and_uses_match_duration() {
+        val initial = Event(
+            usesSets = true,
+            setDurationMinutes = 25,
+            matchDurationMinutes = 40,
+        )
+
+        val updated = initial.withTournamentConfig(
+            TournamentConfig(
+                usesSets = false,
+                matchDurationMinutes = 55,
+            ),
+        )
+
+        assertFalse(updated.usesSets)
+        assertEquals(55, updated.matchDurationMinutes)
+        assertEquals(null, updated.setDurationMinutes)
+    }
+
+    @Test
+    fun withTournamentConfig_set_mode_clears_match_duration_and_keeps_set_duration() {
+        val initial = Event(
+            usesSets = false,
+            setDurationMinutes = null,
+            matchDurationMinutes = 60,
+        )
+
+        val updated = initial.withTournamentConfig(
+            TournamentConfig(
+                usesSets = true,
+                setDurationMinutes = 20,
+                matchDurationMinutes = 70,
+            ),
+        )
+
+        assertTrue(updated.usesSets)
+        assertEquals(null, updated.matchDurationMinutes)
+        assertEquals(20, updated.setDurationMinutes)
     }
 }

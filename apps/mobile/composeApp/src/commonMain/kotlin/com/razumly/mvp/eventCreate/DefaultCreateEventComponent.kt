@@ -1029,7 +1029,7 @@ class DefaultCreateEventComponent(
     ): List<TimeSlot> {
         val selectedDivisionIds = event.divisions.normalizeDivisionIdentifiers()
             .ifEmpty { listOf(DEFAULT_DIVISION) }
-        return _leagueSlots.value.flatMap { slot ->
+        return _leagueSlots.value.mapNotNull { slot ->
             val mappedFieldIds = slot.normalizedScheduledFieldIds()
                 .mapNotNull { fieldId ->
                     (fieldIdReplacements[fieldId] ?: fieldId).takeIf { it.isNotBlank() }
@@ -1050,32 +1050,22 @@ class DefaultCreateEventComponent(
             val endMinutes = slot.endTimeMinutes
 
             if (mappedFieldIds.isEmpty() || normalizedDays.isEmpty() || startMinutes == null || endMinutes == null) {
-                return@flatMap emptyList()
+                return@mapNotNull null
             }
             if (endMinutes <= startMinutes) {
-                return@flatMap emptyList()
+                return@mapNotNull null
             }
 
-            val expandedSlots = mutableListOf<TimeSlot>()
-            normalizedDays.forEachIndexed { dayIndex, day ->
-                mappedFieldIds.forEachIndexed { fieldIndex, fieldId ->
-                    expandedSlots += slot.copy(
-                        id = if (normalizedDays.size == 1 && mappedFieldIds.size == 1 && dayIndex == 0 && fieldIndex == 0) {
-                            slot.id.ifBlank { newId() }
-                        } else {
-                            newId()
-                        },
-                        dayOfWeek = day,
-                        daysOfWeek = listOf(day),
-                        divisions = effectiveDivisionIds,
-                        scheduledFieldId = fieldId,
-                        scheduledFieldIds = listOf(fieldId),
-                        startDate = event.start,
-                        endDate = event.end.takeIf { it > event.start },
-                    )
-                }
-            }
-            expandedSlots
+            slot.copy(
+                id = slot.id.ifBlank { newId() },
+                dayOfWeek = normalizedDays.first(),
+                daysOfWeek = normalizedDays,
+                divisions = effectiveDivisionIds,
+                scheduledFieldId = mappedFieldIds.first(),
+                scheduledFieldIds = mappedFieldIds,
+                startDate = event.start,
+                endDate = event.end.takeIf { it > event.start },
+            )
         }
     }
 
@@ -1172,6 +1162,9 @@ class DefaultCreateEventComponent(
     private fun Event.applyTournamentSportRules(requiresSets: Boolean): Event {
         return if (!requiresSets) {
             copy(
+                usesSets = false,
+                setDurationMinutes = null,
+                matchDurationMinutes = matchDurationMinutes ?: 60,
                 winnerSetCount = 1,
                 loserSetCount = 1,
                 winnerBracketPointsToVictory = winnerBracketPointsToVictory.take(1).ifEmpty { listOf(21) },
@@ -1182,6 +1175,9 @@ class DefaultCreateEventComponent(
             val winnerSets = winnerSetCount.takeIf { allowedSetCounts.contains(it) } ?: 1
             val loserSets = loserSetCount.takeIf { allowedSetCounts.contains(it) } ?: 1
             copy(
+                usesSets = true,
+                setDurationMinutes = setDurationMinutes ?: 20,
+                matchDurationMinutes = matchDurationMinutes ?: 60,
                 winnerSetCount = winnerSets,
                 loserSetCount = loserSets,
                 winnerBracketPointsToVictory = winnerBracketPointsToVictory
@@ -1378,15 +1374,16 @@ class DefaultCreateEventComponent(
 
                 matches.any { match ->
                     val fieldId = match.fieldId?.trim()
+                    val matchStart = match.start ?: return@any false
                     val matchEnd = match.end
                     !fieldId.isNullOrBlank() &&
                         selectedFieldSet.contains(fieldId) &&
                         matchEnd != null &&
-                        matchEnd > match.start &&
+                        matchEnd > matchStart &&
                         rangesOverlap(
                             firstStart = selectedStart,
                             firstEnd = selectedEnd,
-                            secondStart = match.start,
+                            secondStart = matchStart,
                             secondEnd = matchEnd,
                         )
                 }

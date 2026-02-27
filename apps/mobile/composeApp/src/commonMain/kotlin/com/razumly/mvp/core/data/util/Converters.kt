@@ -51,8 +51,20 @@ class Converters {
 
     @TypeConverter
     @OptIn(ExperimentalTime::class)
+    fun fromNullableInstant(instant: Instant?): Long? {
+        return instant?.toEpochMilliseconds()
+    }
+
+    @TypeConverter
+    @OptIn(ExperimentalTime::class)
     fun toInstant(epochMilli: Long): Instant {
         return Instant.fromEpochMilliseconds(epochMilli)
+    }
+
+    @TypeConverter
+    @OptIn(ExperimentalTime::class)
+    fun toNullableInstant(epochMilli: Long?): Instant? {
+        return epochMilli?.let { Instant.fromEpochMilliseconds(it) }
     }
 
     @TypeConverter

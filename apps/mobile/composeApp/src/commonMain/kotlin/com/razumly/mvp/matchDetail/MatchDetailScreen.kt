@@ -144,7 +144,7 @@ fun MatchDetailScreen(
         }
     }.value
 
-    if (showScoreControls && showRefCheckInDialog) {
+    if (showRefCheckInDialog) {
         val message = if (isRef) {
             stringResource(Res.string.referee_checkin_message)
         } else {

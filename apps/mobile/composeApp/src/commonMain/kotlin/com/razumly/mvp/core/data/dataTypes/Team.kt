@@ -15,10 +15,7 @@ import kotlinx.serialization.Serializable
 @Entity
 @Serializable
 data class Team(
-    val seed: Int,
     val division: String,
-    val wins: Int,
-    val losses: Int,
     val name: String?,
     val captainId: String,
     val managerId: String? = null,
@@ -50,10 +47,7 @@ data class Team(
             val defaultSkillDivisionTypeName = defaultSkillDivisionTypeId.toDivisionDisplayLabel()
             val defaultAgeDivisionTypeName = defaultAgeDivisionTypeId.toDivisionDisplayLabel()
             return Team(
-                seed = 0,
                 division = DEFAULT_DIVISION,
-                wins = 0,
-                losses = 0,
                 name = null,
                 playerIds = listOf(captainId),
                 teamSize = 2,
@@ -84,10 +78,7 @@ data class Team(
     fun toTeamDTO(): TeamDTO {
         return TeamDTO(
             name = name,
-            seed = seed,
             division = division.normalizeDivisionLabel(),
-            wins = wins,
-            losses = losses,
             playerIds = playerIds,
             captainId = captainId,
             managerId = managerId,
