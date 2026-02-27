@@ -1029,7 +1029,7 @@ class DefaultCreateEventComponent(
     ): List<TimeSlot> {
         val selectedDivisionIds = event.divisions.normalizeDivisionIdentifiers()
             .ifEmpty { listOf(DEFAULT_DIVISION) }
-        return _leagueSlots.value.flatMap { slot ->
+        return _leagueSlots.value.mapNotNull { slot ->
             val mappedFieldIds = slot.normalizedScheduledFieldIds()
                 .mapNotNull { fieldId ->
                     (fieldIdReplacements[fieldId] ?: fieldId).takeIf { it.isNotBlank() }
@@ -1050,32 +1050,22 @@ class DefaultCreateEventComponent(
             val endMinutes = slot.endTimeMinutes
 
             if (mappedFieldIds.isEmpty() || normalizedDays.isEmpty() || startMinutes == null || endMinutes == null) {
-                return@flatMap emptyList()
+                return@mapNotNull null
             }
             if (endMinutes <= startMinutes) {
-                return@flatMap emptyList()
+                return@mapNotNull null
             }
 
-            val expandedSlots = mutableListOf<TimeSlot>()
-            normalizedDays.forEachIndexed { dayIndex, day ->
-                mappedFieldIds.forEachIndexed { fieldIndex, fieldId ->
-                    expandedSlots += slot.copy(
-                        id = if (normalizedDays.size == 1 && mappedFieldIds.size == 1 && dayIndex == 0 && fieldIndex == 0) {
-                            slot.id.ifBlank { newId() }
-                        } else {
-                            newId()
-                        },
-                        dayOfWeek = day,
-                        daysOfWeek = listOf(day),
-                        divisions = effectiveDivisionIds,
-                        scheduledFieldId = fieldId,
-                        scheduledFieldIds = listOf(fieldId),
-                        startDate = event.start,
-                        endDate = event.end.takeIf { it > event.start },
-                    )
-                }
-            }
-            expandedSlots
+            slot.copy(
+                id = slot.id.ifBlank { newId() },
+                dayOfWeek = normalizedDays.first(),
+                daysOfWeek = normalizedDays,
+                divisions = effectiveDivisionIds,
+                scheduledFieldId = mappedFieldIds.first(),
+                scheduledFieldIds = mappedFieldIds,
+                startDate = event.start,
+                endDate = event.end.takeIf { it > event.start },
+            )
         }
     }
 
