@@ -25,7 +25,11 @@ import com.razumly.mvp.eventDetail.data.IMatchRepository
 import com.razumly.mvp.eventSearch.util.EventFilter
 import dev.icerock.moko.geo.LatLng
 import dev.icerock.moko.geo.LocationTracker
+import dev.icerock.moko.permissions.DeniedAlwaysException
+import dev.icerock.moko.permissions.DeniedException
 import io.github.aakira.napier.Napier
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -101,7 +105,18 @@ class DefaultEventSearchComponent(
     override val locationTracker: LocationTracker,
     private val navigationHandler: INavigationHandler
 ) : ComponentContext by componentContext, EventSearchComponent {
-    private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
+    private val scopeExceptionHandler = CoroutineExceptionHandler { _, throwable ->
+        when (throwable) {
+            is DeniedAlwaysException -> handleLocationPermissionDenied(alwaysDenied = true)
+            is DeniedException -> handleLocationPermissionDenied(alwaysDenied = false)
+            is CancellationException -> Unit
+            else -> Napier.e(
+                message = "Unhandled exception in EventSearchComponent scope: ${throwable.message}",
+                throwable = throwable,
+            )
+        }
+    }
+    private val scope = coroutineScope(Dispatchers.Main + SupervisorJob() + scopeExceptionHandler)
 
     private val _currentRadius = MutableStateFlow(50.0)
     override val currentRadius: StateFlow<Double> = _currentRadius.asStateFlow()
@@ -114,6 +129,7 @@ class DefaultEventSearchComponent(
 
     private val _currentLocation = MutableStateFlow<LatLng?>(null)
     override val currentLocation = _currentLocation.asStateFlow()
+    private val _isLocationSearchEnabled = MutableStateFlow(true)
 
     private val _suggestedEvents = MutableStateFlow<List<Event>>(emptyList())
     override val suggestedEvents: StateFlow<List<Event>> = _suggestedEvents.asStateFlow()
@@ -189,11 +205,7 @@ class DefaultEventSearchComponent(
         }
 
         scope.launch {
-            runCatching {
-                locationTracker.startTracking()
-            }.onFailure { error ->
-                Napier.w("Location tracking disabled: ${error.message}")
-            }
+            startTrackingLocationSafely()
         }
 
         instanceKeeper.put(CLEANUP_KEY, Cleanup(locationTracker))
@@ -201,6 +213,7 @@ class DefaultEventSearchComponent(
         scope.launch {
             try {
                 locationTracker.getLocationsFlow().collect { trackedLocation ->
+                    _isLocationSearchEnabled.value = true
                     val previousLocation = _currentLocation.value
                     _currentLocation.value = trackedLocation
 
@@ -211,6 +224,12 @@ class DefaultEventSearchComponent(
                         refreshRentals(force = true)
                     }
                 }
+            } catch (deniedAlwaysException: DeniedAlwaysException) {
+                handleLocationPermissionDenied(alwaysDenied = true)
+            } catch (deniedException: DeniedException) {
+                handleLocationPermissionDenied(alwaysDenied = false)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (e: Exception) {
                 Napier.w("Location updates unavailable: ${e.message}")
             }
@@ -259,7 +278,7 @@ class DefaultEventSearchComponent(
 
         suggestEventsJob?.cancel()
         suggestEventsJob = scope.launch {
-            val userLocation = _currentLocation.value ?: FALLBACK_SEARCH_LOCATION
+            val userLocation = _currentLocation.value ?: SAN_FRANCISCO_LOCATION
             eventRepository.searchEvents(
                 searchQuery = normalizedQuery,
                 userLocation = userLocation,
@@ -267,7 +286,11 @@ class DefaultEventSearchComponent(
                 offset = 0,
             )
                 .onSuccess { (events, _) ->
-                    _suggestedEvents.value = events
+                    _suggestedEvents.value = if (_isLocationSearchEnabled.value) {
+                        events
+                    } else {
+                        events.sortedByDescending { event -> event.start }
+                    }
                 }.onFailure { e ->
                     _errorState.value = ErrorMessage("Failed to fetch events: ${e.message}")
                 }
@@ -313,7 +336,7 @@ class DefaultEventSearchComponent(
             _isLoadingMore.value = true
             try {
                 val activeFilter = _filter.value
-                val currentLocation = _currentLocation.value ?: FALLBACK_SEARCH_LOCATION
+                val currentLocation = _currentLocation.value ?: SAN_FRANCISCO_LOCATION
                 val currentBounds =
                     getBounds(_currentRadius.value, currentLocation.latitude, currentLocation.longitude)
 
@@ -525,7 +548,12 @@ class DefaultEventSearchComponent(
     }
 
     private fun applyEventFilter(source: List<Event>, filter: EventFilter): List<Event> {
-        return source.filter { event -> filter.filter(event) }
+        val filtered = source.filter { event -> filter.filter(event) }
+        return if (_isLocationSearchEnabled.value) {
+            filtered
+        } else {
+            filtered.sortedByDescending { event -> event.start }
+        }
     }
 
     private fun mergeEvents(existing: List<Event>, incoming: List<Event>): List<Event> {
@@ -638,6 +666,36 @@ class DefaultEventSearchComponent(
         return LatLng(latitude, longitude)
     }
 
+    private suspend fun startTrackingLocationSafely() {
+        try {
+            locationTracker.startTracking()
+            _isLocationSearchEnabled.value = true
+        } catch (deniedAlwaysException: DeniedAlwaysException) {
+            handleLocationPermissionDenied(alwaysDenied = true)
+        } catch (deniedException: DeniedException) {
+            handleLocationPermissionDenied(alwaysDenied = false)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (e: Exception) {
+            Napier.w("Location tracking disabled: ${e.message}")
+        }
+    }
+
+    private fun handleLocationPermissionDenied(alwaysDenied: Boolean) {
+        _isLocationSearchEnabled.value = false
+        _currentLocation.value = SAN_FRANCISCO_LOCATION
+        _errorState.value = ErrorMessage(
+            if (alwaysDenied) {
+                "Location permission is turned off. Showing most recent events with San Francisco as default."
+            } else {
+                "Location permission denied. Showing most recent events with San Francisco as default."
+            }
+        )
+        refreshEvents(force = true)
+        refreshOrganizations(force = true)
+        refreshRentals(force = true)
+    }
+
     private class Cleanup(private val locationTracker: LocationTracker) : InstanceKeeper.Instance {
         override fun onDestroy() {
             locationTracker.stopTracking()
@@ -646,7 +704,7 @@ class DefaultEventSearchComponent(
 
     companion object {
         const val CLEANUP_KEY = "Cleanup_Search"
-        private val FALLBACK_SEARCH_LOCATION = LatLng(0.0, 0.0)
+        private val SAN_FRANCISCO_LOCATION = LatLng(37.7749, -122.4194)
         private const val EVENTS_PAGE_SIZE = 50
         private const val SEARCH_MIN_QUERY_LENGTH = 2
         private const val SEARCH_SUGGESTION_LIMIT = 50

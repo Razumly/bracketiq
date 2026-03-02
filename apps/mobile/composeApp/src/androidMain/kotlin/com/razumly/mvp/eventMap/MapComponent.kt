@@ -22,7 +22,11 @@ import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.util.getBounds
 import dev.icerock.moko.geo.LocationTracker
+import dev.icerock.moko.permissions.DeniedAlwaysException
+import dev.icerock.moko.permissions.DeniedException
 import io.github.aakira.napier.Napier
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -41,7 +45,32 @@ actual class MapComponent(
 ) : ComponentContext by componentContext {
 
     private val logTag = "MapComponent"
-    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private val scopeExceptionHandler = CoroutineExceptionHandler { _, throwable ->
+        when (throwable) {
+            is DeniedAlwaysException -> {
+                Napier.w(
+                    message = "Location permission always denied in map scope",
+                    tag = logTag,
+                )
+            }
+
+            is DeniedException -> {
+                Napier.w(
+                    message = "Location permission denied in map scope",
+                    tag = logTag,
+                )
+            }
+
+            else -> {
+                Napier.e(
+                    message = "Unhandled exception in MapComponent scope: ${throwable.message}",
+                    throwable = throwable,
+                    tag = logTag,
+                )
+            }
+        }
+    }
+    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob() + scopeExceptionHandler)
 
     private val _currentLocation = MutableStateFlow<dev.icerock.moko.geo.LatLng?>(null)
     actual val currentLocation = _currentLocation.asStateFlow()
@@ -98,23 +127,49 @@ actual class MapComponent(
             }
         }
         scope.launch {
-            runCatching {
+            try {
                 locationTracker.startTracking()
-            }.onFailure { error ->
+            } catch (deniedAlwaysException: DeniedAlwaysException) {
                 Napier.w(
-                    message = "Location tracking disabled: ${error.message}",
+                    message = "Location tracking disabled (always denied)",
+                    tag = logTag,
+                )
+                return@launch
+            } catch (deniedException: DeniedException) {
+                Napier.w(
+                    message = "Location tracking disabled (denied)",
+                    tag = logTag,
+                )
+                return@launch
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (e: Exception) {
+                Napier.w(
+                    message = "Location tracking disabled: ${e.message}",
                     tag = logTag,
                 )
                 return@launch
             }
 
-            runCatching {
+            try {
                 locationTracker.getLocationsFlow().collect { trackedLocation ->
                     _currentLocation.value = trackedLocation
                 }
-            }.onFailure { error ->
+            } catch (deniedAlwaysException: DeniedAlwaysException) {
                 Napier.w(
-                    message = "Location updates unavailable: ${error.message}",
+                    message = "Location updates unavailable (always denied)",
+                    tag = logTag,
+                )
+            } catch (deniedException: DeniedException) {
+                Napier.w(
+                    message = "Location updates unavailable (denied)",
+                    tag = logTag,
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (e: Exception) {
+                Napier.w(
+                    message = "Location updates unavailable: ${e.message}",
                     tag = logTag,
                 )
             }

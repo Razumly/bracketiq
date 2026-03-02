@@ -39,6 +39,7 @@ import dev.icerock.moko.permissions.notifications.REMOTE_NOTIFICATION
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -57,7 +58,25 @@ class RootComponent(
 
     private val navigation = StackNavigation<AppConfig>()
     private val _koin = getKoin()
-    private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
+    private val scopeExceptionHandler = CoroutineExceptionHandler { _, throwable ->
+        when (throwable) {
+            is DeniedAlwaysException -> {
+                Napier.w("Permission always denied in root scope: ${throwable.permission}")
+            }
+
+            is DeniedException -> {
+                Napier.w("Permission denied in root scope: ${throwable.permission}")
+            }
+
+            else -> {
+                Napier.e(
+                    message = "Unhandled exception in RootComponent scope: ${throwable.message}",
+                    throwable = throwable
+                )
+            }
+        }
+    }
+    private val scope = coroutineScope(Dispatchers.Main + SupervisorJob() + scopeExceptionHandler)
 
     private val deepLinkNav = MutableStateFlow(deepLinkNavStart)
     private var registeredPushUserId: String? = null

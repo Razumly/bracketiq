@@ -6,6 +6,8 @@ import androidx.room.RoomDatabase
 import androidx.sqlite.SQLiteConnection
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import com.razumly.mvp.core.data.DatabaseService
+import com.razumly.mvp.core.data.MIGRATION_1_2_NO_OP
+import com.razumly.mvp.core.data.MIGRATION_2_3_MATCH_START_NULLABLE
 import com.razumly.mvp.core.data.MVPDatabaseservice
 import io.github.aakira.napier.Napier
 import org.koin.dsl.bind
@@ -23,6 +25,7 @@ actual val roomDBModule = module {
                 context.applicationContext,
                 dbFile.absolutePath
             ).setDriver(BundledSQLiteDriver())
+                .addMigrations(MIGRATION_1_2_NO_OP, MIGRATION_2_3_MATCH_START_NULLABLE)
                 .addCallback(object : RoomDatabase.Callback() {
                     override fun onCreate(connection: SQLiteConnection) {
                         Napier.i(tag = ROOM_DB_LOG_TAG) { "Room database created at ${dbFile.absolutePath}" }

@@ -6,6 +6,7 @@ import androidx.compose.runtime.getValue
 import com.arkivanov.decompose.ExperimentalDecomposeApi
 import com.arkivanov.decompose.extensions.compose.experimental.stack.ChildStack
 import com.arkivanov.decompose.extensions.compose.subscribeAsState
+import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
 import com.razumly.mvp.profile.profileDetails.ProfileDetailsScreen
@@ -13,6 +14,8 @@ import com.razumly.mvp.profile.profileDetails.ProfileDetailsScreen
 @OptIn(ExperimentalDecomposeApi::class)
 @Composable
 fun ProfileScreen(component: ProfileComponent) {
+    PreparePaymentProcessor(component)
+
     val childStack by component.childStack.subscribeAsState()
     val popupHandler = LocalPopupHandler.current
     val loadingHandler = LocalLoadingHandler.current
