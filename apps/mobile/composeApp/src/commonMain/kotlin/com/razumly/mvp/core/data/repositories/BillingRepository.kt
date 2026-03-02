@@ -24,6 +24,7 @@ import io.github.aakira.napier.Napier
 import io.ktor.client.plugins.ClientRequestException
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.encodeURLQueryComponent
+import kotlinx.coroutines.delay
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlin.time.ExperimentalTime
@@ -87,6 +88,30 @@ data class CreateBillRequest(
     val paymentPlanEnabled: Boolean = false,
 )
 
+data class RecordSignatureResult(
+    val operationId: String? = null,
+    val syncStatus: String? = null,
+)
+
+data class BoldSignOperationStatus(
+    val operationId: String,
+    val operationType: String? = null,
+    val status: String,
+    val error: String? = null,
+    val templateDocumentId: String? = null,
+    val signedDocumentRecordId: String? = null,
+    val templateId: String? = null,
+    val documentId: String? = null,
+    val updatedAt: String? = null,
+) {
+    fun isConfirmed(): Boolean = status.trim().equals("CONFIRMED", ignoreCase = true)
+
+    fun isFailed(): Boolean {
+        val normalized = status.trim().uppercase()
+        return normalized == "FAILED" || normalized == "FAILED_RETRYABLE" || normalized == "TIMED_OUT"
+    }
+}
+
 interface IBillingRepository : IMVPRepository {
     suspend fun createPurchaseIntent(
         event: Event,
@@ -107,7 +132,12 @@ interface IBillingRepository : IMVPRepository {
         type: String = "TEXT",
         signerContext: SignerContext = SignerContext.PARTICIPANT,
         childUserId: String? = null,
-    ): Result<Unit>
+    ): Result<RecordSignatureResult>
+    suspend fun pollBoldSignOperation(
+        operationId: String,
+        timeoutMillis: Long = 90_000,
+        intervalMillis: Long = 1_500,
+    ): Result<BoldSignOperationStatus>
 
     suspend fun createAccount(): Result<String>
     suspend fun getOnboardingLink(): Result<String>
@@ -221,7 +251,7 @@ class BillingRepository(
         type: String,
         signerContext: SignerContext,
         childUserId: String?,
-    ): Result<Unit> = runCatching {
+    ): Result<RecordSignatureResult> = runCatching {
         val userId = userRepository.currentUser.value.getOrThrow().id
         val response = api.post<RecordSignatureRequestDto, RecordSignatureResponseDto>(
             path = "api/documents/record-signature",
@@ -243,6 +273,47 @@ class BillingRepository(
         if (response.ok == false) {
             throw Exception("Failed to record signature.")
         }
+
+        RecordSignatureResult(
+            operationId = response.operationId?.trim()?.takeIf(String::isNotBlank),
+            syncStatus = response.syncStatus?.trim()?.takeIf(String::isNotBlank),
+        )
+    }
+
+    override suspend fun pollBoldSignOperation(
+        operationId: String,
+        timeoutMillis: Long,
+        intervalMillis: Long,
+    ): Result<BoldSignOperationStatus> = runCatching {
+        val normalizedOperationId = operationId.trim()
+        require(normalizedOperationId.isNotBlank()) { "Operation id is required." }
+
+        val effectiveTimeoutMillis = timeoutMillis.coerceAtLeast(1_000)
+        val effectiveIntervalMillis = intervalMillis.coerceIn(500, 10_000)
+        val startedAt = kotlin.time.Clock.System.now().toEpochMilliseconds()
+        var lastStatus: BoldSignOperationStatus? = null
+
+        while (kotlin.time.Clock.System.now().toEpochMilliseconds() - startedAt <= effectiveTimeoutMillis) {
+            val dto = api.get<BoldSignOperationStatusDto>(
+                path = "api/boldsign/operations/${normalizedOperationId.encodeURLQueryComponent()}",
+            )
+            val mapped = dto.toOperationStatus()
+            lastStatus = mapped
+
+            if (mapped.isConfirmed()) {
+                return@runCatching mapped
+            }
+            if (mapped.isFailed()) {
+                throw Exception(mapped.error ?: "Document synchronization failed (${mapped.status}).")
+            }
+
+            delay(effectiveIntervalMillis)
+        }
+
+        if (lastStatus != null) {
+            throw Exception(lastStatus.error ?: "Document synchronization is delayed. Please try again shortly.")
+        }
+        throw Exception("Document synchronization is delayed. Please try again shortly.")
     }
 
     override suspend fun listProfileDocuments(): Result<ProfileDocumentsBundle> = runCatching {
@@ -749,8 +820,41 @@ private data class RecordSignatureRequestDto(
 @Serializable
 private data class RecordSignatureResponseDto(
     val ok: Boolean? = null,
+    val operationId: String? = null,
+    val syncStatus: String? = null,
     val error: String? = null,
 )
+
+@Serializable
+private data class BoldSignOperationStatusDto(
+    val operationId: String? = null,
+    val operationType: String? = null,
+    val status: String? = null,
+    val error: String? = null,
+    val templateDocumentId: String? = null,
+    val signedDocumentRecordId: String? = null,
+    val templateId: String? = null,
+    val documentId: String? = null,
+    val updatedAt: String? = null,
+)
+
+private fun BoldSignOperationStatusDto.toOperationStatus(): BoldSignOperationStatus {
+    val normalizedOperationId = operationId?.trim()?.takeIf(String::isNotBlank)
+        ?: throw Exception("Operation status response is missing operationId.")
+    val normalizedStatus = status?.trim()?.takeIf(String::isNotBlank) ?: "PENDING_WEBHOOK"
+
+    return BoldSignOperationStatus(
+        operationId = normalizedOperationId,
+        operationType = operationType?.trim()?.takeIf(String::isNotBlank),
+        status = normalizedStatus,
+        error = error?.trim()?.takeIf(String::isNotBlank),
+        templateDocumentId = templateDocumentId?.trim()?.takeIf(String::isNotBlank),
+        signedDocumentRecordId = signedDocumentRecordId?.trim()?.takeIf(String::isNotBlank),
+        templateId = templateId?.trim()?.takeIf(String::isNotBlank),
+        documentId = documentId?.trim()?.takeIf(String::isNotBlank),
+        updatedAt = updatedAt?.trim()?.takeIf(String::isNotBlank),
+    )
+}
 
 @Serializable
 private data class EmptyRequestDto(
@@ -1104,6 +1208,8 @@ data class SignStep(
     val documentSigningUrl: String? = null,
     val documentId: String? = null,
     @SerialName("documentID") val legacyDocumentId: String? = null,
+    val operationId: String? = null,
+    val syncStatus: String? = null,
 ) {
     fun isTextStep(): Boolean {
         return type.equals("TEXT", ignoreCase = true) || resolvedSigningUrl().isNullOrBlank()

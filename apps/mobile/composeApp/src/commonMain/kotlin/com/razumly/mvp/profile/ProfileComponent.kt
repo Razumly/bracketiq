@@ -181,6 +181,18 @@ data class ProfileTextSignaturePromptState(
     val step: SignStep,
 )
 
+enum class ProfileWebDocumentPromptMode {
+    SIGN,
+    VIEW,
+}
+
+data class ProfileWebDocumentPromptState(
+    val title: String,
+    val url: String,
+    val mode: ProfileWebDocumentPromptMode,
+    val description: String? = null,
+)
+
 interface ProfileComponent : IPaymentProcessor {
     val childStack: Value<ChildStack<*, Child>>
     val errorState: StateFlow<ErrorMessage?>
@@ -196,6 +208,7 @@ interface ProfileComponent : IPaymentProcessor {
     val activeMembershipActionId: StateFlow<String?>
     val activeDocumentActionId: StateFlow<String?>
     val textSignaturePrompt: StateFlow<ProfileTextSignaturePromptState?>
+    val webDocumentPrompt: StateFlow<ProfileWebDocumentPromptState?>
     val isStripeAccountConnected: StateFlow<Boolean>
 
     fun onBackClicked()
@@ -244,6 +257,7 @@ interface ProfileComponent : IPaymentProcessor {
     fun openScheduleEvent(eventId: String)
     fun confirmTextSignature()
     fun dismissTextSignature()
+    fun dismissWebDocumentPrompt()
     fun createChild(
         firstName: String,
         lastName: String,
@@ -367,12 +381,16 @@ class DefaultProfileComponent(
     private val _textSignaturePrompt = MutableStateFlow<ProfileTextSignaturePromptState?>(null)
     override val textSignaturePrompt = _textSignaturePrompt.asStateFlow()
 
+    private val _webDocumentPrompt = MutableStateFlow<ProfileWebDocumentPromptState?>(null)
+    override val webDocumentPrompt = _webDocumentPrompt.asStateFlow()
+
     private val _isStripeAccountConnected = MutableStateFlow(false)
     override val isStripeAccountConnected = _isStripeAccountConnected.asStateFlow()
 
     private var loadingHandler: LoadingHandler? = null
     private var eventTemplatesJob: Job? = null
     private var childrenTabVisibilityUserId: String? = null
+    private var pendingDocumentSyncJob: Job? = null
 
     override val childStack: Value<ChildStack<*, ProfileComponent.Child>> = childStack(
         source = navigation,
@@ -1213,14 +1231,31 @@ class DefaultProfileComponent(
                     return@onSuccess
                 }
 
-                val openResult = urlHandler?.openUrlInWebView(signingUrl)
-                    ?: Result.failure(IllegalStateException("Web view is unavailable."))
-                openResult.onFailure { throwable ->
-                    _errorState.value = ErrorMessage(
-                        throwable.message ?: "Unable to open signing document.",
-                    )
-                }.onSuccess {
-                    _errorState.value = ErrorMessage("Complete signing, then refresh documents.")
+                _webDocumentPrompt.value = ProfileWebDocumentPromptState(
+                    title = step.title?.trim()?.takeIf(String::isNotBlank) ?: document.title,
+                    url = signingUrl,
+                    mode = ProfileWebDocumentPromptMode.SIGN,
+                    description = "Signer: ${document.signerContextLabel}",
+                )
+
+                val operationId = step.operationId?.trim()?.takeIf(String::isNotBlank)
+                if (operationId == null) {
+                    _errorState.value = ErrorMessage("Complete signing in the modal, then refresh documents.")
+                    return@onSuccess
+                }
+
+                pendingDocumentSyncJob?.cancel()
+                pendingDocumentSyncJob = scope.launch {
+                    _errorState.value = ErrorMessage("Waiting for signature sync...")
+                    billingRepository.pollBoldSignOperation(operationId).onSuccess {
+                        _webDocumentPrompt.value = null
+                        _errorState.value = ErrorMessage("Document signed.")
+                        refreshDocuments()
+                    }.onFailure { throwable ->
+                        _errorState.value = ErrorMessage(
+                            throwable.message ?: "Failed to confirm signature status.",
+                        )
+                    }
                 }
             }.onFailure { throwable ->
                 _errorState.value = ErrorMessage(
@@ -1257,13 +1292,12 @@ class DefaultProfileComponent(
                 "${apiBaseUrl.trimEnd('/')}/${viewUrl.trimStart('/')}"
             }
 
-            val openResult = urlHandler?.openUrlInWebView(resolvedUrl)
-                ?: Result.failure(IllegalStateException("Web view is unavailable."))
-            openResult.onFailure { throwable ->
-                _errorState.value = ErrorMessage(
-                    throwable.message ?: "Unable to open document.",
-                )
-            }
+            _webDocumentPrompt.value = ProfileWebDocumentPromptState(
+                title = document.title,
+                url = resolvedUrl,
+                mode = ProfileWebDocumentPromptMode.VIEW,
+                description = document.organizationName,
+            )
 
             _activeDocumentActionId.value = null
             loadingHandler?.hideLoading()
@@ -1309,6 +1343,18 @@ class DefaultProfileComponent(
 
     override fun dismissTextSignature() {
         _textSignaturePrompt.value = null
+    }
+
+    override fun dismissWebDocumentPrompt() {
+        pendingDocumentSyncJob?.cancel()
+        pendingDocumentSyncJob = null
+
+        val mode = _webDocumentPrompt.value?.mode
+        _webDocumentPrompt.value = null
+
+        if (mode == ProfileWebDocumentPromptMode.SIGN) {
+            _errorState.value = ErrorMessage("Document signing canceled.")
+        }
     }
 
     override fun createChild(

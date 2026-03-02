@@ -42,6 +42,7 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.ProfileDocumentCard
 import com.razumly.mvp.core.data.repositories.ProfileDocumentType
+import com.razumly.mvp.core.presentation.composables.EmbeddedWebModal
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import com.razumly.mvp.core.presentation.composables.NetworkAvatar
@@ -919,6 +920,7 @@ fun ProfileDocumentsScreen(component: ProfileComponent) {
     val documentsState by component.documentsState.collectAsState()
     val activeDocumentActionId by component.activeDocumentActionId.collectAsState()
     val textSignaturePrompt by component.textSignaturePrompt.collectAsState()
+    val webDocumentPrompt by component.webDocumentPrompt.collectAsState()
     var textPreviewDocument by remember { mutableStateOf<ProfileDocumentCard?>(null) }
 
     LaunchedEffect(component) {
@@ -1056,6 +1058,15 @@ fun ProfileDocumentsScreen(component: ProfileComponent) {
                     Text("Cancel")
                 }
             },
+        )
+    }
+
+    webDocumentPrompt?.let { prompt ->
+        EmbeddedWebModal(
+            title = prompt.title,
+            url = prompt.url,
+            description = prompt.description,
+            onDismiss = component::dismissWebDocumentPrompt,
         )
     }
 

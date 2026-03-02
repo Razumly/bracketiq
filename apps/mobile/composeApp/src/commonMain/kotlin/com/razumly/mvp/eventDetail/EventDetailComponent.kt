@@ -124,6 +124,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val childJoinSelectionDialog: StateFlow<ChildJoinSelectionDialogState?>
     val withdrawTargets: StateFlow<List<WithdrawTargetOption>>
     val textSignaturePrompt: StateFlow<TextSignaturePromptState?>
+    val webSignaturePrompt: StateFlow<WebSignaturePromptState?>
     val eventImageIds: StateFlow<List<String>>
     val organizationTemplates: StateFlow<List<OrganizationTemplateDocument>>
     val organizationTemplatesLoading: StateFlow<Boolean>
@@ -196,6 +197,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun confirmLeagueStandings(applyReassignment: Boolean = true)
     fun confirmTextSignature()
     fun dismissTextSignature()
+    fun dismissWebSignaturePrompt()
     fun onUploadSelected(photo: GalleryPhotoResult)
     fun deleteImage(imageId: String)
     fun sendNotification(title: String, message: String)
@@ -217,6 +219,13 @@ data class MatchEditDialogState(
 
 data class TextSignaturePromptState(
     val step: SignStep,
+    val currentStep: Int,
+    val totalSteps: Int,
+)
+
+data class WebSignaturePromptState(
+    val step: SignStep?,
+    val url: String,
     val currentStep: Int,
     val totalSteps: Int,
 )
@@ -674,6 +683,9 @@ class DefaultEventDetailComponent(
     private val _textSignaturePrompt = MutableStateFlow<TextSignaturePromptState?>(null)
     override val textSignaturePrompt = _textSignaturePrompt.asStateFlow()
 
+    private val _webSignaturePrompt = MutableStateFlow<WebSignaturePromptState?>(null)
+    override val webSignaturePrompt = _webSignaturePrompt.asStateFlow()
+
     private var joinableChildren: List<JoinChildOption> = emptyList()
     private var pendingSignatureSteps: List<SignStep> = emptyList()
     private var pendingSignatureStepIndex = 0
@@ -682,6 +694,7 @@ class DefaultEventDetailComponent(
     private var pendingSignatureContexts: List<SignerContext> = emptyList()
     private var pendingSignatureContextIndex = 0
     private var pendingSignatureChild: JoinChildOption? = null
+    private var pendingPdfSignaturePollJob: Job? = null
     private val completedSignatureKeys = mutableSetOf<String>()
 
     private val shareServiceProvider = ShareServiceProvider()
@@ -1472,6 +1485,9 @@ class DefaultEventDetailComponent(
     }
 
     private suspend fun processNextSignatureStep() {
+        pendingPdfSignaturePollJob?.cancel()
+        pendingPdfSignaturePollJob = null
+
         val currentStep = pendingSignatureSteps.getOrNull(pendingSignatureStepIndex)
         if (currentStep == null) {
             advanceSigningContextOrComplete()
@@ -1496,22 +1512,46 @@ class DefaultEventDetailComponent(
             return
         }
 
-        val openResult = urlHandler?.openUrlInWebView(signingUrl)
-            ?: Result.failure(IllegalStateException("Web view is unavailable."))
+        _webSignaturePrompt.value = WebSignaturePromptState(
+            step = currentStep,
+            url = signingUrl,
+            currentStep = pendingSignatureStepIndex + 1,
+            totalSteps = pendingSignatureSteps.size,
+        )
 
-        openResult.onFailure { throwable ->
-            Napier.e("Failed to open signing URL.", throwable)
+        val operationId = currentStep.operationId?.trim()?.takeIf(String::isNotBlank)
+        if (operationId == null) {
             _errorState.value = ErrorMessage(
-                "Unable to open signing document: ${throwable.message ?: "Unknown error"}"
+                "Complete signing in the modal, then tap Join/Purchase again."
             )
-        }.onSuccess {
-            _errorState.value = ErrorMessage(
-                "Please complete document signing, then tap Join/Purchase again to continue registration."
-            )
+            return
+        }
+
+        _errorState.value = ErrorMessage("Waiting for signature sync...")
+        pendingPdfSignaturePollJob = scope.launch {
+            billingRepository.pollBoldSignOperation(operationId).onFailure { throwable ->
+                Napier.e("Failed to poll BoldSign operation.", throwable)
+                _errorState.value = ErrorMessage(
+                    throwable.message ?: "Failed to confirm signature status."
+                )
+                clearPendingSignatureFlow()
+            }.onSuccess {
+                _webSignaturePrompt.value = null
+                val completionKey = signatureCompletionKey(
+                    templateId = currentStep.templateId,
+                    signerContext = pendingSignatureContext,
+                    child = pendingSignatureChild,
+                )
+                completedSignatureKeys += completionKey
+                pendingSignatureStepIndex += 1
+                processNextSignatureStep()
+            }
         }
     }
 
     private fun clearPendingSignatureFlow() {
+        pendingPdfSignaturePollJob?.cancel()
+        pendingPdfSignaturePollJob = null
         pendingSignatureSteps = emptyList()
         pendingSignatureStepIndex = 0
         pendingSignatureContext = SignerContext.PARTICIPANT
@@ -1520,6 +1560,7 @@ class DefaultEventDetailComponent(
         pendingSignatureChild = null
         pendingPostSignatureAction = null
         _textSignaturePrompt.value = null
+        _webSignaturePrompt.value = null
     }
 
     private suspend fun processPurchaseIntent(intent: PurchaseIntent) {
@@ -1551,19 +1592,15 @@ class DefaultEventDetailComponent(
             return true
         }
 
-        val openResult = urlHandler?.openUrlInWebView(signingUrl)
-            ?: Result.failure(IllegalStateException("Web view is unavailable."))
-
-        openResult.onFailure { throwable ->
-            Napier.e("Failed to open signing URL before purchase.", throwable)
-            _errorState.value = ErrorMessage(
-                "Unable to open signing document: ${throwable.message ?: "Unknown error"}"
-            )
-        }.onSuccess {
-            _errorState.value = ErrorMessage(
-                "Please complete document signing, then tap Purchase Ticket again."
-            )
-        }
+        _webSignaturePrompt.value = WebSignaturePromptState(
+            step = null,
+            url = signingUrl,
+            currentStep = 1,
+            totalSteps = 1,
+        )
+        _errorState.value = ErrorMessage(
+            "Please complete document signing in the modal, then tap Purchase Ticket again."
+        )
 
         return false
     }
@@ -2408,6 +2445,11 @@ class DefaultEventDetailComponent(
     }
 
     override fun dismissTextSignature() {
+        clearPendingSignatureFlow()
+        _errorState.value = ErrorMessage("Document signing canceled.")
+    }
+
+    override fun dismissWebSignaturePrompt() {
         clearPendingSignatureFlow()
         _errorState.value = ErrorMessage("Document signing canceled.")
     }

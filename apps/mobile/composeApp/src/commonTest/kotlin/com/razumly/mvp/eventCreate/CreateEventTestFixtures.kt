@@ -32,6 +32,7 @@ import com.razumly.mvp.core.data.repositories.FamilyChild
 import com.razumly.mvp.core.data.repositories.FamilyJoinRequest
 import com.razumly.mvp.core.data.repositories.FamilyJoinRequestAction
 import com.razumly.mvp.core.data.repositories.FamilyJoinRequestResolution
+import com.razumly.mvp.core.data.repositories.BoldSignOperationStatus
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
@@ -42,6 +43,7 @@ import com.razumly.mvp.core.data.repositories.LeagueDivisionStandings
 import com.razumly.mvp.core.data.repositories.LeagueStandingsConfirmResult
 import com.razumly.mvp.core.data.repositories.ProfileDocumentsBundle
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
+import com.razumly.mvp.core.data.repositories.RecordSignatureResult
 import com.razumly.mvp.core.data.repositories.ChildRegistrationResult
 import com.razumly.mvp.core.data.repositories.CreateBillRequest
 import com.razumly.mvp.core.data.repositories.SelfRegistrationResult
@@ -471,7 +473,18 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
         type: String,
         signerContext: SignerContext,
         childUserId: String?,
-    ): Result<Unit> = Result.success(Unit)
+    ): Result<RecordSignatureResult> = Result.success(RecordSignatureResult())
+
+    override suspend fun pollBoldSignOperation(
+        operationId: String,
+        timeoutMillis: Long,
+        intervalMillis: Long,
+    ): Result<BoldSignOperationStatus> = Result.success(
+        BoldSignOperationStatus(
+            operationId = operationId,
+            status = "CONFIRMED",
+        )
+    )
 
     override suspend fun createAccount(): Result<String> = Result.success("https://example.test/onboarding")
     override suspend fun getOnboardingLink(): Result<String> = Result.success("https://example.test/onboarding")

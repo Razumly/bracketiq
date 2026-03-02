@@ -111,6 +111,7 @@ import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.data.util.resolveParticipantCapacity
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
+import com.razumly.mvp.core.presentation.composables.EmbeddedWebModal
 import com.razumly.mvp.core.presentation.composables.PlatformTextField
 import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
 import com.razumly.mvp.core.presentation.composables.PullToRefreshContainer
@@ -1094,6 +1095,7 @@ fun EventDetailScreen(
     val childJoinSelectionDialog by component.childJoinSelectionDialog.collectAsState()
     val withdrawTargets by component.withdrawTargets.collectAsState()
     val textSignaturePrompt by component.textSignaturePrompt.collectAsState()
+    val webSignaturePrompt by component.webSignaturePrompt.collectAsState()
     val eventImageIds by component.eventImageIds.collectAsState()
     val organizationTemplates by component.organizationTemplates.collectAsState()
     val organizationTemplatesLoading by component.organizationTemplatesLoading.collectAsState()
@@ -2402,6 +2404,26 @@ fun EventDetailScreen(
                     prompt = prompt,
                     onConfirm = component::confirmTextSignature,
                     onDismiss = component::dismissTextSignature,
+                )
+            }
+
+            webSignaturePrompt?.let { prompt ->
+                val signerLabel = prompt.step?.requiredSignerLabel
+                    ?.trim()
+                    ?.takeIf(String::isNotBlank)
+                    ?.let { label -> "Required signer: $label" }
+                val progressLabel = if (prompt.totalSteps > 1) {
+                    "Document ${prompt.currentStep} of ${prompt.totalSteps}"
+                } else {
+                    null
+                }
+                val description = listOfNotNull(progressLabel, signerLabel).joinToString(" • ")
+
+                EmbeddedWebModal(
+                    title = prompt.step?.title ?: "Sign required document",
+                    url = prompt.url,
+                    description = description,
+                    onDismiss = component::dismissWebSignaturePrompt,
                 )
             }
 
