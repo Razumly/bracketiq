@@ -797,3 +797,88 @@ tasks.matching { it.name == "iosSimulatorArm64Test" || it.name == "connectedDebu
     dependsOn(startLocalBackend)
     finalizedBy(stopLocalBackend)
 }
+
+fun prunePreparedComposeDrawableDirectories(logPrefix: String) {
+    val preparedResourcesRoot = layout.buildDirectory
+        .dir("generated/compose/resourceGenerator/preparedResources")
+        .get()
+        .asFile
+
+    if (!preparedResourcesRoot.exists()) return
+
+    preparedResourcesRoot
+        .listFiles()
+        ?.filter { it.isDirectory }
+        ?.forEach { sourceSetDir ->
+            val preparedDrawableDir = File(sourceSetDir, "composeResources/drawable")
+            if (!preparedDrawableDir.exists()) return@forEach
+
+            preparedDrawableDir.listFiles()
+                ?.filter { it.isDirectory }
+                ?.forEach { nestedDir ->
+                    val removed = project.delete(nestedDir) || nestedDir.deleteRecursively()
+                    if (removed) {
+                        logger.lifecycle(
+                            "$logPrefix: removed nested drawable directory ${sourceSetDir.name}/${nestedDir.name}"
+                        )
+                    } else if (nestedDir.exists()) {
+                        throw org.gradle.api.GradleException(
+                            "$logPrefix: failed to remove nested prepared drawable directory ${nestedDir.absolutePath}"
+                        )
+                    }
+                }
+        }
+}
+
+fun sanitizeSourceComposeDrawableDirectories(logPrefix: String) {
+    val sourceDrawableDir = project.file("src/commonMain/composeResources/drawable")
+    if (!sourceDrawableDir.exists()) return
+
+    val nestedDirs = sourceDrawableDir
+        .walkTopDown()
+        .filter { it.isDirectory && it != sourceDrawableDir }
+        .toList()
+        .sortedByDescending { it.absolutePath.length }
+
+    nestedDirs.forEach { nestedDir ->
+        val containsFiles = nestedDir.walkTopDown().any { it.isFile }
+        if (containsFiles) {
+            val relPath = nestedDir.relativeTo(project.projectDir).invariantSeparatorsPath
+            throw org.gradle.api.GradleException(
+                "$logPrefix: nested drawable directories with files are not supported by Compose resources: $relPath"
+            )
+        }
+
+        val removed = project.delete(nestedDir) || nestedDir.deleteRecursively()
+        if (removed) {
+            logger.lifecycle("$logPrefix: removed empty source drawable directory ${nestedDir.name}")
+        }
+    }
+}
+
+val sanitizePreparedComposeResourcesForCommonMain =
+    tasks.register("sanitizePreparedComposeResourcesForCommonMain") {
+        group = "build"
+        description = "Removes nested drawable directories from prepared Compose resources for commonMain."
+
+        doLast {
+            sanitizeSourceComposeDrawableDirectories("sanitizePreparedComposeResourcesForCommonMain")
+            prunePreparedComposeDrawableDirectories("sanitizePreparedComposeResourcesForCommonMain")
+        }
+    }
+
+// Compose resource accessor generation expects flat files under drawable/ and can fail on nested dirs.
+tasks.matching { it.name.startsWith("prepareComposeResourcesTaskFor") }.configureEach {
+    doFirst {
+        sanitizeSourceComposeDrawableDirectories(name)
+    }
+    finalizedBy(sanitizePreparedComposeResourcesForCommonMain)
+}
+
+tasks.matching { it.name.startsWith("generateResourceAccessorsFor") }.configureEach {
+    dependsOn(sanitizePreparedComposeResourcesForCommonMain)
+}
+
+sanitizePreparedComposeResourcesForCommonMain.configure {
+    mustRunAfter(tasks.matching { it.name.startsWith("prepareComposeResourcesTaskFor") })
+}

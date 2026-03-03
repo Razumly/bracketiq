@@ -631,8 +631,31 @@ class DefaultEventDetailComponent(
 
     private val _usersTeam = MutableStateFlow<TeamWithPlayers?>(null)
 
-    override val validTeams = _userTeams.flatMapLatest { teams ->
-        flowOf(teams.filter { it.team.teamSize == event.teamSizeLimit && it.team.captainId == currentUser.value.id })
+    override val validTeams = combine(
+        _userTeams,
+        eventWithRelations,
+        currentUser,
+    ) { teams, relations, user ->
+        val targetSportName = relations.sport?.name
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?: relations.event.sportId
+                ?.trim()
+                .orEmpty()
+        val normalizedTargetSport = targetSportName.lowercase()
+        val relevantTeams = if (normalizedTargetSport.isNotBlank()) {
+            teams.filter { teamWithPlayers ->
+                teamWithPlayers.team.sport
+                    ?.trim()
+                    ?.lowercase() == normalizedTargetSport
+            }
+        } else {
+            teams
+        }
+        val currentUserId = user.id.trim()
+        relevantTeams.filter { teamWithPlayers ->
+            teamWithPlayers.team.managerId?.trim() == currentUserId
+        }
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     override val isEventFull = combine(eventWithRelations, selectedDivision) { relations, division ->

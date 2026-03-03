@@ -9,9 +9,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Button
@@ -299,7 +299,11 @@ fun CreateOrEditTeamDialog(
         shape = RoundedCornerShape(12.dp),
         elevation = CardDefaults.cardElevation(12.dp)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(
+            modifier = Modifier
+                .padding(16.dp)
+                .verticalScroll(rememberScrollState())
+        ) {
             Text("Team Setup", style = MaterialTheme.typography.titleLarge)
             Spacer(modifier = Modifier.height(8.dp))
 
@@ -392,8 +396,8 @@ fun CreateOrEditTeamDialog(
 
             Spacer(modifier = Modifier.height(12.dp))
             Text("Players")
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(playersInTeam) { player ->
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                playersInTeam.forEach { player ->
                     Row(
                         Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -409,7 +413,7 @@ fun CreateOrEditTeamDialog(
                         }
                     }
                 }
-                items(invitedPlayers) { player ->
+                invitedPlayers.forEach { player ->
                     Row(
                         Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -426,11 +430,9 @@ fun CreateOrEditTeamDialog(
                     }
                 }
                 if (playersInTeam.size + invitedPlayers.size < resolvedTeamSize || resolvedTeamSize == 7 && showEditDetails) {
-                    item {
-                        InvitePlayerCard {
-                            inviteTarget = TeamInviteTarget.PLAYER
-                            showSearchDialog = true
-                        }
+                    InvitePlayerCard {
+                        inviteTarget = TeamInviteTarget.PLAYER
+                        showSearchDialog = true
                     }
                 }
             }

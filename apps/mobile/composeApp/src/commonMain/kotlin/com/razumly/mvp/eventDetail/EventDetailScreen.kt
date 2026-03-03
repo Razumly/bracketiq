@@ -985,9 +985,15 @@ private fun JoinOptionsSheet(
     onSelectOption: (JoinOption) -> Unit,
 ) {
     var isDivisionMenuExpanded by remember { mutableStateOf(false) }
+    val hasRequiredDivisionSelection = remember(selectedDivisionId, divisionOptions) {
+        selectedDivisionId?.let { selectedId ->
+            divisionOptions.any { option -> option.id == selectedId }
+        } == true
+    }
+    val shouldEnableJoinActions = divisionOptions.isEmpty() || hasRequiredDivisionSelection
     val selectedDivisionLabel = remember(selectedDivisionId, divisionOptions) {
         val selected = divisionOptions.firstOrNull { it.id == selectedDivisionId }
-        selected?.label ?: divisionOptions.firstOrNull()?.label.orEmpty()
+        selected?.label.orEmpty()
     }
 
     Column(
@@ -1010,7 +1016,7 @@ private fun JoinOptionsSheet(
                     val label = if (selectedDivisionLabel.isNotBlank()) {
                         "Division: $selectedDivisionLabel"
                     } else {
-                        "Select division"
+                        "select a division"
                     }
                     Text(label)
                 }
@@ -1040,16 +1046,27 @@ private fun JoinOptionsSheet(
         }
         options.forEach { option ->
             if (option.requiresPayment) {
-                StripeButton(
-                    onClick = { onSelectOption(option) },
-                    paymentProcessor = paymentProcessor,
-                    text = option.label,
-                    colors = ButtonDefaults.buttonColors(),
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                if (shouldEnableJoinActions) {
+                    StripeButton(
+                        onClick = { onSelectOption(option) },
+                        paymentProcessor = paymentProcessor,
+                        text = option.label,
+                        colors = ButtonDefaults.buttonColors(),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                } else {
+                    Button(
+                        onClick = {},
+                        enabled = false,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(option.label)
+                    }
+                }
             } else {
                 Button(
                     onClick = { onSelectOption(option) },
+                    enabled = shouldEnableJoinActions,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(option.label)
@@ -1235,6 +1252,7 @@ fun EventDetailScreen(
     var refundReason by remember { mutableStateOf("") }
     var showNotifyDialog by remember { mutableStateOf(false) }
     var showJoinOptionsSheet by remember { mutableStateOf(false) }
+    var selectedJoinOptionDivisionId by rememberSaveable { mutableStateOf<String?>(null) }
     var showStandingsConfirmDialog by remember { mutableStateOf(false) }
     var showBuildBracketConfirmDialog by remember { mutableStateOf(false) }
     var showStickyDockByScroll by remember { mutableStateOf(true) }
@@ -1270,6 +1288,16 @@ fun EventDetailScreen(
     val timeDiff = selectedEvent.event.start.minus(Clock.System.now())
     isRefundAutomatic = (cutoffHours != null && timeDiff <= cutoffHours.hours)
     val teamSignup = selectedEvent.event.teamSignup
+    val teamSelectionSportLabel = remember(selectedEvent.sport, sports, selectedEvent.event.sportId) {
+        selectedEvent.sport?.name
+            ?: sports.firstOrNull { it.id == selectedEvent.event.sportId }?.name
+            ?: selectedEvent.event.sportId
+                ?.takeIf(String::isNotBlank)
+                ?.replace('_', ' ')
+                ?.replace('-', ' ')
+                ?.toTitleCase()
+            ?: "this event"
+    }
     val canLeaveSelf = isUserInEvent && (!teamSignup || isCaptain || isFreeAgent || isWaitListed)
     val selectableWithdrawTargets = remember(withdrawTargets, teamSignup, isCaptain) {
         withdrawTargets.filter { target ->
@@ -1420,6 +1448,11 @@ fun EventDetailScreen(
     ) {
         joinDivisionOptions.resolveSelectedDivisionId(selectedDivision)
     }
+    LaunchedEffect(showJoinOptionsSheet) {
+        if (showJoinOptionsSheet) {
+            selectedJoinOptionDivisionId = null
+        }
+    }
     val editableFieldsForDetails = remember(eventFields) {
         eventFields
             .map { relation -> relation.field }
@@ -1435,7 +1468,7 @@ fun EventDetailScreen(
         teamSignup,
         selectedEvent.event.price,
         eventHasStarted,
-        selectedJoinDivisionId,
+        selectedJoinOptionDivisionId,
         joinDivisionOptions,
     ) {
         if (isUserInEvent || eventHasStarted) {
@@ -1453,8 +1486,7 @@ fun EventDetailScreen(
                                 },
                                 requiresPayment = selectedEvent.event.price > 0,
                                 onClick = {
-                                    selectedJoinDivisionId?.let { component.selectDivision(it) }
-                                        ?: joinDivisionOptions.firstOrNull()?.id?.let { component.selectDivision(it) }
+                                    selectedJoinOptionDivisionId?.let { component.selectDivision(it) }
                                     showTeamSelectionDialog = true
                                 }
                             )
@@ -1489,8 +1521,7 @@ fun EventDetailScreen(
                             },
                             requiresPayment = selectedEvent.event.price > 0,
                             onClick = {
-                                selectedJoinDivisionId?.let { component.selectDivision(it) }
-                                    ?: joinDivisionOptions.firstOrNull()?.id?.let { component.selectDivision(it) }
+                                selectedJoinOptionDivisionId?.let { component.selectDivision(it) }
                                 showTeamSelectionDialog = true
                             }
                         )
@@ -2190,13 +2221,16 @@ fun EventDetailScreen(
                     JoinOptionsSheet(
                         options = joinOptions,
                         paymentProcessor = component,
-                        selectedDivisionId = selectedJoinDivisionId,
+                        selectedDivisionId = selectedJoinOptionDivisionId,
                         divisionOptions = if (teamSignup) {
                             joinDivisionOptions
                         } else {
                             emptyList()
                         },
-                        onDivisionSelected = component::selectDivision,
+                        onDivisionSelected = { divisionId ->
+                            selectedJoinOptionDivisionId = divisionId
+                            component.selectDivision(divisionId)
+                        },
                         onDismiss = { showJoinOptionsSheet = false },
                         onSelectOption = { action ->
                             showJoinOptionsSheet = false
@@ -2231,6 +2265,7 @@ fun EventDetailScreen(
             }
             if (showTeamSelectionDialog) {
                 TeamSelectionDialog(
+                    eventSportLabel = teamSelectionSportLabel,
                     teams = validTeams,
                     onTeamSelected = { selectedTeam ->
                         showTeamSelectionDialog = false
@@ -2240,7 +2275,6 @@ fun EventDetailScreen(
                         showTeamSelectionDialog = false
                     },
                     onCreateTeam = { component.createNewTeam() },
-                    sizeLimit = selectedEvent.event.teamSizeLimit
                 )
             }
             joinChoiceDialog?.let {
@@ -2438,7 +2472,7 @@ fun EventDetailScreen(
 }
 @Composable
 fun TeamSelectionDialog(
-    sizeLimit: Int,
+    eventSportLabel: String,
     teams: List<TeamWithPlayers>,
     onTeamSelected: (TeamWithPlayers) -> Unit,
     onDismiss: () -> Unit,
@@ -2446,7 +2480,7 @@ fun TeamSelectionDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Select a Team of size $sizeLimit") },
+        title = { Text("Select a team for $eventSportLabel") },
         text = {
             // List only valid teams
             LazyColumn {
