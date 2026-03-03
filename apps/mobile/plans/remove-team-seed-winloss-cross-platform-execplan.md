@@ -69,7 +69,7 @@ Key mobile files:
 
 ## Plan of Work
 
-First, update `mvp-site` contracts and API mapping so teams no longer carry `seed`/`wins`/`losses` and standings payloads no longer publish `wins`/`losses`. Then update web UI components and schedule standings table to remove win/loss and ratio presentation. Next, adjust scheduler code so match-level seed slots remain authoritative for playoff placement while team-level seed/win/loss persistence is no longer required. After web/API alignment is complete, apply the same contract/UI removals in `mvp-app` team models, DTO mapping, and standings rendering, including fallback labels that previously used `team.seed`.
+First, update `mvp-site` contracts and API mapping so teams no longer carry `seed`/`wins`/`losses` and standings payloads no longer publish `wins`/`losses`. Then update web UI components and schedule standings table to remove win/loss and ratio presentation. Next, adjust scheduler code so match-level seed slots remain authoritative for playoff placement while team-level seed/win/loss persistence is no longer required. After web/API alignment is complete, apply the same contract/UI removals in `mvp-app` team models, DTO mapping, and standings rendering, including fallback labels that previously used the team seed field.
 
 ## Concrete Steps
 

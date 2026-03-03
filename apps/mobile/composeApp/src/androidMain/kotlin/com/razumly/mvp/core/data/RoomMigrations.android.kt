@@ -179,7 +179,6 @@ private val migrationSql84To85 = listOf(
     """
     UPDATE `Team`
     SET
-        `seed` = COALESCE(`seed`, 0),
         `division` = COALESCE(`division`, 'OPEN'),
         `wins` = COALESCE(`wins`, 0),
         `losses` = COALESCE(`losses`, 0),
@@ -305,7 +304,7 @@ private val migrationSql2To3 = listOf(
     SELECT `teamId`, `eventId`
     FROM `event_team_cross_ref`
     """.trimIndent(),
-    // Rebuild Team to remove legacy columns (seed/wins/losses) while preserving current fields.
+    // Rebuild Team to remove legacy columns while preserving current fields.
     """
     CREATE TABLE IF NOT EXISTS `Team_new` (
         `division` TEXT NOT NULL,

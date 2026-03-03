@@ -143,7 +143,7 @@ private val MIGRATION_2_3_MATCH_START_NULLABLE = object : Migration(2, 3) {
             SELECT `teamId`, `eventId`
             FROM `event_team_cross_ref`
             """.trimIndent(),
-            // Rebuild Team to remove legacy columns (seed/wins/losses) while preserving current fields.
+            // Rebuild Team to remove legacy columns while preserving current fields.
             """
             CREATE TABLE IF NOT EXISTS `Team_new` (
                 `division` TEXT NOT NULL,
