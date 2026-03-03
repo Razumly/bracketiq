@@ -56,6 +56,7 @@ import kotlinx.coroutines.launch
 import kotlin.time.Instant
 
 interface IEventRepository : IMVPRepository {
+    fun getCachedEventsFlow(): Flow<Result<List<Event>>>
     fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>>
     fun resetCursor()
     suspend fun getEvent(eventId: String): Result<Event>
@@ -190,12 +191,25 @@ class EventRepository(
         // Paging is currently handled by the UI by re-issuing search calls; keep this as a no-op for now.
     }
 
+    override fun getCachedEventsFlow(): Flow<Result<List<Event>>> =
+        databaseService.getEventDao.getAllCachedEvents().map { cached ->
+            Result.success(cached)
+        }
+
     override fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>> =
         callbackFlow {
             val localJob = launch {
                 databaseService.getEventDao.getEventWithRelationsFlow(eventId)
                     .collect { local ->
-                        trySend(Result.success(local))
+                        if (local != null) {
+                            trySend(Result.success(local))
+                        } else {
+                            trySend(
+                                Result.failure(
+                                    NoSuchElementException("Event $eventId not found in local cache")
+                                )
+                            )
+                        }
                     }
             }
 

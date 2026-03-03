@@ -2174,17 +2174,25 @@ class DefaultEventDetailComponent(
         scope.launch {
             val currentEvent = selectedEvent.value
             val isTemplateEvent = currentEvent.state.equals("TEMPLATE", ignoreCase = true)
+            var deleted = false
             if (isTemplateEvent || currentEvent.price == 0.0) {
                 loadingHandler.showLoading(if (isTemplateEvent) "Deleting Template ..." else "Deleting Event ...")
-                eventRepository.deleteEvent(selectedEvent.value.id).onFailure {
-                    _errorState.value = ErrorMessage(it.message ?: "")
-                }
-                backCallback.onBack()
+                eventRepository.deleteEvent(selectedEvent.value.id)
+                    .onSuccess {
+                        deleted = true
+                    }.onFailure {
+                        _errorState.value = ErrorMessage(it.message ?: "")
+                    }
             } else {
                 loadingHandler.showLoading("Deleting Event and Refunding ...")
-                billingRepository.deleteAndRefundEvent(selectedEvent.value).onFailure {
-                    _errorState.value = ErrorMessage(it.message ?: "")
-                }
+                billingRepository.deleteAndRefundEvent(selectedEvent.value)
+                    .onSuccess {
+                        deleted = true
+                    }.onFailure {
+                        _errorState.value = ErrorMessage(it.message ?: "")
+                    }
+            }
+            if (deleted) {
                 backCallback.onBack()
             }
             loadingHandler.hideLoading()

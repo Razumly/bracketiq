@@ -179,6 +179,7 @@ val componentModule = module {
             componentContext = componentContext,
             teamRepository = get(),
             userRepository = get(),
+            sportsRepository = get(),
             freeAgents = freeAgents,
             selectedEvent = selectedEvent,
             selectedFreeAgentId = selectedFreeAgentId,

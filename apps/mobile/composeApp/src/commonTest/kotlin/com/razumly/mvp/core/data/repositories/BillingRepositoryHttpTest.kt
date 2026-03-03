@@ -122,6 +122,7 @@ private class BillingRepositoryHttp_FakeUserRepository(
 }
 
 private object BillingRepositoryHttp_UnusedEventRepository : IEventRepository {
+    override fun getCachedEventsFlow(): Flow<Result<List<Event>>> = error("unused")
     override fun getEventWithRelationsFlow(eventId: String): Flow<Result<com.razumly.mvp.core.data.dataTypes.EventWithRelations>> = error("unused")
     override fun resetCursor() {}
     override suspend fun getEvent(eventId: String): Result<Event> = error("unused")

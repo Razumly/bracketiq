@@ -24,6 +24,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
@@ -75,6 +77,7 @@ private val TEAM_DIVISION_GENDER_OPTIONS = listOf(
 @Composable
 fun CreateOrEditTeamDialog(
     team: TeamWithPlayers,
+    sports: List<Sport>,
     friends: List<UserData>,
     freeAgents: List<UserData>,
     suggestions: List<UserData>,
@@ -100,6 +103,7 @@ fun CreateOrEditTeamDialog(
     var showDeleteDialog by remember { mutableStateOf(false) }
     var inviteError by remember { mutableStateOf<String?>(null) }
     var inviteTarget by remember { mutableStateOf(TeamInviteTarget.PLAYER) }
+    var sportInput by remember(team.team.id) { mutableStateOf(team.team.sport?.trim().orEmpty()) }
     val scope = rememberCoroutineScope()
     val showEditDetails = isCaptain || isNewTeam
     val parsedTeamSize = teamSizeInput.toIntOrNull()
@@ -236,6 +240,7 @@ fun CreateOrEditTeamDialog(
         )
     }
     val normalizedDivisionGender = divisionGenderInput.trim().uppercase()
+    val normalizedSportName = sportInput.trim()
     val normalizedSkillDivisionTypeId = skillDivisionTypeInput.normalizeDivisionIdentifier()
     val normalizedAgeDivisionTypeId = ageDivisionTypeInput.normalizeDivisionIdentifier()
     val isTeamDivisionValid = normalizedDivisionGender in setOf("M", "F", "C") &&
@@ -260,6 +265,38 @@ fun CreateOrEditTeamDialog(
         skillDivisionTypeId = normalizedSkillDivisionTypeId,
         ageDivisionTypeId = normalizedAgeDivisionTypeId,
     )
+    val resolvedEventSportName = remember(selectedEvent?.sportId, sports) {
+        val normalizedEventSportId = selectedEvent?.sportId?.trim().orEmpty()
+        if (normalizedEventSportId.isBlank()) {
+            ""
+        } else {
+            sports.firstOrNull { sport -> sport.id == normalizedEventSportId }?.name
+                ?: normalizedEventSportId
+        }
+    }
+    val sportOptions = remember(sports, team.team.sport, resolvedEventSportName) {
+        val optionLabels = linkedSetOf<String>()
+        team.team.sport
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?.let(optionLabels::add)
+        resolvedEventSportName
+            .trim()
+            .takeIf(String::isNotBlank)
+            ?.let(optionLabels::add)
+        sports.forEach { sport ->
+            sport.name
+                .trim()
+                .takeIf(String::isNotBlank)
+                ?.let(optionLabels::add)
+        }
+        optionLabels.map { label -> DropdownOption(value = label, label = label) }
+    }
+    LaunchedEffect(team.team.id, resolvedEventSportName) {
+        if (sportInput.isBlank() && resolvedEventSportName.isNotBlank()) {
+            sportInput = resolvedEventSportName
+        }
+    }
     val knownUsersById = remember(
         staffUsersById,
         team.captain,
@@ -340,6 +377,17 @@ fun CreateOrEditTeamDialog(
                 } else {
                     ""
                 },
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+            PlatformDropdown(
+                selectedValue = sportInput,
+                onSelectionChange = { value -> sportInput = value },
+                options = sportOptions,
+                modifier = Modifier.fillMaxWidth(),
+                label = "Sport",
+                placeholder = "Select sport",
+                enabled = showEditDetails,
             )
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -500,6 +548,7 @@ fun CreateOrEditTeamDialog(
                             team.team.copy(playerIds = playersInTeam.map { it.id },
                                 pending = invitedPlayers.map { it.id },
                                 name = teamName,
+                                sport = normalizedSportName.ifBlank { null },
                                 teamSize = resolvedTeamSize,
                                 division = resolvedDivisionToken,
                                 divisionTypeId = resolvedDivisionTypeId,

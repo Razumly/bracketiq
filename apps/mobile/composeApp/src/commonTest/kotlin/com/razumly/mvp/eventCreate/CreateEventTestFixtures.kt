@@ -268,6 +268,9 @@ internal class CreateEvent_FakeEventRepository(
 ) : IEventRepository {
     val createEventCalls = mutableListOf<CreateEventCall>()
 
+    override fun getCachedEventsFlow(): Flow<Result<List<Event>>> =
+        flowOf(Result.success(emptyList()))
+
     override fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>> =
         flowOf(Result.failure(IllegalStateException("unused")))
 

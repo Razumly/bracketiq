@@ -37,6 +37,7 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
     val currentTeams by component.currentTeams.collectAsState()
     val lazyListState = rememberLazyListState()
     val friends by component.friends.collectAsState()
+    val sports by component.sports.collectAsState()
     val suggestions by component.suggestedPlayers.collectAsState()
     val freeAgents by component.freeAgentsFiltered.collectAsState()
     val selectedFreeAgent by component.selectedFreeAgent.collectAsState()
@@ -140,6 +141,7 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
         Dialog(onDismissRequest = { component.deselectTeam() }) {
             CreateOrEditTeamDialog(
                 team = selectedTeam!!,
+                sports = sports,
                 friends = friends,
                 freeAgents = freeAgents,
                 onSearch = { query -> component.searchPlayers(query) },

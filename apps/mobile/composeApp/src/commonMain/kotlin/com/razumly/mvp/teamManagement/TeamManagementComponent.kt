@@ -3,10 +3,12 @@ package com.razumly.mvp.teamManagement
 import com.arkivanov.decompose.ComponentContext
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Invite
+import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.IEventRepository
+import com.razumly.mvp.core.data.repositories.ISportsRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.presentation.INavigationHandler
@@ -31,6 +33,7 @@ interface TeamManagementComponent {
     val currentUser: UserData
     val selectedFreeAgentId: String?
     val selectedFreeAgent: StateFlow<UserData?>
+    val sports: StateFlow<List<Sport>>
     val friends: StateFlow<List<UserData>>
     val currentTeams: StateFlow<List<TeamWithPlayers>>
     val teamInvites: StateFlow<List<TeamInvite>>
@@ -63,6 +66,7 @@ data class TeamInvite(
 class DefaultTeamManagementComponent(
     componentContext: ComponentContext,
     private val eventRepository: IEventRepository,
+    private val sportsRepository: ISportsRepository,
     private val teamRepository: ITeamRepository,
     private val userRepository: IUserRepository,
     private val freeAgents: List<String>,
@@ -82,6 +86,9 @@ class DefaultTeamManagementComponent(
 
     private val _friends = MutableStateFlow<List<UserData>>(listOf())
     override val friends = _friends.asStateFlow()
+
+    private val _sports = MutableStateFlow<List<Sport>>(emptyList())
+    override val sports = _sports.asStateFlow()
 
     override val currentTeams =
         teamRepository.getTeamsWithPlayersFlow(currentUser.id).map { team ->
@@ -152,6 +159,12 @@ class DefaultTeamManagementComponent(
     init {
         scope.launch {
             _friends.value = userRepository.getUsers(currentUser.friendIds).getOrElse {
+                _errorState.value = it.message
+                emptyList()
+            }
+        }
+        scope.launch {
+            _sports.value = sportsRepository.getSports().getOrElse {
                 _errorState.value = it.message
                 emptyList()
             }

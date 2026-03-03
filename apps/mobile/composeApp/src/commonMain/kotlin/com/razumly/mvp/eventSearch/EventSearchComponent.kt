@@ -167,6 +167,7 @@ class DefaultEventSearchComponent(
     private var rentalsLoaded = false
     private var suggestEventsJob: Job? = null
     private var suggestOrganizationsJob: Job? = null
+    private var cachedEventsSyncJob: Job? = null
     private var eventOffset = 0
 
     private lateinit var loadingHandler: LoadingHandler
@@ -242,6 +243,7 @@ class DefaultEventSearchComponent(
             }
         }
 
+        observeCachedEvents()
         refreshEvents(force = true)
         refreshOrganizations(force = true)
         refreshRentals(force = true)
@@ -562,6 +564,35 @@ class DefaultEventSearchComponent(
         existing.forEach { event -> merged[event.id] = event }
         incoming.forEach { event -> merged[event.id] = event }
         return merged.values.toList()
+    }
+
+    private fun observeCachedEvents() {
+        if (cachedEventsSyncJob != null) return
+        cachedEventsSyncJob = scope.launch {
+            eventRepository.getCachedEventsFlow().collect { result ->
+                result.onSuccess { cachedEvents ->
+                    reconcileVisibleEventsWithCache(cachedEvents)
+                }.onFailure { error ->
+                    Napier.w("Failed to sync discover events from cache: ${error.message}")
+                }
+            }
+        }
+    }
+
+    private fun reconcileVisibleEventsWithCache(cachedEvents: List<Event>) {
+        val currentEvents = _rawEvents.value
+        if (currentEvents.isEmpty()) return
+
+        val cachedById = cachedEvents.associateBy { it.id }
+        val reconciledEvents = currentEvents.mapNotNull { current ->
+            cachedById[current.id]
+        }
+
+        if (reconciledEvents == currentEvents) return
+
+        _rawEvents.value = reconciledEvents
+        _events.value = applyEventFilter(reconciledEvents, _filter.value)
+        eventOffset = eventOffset.coerceAtMost(reconciledEvents.size)
     }
 
     private suspend fun loadRentalOrganizations(force: Boolean = false) {

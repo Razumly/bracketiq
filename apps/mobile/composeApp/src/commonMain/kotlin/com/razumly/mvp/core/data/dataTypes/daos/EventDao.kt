@@ -59,7 +59,7 @@ interface EventDao {
 
     @Transaction
     @Query("SELECT * FROM Event WHERE id = :id")
-    fun getEventWithRelationsFlow(id: String): Flow<EventWithRelations>
+    fun getEventWithRelationsFlow(id: String): Flow<EventWithRelations?>
 
     @Transaction
     suspend fun upsertEventWithRelations(event: Event) {
