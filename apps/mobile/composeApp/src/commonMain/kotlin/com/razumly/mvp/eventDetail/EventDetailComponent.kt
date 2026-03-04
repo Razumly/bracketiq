@@ -37,6 +37,8 @@ import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.LeagueDivisionStandings
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.data.repositories.CreateBillRequest
+import com.razumly.mvp.core.data.repositories.EventTeamBillCreateRequest
+import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
 import com.razumly.mvp.core.data.util.divisionsEquivalent
 import com.razumly.mvp.core.data.util.isPlaceholderSlot
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
@@ -167,6 +169,18 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun shareEvent()
     fun createNewTeam()
     fun inviteFreeAgentToTeam(userId: String)
+    fun removeTeamParticipant(team: TeamWithPlayers)
+    fun removeUserParticipant(userId: String)
+    suspend fun getParticipantBillingSnapshot(teamId: String): Result<EventTeamBillingSnapshot>
+    suspend fun createParticipantBill(
+        teamId: String,
+        request: EventTeamBillCreateRequest,
+    ): Result<Unit>
+    suspend fun refundParticipantPayment(
+        teamId: String,
+        billPaymentId: String,
+        amountCents: Int,
+    ): Result<Unit>
     fun selectPlace(place: MVPPlace?)
     fun onTypeSelected(type: EventType)
     fun selectFieldCount(count: Int)
@@ -1991,6 +2005,97 @@ class DefaultEventDetailComponent(
             selectedEvent.value.freeAgents,
             selectedEvent.value,
             selectedFreeAgentId = normalizedUserId,
+        )
+    }
+
+    override fun removeTeamParticipant(team: TeamWithPlayers) {
+        scope.launch {
+            val event = selectedEvent.value
+            loadingHandler.showLoading("Removing team...")
+            eventRepository.removeTeamFromEvent(event, team)
+                .onSuccess {
+                    eventRepository.getEvent(event.id)
+                }
+                .onFailure { throwable ->
+                    _errorState.value = ErrorMessage(
+                        throwable.message ?: "Failed to remove team participant.",
+                    )
+                }
+            loadingHandler.hideLoading()
+        }
+    }
+
+    override fun removeUserParticipant(userId: String) {
+        scope.launch {
+            val event = selectedEvent.value
+            val normalizedUserId = userId.trim().takeIf(String::isNotBlank)
+            if (normalizedUserId == null) {
+                _errorState.value = ErrorMessage("User id is required.")
+                return@launch
+            }
+            loadingHandler.showLoading("Removing participant...")
+            eventRepository.removeCurrentUserFromEvent(event, targetUserId = normalizedUserId)
+                .onSuccess {
+                    eventRepository.getEvent(event.id)
+                }
+                .onFailure { throwable ->
+                    _errorState.value = ErrorMessage(
+                        throwable.message ?: "Failed to remove participant.",
+                    )
+                }
+            loadingHandler.hideLoading()
+        }
+    }
+
+    override suspend fun getParticipantBillingSnapshot(teamId: String): Result<EventTeamBillingSnapshot> {
+        val normalizedEventId = selectedEvent.value.id.trim()
+        val normalizedTeamId = teamId.trim()
+        if (normalizedEventId.isEmpty() || normalizedTeamId.isEmpty()) {
+            return Result.failure(
+                IllegalArgumentException("Event and participant team ids are required."),
+            )
+        }
+        return billingRepository.getEventTeamBillingSnapshot(
+            eventId = normalizedEventId,
+            teamId = normalizedTeamId,
+        )
+    }
+
+    override suspend fun createParticipantBill(
+        teamId: String,
+        request: EventTeamBillCreateRequest,
+    ): Result<Unit> {
+        val normalizedEventId = selectedEvent.value.id.trim()
+        val normalizedTeamId = teamId.trim()
+        if (normalizedEventId.isEmpty() || normalizedTeamId.isEmpty()) {
+            return Result.failure(
+                IllegalArgumentException("Event and participant team ids are required."),
+            )
+        }
+        return billingRepository.createEventTeamBill(
+            eventId = normalizedEventId,
+            teamId = normalizedTeamId,
+            request = request,
+        ).map { Unit }
+    }
+
+    override suspend fun refundParticipantPayment(
+        teamId: String,
+        billPaymentId: String,
+        amountCents: Int,
+    ): Result<Unit> {
+        val normalizedEventId = selectedEvent.value.id.trim()
+        val normalizedTeamId = teamId.trim()
+        if (normalizedEventId.isEmpty() || normalizedTeamId.isEmpty()) {
+            return Result.failure(
+                IllegalArgumentException("Event and participant team ids are required."),
+            )
+        }
+        return billingRepository.refundEventTeamBillPayment(
+            eventId = normalizedEventId,
+            teamId = normalizedTeamId,
+            billPaymentId = billPaymentId,
+            amountCents = amountCents,
         )
     }
 

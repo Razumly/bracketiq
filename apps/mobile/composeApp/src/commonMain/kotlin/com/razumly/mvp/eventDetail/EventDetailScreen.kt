@@ -753,14 +753,14 @@ private fun BracketFloatingBar(
             if (showMatchEditAction) {
                 if (isEditingMatches && onCommitMatchEdit != null && onCancelMatchEdit != null) {
                     Button(onClick = onCommitMatchEdit) {
-                        Text("Save Matches")
+                        Text("Save")
                     }
                     Button(onClick = onCancelMatchEdit) {
-                        Text("Cancel Edit")
+                        Text("Cancel")
                     }
                 } else if (!isEditingMatches && onStartMatchEdit != null) {
                     Button(onClick = onStartMatchEdit) {
-                        Text("Edit Matches")
+                        Text("Manage")
                     }
                 }
             }
@@ -916,6 +916,10 @@ private fun ParticipantsFloatingBar(
     selectedSection: ParticipantsSection,
     availableSections: List<ParticipantsSection>,
     onSectionSelected: (ParticipantsSection) -> Unit,
+    showManageAction: Boolean = false,
+    isManagingParticipants: Boolean = false,
+    onStartManagingParticipants: (() -> Unit)? = null,
+    onStopManagingParticipants: (() -> Unit)? = null,
     onShowDetailsClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -958,6 +962,17 @@ private fun ParticipantsFloatingBar(
                                 }
                             }
                         )
+                    }
+                }
+            }
+            if (showManageAction) {
+                if (isManagingParticipants && onStopManagingParticipants != null) {
+                    Button(onClick = onStopManagingParticipants) {
+                        Text("Done")
+                    }
+                } else if (!isManagingParticipants && onStartManagingParticipants != null) {
+                    Button(onClick = onStartManagingParticipants) {
+                        Text("Manage")
                     }
                 }
             }
@@ -1193,7 +1208,8 @@ fun EventDetailScreen(
             )
     }
     val canConfirmLeagueResultsFromDock = hasStandingsView && canManageLeagueStandings
-    val canManageMatchEditingFromDock = isHost
+    val canManageMatchEditingFromDock = canManageTemplate
+    val canManageParticipantsFromDock = canManageTemplate
     val computedLeagueStandings = remember(
         selectedEvent.teams,
         selectedEvent.matches,
@@ -1257,6 +1273,7 @@ fun EventDetailScreen(
     var showBuildBracketConfirmDialog by remember { mutableStateOf(false) }
     var showStickyDockByScroll by remember { mutableStateOf(true) }
     var mapRevealCenter by remember { mutableStateOf(Offset.Zero) }
+    var isManagingParticipants by rememberSaveable { mutableStateOf(false) }
 
     var imageScheme by remember {
         mutableStateOf(
@@ -2042,7 +2059,9 @@ fun EventDetailScreen(
                                         ParticipantsView(
                                             showFab = { showFab = it },
                                             section = selectedParticipantsSection,
-                                            onNavigateToChat = component::onNavigateToChat
+                                            onNavigateToChat = component::onNavigateToChat,
+                                            manageMode = isManagingParticipants,
+                                            canManageParticipants = canManageParticipantsFromDock,
                                         )
                                     }
                                 }
@@ -2127,6 +2146,11 @@ fun EventDetailScreen(
                                         selectedDivisionId = selectedStandingsDivisionId,
                                         divisionOptions = standingsTabDivisionOptions,
                                         onDivisionSelected = component::selectDivision,
+                                        showMatchEditAction = canManageMatchEditingFromDock,
+                                        isEditingMatches = isEditingMatches,
+                                        onStartMatchEdit = component::startEditingMatches,
+                                        onCancelMatchEdit = component::cancelEditingMatches,
+                                        onCommitMatchEdit = component::commitMatchChanges,
                                         showConfirmResultsAction = canConfirmLeagueResultsFromDock,
                                         confirmResultsEnabled = canConfirmLeagueResultsFromDock &&
                                             !leagueDivisionStandingsLoading &&
@@ -2141,6 +2165,14 @@ fun EventDetailScreen(
                                         selectedSection = selectedParticipantsSection,
                                         availableSections = participantSections,
                                         onSectionSelected = { selectedParticipantsSection = it },
+                                        showManageAction = canManageParticipantsFromDock,
+                                        isManagingParticipants = isManagingParticipants,
+                                        onStartManagingParticipants = {
+                                            isManagingParticipants = true
+                                        },
+                                        onStopManagingParticipants = {
+                                            isManagingParticipants = false
+                                        },
                                         onShowDetailsClick = component::toggleDetails,
                                     )
                                 }

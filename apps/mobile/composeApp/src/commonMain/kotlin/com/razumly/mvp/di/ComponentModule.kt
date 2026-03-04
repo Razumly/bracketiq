@@ -144,6 +144,7 @@ val componentModule = module {
             billingRepository = get(),
             eventRepository = get(),
             teamRepository = get(),
+            pushNotificationsRepository = get(),
             navigationHandler = navHandler,
         )
     }

@@ -262,6 +262,8 @@ private object FakePushNotificationsRepository : IPushNotificationsRepository {
 
     override suspend fun addDeviceAsTarget(): Result<Unit> = Result.success(Unit)
     override suspend fun removeDeviceAsTarget(): Result<Unit> = Result.success(Unit)
+    override suspend fun getDeviceTargetDebugStatus(syncBeforeCheck: Boolean): Result<PushDeviceTargetDebugStatus> =
+        Result.success(PushDeviceTargetDebugStatus())
 }
 
 class TeamRepositoryTeamsFetchTest {

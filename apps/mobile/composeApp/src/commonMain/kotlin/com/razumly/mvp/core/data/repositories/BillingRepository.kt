@@ -88,6 +88,75 @@ data class CreateBillRequest(
     val paymentPlanEnabled: Boolean = false,
 )
 
+data class EventTeamBillingUserOption(
+    val id: String,
+    val displayName: String,
+)
+
+data class EventTeamBillingLineItem(
+    val id: String? = null,
+    val type: String? = null,
+    val label: String? = null,
+    val amountCents: Int? = null,
+    val quantity: Int? = null,
+)
+
+data class EventTeamBillingPaymentSnapshot(
+    val id: String,
+    val billId: String,
+    val sequence: Int,
+    val status: String? = null,
+    val amountCents: Int,
+    val refundedAmountCents: Int,
+    val refundableAmountCents: Int,
+    val paidAt: String? = null,
+    val paymentIntentId: String? = null,
+    val isRefundable: Boolean,
+)
+
+data class EventTeamBillingBillSnapshot(
+    val id: String,
+    val ownerType: String,
+    val ownerId: String,
+    val ownerName: String,
+    val totalAmountCents: Int,
+    val paidAmountCents: Int,
+    val refundedAmountCents: Int,
+    val refundableAmountCents: Int,
+    val status: String? = null,
+    val allowSplit: Boolean? = null,
+    val lineItems: List<EventTeamBillingLineItem> = emptyList(),
+    val payments: List<EventTeamBillingPaymentSnapshot> = emptyList(),
+)
+
+data class EventTeamBillingTotals(
+    val paidAmountCents: Int,
+    val refundedAmountCents: Int,
+    val refundableAmountCents: Int,
+)
+
+data class EventTeamBillingSnapshot(
+    val teamId: String,
+    val teamName: String? = null,
+    val playerIds: List<String> = emptyList(),
+    val users: List<EventTeamBillingUserOption> = emptyList(),
+    val bills: List<EventTeamBillingBillSnapshot> = emptyList(),
+    val totals: EventTeamBillingTotals = EventTeamBillingTotals(
+        paidAmountCents = 0,
+        refundedAmountCents = 0,
+        refundableAmountCents = 0,
+    ),
+)
+
+data class EventTeamBillCreateRequest(
+    val ownerType: String,
+    val ownerId: String? = null,
+    val eventAmountCents: Int,
+    val taxAmountCents: Int = 0,
+    val allowSplit: Boolean = false,
+    val label: String? = null,
+)
+
 data class RecordSignatureResult(
     val operationId: String? = null,
     val syncStatus: String? = null,
@@ -144,6 +213,18 @@ interface IBillingRepository : IMVPRepository {
     suspend fun listBills(ownerType: String, ownerId: String, limit: Int = 100): Result<List<Bill>>
     suspend fun createBill(request: CreateBillRequest): Result<Bill>
     suspend fun getBillPayments(billId: String): Result<List<BillPayment>>
+    suspend fun getEventTeamBillingSnapshot(eventId: String, teamId: String): Result<EventTeamBillingSnapshot>
+    suspend fun createEventTeamBill(
+        eventId: String,
+        teamId: String,
+        request: EventTeamBillCreateRequest,
+    ): Result<Bill>
+    suspend fun refundEventTeamBillPayment(
+        eventId: String,
+        teamId: String,
+        billPaymentId: String,
+        amountCents: Int,
+    ): Result<Unit>
     suspend fun createBillingIntent(billId: String, billPaymentId: String): Result<PurchaseIntent>
     suspend fun listSubscriptions(userId: String, limit: Int = 100): Result<List<Subscription>>
     suspend fun cancelSubscription(subscriptionId: String): Result<Boolean>
@@ -432,6 +513,94 @@ class BillingRepository(
         val encodedBillId = billId.encodeURLQueryComponent()
         val response = api.get<BillPaymentsResponseDto>(path = "api/billing/bills/$encodedBillId/payments")
         response.payments.mapNotNull { it.toBillPaymentOrNull() }
+    }
+
+    override suspend fun getEventTeamBillingSnapshot(
+        eventId: String,
+        teamId: String,
+    ): Result<EventTeamBillingSnapshot> = runCatching {
+        val normalizedEventId = eventId.trim()
+        val normalizedTeamId = teamId.trim()
+        require(normalizedEventId.isNotBlank()) { "Event id is required." }
+        require(normalizedTeamId.isNotBlank()) { "Team id is required." }
+
+        val encodedEventId = normalizedEventId.encodeURLQueryComponent()
+        val encodedTeamId = normalizedTeamId.encodeURLQueryComponent()
+        val response = api.get<EventTeamBillingSnapshotResponseDto>(
+            path = "api/events/$encodedEventId/teams/$encodedTeamId/billing",
+        )
+        response.error?.takeIf(String::isNotBlank)?.let { throw Exception(it) }
+        response.toSnapshotOrNull() ?: error("Billing snapshot response missing required fields")
+    }
+
+    override suspend fun createEventTeamBill(
+        eventId: String,
+        teamId: String,
+        request: EventTeamBillCreateRequest,
+    ): Result<Bill> = runCatching {
+        val normalizedEventId = eventId.trim()
+        val normalizedTeamId = teamId.trim()
+        require(normalizedEventId.isNotBlank()) { "Event id is required." }
+        require(normalizedTeamId.isNotBlank()) { "Team id is required." }
+
+        val ownerType = request.ownerType.trim().uppercase()
+        if (ownerType != "USER" && ownerType != "TEAM") {
+            throw IllegalArgumentException("Bill ownerType must be USER or TEAM.")
+        }
+
+        val ownerId = request.ownerId?.trim()?.takeIf(String::isNotBlank)
+        if (ownerType == "USER" && ownerId == null) {
+            throw IllegalArgumentException("ownerId is required for USER bills.")
+        }
+        if (request.eventAmountCents <= 0) {
+            throw IllegalArgumentException("eventAmountCents must be greater than 0.")
+        }
+        if (request.taxAmountCents < 0) {
+            throw IllegalArgumentException("taxAmountCents must be zero or greater.")
+        }
+
+        val encodedEventId = normalizedEventId.encodeURLQueryComponent()
+        val encodedTeamId = normalizedTeamId.encodeURLQueryComponent()
+        val response = api.post<EventTeamBillCreateRequestDto, CreateBillResponseDto>(
+            path = "api/events/$encodedEventId/teams/$encodedTeamId/billing/bills",
+            body = EventTeamBillCreateRequestDto(
+                ownerType = ownerType,
+                ownerId = ownerId,
+                eventAmountCents = request.eventAmountCents,
+                taxAmountCents = request.taxAmountCents,
+                allowSplit = request.allowSplit,
+                label = request.label?.trim()?.takeIf(String::isNotBlank),
+            ),
+        )
+
+        response.error?.takeIf(String::isNotBlank)?.let { throw Exception(it) }
+        response.bill?.toBillOrNull() ?: error("Create team bill response missing bill")
+    }
+
+    override suspend fun refundEventTeamBillPayment(
+        eventId: String,
+        teamId: String,
+        billPaymentId: String,
+        amountCents: Int,
+    ): Result<Unit> = runCatching {
+        val normalizedEventId = eventId.trim()
+        val normalizedTeamId = teamId.trim()
+        val normalizedBillPaymentId = billPaymentId.trim()
+        require(normalizedEventId.isNotBlank()) { "Event id is required." }
+        require(normalizedTeamId.isNotBlank()) { "Team id is required." }
+        require(normalizedBillPaymentId.isNotBlank()) { "Bill payment id is required." }
+        require(amountCents > 0) { "Refund amount must be greater than 0." }
+
+        val encodedEventId = normalizedEventId.encodeURLQueryComponent()
+        val encodedTeamId = normalizedTeamId.encodeURLQueryComponent()
+        val response = api.post<EventTeamBillRefundRequestDto, EventTeamBillRefundResponseDto>(
+            path = "api/events/$encodedEventId/teams/$encodedTeamId/billing/refunds",
+            body = EventTeamBillRefundRequestDto(
+                billPaymentId = normalizedBillPaymentId,
+                amountCents = amountCents,
+            ),
+        )
+        response.error?.takeIf(String::isNotBlank)?.let { throw Exception(it) }
     }
 
     override suspend fun createBillingIntent(billId: String, billPaymentId: String): Result<PurchaseIntent> = runCatching {
@@ -922,9 +1091,100 @@ private data class CreateBillRequestDto(
 )
 
 @Serializable
+private data class EventTeamBillCreateRequestDto(
+    val ownerType: String,
+    val ownerId: String? = null,
+    val eventAmountCents: Int,
+    val taxAmountCents: Int = 0,
+    val allowSplit: Boolean = false,
+    val label: String? = null,
+)
+
+@Serializable
 private data class CreateBillResponseDto(
     val bill: BillApiDto? = null,
     val error: String? = null,
+)
+
+@Serializable
+private data class EventTeamBillRefundRequestDto(
+    val billPaymentId: String,
+    val amountCents: Int,
+)
+
+@Serializable
+private data class EventTeamBillRefundResponseDto(
+    val error: String? = null,
+)
+
+@Serializable
+private data class EventTeamBillingSnapshotResponseDto(
+    val team: EventTeamBillingTeamDto? = null,
+    val users: List<EventTeamBillingUserDto> = emptyList(),
+    val bills: List<EventTeamBillingBillDto> = emptyList(),
+    val totals: EventTeamBillingTotalsDto? = null,
+    val error: String? = null,
+)
+
+@Serializable
+private data class EventTeamBillingTeamDto(
+    val id: String? = null,
+    val name: String? = null,
+    val playerIds: List<String> = emptyList(),
+)
+
+@Serializable
+private data class EventTeamBillingUserDto(
+    val id: String? = null,
+    val displayName: String? = null,
+)
+
+@Serializable
+private data class EventTeamBillingLineItemDto(
+    val id: String? = null,
+    val type: String? = null,
+    val label: String? = null,
+    val amountCents: Int? = null,
+    val quantity: Int? = null,
+)
+
+@Serializable
+private data class EventTeamBillingPaymentDto(
+    val id: String? = null,
+    @SerialName("\$id") val legacyId: String? = null,
+    val billId: String? = null,
+    val sequence: Int? = null,
+    val status: String? = null,
+    val amountCents: Int? = null,
+    val refundedAmountCents: Int? = null,
+    val refundableAmountCents: Int? = null,
+    val paidAt: String? = null,
+    val paymentIntentId: String? = null,
+    val isRefundable: Boolean? = null,
+)
+
+@Serializable
+private data class EventTeamBillingBillDto(
+    val id: String? = null,
+    @SerialName("\$id") val legacyId: String? = null,
+    val ownerType: String? = null,
+    val ownerId: String? = null,
+    val ownerName: String? = null,
+    val totalAmountCents: Int? = null,
+    val paidAmountCents: Int? = null,
+    val refundedAmountCents: Int? = null,
+    val refundableAmountCents: Int? = null,
+    val status: String? = null,
+    val allowSplit: Boolean? = null,
+    val lineItems: List<EventTeamBillingLineItemDto> = emptyList(),
+    val payments: List<EventTeamBillingPaymentDto> = emptyList(),
+)
+
+@Serializable
+private data class EventTeamBillingTotalsDto(
+    val paidAmountCents: Int? = null,
+    val refundedAmountCents: Int? = null,
+    val refundableAmountCents: Int? = null,
 )
 
 @Serializable
@@ -978,6 +1238,94 @@ private data class BillApiDto(
             createdBy = createdBy,
         )
     }
+}
+
+private fun EventTeamBillingSnapshotResponseDto.toSnapshotOrNull(): EventTeamBillingSnapshot? {
+    val teamDto = team ?: return null
+    val resolvedTeamId = teamDto.id?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val bills = bills.mapNotNull { bill -> bill.toBillOrNull() }
+    val totalsDto = totals
+    val totals = EventTeamBillingTotals(
+        paidAmountCents = totalsDto?.paidAmountCents ?: 0,
+        refundedAmountCents = totalsDto?.refundedAmountCents ?: 0,
+        refundableAmountCents = totalsDto?.refundableAmountCents ?: 0,
+    )
+    return EventTeamBillingSnapshot(
+        teamId = resolvedTeamId,
+        teamName = teamDto.name?.trim()?.takeIf(String::isNotBlank),
+        playerIds = teamDto.playerIds.mapNotNull { id -> id.trim().takeIf(String::isNotBlank) },
+        users = users.mapNotNull { user -> user.toUserOptionOrNull() },
+        bills = bills,
+        totals = totals,
+    )
+}
+
+private fun EventTeamBillingUserDto.toUserOptionOrNull(): EventTeamBillingUserOption? {
+    val resolvedId = id?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val resolvedDisplayName = displayName?.trim()?.takeIf(String::isNotBlank) ?: resolvedId
+    return EventTeamBillingUserOption(
+        id = resolvedId,
+        displayName = resolvedDisplayName,
+    )
+}
+
+private fun EventTeamBillingBillDto.toBillOrNull(): EventTeamBillingBillSnapshot? {
+    val resolvedId = id?.trim()?.takeIf(String::isNotBlank)
+        ?: legacyId?.trim()?.takeIf(String::isNotBlank)
+        ?: return null
+    val resolvedOwnerType = ownerType?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val resolvedOwnerId = ownerId?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val resolvedOwnerName = ownerName?.trim()?.takeIf(String::isNotBlank) ?: resolvedOwnerId
+    val resolvedTotalAmount = totalAmountCents ?: return null
+    val resolvedPaid = paidAmountCents ?: 0
+    val resolvedRefunded = refundedAmountCents ?: 0
+    val resolvedRefundable = refundableAmountCents ?: 0
+
+    return EventTeamBillingBillSnapshot(
+        id = resolvedId,
+        ownerType = resolvedOwnerType,
+        ownerId = resolvedOwnerId,
+        ownerName = resolvedOwnerName,
+        totalAmountCents = resolvedTotalAmount,
+        paidAmountCents = resolvedPaid,
+        refundedAmountCents = resolvedRefunded,
+        refundableAmountCents = resolvedRefundable,
+        status = status?.trim()?.takeIf(String::isNotBlank),
+        allowSplit = allowSplit,
+        lineItems = lineItems.map { lineItem ->
+            EventTeamBillingLineItem(
+                id = lineItem.id?.trim()?.takeIf(String::isNotBlank),
+                type = lineItem.type?.trim()?.takeIf(String::isNotBlank),
+                label = lineItem.label?.trim()?.takeIf(String::isNotBlank),
+                amountCents = lineItem.amountCents,
+                quantity = lineItem.quantity,
+            )
+        },
+        payments = payments.mapNotNull { payment -> payment.toPaymentOrNull() },
+    )
+}
+
+private fun EventTeamBillingPaymentDto.toPaymentOrNull(): EventTeamBillingPaymentSnapshot? {
+    val resolvedId = id?.trim()?.takeIf(String::isNotBlank)
+        ?: legacyId?.trim()?.takeIf(String::isNotBlank)
+        ?: return null
+    val resolvedBillId = billId?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val resolvedSequence = sequence ?: return null
+    val resolvedAmountCents = amountCents ?: return null
+    val resolvedRefunded = refundedAmountCents ?: 0
+    val resolvedRefundable = refundableAmountCents ?: 0
+    return EventTeamBillingPaymentSnapshot(
+        id = resolvedId,
+        billId = resolvedBillId,
+        sequence = resolvedSequence,
+        status = status?.trim()?.takeIf(String::isNotBlank),
+        amountCents = resolvedAmountCents,
+        refundedAmountCents = resolvedRefunded,
+        refundableAmountCents = resolvedRefundable,
+        paidAt = paidAt?.trim()?.takeIf(String::isNotBlank),
+        paymentIntentId = paymentIntentId?.trim()?.takeIf(String::isNotBlank),
+        isRefundable = isRefundable ?: false,
+    )
 }
 
 @Serializable

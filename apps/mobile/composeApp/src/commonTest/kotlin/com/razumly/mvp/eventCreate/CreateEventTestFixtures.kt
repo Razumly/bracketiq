@@ -46,6 +46,8 @@ import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.data.repositories.RecordSignatureResult
 import com.razumly.mvp.core.data.repositories.ChildRegistrationResult
 import com.razumly.mvp.core.data.repositories.CreateBillRequest
+import com.razumly.mvp.core.data.repositories.EventTeamBillCreateRequest
+import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
 import com.razumly.mvp.core.data.repositories.SelfRegistrationResult
 import com.razumly.mvp.core.data.repositories.SignerContext
 import com.razumly.mvp.core.data.repositories.SignStep
@@ -494,6 +496,35 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
     override suspend fun listBills(ownerType: String, ownerId: String, limit: Int): Result<List<Bill>> =
         Result.success(emptyList())
     override suspend fun getBillPayments(billId: String): Result<List<BillPayment>> = Result.success(emptyList())
+    override suspend fun getEventTeamBillingSnapshot(
+        eventId: String,
+        teamId: String,
+    ): Result<EventTeamBillingSnapshot> = Result.success(
+        EventTeamBillingSnapshot(
+            teamId = teamId,
+            teamName = "Team",
+        )
+    )
+    override suspend fun createEventTeamBill(
+        eventId: String,
+        teamId: String,
+        request: EventTeamBillCreateRequest,
+    ): Result<Bill> = Result.success(
+        Bill(
+            ownerType = request.ownerType,
+            ownerId = request.ownerId ?: teamId,
+            eventId = eventId,
+            totalAmountCents = request.eventAmountCents + request.taxAmountCents,
+            allowSplit = request.allowSplit,
+            id = "bill-event-team-test",
+        )
+    )
+    override suspend fun refundEventTeamBillPayment(
+        eventId: String,
+        teamId: String,
+        billPaymentId: String,
+        amountCents: Int,
+    ): Result<Unit> = Result.success(Unit)
     override suspend fun createBillingIntent(billId: String, billPaymentId: String): Result<PurchaseIntent> =
         Result.success(PurchaseIntent(paymentIntent = "pi_bill", publishableKey = "pk_bill"))
     override suspend fun listSubscriptions(userId: String, limit: Int): Result<List<Subscription>> =

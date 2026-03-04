@@ -22,7 +22,9 @@ import com.razumly.mvp.core.data.repositories.FamilyJoinRequest
 import com.razumly.mvp.core.data.repositories.FamilyJoinRequestAction
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IEventRepository
+import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
+import com.razumly.mvp.core.data.repositories.PushDeviceTargetDebugStatus
 import com.razumly.mvp.core.data.repositories.ProfileDocumentCard
 import com.razumly.mvp.core.data.repositories.ProfileDocumentType
 import com.razumly.mvp.core.data.repositories.SignStep
@@ -176,6 +178,13 @@ data class ProfileMyScheduleState(
     val error: String? = null,
 )
 
+data class ProfilePushTargetDebugState(
+    val isLoading: Boolean = false,
+    val status: PushDeviceTargetDebugStatus? = null,
+    val error: String? = null,
+    val lastCheckedAt: String? = null,
+)
+
 data class ProfileTextSignaturePromptState(
     val document: ProfileDocumentCard,
     val step: SignStep,
@@ -204,6 +213,7 @@ interface ProfileComponent : IPaymentProcessor {
     val connectionsState: StateFlow<ProfileConnectionsState>
     val documentsState: StateFlow<ProfileDocumentsState>
     val myScheduleState: StateFlow<ProfileMyScheduleState>
+    val pushTargetDebugState: StateFlow<ProfilePushTargetDebugState>
     val activeBillPaymentId: StateFlow<String?>
     val activeMembershipActionId: StateFlow<String?>
     val activeDocumentActionId: StateFlow<String?>
@@ -229,6 +239,7 @@ interface ProfileComponent : IPaymentProcessor {
     fun manageEvents()
     fun manageRefunds()
     fun clearCache()
+    fun refreshPushTargetDebugStatus(syncBeforeCheck: Boolean = false)
     fun refreshEventTemplates()
     fun openEventTemplate(event: Event)
     fun manageStripeAccountOnboarding()
@@ -335,6 +346,7 @@ class DefaultProfileComponent(
     private val billingRepository: IBillingRepository,
     private val eventRepository: IEventRepository,
     private val teamRepository: ITeamRepository,
+    private val pushNotificationsRepository: IPushNotificationsRepository,
     private val navigationHandler: INavigationHandler,
 ) : ProfileComponent, PaymentProcessor(), ComponentContext by componentContext {
 
@@ -368,6 +380,9 @@ class DefaultProfileComponent(
 
     private val _myScheduleState = MutableStateFlow(ProfileMyScheduleState())
     override val myScheduleState = _myScheduleState.asStateFlow()
+
+    private val _pushTargetDebugState = MutableStateFlow(ProfilePushTargetDebugState())
+    override val pushTargetDebugState = _pushTargetDebugState.asStateFlow()
 
     private val _activeBillPaymentId = MutableStateFlow<String?>(null)
     override val activeBillPaymentId = _activeBillPaymentId.asStateFlow()
@@ -510,6 +525,32 @@ class DefaultProfileComponent(
     override fun clearCache() {
         scope.launch {
             // TODO: Wire cache clearing behavior once the cache strategy is finalized.
+        }
+    }
+
+    override fun refreshPushTargetDebugStatus(syncBeforeCheck: Boolean) {
+        scope.launch {
+            _pushTargetDebugState.value = _pushTargetDebugState.value.copy(
+                isLoading = true,
+                error = null,
+            )
+
+            pushNotificationsRepository.getDeviceTargetDebugStatus(syncBeforeCheck)
+                .onSuccess { status ->
+                    _pushTargetDebugState.value = ProfilePushTargetDebugState(
+                        isLoading = false,
+                        status = status,
+                        error = null,
+                        lastCheckedAt = Clock.System.now().toString(),
+                    )
+                }
+                .onFailure { throwable ->
+                    _pushTargetDebugState.value = _pushTargetDebugState.value.copy(
+                        isLoading = false,
+                        error = throwable.message ?: "Failed to load push target debug status.",
+                        lastCheckedAt = Clock.System.now().toString(),
+                    )
+                }
         }
     }
 

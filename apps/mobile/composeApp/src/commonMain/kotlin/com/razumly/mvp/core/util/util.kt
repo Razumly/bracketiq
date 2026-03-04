@@ -80,4 +80,6 @@ val jsonMVP =  Json {
 expect object Platform {
     val name: String
     val isIOS: Boolean
+    val isDebugBuild: Boolean
+    val isNonReleaseBuild: Boolean
 }

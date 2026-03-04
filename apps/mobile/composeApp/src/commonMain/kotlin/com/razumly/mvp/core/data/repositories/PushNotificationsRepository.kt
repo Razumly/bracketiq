@@ -8,8 +8,11 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.dto.MessagingTopicMessageRequestDto
+import com.razumly.mvp.core.network.dto.MessagingTopicSubscriptionDebugResponseDto
 import com.razumly.mvp.core.network.dto.MessagingTopicSubscriptionRequestDto
 import com.razumly.mvp.core.network.dto.MessagingTopicUpsertRequestDto
+import io.ktor.http.encodeURLPathPart
+import io.ktor.http.encodeURLQueryComponent
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -72,7 +75,23 @@ interface IPushNotificationsRepository {
 
     suspend fun addDeviceAsTarget(): Result<Unit>
     suspend fun removeDeviceAsTarget(): Result<Unit>
+    suspend fun getDeviceTargetDebugStatus(syncBeforeCheck: Boolean = false): Result<PushDeviceTargetDebugStatus>
 }
+
+data class PushDeviceTargetDebugStatus(
+    val userId: String? = null,
+    val topicId: String? = null,
+    val localPushToken: String? = null,
+    val localPushTarget: String? = null,
+    val hasAnyTargetForUser: Boolean = false,
+    val hasTopicTargetForUser: Boolean = false,
+    val hasProvidedTokenForUser: Boolean = false,
+    val hasProvidedTokenOnTopic: Boolean = false,
+    val tokenRecordPushTarget: String? = null,
+    val tokenRecordPushPlatform: String? = null,
+    val tokenRecordUpdatedAt: String? = null,
+    val tokenRecordLastSeenAt: String? = null,
+)
 
 class PushNotificationsRepository(
     private val userDataSource: CurrentUserDataSource,
@@ -260,6 +279,56 @@ class PushNotificationsRepository(
         userDataSource.savePushTarget("")
         userDataSource.savePushToken("")
     }
+
+    override suspend fun getDeviceTargetDebugStatus(syncBeforeCheck: Boolean): Result<PushDeviceTargetDebugStatus> =
+        runCatching {
+            if (syncBeforeCheck) {
+                addDeviceAsTarget().getOrThrow()
+            }
+
+            val userId = resolveCurrentOrCachedPushUserId()
+            val localPushToken = currentCachedPushTokenOrNull()?.trim()?.takeIf(String::isNotBlank)
+            val localPushTarget = userDataSource.getPushTarget().first().trim().takeIf(String::isNotBlank)
+            val topicId = localPushTarget ?: userId?.let(::userTopicId)
+
+            if (userId.isNullOrBlank() || topicId.isNullOrBlank()) {
+                return@runCatching PushDeviceTargetDebugStatus(
+                    userId = userId,
+                    topicId = topicId,
+                    localPushToken = localPushToken,
+                    localPushTarget = localPushTarget,
+                )
+            }
+
+            val queryParams = buildList {
+                add("userId=${userId.encodeURLQueryComponent()}")
+                if (!localPushToken.isNullOrBlank()) {
+                    add("pushToken=${localPushToken.encodeURLQueryComponent()}")
+                }
+            }
+            val encodedTopicId = topicId.encodeURLPathPart()
+            val responsePath = if (queryParams.isNotEmpty()) {
+                "api/messaging/topics/$encodedTopicId/subscriptions?${queryParams.joinToString("&")}"
+            } else {
+                "api/messaging/topics/$encodedTopicId/subscriptions"
+            }
+
+            val response = api.get<MessagingTopicSubscriptionDebugResponseDto>(responsePath)
+            PushDeviceTargetDebugStatus(
+                userId = userId,
+                topicId = response.topicId.ifBlank { topicId },
+                localPushToken = localPushToken,
+                localPushTarget = localPushTarget,
+                hasAnyTargetForUser = response.hasAnyTargetForUser,
+                hasTopicTargetForUser = response.hasTopicTargetForUser,
+                hasProvidedTokenForUser = response.hasProvidedTokenForUser,
+                hasProvidedTokenOnTopic = response.hasProvidedTokenOnTopic,
+                tokenRecordPushTarget = response.tokenRecordPushTarget,
+                tokenRecordPushPlatform = response.tokenRecordPushPlatform,
+                tokenRecordUpdatedAt = response.tokenRecordUpdatedAt,
+                tokenRecordLastSeenAt = response.tokenRecordLastSeenAt,
+            )
+        }
 
     private suspend fun subscribeUserToTopic(userId: String, topicId: String): Result<Unit> = runCatching {
         val normalizedUserId = normalizeId(userId, "User id")

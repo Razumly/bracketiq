@@ -3,7 +3,9 @@ package com.razumly.mvp.profile
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -22,6 +24,7 @@ import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -34,6 +37,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
+import com.razumly.mvp.core.util.Platform
 import com.razumly.mvp.icons.MVPIcons
 import com.razumly.mvp.icons.ProfileActionChildren
 import com.razumly.mvp.icons.ProfileActionClearCache
@@ -58,6 +62,7 @@ private data class ProfileAction(
 fun ProfileHomeScreen(component: ProfileComponent) {
     val navPadding = LocalNavBarPadding.current
     val showChildrenTab by component.showChildrenTab.collectAsState()
+    val pushTargetDebugState by component.pushTargetDebugState.collectAsState()
     val actions = remember(component, showChildrenTab) {
         buildList {
             add(
@@ -190,6 +195,16 @@ fun ProfileHomeScreen(component: ProfileComponent) {
                 ProfileActionCard(action = action)
             }
 
+            if (Platform.isNonReleaseBuild) {
+                item(span = { GridItemSpan(2) }) {
+                    PushTargetDebugCard(
+                        state = pushTargetDebugState,
+                        onCheckStatus = { component.refreshPushTargetDebugStatus() },
+                        onSyncAndCheck = { component.refreshPushTargetDebugStatus(syncBeforeCheck = true) },
+                    )
+                }
+            }
+
             item(span = { GridItemSpan(2) }) {
                 Button(
                     modifier = Modifier.fillMaxWidth(),
@@ -251,4 +266,127 @@ private fun ProfileActionCard(action: ProfileAction) {
             )
         }
     }
+}
+
+@Composable
+private fun PushTargetDebugCard(
+    state: ProfilePushTargetDebugState,
+    onCheckStatus: () -> Unit,
+    onSyncAndCheck: () -> Unit,
+) {
+    val status = state.status
+    val isAssociated = status?.hasTopicTargetForUser == true || status?.hasProvidedTokenOnTopic == true
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = "Push Target Debug",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = "Check if this device token is linked to your push target topic.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedButton(
+                    modifier = Modifier.weight(1f),
+                    enabled = !state.isLoading,
+                    onClick = onCheckStatus,
+                ) {
+                    Text("Check")
+                }
+                Button(
+                    modifier = Modifier.weight(1f),
+                    enabled = !state.isLoading,
+                    onClick = onSyncAndCheck,
+                ) {
+                    Text("Sync + Check")
+                }
+            }
+
+            if (state.isLoading) {
+                Text(
+                    text = "Checking...",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+
+            state.error?.let { error ->
+                Text(
+                    text = error,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+
+            status?.let {
+                Text(
+                    text = "Associated: ${if (isAssociated) "Yes" else "No"}",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    text = "User: ${it.userId ?: "Unavailable"}",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Text(
+                    text = "Topic: ${it.topicId ?: "Unavailable"}",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Text(
+                    text = "Local token: ${maskToken(it.localPushToken)}",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Text(
+                    text = "Local target: ${it.localPushTarget ?: "Unavailable"}",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Text(
+                    text = "Any target on user: ${it.hasAnyTargetForUser}",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Text(
+                    text = "Topic target on user: ${it.hasTopicTargetForUser}",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Text(
+                    text = "Token belongs to user: ${it.hasProvidedTokenForUser}",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Text(
+                    text = "Token mapped to topic: ${it.hasProvidedTokenOnTopic}",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+
+            state.lastCheckedAt?.let { checkedAt ->
+                Text(
+                    text = "Last checked: $checkedAt",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+private fun maskToken(value: String?): String {
+    val token = value?.trim().orEmpty()
+    if (token.isBlank()) return "Unavailable"
+    if (token.length <= 24) return token
+    return "${token.take(10)}...${token.takeLast(10)}"
 }

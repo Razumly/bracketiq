@@ -22,3 +22,17 @@ data class MessagingTopicMessageRequestDto(
     val userIds: List<String> = emptyList(),
     val senderId: String? = null,
 )
+
+@Serializable
+data class MessagingTopicSubscriptionDebugResponseDto(
+    val topicId: String,
+    val userId: String,
+    val hasAnyTargetForUser: Boolean = false,
+    val hasTopicTargetForUser: Boolean = false,
+    val hasProvidedTokenForUser: Boolean = false,
+    val hasProvidedTokenOnTopic: Boolean = false,
+    val tokenRecordPushTarget: String? = null,
+    val tokenRecordPushPlatform: String? = null,
+    val tokenRecordUpdatedAt: String? = null,
+    val tokenRecordLastSeenAt: String? = null,
+)
