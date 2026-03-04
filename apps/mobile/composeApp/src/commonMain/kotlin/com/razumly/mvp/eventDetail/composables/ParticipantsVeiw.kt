@@ -37,6 +37,7 @@ import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
 import com.razumly.mvp.core.data.repositories.EventTeamBillingUserOption
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.PlayerInteractionComponent
+import com.razumly.mvp.core.presentation.composables.MoneyInputField
 import com.razumly.mvp.core.presentation.composables.PlatformTextField
 import com.razumly.mvp.core.presentation.composables.PlayerAction
 import com.razumly.mvp.core.presentation.composables.PlayerCardWithActions
@@ -706,6 +707,10 @@ fun ParticipantsView(
     billContext?.let { context ->
         val availableUserOwners = context.userOptions
         val isUserOnlyOwner = !context.allowTeamOwner
+        val previewEventAmountCents = (parseCurrencyTextToCents(createBillAmount) ?: 0).coerceAtLeast(0)
+        val previewTaxAmountCents = (parseCurrencyTextToCents(createBillTax) ?: 0).coerceAtLeast(0)
+        val previewTotalAmountCents = previewEventAmountCents + previewTaxAmountCents
+        val previewLabel = createBillLabel.trim().ifBlank { "Event registration" }
 
         AlertDialog(
             onDismissRequest = {
@@ -767,17 +772,19 @@ fun ParticipantsView(
                         }
                     }
 
-                    PlatformTextField(
+                    MoneyInputField(
                         value = createBillAmount,
                         onValueChange = { createBillAmount = it },
                         modifier = Modifier.fillMaxWidth(),
-                        placeholder = "Amount (e.g. 150.00)",
+                        label = "Price",
+                        placeholder = "0.00",
                     )
-                    PlatformTextField(
+                    MoneyInputField(
                         value = createBillTax,
                         onValueChange = { createBillTax = it },
                         modifier = Modifier.fillMaxWidth(),
-                        placeholder = "Tax (e.g. 0.00)",
+                        label = "Tax",
+                        placeholder = "0.00",
                     )
                     PlatformTextField(
                         value = createBillLabel,
@@ -802,6 +809,28 @@ fun ParticipantsView(
                             )
                         }
                     }
+
+                    HorizontalDivider()
+                    Text(
+                        text = "Price preview",
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    BillPreviewRow(
+                        label = previewLabel,
+                        amount = formatCurrency(previewEventAmountCents),
+                    )
+                    if (previewTaxAmountCents > 0) {
+                        BillPreviewRow(
+                            label = "Tax",
+                            amount = formatCurrency(previewTaxAmountCents),
+                        )
+                    }
+                    HorizontalDivider()
+                    BillPreviewRow(
+                        label = "Total",
+                        amount = formatCurrency(previewTotalAmountCents),
+                        isTotal = true,
+                    )
                 }
             },
             confirmButton = {
@@ -887,4 +916,25 @@ private fun parseCurrencyTextToCents(value: String): Int? {
     val numeric = value.trim().replace("$", "").takeIf(String::isNotBlank)?.toDoubleOrNull() ?: return null
     if (!numeric.isFinite()) return null
     return round(numeric * 100).toInt()
+}
+
+@Composable
+private fun BillPreviewRow(
+    label: String,
+    amount: String,
+    isTotal: Boolean = false,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            text = label,
+            style = if (isTotal) MaterialTheme.typography.titleSmall else MaterialTheme.typography.bodyMedium,
+        )
+        Text(
+            text = amount,
+            style = if (isTotal) MaterialTheme.typography.titleSmall else MaterialTheme.typography.bodyMedium,
+        )
+    }
 }
