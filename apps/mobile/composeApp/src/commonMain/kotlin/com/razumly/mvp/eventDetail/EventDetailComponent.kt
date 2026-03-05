@@ -53,11 +53,9 @@ import com.razumly.mvp.core.presentation.util.createEventUrl
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.util.newId
-import com.razumly.mvp.eventDetail.data.BracketLane
 import com.razumly.mvp.eventDetail.data.BracketNode
 import com.razumly.mvp.eventDetail.data.IMatchRepository
 import com.razumly.mvp.eventDetail.data.StagedMatchCreate
-import com.razumly.mvp.eventDetail.data.filterValidNextMatchCandidates
 import com.razumly.mvp.eventDetail.data.validateAndNormalizeBracketGraph
 import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
 import io.github.aakira.napier.Napier
@@ -404,9 +402,6 @@ class DefaultEventDetailComponent(
 
     private fun extractClientId(matchId: String): String =
         matchId.removePrefix(CLIENT_MATCH_PREFIX)
-
-    private fun isLocalPlaceholderId(value: String?): Boolean =
-        normalizeToken(value)?.startsWith(LOCAL_PLACEHOLDER_PREFIX) == true
 
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
     override val currentUser = userRepository.currentUser.map { it.getOrThrow() }
@@ -1360,9 +1355,7 @@ class DefaultEventDetailComponent(
                     priceCents = paymentPlan.priceCents,
                 )
                     .onSuccess { purchaseIntent ->
-                        purchaseIntent?.let {
-                            processPurchaseIntent(it)
-                        }
+                        processPurchaseIntent(purchaseIntent)
                     }.onFailure {
                         _errorState.value = ErrorMessage(it.message ?: "")
                     }
@@ -1412,9 +1405,7 @@ class DefaultEventDetailComponent(
                     priceCents = paymentPlan.priceCents,
                 )
                     .onSuccess { purchaseIntent ->
-                        purchaseIntent?.let {
-                            processPurchaseIntent(it)
-                        }
+                        processPurchaseIntent(purchaseIntent)
                     }.onFailure {
                         _errorState.value = ErrorMessage(it.message ?: "")
                     }
@@ -1600,7 +1591,7 @@ class DefaultEventDetailComponent(
         _webSignaturePrompt.value = null
     }
 
-    private suspend fun processPurchaseIntent(intent: PurchaseIntent) {
+    private fun processPurchaseIntent(intent: PurchaseIntent) {
         if (!ensureDocumentSignedBeforePurchase(intent)) {
             return
         }
@@ -1614,11 +1605,13 @@ class DefaultEventDetailComponent(
                 loadingHandler.hideLoading()
             })
         } ?: run {
-            showPaymentSheet(intent)
+            scope.launch {
+                showPaymentSheet(intent)
+            }
         }
     }
 
-    private suspend fun ensureDocumentSignedBeforePurchase(intent: PurchaseIntent): Boolean {
+    private fun ensureDocumentSignedBeforePurchase(intent: PurchaseIntent): Boolean {
         if (!intent.isSignatureRequired() || intent.isSignatureCompleted()) {
             return true
         }
@@ -1764,7 +1757,7 @@ class DefaultEventDetailComponent(
     }
 
     override fun viewEvent() {
-        hydrateEventDetailForMobile(openDetailsWhenFinished = true)
+        hydrateEventDetailForMobile()
     }
 
     override fun toggleDetails() {
@@ -1775,12 +1768,10 @@ class DefaultEventDetailComponent(
         }
     }
 
-    private fun hydrateEventDetailForMobile(openDetailsWhenFinished: Boolean) {
+    private fun hydrateEventDetailForMobile() {
         val eventId = selectedEvent.value.id.trim()
         if (eventId.isEmpty()) {
-            if (openDetailsWhenFinished) {
-                _showDetails.value = true
-            }
+            _showDetails.value = true
             return
         }
 
@@ -1809,7 +1800,7 @@ class DefaultEventDetailComponent(
                     )
                 }
 
-                if (requestToken == eventDetailHydrationToken && openDetailsWhenFinished) {
+                if (requestToken == eventDetailHydrationToken) {
                     _showDetails.value = true
                 }
             } finally {
@@ -2076,7 +2067,7 @@ class DefaultEventDetailComponent(
             eventId = normalizedEventId,
             teamId = normalizedTeamId,
             request = request,
-        ).map { Unit }
+        ).map { }
     }
 
     override suspend fun refundParticipantPayment(
@@ -3081,9 +3072,8 @@ class DefaultEventDetailComponent(
 
     override fun sendNotification(title: String, message: String) {
         scope.launch {
-            val isEvent = selectedEvent.value is Event
             notificationsRepository.sendEventNotification(
-                eventWithRelations.value.event.id, title, message, isEvent
+                eventWithRelations.value.event.id, title, message, true
             ).onFailure {
                 _errorState.value = ErrorMessage(("Failed to send message: " + it.message))
             }
@@ -3199,7 +3189,7 @@ class DefaultEventDetailComponent(
             try {
                 eventRepository.getEvent(selectedEvent.value.id)
                 delay(checkIntervalS)
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 delay(checkIntervalS * 2)
             }
         }

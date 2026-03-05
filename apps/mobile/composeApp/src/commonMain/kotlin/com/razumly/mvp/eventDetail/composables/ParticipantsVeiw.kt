@@ -122,8 +122,8 @@ fun ParticipantsView(
         (teamPlayers + selectedEvent.players + freeAgentUsers).distinctBy(UserData::id)
     }
     val participantsTeamsByUserId = remember(selectedEvent.teams) {
-        buildMap {
-            selectedEvent.teams.forEach { teamWithPlayers ->
+        mutableMapOf<String, TeamWithPlayers>().apply {
+            selectedEvent.teams.forEach { teamWithPlayers: TeamWithPlayers ->
                 val team = teamWithPlayers.team
                 val memberIds = buildSet {
                     addAll(team.playerIds)
@@ -134,10 +134,12 @@ fun ParticipantsView(
                 }.map(String::trim).filter(String::isNotBlank)
 
                 memberIds.forEach { memberId ->
-                    putIfAbsent(memberId, teamWithPlayers)
+                    if (!containsKey(memberId)) {
+                        this[memberId] = teamWithPlayers
+                    }
                 }
             }
-        }
+        }.toMap()
     }
     val canInviteToTeam = remember(selectedEvent.teams, currentUser.id) {
         selectedEvent.teams.any { teamWithPlayers ->
@@ -620,7 +622,7 @@ fun ParticipantsView(
                                         ) {
                                             Text(
                                                 "Payment #${payment.sequence} • " +
-                                                    "${formatCurrency(payment.amountCents)}",
+                                                    formatCurrency(payment.amountCents),
                                                 style = MaterialTheme.typography.bodyMedium,
                                             )
                                             Text(

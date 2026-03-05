@@ -18,6 +18,7 @@ actual fun PreparePaymentProcessor(paymentProcessor: IPaymentProcessor) {
 }
 
 @Composable
+@Suppress("UNUSED_PARAMETER")
 actual fun StripeButton(
     onClick: () -> Unit,
     paymentProcessor: IPaymentProcessor,
@@ -25,8 +26,6 @@ actual fun StripeButton(
     colors: ButtonColors?,
     modifier: Modifier,
 ) {
-    PreparePaymentProcessor(paymentProcessor)
-
     Button(
         onClick = onClick,
         colors = colors ?: ButtonDefaults.buttonColors(),

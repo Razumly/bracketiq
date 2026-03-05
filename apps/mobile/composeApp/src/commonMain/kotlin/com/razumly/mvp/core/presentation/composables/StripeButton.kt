@@ -8,6 +8,10 @@ import com.razumly.mvp.core.presentation.IPaymentProcessor
 @Composable
 expect fun PreparePaymentProcessor(paymentProcessor: IPaymentProcessor)
 
+/**
+ * Renders a payment CTA only.
+ * Call [PreparePaymentProcessor] once at the screen root to keep launcher registration stable.
+ */
 @Composable
 expect fun StripeButton(
     onClick: () -> Unit,

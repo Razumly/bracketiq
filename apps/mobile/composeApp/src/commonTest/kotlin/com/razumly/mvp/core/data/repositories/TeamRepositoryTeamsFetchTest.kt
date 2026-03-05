@@ -2,9 +2,10 @@ package com.razumly.mvp.core.data.repositories
 
 import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.AuthAccount
+import com.razumly.mvp.core.data.dataTypes.ChatGroup
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.UserData
-import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
 import com.razumly.mvp.core.data.dataTypes.daos.ChatGroupDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventDao
@@ -245,19 +246,19 @@ private object FakePushNotificationsRepository : IPushNotificationsRepository {
     override suspend fun sendChatGroupNotification(chatGroupId: String, title: String, body: String): Result<Unit> =
         Result.success(Unit)
 
-    override suspend fun createTeamTopic(team: com.razumly.mvp.core.data.dataTypes.Team): Result<Unit> =
+    override suspend fun createTeamTopic(team: Team): Result<Unit> =
         Result.success(Unit)
 
     override suspend fun deleteTopic(id: String): Result<Unit> =
         Result.success(Unit)
 
-    override suspend fun createEventTopic(event: com.razumly.mvp.core.data.dataTypes.Event): Result<Unit> =
+    override suspend fun createEventTopic(event: Event): Result<Unit> =
         Result.success(Unit)
 
-    override suspend fun createTournamentTopic(event: com.razumly.mvp.core.data.dataTypes.Event): Result<Unit> =
+    override suspend fun createTournamentTopic(event: Event): Result<Unit> =
         Result.success(Unit)
 
-    override suspend fun createChatGroupTopic(chatGroup: com.razumly.mvp.core.data.dataTypes.ChatGroup): Result<Unit> =
+    override suspend fun createChatGroupTopic(chatGroup: ChatGroup): Result<Unit> =
         Result.success(Unit)
 
     override suspend fun addDeviceAsTarget(): Result<Unit> = Result.success(Unit)

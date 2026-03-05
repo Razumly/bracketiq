@@ -46,7 +46,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
@@ -456,8 +455,8 @@ class DefaultProfileComponent(
         }
     }
 
-    override fun setLoadingHandler(handler: LoadingHandler) {
-        loadingHandler = handler
+    override fun setLoadingHandler(loadingHandler: LoadingHandler) {
+        this.loadingHandler = loadingHandler
     }
 
     @OptIn(DelicateDecomposeApi::class)
@@ -1589,7 +1588,7 @@ private fun FamilyChild.toProfileChild(): ProfileChild {
         linkStatus = linkStatus,
         relationship = relationship,
         email = email,
-        hasEmail = hasEmail ?: email?.isNotBlank() == true,
+        hasEmail = hasEmail ?: (email?.isNotBlank() == true),
     )
 }
 

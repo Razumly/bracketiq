@@ -55,6 +55,7 @@ fun calcDistance(start: LatLng, end: LatLng): Double {
     }
 }
 
+@Suppress("unused")
 suspend fun LocationTracker.getCurrentLocation(): LatLng {
     try {
         val location = getLocationsFlow().first()
@@ -77,6 +78,7 @@ val jsonMVP =  Json {
     explicitNulls = false
 }
 
+@Suppress("unused", "EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
 expect object Platform {
     val name: String
     val isIOS: Boolean

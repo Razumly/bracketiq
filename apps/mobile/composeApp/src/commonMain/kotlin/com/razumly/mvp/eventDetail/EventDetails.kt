@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -161,6 +162,9 @@ import kotlin.time.ExperimentalTime
 
 val localImageScheme = compositionLocalOf<DynamicScheme> { error("No color scheme provided") }
 private const val MOBILE_EVENT_DETAILS_BREAKPOINT_DP = 600
+private const val MAX_READ_ONLY_NAME_LIST_ITEMS = 5
+private val readOnlyNameListItemHeight = 28.dp
+private val readOnlyNameListSpacing = 4.dp
 
 private enum class UserPickerTarget {
     HOST,
@@ -1417,6 +1421,12 @@ fun EventDetails(
         }
         listOf(fieldSummary, slotSummary).filterNotNull().joinToString(" • ")
     }
+    val normalizedEventDivisions = remember(event.divisions) {
+        event.divisions.normalizeDivisionIdentifiers()
+    }
+    val fieldsById = remember(editableFields) {
+        editableFields.associateBy(Field::id)
+    }
     val heroHeightFraction = if (editView) 0.6f else 0.32f
     val heroSpacerFraction = if (editView) 0.5f else 0.24f
     val heroHeight = (getScreenHeight() * heroHeightFraction).dp
@@ -1790,19 +1800,16 @@ fun EventDetails(
                     animationDelay = 200,
                     viewContent = {
                         DetailKeyValueList(
-                            rows = listOf(
-                                DetailRowSpec("Event type", event.eventType.name.toTitleCase()),
-                                DetailRowSpec("Host", hostDisplayName),
-                                DetailRowSpec("Entry fee", priceSummary),
-                                DetailRowSpec(
-                                    if (event.teamSignup) "Max teams" else "Max players",
-                                    event.maxParticipants.toString(),
-                                ),
-                                DetailRowSpec("Team size", event.teamSizeLimit.toString()),
-                                DetailRowSpec("Registration closes", "$registrationSummary \u203A"),
-                                DetailRowSpec("Refunds", "$refundSummary \u203A"),
-                                DetailRowSpec("Waitlist", "${event.waitListIds.size}"),
+                            rows = buildEventDetailsRows(
+                                event = event,
+                                priceSummary = priceSummary,
+                                registrationSummary = registrationSummary,
+                                refundSummary = refundSummary,
                             ),
+                        )
+                        ReadOnlyDivisionsList(
+                            event = event,
+                            divisionDetails = divisionDetailsForSettings,
                         )
                     },
                     editContent = {
@@ -2420,8 +2427,9 @@ fun EventDetails(
                     },
                 )
 
-                // Specifics Card
-                animatedCardSection(
+                if (editView) {
+                    // Specifics Card
+                    animatedCardSection(
                     sectionId = "specifics",
                     sectionTitle = "Division Settings",
                     collapsibleInEditMode = true,
@@ -3140,13 +3148,15 @@ fun EventDetails(
                             }
                         }
                     }
+                    }
 
-                })
+                    )
+                }
 
                 if (editEvent.eventType == EventType.LEAGUE) {
                     animatedCardSection(
                         sectionId = "league_scoring",
-                        sectionTitle = "League Scoring Config",
+                        sectionTitle = if (editView) "League Scoring Config" else "League Scoring Rules",
                         collapsibleInEditMode = true,
                         collapsibleInViewMode = true,
                         viewSummary = "Scoring rules",
@@ -3178,7 +3188,7 @@ fun EventDetails(
                 if (editEvent.eventType == EventType.LEAGUE || editEvent.eventType == EventType.TOURNAMENT) {
                     animatedCardSection(
                         sectionId = "facility_schedule",
-                        sectionTitle = "Schedule Config",
+                        sectionTitle = if (editView) "Schedule Config" else "Schedule",
                         collapsibleInEditMode = true,
                         collapsibleInViewMode = true,
                         viewSummary = facilitiesSummaryLine,
@@ -3188,17 +3198,17 @@ fun EventDetails(
                         animationDelay = 450,
                         viewContent = {
                             DetailKeyValueList(
-                                rows = buildList {
-                                    add(DetailRowSpec("Field count", (editEvent.fieldCount ?: 0).toString()))
-                                    if (editEvent.eventType == EventType.LEAGUE || editEvent.eventType == EventType.TOURNAMENT) {
-                                        add(
-                                            DetailRowSpec(
-                                                "Weekly timeslots",
-                                                "${eventWithRelations.timeSlots.size}",
-                                            ),
-                                        )
-                                    }
-                                },
+                                rows = buildScheduleDetailsRows(
+                                    event = event,
+                                    fieldCount = event.fieldCount ?: editableFields.size,
+                                    slotCount = eventWithRelations.timeSlots.size,
+                                ),
+                            )
+                            ScheduleTimeslotsReadOnlyList(
+                                slots = eventWithRelations.timeSlots,
+                                fieldsById = fieldsById,
+                                divisionDetails = divisionDetailsForSettings,
+                                fallbackDivisionIds = normalizedEventDivisions,
                             )
                         },
                         editContent = {
@@ -3993,6 +4003,110 @@ fun LazyListScope.animatedCardSection(
     }
 }
 
+private fun buildEventDetailsRows(
+    event: Event,
+    priceSummary: String,
+    registrationSummary: String,
+    refundSummary: String,
+): List<DetailRowSpec> {
+    return listOf(
+        DetailRowSpec("Entry fee", priceSummary),
+        DetailRowSpec(
+            if (event.teamSignup) "Max teams" else "Max players",
+            event.maxParticipants.toString(),
+        ),
+        DetailRowSpec("Team size", event.teamSizeLimit.toString()),
+        DetailRowSpec("Registration closes", "$registrationSummary \u203A"),
+        DetailRowSpec("Refunds", "$refundSummary \u203A"),
+        DetailRowSpec("Waitlist", "${event.waitListIds.size}"),
+    )
+}
+
+private fun buildScheduleDetailsRows(
+    event: Event,
+    fieldCount: Int,
+    slotCount: Int,
+): List<DetailRowSpec> {
+    return buildList {
+        add(DetailRowSpec("Field count", fieldCount.coerceAtLeast(0).toString()))
+        add(DetailRowSpec("Weekly timeslots", slotCount.toString()))
+
+        when (event.eventType) {
+            EventType.LEAGUE -> {
+                add(DetailRowSpec("Games per opponent", "${event.gamesPerOpponent ?: 1}"))
+                if (event.usesSets) {
+                    add(DetailRowSpec("Sets per match", "${event.setsPerMatch ?: 1}"))
+                    add(DetailRowSpec("Set duration", "${event.setDurationMinutes ?: 20} minutes"))
+                    if (event.pointsToVictory.isNotEmpty()) {
+                        add(DetailRowSpec("Points to victory", event.pointsToVictory.joinToString()))
+                    }
+                } else {
+                    add(DetailRowSpec("Match duration", "${event.matchDurationMinutes ?: 60} minutes"))
+                }
+                add(DetailRowSpec("Rest time", "${event.restTimeMinutes ?: 0} minutes"))
+                if (event.includePlayoffs) {
+                    add(
+                        DetailRowSpec(
+                            "Playoffs",
+                            if (event.singleDivision) {
+                                "${(event.playoffTeamCount ?: event.maxParticipants).coerceAtLeast(2)} teams"
+                            } else {
+                                "Configured per division"
+                            },
+                        ),
+                    )
+                }
+            }
+
+            EventType.TOURNAMENT -> {
+                if (event.usesSets) {
+                    add(DetailRowSpec("Set duration", "${event.setDurationMinutes ?: 20} minutes"))
+                } else {
+                    add(DetailRowSpec("Match duration", "${event.matchDurationMinutes ?: 60} minutes"))
+                }
+                add(
+                    DetailRowSpec(
+                        "Bracket",
+                        if (event.doubleElimination) "Double elimination" else "Single elimination",
+                    ),
+                )
+                if (event.doubleElimination) {
+                    add(DetailRowSpec("Winner set count", event.winnerSetCount.toString()))
+                    if (event.winnerBracketPointsToVictory.isNotEmpty()) {
+                        add(
+                            DetailRowSpec(
+                                "Winner set points",
+                                event.winnerBracketPointsToVictory.joinToString(),
+                            ),
+                        )
+                    }
+                    add(DetailRowSpec("Loser set count", event.loserSetCount.toString()))
+                    if (event.loserBracketPointsToVictory.isNotEmpty()) {
+                        add(
+                            DetailRowSpec(
+                                "Loser set points",
+                                event.loserBracketPointsToVictory.joinToString(),
+                            ),
+                        )
+                    }
+                } else {
+                    add(DetailRowSpec("Bracket set count", event.winnerSetCount.toString()))
+                    if (event.winnerBracketPointsToVictory.isNotEmpty()) {
+                        add(
+                            DetailRowSpec(
+                                "Bracket set points",
+                                event.winnerBracketPointsToVictory.joinToString(),
+                            ),
+                        )
+                    }
+                }
+            }
+
+            EventType.EVENT -> Unit
+        }
+    }
+}
+
 private data class DetailRowSpec(
     val label: String,
     val value: String?,
@@ -4126,6 +4240,385 @@ private fun DetailStatsGrid(
             }
         }
     }
+}
+
+@Composable
+private fun ReadOnlyDivisionsList(
+    event: Event,
+    divisionDetails: List<DivisionDetail>,
+) {
+    Spacer(modifier = Modifier.height(8.dp))
+    var expanded by rememberSaveable(event.id) { mutableStateOf(false) }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            text = "Divisions (${divisionDetails.size})",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        TextButton(onClick = { expanded = !expanded }) {
+            Text(if (expanded) "Hide" else "Show")
+            Spacer(modifier = Modifier.size(4.dp))
+            Icon(
+                imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                contentDescription = if (expanded) "Collapse divisions" else "Expand divisions",
+            )
+        }
+    }
+
+    if (event.singleDivision) {
+        Text(
+            text = "Single-division events mirror event-level capacity and pricing settings.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+
+    AnimatedVisibility(visible = expanded) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (divisionDetails.isEmpty()) {
+                Text(
+                    text = "No divisions configured.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                divisionDetails.forEach { detail ->
+                    ReadOnlyDivisionCard(
+                        event = event,
+                        detail = detail,
+                        allDivisionDetails = divisionDetails,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReadOnlyDivisionCard(
+    event: Event,
+    detail: DivisionDetail,
+    allDivisionDetails: List<DivisionDetail>,
+) {
+    val normalizedDetail = detail.normalizeDivisionDetail(event.id)
+    val detailMeta = listOf(
+        normalizedDetail.gender.ifBlank { "C" },
+        normalizedDetail.skillDivisionTypeName.ifBlank {
+            normalizedDetail.skillDivisionTypeId.toDivisionDisplayLabel()
+        },
+        normalizedDetail.ageDivisionTypeName.ifBlank {
+            normalizedDetail.ageDivisionTypeId.toDivisionDisplayLabel()
+        },
+    ).joinToString(" • ")
+    val priceCents = (detail.price ?: event.priceCents).coerceAtLeast(0)
+    val maxParticipants = (detail.maxParticipants ?: event.maxParticipants).coerceAtLeast(2)
+    val paymentPlanInstallmentCount = maxOf(
+        detail.installmentCount ?: 0,
+        detail.installmentAmounts.size,
+        detail.installmentDueDates.size,
+    )
+    val playoffTeams = if (
+        event.eventType == EventType.LEAGUE &&
+        event.includePlayoffs &&
+        !event.singleDivision
+    ) {
+        detail.playoffTeamCount?.coerceAtLeast(2)
+    } else {
+        null
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+        border = BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                text = detail.name.ifBlank { detail.id.toDivisionDisplayLabel(allDivisionDetails) },
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = detailMeta,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = "Price: ${priceCents.toDouble().div(100.0).moneyFormat()} • " +
+                    "${if (event.teamSignup) "Max teams" else "Max participants"}: $maxParticipants",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (paymentPlanInstallmentCount > 0 && detail.allowPaymentPlans == true) {
+                Text(
+                    text = "Payment plan: $paymentPlanInstallmentCount installments",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (playoffTeams != null) {
+                Text(
+                    text = "Playoff teams: $playoffTeams",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ScheduleTimeslotsReadOnlyList(
+    slots: List<TimeSlot>,
+    fieldsById: Map<String, Field>,
+    divisionDetails: List<DivisionDetail>,
+    fallbackDivisionIds: List<String>,
+) {
+    Spacer(modifier = Modifier.height(8.dp))
+    Text(
+        text = "Weekly timeslots",
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.onSurface,
+    )
+    if (slots.isEmpty()) {
+        Text(
+            text = "No weekly timeslots configured.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        return
+    }
+
+    val groupedSlots = remember(slots) { buildScheduleTimeslotGroups(slots) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        groupedSlots.forEach { (dayOfWeek, daySlots) ->
+            Text(
+                text = "${dayOfWeekLabel(dayOfWeek)} (${daySlots.size})",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                daySlots.forEach { slot ->
+                    val fieldNames = resolveSlotFieldNames(slot, fieldsById)
+                    val divisionNames = resolveSlotDivisionNames(
+                        slot = slot,
+                        divisionDetails = divisionDetails,
+                        fallbackDivisionIds = fallbackDivisionIds,
+                    )
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                        ),
+                        border = BorderStroke(
+                            1.dp,
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                        ),
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Text(
+                                text = formatSlotTimeRange(slot.startTimeMinutes, slot.endTimeMinutes),
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            ReadOnlyNameList(
+                                title = "Fields",
+                                singularTitle = "Field",
+                                values = fieldNames,
+                                emptyText = "Fields: Not assigned",
+                            )
+                            ReadOnlyNameList(
+                                title = "Divisions",
+                                singularTitle = "Division",
+                                values = divisionNames,
+                                emptyText = "Divisions: Not assigned",
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReadOnlyNameList(
+    title: String,
+    singularTitle: String,
+    values: List<String>,
+    emptyText: String,
+) {
+    when {
+        values.isEmpty() -> {
+            Text(
+                text = emptyText,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        values.size == 1 -> {
+            Text(
+                text = "$singularTitle: ${values.first()}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        else -> {
+            val visibleItems = values.size.coerceAtMost(MAX_READ_ONLY_NAME_LIST_ITEMS)
+            val maxHeight = (readOnlyNameListItemHeight * visibleItems) +
+                (readOnlyNameListSpacing * (visibleItems - 1).coerceAtLeast(0))
+            Text(
+                text = "$title (${values.size})",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = maxHeight),
+                verticalArrangement = Arrangement.spacedBy(readOnlyNameListSpacing),
+            ) {
+                items(values) { value ->
+                    Text(
+                        text = value,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = readOnlyNameListItemHeight),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun buildScheduleTimeslotGroups(slots: List<TimeSlot>): List<Pair<Int, List<TimeSlot>>> {
+    if (slots.isEmpty()) return emptyList()
+
+    val grouped = mutableMapOf<Int, MutableList<TimeSlot>>()
+    slots.forEach { slot ->
+        val normalizedDays = slot.normalizedDaysOfWeek()
+        if (normalizedDays.isEmpty()) {
+            grouped.getOrPut(-1) { mutableListOf() } += slot
+        } else {
+            normalizedDays.forEach { day ->
+                grouped.getOrPut(day) { mutableListOf() } += slot
+            }
+        }
+    }
+
+    val dayOrder = listOf(0, 1, 2, 3, 4, 5, 6, -1)
+    return grouped.entries
+        .sortedBy { entry ->
+            dayOrder.indexOf(entry.key).let { index ->
+                if (index >= 0) index else Int.MAX_VALUE
+            }
+        }
+        .map { entry ->
+            entry.key to entry.value.sortedWith(
+                compareBy<TimeSlot>(
+                    { it.startTimeMinutes ?: Int.MAX_VALUE },
+                    { it.endTimeMinutes ?: Int.MAX_VALUE },
+                    { it.id },
+                ),
+            )
+        }
+}
+
+private fun resolveSlotFieldNames(
+    slot: TimeSlot,
+    fieldsById: Map<String, Field>,
+): List<String> {
+    return slot.normalizedScheduledFieldIds()
+        .map { fieldId ->
+            val field = fieldsById[fieldId]
+            field?.name?.takeIf(String::isNotBlank)
+                ?: field?.let { resolved -> "Field ${resolved.fieldNumber}" }
+                ?: fieldId
+        }
+        .distinct()
+}
+
+private fun resolveSlotDivisionNames(
+    slot: TimeSlot,
+    divisionDetails: List<DivisionDetail>,
+    fallbackDivisionIds: List<String>,
+): List<String> {
+    val slotDivisionIds = slot.normalizedDivisionIds().normalizeDivisionIdentifiers()
+    val effectiveDivisionIds = if (slotDivisionIds.isNotEmpty()) {
+        slotDivisionIds
+    } else {
+        fallbackDivisionIds
+    }
+    return effectiveDivisionIds
+        .map { divisionId -> divisionId.toDivisionDisplayLabel(divisionDetails) }
+        .distinct()
+}
+
+private fun dayOfWeekLabel(dayOfWeek: Int): String {
+    return when (dayOfWeek) {
+        0 -> "Monday"
+        1 -> "Tuesday"
+        2 -> "Wednesday"
+        3 -> "Thursday"
+        4 -> "Friday"
+        5 -> "Saturday"
+        6 -> "Sunday"
+        else -> "Unassigned day"
+    }
+}
+
+private fun formatSlotTimeRange(startMinutes: Int?, endMinutes: Int?): String {
+    val startLabel = startMinutes?.let(::formatMinutesTo12Hour) ?: "Start not set"
+    val endLabel = endMinutes?.let(::formatMinutesTo12Hour) ?: "End not set"
+    return "$startLabel - $endLabel"
+}
+
+private fun formatMinutesTo12Hour(totalMinutes: Int): String {
+    val normalizedMinutes = ((totalMinutes % 1440) + 1440) % 1440
+    val hour24 = normalizedMinutes / 60
+    val minute = normalizedMinutes % 60
+    val meridiem = if (hour24 >= 12) "PM" else "AM"
+    val hour12 = when (val value = hour24 % 12) {
+        0 -> 12
+        else -> value
+    }
+    return "$hour12:${minute.toString().padStart(2, '0')} $meridiem"
 }
 
 internal data class DivisionEditorState(

@@ -97,8 +97,6 @@ import androidx.compose.ui.unit.dp
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.ktx.DynamicScheme
-import com.razumly.mvp.core.data.dataTypes.DivisionDetail
-import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfig
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
@@ -843,7 +841,7 @@ private fun ScrollableFloatingDockRow(
         )
         DockScrollIndicator(
             visible = showLeftIndicator,
-            icon = Icons.Default.KeyboardArrowLeft,
+            icon = Icons.Filled.KeyboardArrowLeft,
             contentDescription = "Scroll dock left",
             onClick = {
                 coroutineScope.launch {
@@ -855,7 +853,7 @@ private fun ScrollableFloatingDockRow(
         )
         DockScrollIndicator(
             visible = showRightIndicator,
-            icon = Icons.Default.KeyboardArrowRight,
+            icon = Icons.Filled.KeyboardArrowRight,
             contentDescription = "Scroll dock right",
             onClick = {
                 coroutineScope.launch {
@@ -1118,7 +1116,6 @@ fun EventDetailScreen(
     val currentFeeBreakdown by component.currentFeeBreakdown.collectAsState()
     val editableMatches by component.editableMatches.collectAsState()
     val eventFields by component.eventFields.collectAsState()
-    val divisionFields by component.divisionFields.collectAsState()
     val selectedDivision by component.selectedDivision.collectAsState()
     val losersBracket by component.losersBracket.collectAsState()
     val showTeamDialog by component.showTeamSelectionDialog.collectAsState()
@@ -2420,7 +2417,7 @@ fun EventDetailScreen(
                             onClick = {
                                 component.deleteEvent()
                                 showDeleteConfirmation = false
-                            }, colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                            }, colors = ButtonDefaults.buttonColors(
                                 containerColor = MaterialTheme.colorScheme.error
                             )
                         ) {
@@ -2917,7 +2914,7 @@ private fun StandingAccumulator.applyMatchResult(
         MatchOutcome.DRAW -> draws++
     }
 
-    var matchPoints = when (outcome) {
+    val matchPoints = when (outcome) {
         MatchOutcome.WIN -> (config?.pointsForWin ?: DEFAULT_POINTS_FOR_WIN).toDouble()
         MatchOutcome.LOSS -> (config?.pointsForLoss ?: DEFAULT_POINTS_FOR_LOSS).toDouble()
         MatchOutcome.DRAW -> (config?.pointsForDraw ?: DEFAULT_POINTS_FOR_DRAW).toDouble()
