@@ -274,7 +274,9 @@ fun EventDetails(
 
     val lazyListState = rememberLazyListState()
 
-    var fieldCount by remember { mutableStateOf(editEvent.fieldCount ?: editableFields.size) }
+    var fieldCount by remember {
+        mutableStateOf(resolveReadOnlyFieldCount(event = editEvent, editableFields = editableFields))
+    }
     val selectedDivisions = remember(editEvent.divisions) {
         editEvent.divisions.normalizeDivisionIdentifiers()
     }
@@ -1034,8 +1036,8 @@ fun EventDetails(
         }
     }
 
-    LaunchedEffect(editEvent.fieldCount, editableFields.size) {
-        val normalized = editEvent.fieldCount ?: editableFields.size
+    LaunchedEffect(editEvent.fieldIds, editableFields.size) {
+        val normalized = resolveReadOnlyFieldCount(event = editEvent, editableFields = editableFields)
         if (normalized != fieldCount) {
             fieldCount = normalized
         }
@@ -1412,8 +1414,12 @@ fun EventDetails(
             leagueSummary,
         ).filterNotNull().joinToString(" • ")
     }
-    val facilitiesSummaryLine = remember(fieldCount, eventWithRelations.timeSlots, editEvent.eventType) {
-        val fieldSummary = "${fieldCount.coerceAtLeast(0)} fields"
+    val readOnlyFieldCount = remember(event.fieldIds, editableFields.size) {
+        resolveReadOnlyFieldCount(event = event, editableFields = editableFields)
+    }
+    val facilitiesFieldCount = if (editView) fieldCount else readOnlyFieldCount
+    val facilitiesSummaryLine = remember(facilitiesFieldCount, eventWithRelations.timeSlots, editEvent.eventType) {
+        val fieldSummary = "${facilitiesFieldCount.coerceAtLeast(0)} fields"
         val slotSummary = if (editEvent.eventType == EventType.LEAGUE || editEvent.eventType == EventType.TOURNAMENT) {
             "${eventWithRelations.timeSlots.size} weekly slots"
         } else {
@@ -3200,7 +3206,7 @@ fun EventDetails(
                             DetailKeyValueList(
                                 rows = buildScheduleDetailsRows(
                                     event = event,
-                                    fieldCount = event.fieldCount ?: editableFields.size,
+                                    fieldCount = readOnlyFieldCount,
                                     slotCount = eventWithRelations.timeSlots.size,
                                 ),
                             )
@@ -4104,6 +4110,18 @@ private fun buildScheduleDetailsRows(
 
             EventType.EVENT -> Unit
         }
+    }
+}
+
+private fun resolveReadOnlyFieldCount(
+    event: Event,
+    editableFields: List<Field>,
+): Int {
+    val linkedFieldCount = event.fieldIds.count { fieldId -> fieldId.isNotBlank() }
+    return when {
+        linkedFieldCount > 0 -> linkedFieldCount
+        editableFields.isNotEmpty() -> editableFields.size
+        else -> 0
     }
 }
 

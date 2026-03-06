@@ -590,7 +590,11 @@ class DefaultCreateEventComponent(
         }
         if (type == EventType.LEAGUE || type == EventType.TOURNAMENT) {
             if (_fieldCount.value <= 0) {
-                val selectedCount = (newEventState.value.fieldCount ?: 1).coerceAtLeast(1)
+                val selectedCount = when {
+                    _localFields.value.isNotEmpty() -> _localFields.value.size
+                    newEventState.value.fieldIds.isNotEmpty() -> newEventState.value.fieldIds.size
+                    else -> 1
+                }.coerceAtLeast(1)
                 selectFieldCount(selectedCount)
             }
         }
@@ -659,9 +663,6 @@ class DefaultCreateEventComponent(
     override fun selectFieldCount(count: Int) {
         val normalized = count.coerceAtLeast(0)
         _fieldCount.value = normalized
-        updateEventField {
-            copy(fieldCount = normalized.takeIf { it > 0 })
-        }
 
         val currentEvent = newEventState.value
         val currentFields = _localFields.value
@@ -958,7 +959,6 @@ class DefaultCreateEventComponent(
             }
             preparedEvent = preparedEvent.copy(
                 fieldIds = createdFields.map { it.id },
-                fieldCount = createdFields.size,
             )
         }
 

@@ -125,7 +125,9 @@ data class EventDTO(
             teamSizeLimit = teamSizeLimit,
             registrationByDivisionType = registrationByDivisionType,
             eventType = EventType.valueOf(eventType),
-            fieldCount = fieldCount,
+            fieldCount = fieldIds
+                .count { fieldId -> fieldId.isNotBlank() }
+                .takeIf { count -> count > 0 },
             gamesPerOpponent = gamesPerOpponent,
             includePlayoffs = includePlayoffs,
             playoffTeamCount = playoffTeamCount,

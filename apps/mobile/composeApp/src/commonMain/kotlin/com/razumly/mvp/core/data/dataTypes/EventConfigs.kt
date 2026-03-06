@@ -88,7 +88,12 @@ fun Event.toTournamentConfig(): TournamentConfig = TournamentConfig(
         loserBracketPointsToVictory
     },
     prize = prize,
-    fieldCount = (fieldCount ?: 1).coerceAtLeast(1),
+    fieldCount = (
+        fieldIds.count { fieldId -> fieldId.isNotBlank() }
+            .takeIf { count -> count > 0 }
+            ?: fieldCount
+            ?: 1
+        ).coerceAtLeast(1),
     restTimeMinutes = (restTimeMinutes ?: 0).coerceAtLeast(0),
     usesSets = usesSets,
     matchDurationMinutes = matchDurationMinutes ?: 60,
@@ -102,7 +107,6 @@ fun Event.withTournamentConfig(config: TournamentConfig): Event = copy(
     winnerBracketPointsToVictory = config.winnerBracketPointsToVictory,
     loserBracketPointsToVictory = config.loserBracketPointsToVictory,
     prize = config.prize,
-    fieldCount = config.fieldCount.coerceAtLeast(1),
     restTimeMinutes = config.restTimeMinutes.coerceAtLeast(0),
     usesSets = config.usesSets,
     matchDurationMinutes = if (config.usesSets) null else config.matchDurationMinutes.coerceAtLeast(15),

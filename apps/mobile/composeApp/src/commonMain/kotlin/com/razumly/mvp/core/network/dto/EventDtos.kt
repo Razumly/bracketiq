@@ -126,6 +126,11 @@ data class EventApiDto(
             existingDetails = normalizedDetails,
             eventId = resolvedId,
         )
+        val resolvedFieldIds = (fieldIds ?: emptyList())
+            .map { fieldId -> fieldId.trim() }
+            .filter(String::isNotBlank)
+            .distinct()
+        val resolvedFieldCount = resolvedFieldIds.size.takeIf { count -> count > 0 }
         val resolvedPriceCents = (price ?: 0).coerceAtLeast(0)
         val resolvedMaxParticipants = (maxParticipants ?: 0).coerceAtLeast(0)
         val resolvedEventPlayoffTeamCount = playoffTeamCount?.coerceAtLeast(2)
@@ -219,7 +224,7 @@ data class EventApiDto(
             seedColor = seedColor ?: Primary.toArgb(),
             sportId = sportId,
             timeSlotIds = timeSlotIds ?: emptyList(),
-            fieldIds = fieldIds ?: emptyList(),
+            fieldIds = resolvedFieldIds,
             leagueScoringConfigId = leagueScoringConfigId,
             organizationId = organizationId,
             autoCancellation = autoCancellation ?: false,
@@ -229,7 +234,7 @@ data class EventApiDto(
             teamSizeLimit = (teamSizeLimit ?: 0).takeIf { it > 0 } ?: 2,
             registrationByDivisionType = registrationByDivisionType ?: false,
             eventType = resolvedEventType,
-            fieldCount = fieldCount,
+            fieldCount = resolvedFieldCount,
             gamesPerOpponent = gamesPerOpponent,
             includePlayoffs = includePlayoffs ?: false,
             playoffTeamCount = if (singleDivision == false) {
@@ -560,7 +565,7 @@ fun Event.toUpdateDto(
         registrationCutoffHours = registrationCutoffHours,
         seedColor = seedColor,
         imageId = imageId,
-        fieldCount = fieldCount,
+        fieldCount = null,
         winnerBracketPointsToVictory = winnerBracketPointsToVictory,
         loserBracketPointsToVictory = loserBracketPointsToVictory,
         coordinates = coordinates,

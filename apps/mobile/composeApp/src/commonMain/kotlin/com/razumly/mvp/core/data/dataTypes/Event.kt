@@ -148,7 +148,9 @@ fun Event.toEventDTO(): EventDTO =
         minAge = minAge,
         maxAge = maxAge,
         registrationByDivisionType = registrationByDivisionType,
-        fieldCount = fieldCount,
+        fieldCount = fieldIds
+            .count { fieldId -> fieldId.isNotBlank() }
+            .takeIf { count -> count > 0 },
         gamesPerOpponent = gamesPerOpponent,
         includePlayoffs = includePlayoffs,
         playoffTeamCount = playoffTeamCount,
