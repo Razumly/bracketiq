@@ -318,6 +318,51 @@ tasks.withType<KotlinNativeSimulatorTest>().configureEach {
     device.set(deviceName)
 }
 
+fun isIdeSyncBuild(): Boolean {
+    return System.getProperty("idea.sync.active") == "true" ||
+        System.getProperty("android.injected.invoked.from.ide") == "true"
+}
+
+fun isXcodeFirstLaunchComplete(): Boolean {
+    if (System.getProperty("os.name") != "Mac OS X") return true
+
+    return runCatching {
+        runProcess(
+            command = listOf("xcodebuild", "-checkFirstLaunchStatus"),
+            timeoutSeconds = 10,
+        ) == 0
+    }.getOrDefault(false)
+}
+
+if (isIdeSyncBuild() && !isXcodeFirstLaunchComplete()) {
+    logger.warn(
+        "Xcode first-launch setup is incomplete. " +
+            "Skipping CocoaPods sync tasks for IDE import. " +
+            "Run `sudo xcodebuild -license accept` to enable full iOS builds."
+    )
+
+    tasks.matching {
+        it.name == "podImport" ||
+            it.name == "podInstall" ||
+            it.name == "podInstallSyntheticIos" ||
+            it.name.startsWith("podSetupBuild") ||
+            it.name.startsWith("podBuild")
+    }.configureEach {
+        enabled = false
+    }
+
+    tasks.matching {
+        it.name.startsWith("cinteropGooglePlaces") ||
+            it.name.startsWith("cinteropGoogleSignIn") ||
+            it.name.startsWith("cinteropIQKeyboardManagerSwift") ||
+            it.name.contains("Cinterop-GooglePlaces") ||
+            it.name.contains("Cinterop-GoogleSignIn") ||
+            it.name.contains("Cinterop-IQKeyboardManagerSwift")
+    }.configureEach {
+        enabled = false
+    }
+}
+
 fun isPortOpen(host: String, port: Int, timeoutMs: Int = 250): Boolean {
     return try {
         Socket().use { socket ->
