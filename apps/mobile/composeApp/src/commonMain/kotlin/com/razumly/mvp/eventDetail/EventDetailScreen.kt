@@ -1206,6 +1206,7 @@ fun EventDetailScreen(
     }
     val canConfirmLeagueResultsFromDock = hasStandingsView && canManageLeagueStandings
     val canManageMatchEditingFromDock = canManageTemplate
+    val canEditMatches = canManageMatchEditingFromDock && isEditingMatches
     val canManageParticipantsFromDock = canManageTemplate
     val computedLeagueStandings = remember(
         selectedEvent.teams,
@@ -1979,14 +1980,18 @@ fun EventDetailScreen(
                                     TournamentBracketView(
                                         showFab = { showFab = it },
                                         onMatchClick = { match ->
-                                            if (!isEditingMatches) {
+                                            if (!canEditMatches) {
                                                 component.matchSelected(match)
                                             }
                                         },
-                                        isEditingMatches = isEditingMatches,
+                                        isEditingMatches = canEditMatches,
                                         editableMatches = editableMatches,
                                         onEditMatch = { match ->
-                                            component.showMatchEditDialog(match)
+                                            if (canEditMatches) {
+                                                component.showMatchEditDialog(match)
+                                            } else {
+                                                component.matchSelected(match)
+                                            }
                                         },
                                     )
                                 }
@@ -1996,7 +2001,7 @@ fun EventDetailScreen(
                                         showFab = false
                                         DetailTabLoadingState("Loading schedule matches...")
                                     } else {
-                                        val allScheduleMatches = if (isEditingMatches) {
+                                        val allScheduleMatches = if (canEditMatches) {
                                             editableMatches
                                         } else {
                                             selectedEvent.matches
@@ -2018,12 +2023,12 @@ fun EventDetailScreen(
                                             fields = eventFields,
                                             showFab = { showFab = it },
                                             trackedUserIds = scheduleTrackedUserIds,
-                                            canManageMatches = isEditingMatches,
+                                            canManageMatches = canEditMatches,
                                             onToggleLockAllMatches = { locked, matchIds ->
                                                 component.setLockForEditableMatches(matchIds, locked)
                                             },
                                             onMatchClick = { match ->
-                                                if (isEditingMatches) {
+                                                if (canEditMatches) {
                                                     component.showMatchEditDialog(
                                                         match = match,
                                                         creationContext = MatchCreateContext.SCHEDULE,
@@ -2080,22 +2085,22 @@ fun EventDetailScreen(
                                         isLosersBracket = losersBracket,
                                         onBracketToggle = component::toggleLosersBracket,
                                         showMatchEditAction = canManageMatchEditingFromDock,
-                                        isEditingMatches = isEditingMatches,
+                                        isEditingMatches = canEditMatches,
                                         onStartMatchEdit = component::startEditingMatches,
                                         onCancelMatchEdit = component::cancelEditingMatches,
                                         onCommitMatchEdit = component::commitMatchChanges,
-                                        primaryActionLabel = if (isEditingMatches && canManageMatchEditingFromDock) {
+                                        primaryActionLabel = if (canEditMatches) {
                                             "Add Match"
                                         } else {
                                             null
                                         },
-                                        onPrimaryActionClick = if (isEditingMatches && canManageMatchEditingFromDock) {
+                                        onPrimaryActionClick = if (canEditMatches) {
                                             component::addBracketMatch
                                         } else {
                                             null
                                         },
-                                        primaryActionEnabled = isEditingMatches,
-                                        primaryActionColors = if (isEditingMatches && canManageMatchEditingFromDock) {
+                                        primaryActionEnabled = canEditMatches,
+                                        primaryActionColors = if (canEditMatches) {
                                             ButtonDefaults.buttonColors(
                                                 containerColor = Color(0xFF2E7D32),
                                                 contentColor = Color.White,
@@ -2112,22 +2117,22 @@ fun EventDetailScreen(
                                         divisionOptions = joinDivisionOptions,
                                         onDivisionSelected = component::selectDivision,
                                         showMatchEditAction = canManageMatchEditingFromDock,
-                                        isEditingMatches = isEditingMatches,
+                                        isEditingMatches = canEditMatches,
                                         onStartMatchEdit = component::startEditingMatches,
                                         onCancelMatchEdit = component::cancelEditingMatches,
                                         onCommitMatchEdit = component::commitMatchChanges,
-                                        primaryActionLabel = if (isEditingMatches && canManageMatchEditingFromDock) {
+                                        primaryActionLabel = if (canEditMatches) {
                                             "Add Match"
                                         } else {
                                             null
                                         },
-                                        onPrimaryActionClick = if (isEditingMatches && canManageMatchEditingFromDock) {
+                                        onPrimaryActionClick = if (canEditMatches) {
                                             component::addScheduleMatch
                                         } else {
                                             null
                                         },
-                                        primaryActionEnabled = isEditingMatches,
-                                        primaryActionColors = if (isEditingMatches && canManageMatchEditingFromDock) {
+                                        primaryActionEnabled = canEditMatches,
+                                        primaryActionColors = if (canEditMatches) {
                                             ButtonDefaults.buttonColors(
                                                 containerColor = Color(0xFF2E7D32),
                                                 contentColor = Color.White,
@@ -2144,7 +2149,7 @@ fun EventDetailScreen(
                                         divisionOptions = standingsTabDivisionOptions,
                                         onDivisionSelected = component::selectDivision,
                                         showMatchEditAction = canManageMatchEditingFromDock,
-                                        isEditingMatches = isEditingMatches,
+                                        isEditingMatches = canEditMatches,
                                         onStartMatchEdit = component::startEditingMatches,
                                         onCancelMatchEdit = component::cancelEditingMatches,
                                         onCommitMatchEdit = component::commitMatchChanges,

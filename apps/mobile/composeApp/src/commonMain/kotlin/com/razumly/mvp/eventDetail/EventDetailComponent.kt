@@ -358,6 +358,25 @@ class DefaultEventDetailComponent(
             targetEvent.state.equals("TEMPLATE", ignoreCase = true)
     }
 
+    private fun canManageMatchEditing(): Boolean {
+        val currentUserId = currentUser.value.id.trim()
+        if (currentUserId.isBlank()) {
+            return false
+        }
+        val targetEvent = selectedEvent.value
+        if (targetEvent.hostId == currentUserId) {
+            return true
+        }
+        if (targetEvent.assistantHostIds.any { assistantHostId -> assistantHostId == currentUserId }) {
+            return true
+        }
+        val organization = eventWithRelations.value.organization
+        return organization?.ownerId == currentUserId ||
+            organization?.hostIds?.any { hostId -> hostId == currentUserId } == true
+    }
+
+    private fun canEditMatchesNow(): Boolean = _isEditingMatches.value && canManageMatchEditing()
+
     private fun normalizeToken(value: String?): String? =
         value?.trim()?.takeIf(String::isNotBlank)
 
@@ -2696,6 +2715,51 @@ class DefaultEventDetailComponent(
         }
     }
 
+    private fun normalizeEditableBracketGraph(matches: List<MatchWithRelations>): List<MatchWithRelations> {
+        if (matches.isEmpty()) {
+            return matches
+        }
+        val graphValidation = validateAndNormalizeBracketGraph(buildBracketNodes(matches))
+        if (!graphValidation.ok) {
+            return matches
+        }
+
+        val withNormalizedPrevious = matches.map { relation ->
+            val match = relation.match
+            val normalizedNode = graphValidation.normalizedById[match.id] ?: return@map relation
+            val normalizedPreviousLeftId = normalizeToken(normalizedNode.previousLeftId)
+            val normalizedPreviousRightId = normalizeToken(normalizedNode.previousRightId)
+            val currentPreviousLeftId = normalizeToken(match.previousLeftId)
+            val currentPreviousRightId = normalizeToken(match.previousRightId)
+
+            if (currentPreviousLeftId == normalizedPreviousLeftId &&
+                currentPreviousRightId == normalizedPreviousRightId
+            ) {
+                relation
+            } else {
+                relation.copy(
+                    match = match.copy(
+                        previousLeftId = normalizedPreviousLeftId,
+                        previousRightId = normalizedPreviousRightId,
+                    ),
+                    previousLeftMatch = null,
+                    previousRightMatch = null,
+                )
+            }
+        }
+
+        val matchesById = withNormalizedPrevious.associateBy { relation -> relation.match.id }
+        return withNormalizedPrevious.map { relation ->
+            val match = relation.match
+            relation.copy(
+                winnerNextMatch = normalizeToken(match.winnerNextMatchId)?.let { id -> matchesById[id]?.match },
+                loserNextMatch = normalizeToken(match.loserNextMatchId)?.let { id -> matchesById[id]?.match },
+                previousLeftMatch = normalizeToken(match.previousLeftId)?.let { id -> matchesById[id]?.match },
+                previousRightMatch = normalizeToken(match.previousRightId)?.let { id -> matchesById[id]?.match },
+            )
+        }
+    }
+
     private fun nextEditableMatchNumber(): Int {
         val maxMatchId = _editableMatches.value.maxOfOrNull { relation -> relation.match.matchId } ?: 0
         return maxMatchId + 1
@@ -2715,7 +2779,7 @@ class DefaultEventDetailComponent(
         seed: MatchMVP? = null,
         openEditor: Boolean = false,
     ): MatchWithRelations? {
-        if (!_isEditingMatches.value) {
+        if (!canEditMatchesNow()) {
             return null
         }
 
@@ -2794,9 +2858,12 @@ class DefaultEventDetailComponent(
     }
 
     override fun startEditingMatches() {
+        if (!canManageMatchEditing()) {
+            return
+        }
         scope.launch {
             val currentMatches = eventWithRelations.value.matches
-            _editableMatches.value = currentMatches.map { it.copy() }
+            _editableMatches.value = normalizeEditableBracketGraph(currentMatches.map { it.copy() })
             _stagedMatchCreates.value = emptyMap()
             _stagedMatchDeletes.value = emptySet()
             pendingCreateMatchId = null
@@ -2816,6 +2883,9 @@ class DefaultEventDetailComponent(
     }
 
     override fun commitMatchChanges() {
+        if (!canEditMatchesNow()) {
+            return
+        }
         scope.launch {
             val matches = _editableMatches.value
 
@@ -2875,12 +2945,13 @@ class DefaultEventDetailComponent(
             val currentMatch = currentMatches[matchIndex]
             val updatedMatch = currentMatch.copy(match = updater(currentMatch.match))
             currentMatches[matchIndex] = updatedMatch
-            _editableMatches.value = currentMatches
+            _editableMatches.value = normalizeEditableBracketGraph(currentMatches)
             refreshEditableRounds()
         }
     }
 
     override fun setLockForEditableMatches(matchIds: List<String>, locked: Boolean) {
+        if (!canEditMatchesNow()) return
         if (matchIds.isEmpty()) return
         val targetIds = matchIds.map(String::trim).filter(String::isNotBlank).toSet()
         if (targetIds.isEmpty()) return
@@ -2911,7 +2982,7 @@ class DefaultEventDetailComponent(
     }
 
     override fun addBracketMatchFromAnchor(anchorMatchId: String, slot: BracketAddSlot) {
-        if (!_isEditingMatches.value) {
+        if (!canEditMatchesNow()) {
             return
         }
         val normalizedAnchorId = normalizeToken(anchorMatchId) ?: return
@@ -3058,6 +3129,9 @@ class DefaultEventDetailComponent(
         creationContext: MatchCreateContext,
         isCreateMode: Boolean,
     ) {
+        if (!canEditMatchesNow()) {
+            return
+        }
         val availableMatches = if (_isEditingMatches.value) _editableMatches.value else eventWithRelations.value.matches
         _showMatchEditDialog.value = MatchEditDialogState(
             match = match,
@@ -3094,6 +3168,9 @@ class DefaultEventDetailComponent(
     }
 
     override fun deleteMatchFromDialog(matchId: String) {
+        if (!canEditMatchesNow()) {
+            return
+        }
         val normalizedId = normalizeToken(matchId) ?: return
         if (!_editableMatches.value.any { relation -> relation.match.id == normalizedId }) {
             _showMatchEditDialog.value = null
@@ -3114,6 +3191,7 @@ class DefaultEventDetailComponent(
                     ),
                 )
             }
+            .let(::normalizeEditableBracketGraph)
         _stagedMatchCreates.value = _stagedMatchCreates.value - normalizedId
         _stagedMatchDeletes.value = if (isClient) {
             _stagedMatchDeletes.value - normalizedId
@@ -3128,6 +3206,9 @@ class DefaultEventDetailComponent(
     }
 
     override fun updateMatchFromDialog(updatedMatch: MatchWithRelations) {
+        if (!canEditMatchesNow()) {
+            return
+        }
         val currentMatches = _editableMatches.value.toMutableList()
         val matchIndex = currentMatches.indexOfFirst { it.match.id == updatedMatch.match.id }
 
@@ -3136,7 +3217,7 @@ class DefaultEventDetailComponent(
         } else {
             currentMatches += updatedMatch
         }
-        _editableMatches.value = currentMatches
+        _editableMatches.value = normalizeEditableBracketGraph(currentMatches)
         if (isClientMatchId(updatedMatch.match.id) && !_stagedMatchCreates.value.containsKey(updatedMatch.match.id)) {
             _stagedMatchCreates.value = _stagedMatchCreates.value + (
                 updatedMatch.match.id to StagedMatchCreateMeta(

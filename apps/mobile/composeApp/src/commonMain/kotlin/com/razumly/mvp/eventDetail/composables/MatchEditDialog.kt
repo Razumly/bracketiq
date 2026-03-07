@@ -130,6 +130,9 @@ private fun MatchEditDialogContent(
     var loserNextMatchId by remember(match.match.loserNextMatchId) {
         mutableStateOf(normalizeToken(match.match.loserNextMatchId))
     }
+    var losersBracket by remember(match.match.losersBracket) {
+        mutableStateOf(match.match.losersBracket)
+    }
     var validationError by remember { mutableStateOf<String?>(null) }
 
     val requiresScheduleFields = creationContext == MatchCreateContext.SCHEDULE
@@ -212,6 +215,7 @@ private fun MatchEditDialogContent(
         endTime,
         winnerNextMatchId,
         loserNextMatchId,
+        losersBracket,
     ) {
         validationError = null
     }
@@ -418,6 +422,39 @@ private fun MatchEditDialogContent(
             }
 
             item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column {
+                        Text(
+                            text = "Place match in losers bracket",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            text = if (losersBracket) {
+                                "Currently: Losers Bracket"
+                            } else {
+                                "Currently: Winners Bracket"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Checkbox(
+                        checked = losersBracket,
+                        onCheckedChange = { isLosersBracket ->
+                            losersBracket = isLosersBracket
+                            editedMatch = editedMatch.copy(
+                                match = editedMatch.match.copy(losersBracket = isLosersBracket)
+                            )
+                        }
+                    )
+                }
+            }
+
+            item {
                 MatchLinkSelectionField(
                     label = "Winner advances to",
                     selectedMatchId = selectedWinnerNext,
@@ -428,6 +465,9 @@ private fun MatchEditDialogContent(
                     onExpandedChange = { showWinnerNextDropdown = it },
                     onMatchSelected = { selectedId ->
                         winnerNextMatchId = selectedId
+                        if (!selectedId.isNullOrBlank() && normalizeToken(loserNextMatchId) == selectedId) {
+                            loserNextMatchId = null
+                        }
                         showWinnerNextDropdown = false
                     },
                 )
@@ -444,6 +484,9 @@ private fun MatchEditDialogContent(
                     onExpandedChange = { showLoserNextDropdown = it },
                     onMatchSelected = { selectedId ->
                         loserNextMatchId = selectedId
+                        if (!selectedId.isNullOrBlank() && normalizeToken(winnerNextMatchId) == selectedId) {
+                            winnerNextMatchId = null
+                        }
                         showLoserNextDropdown = false
                     },
                 )
@@ -492,13 +535,18 @@ private fun MatchEditDialogContent(
                         return@Button
                     }
 
+                    val resolvedWinnerNext = selectedWinnerNext
+                    val resolvedLoserNext = selectedLoserNext?.takeIf { candidate ->
+                        candidate != resolvedWinnerNext
+                    }
+
                     val validationNodes = bracketNodes.map { node ->
                         if (node.id != currentMatchId) {
                             node
                         } else {
                             node.copy(
-                                winnerNextMatchId = selectedWinnerNext,
-                                loserNextMatchId = selectedLoserNext,
+                                winnerNextMatchId = resolvedWinnerNext,
+                                loserNextMatchId = resolvedLoserNext,
                             )
                         }
                     }
@@ -511,8 +559,8 @@ private fun MatchEditDialogContent(
                     if (isCreateMode && eventType == EventType.TOURNAMENT) {
                         val normalizedNode = graphValidation.normalizedById[currentMatchId]
                         val hasAnyLink =
-                            !selectedWinnerNext.isNullOrBlank() ||
-                                !selectedLoserNext.isNullOrBlank() ||
+                            !resolvedWinnerNext.isNullOrBlank() ||
+                                !resolvedLoserNext.isNullOrBlank() ||
                                 !normalizeToken(normalizedNode?.previousLeftId).isNullOrBlank() ||
                                 !normalizeToken(normalizedNode?.previousRightId).isNullOrBlank()
                         if (!hasAnyLink) {
@@ -524,8 +572,9 @@ private fun MatchEditDialogContent(
                     val nextMatch = editedMatch.match.copy(
                         start = startTime,
                         end = endTime,
-                        winnerNextMatchId = selectedWinnerNext,
-                        loserNextMatchId = selectedLoserNext,
+                        losersBracket = losersBracket,
+                        winnerNextMatchId = resolvedWinnerNext,
+                        loserNextMatchId = resolvedLoserNext,
                     )
                     onConfirm(editedMatch.copy(match = nextMatch))
                     onDismissRequest()

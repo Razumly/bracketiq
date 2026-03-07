@@ -100,6 +100,21 @@ data class Event(
     val playerIds: List<String> get() = userIds
 }
 
+fun Event.isDraftLikeState(): Boolean {
+    return when (state.trim().uppercase()) {
+        "UNPUBLISHED", "DRAFT" -> true
+        else -> false
+    }
+}
+
+fun Event.lifecycleStateLabel(): String {
+    return when (state.trim().uppercase()) {
+        "UNPUBLISHED", "DRAFT" -> "Draft"
+        "TEMPLATE" -> "Template"
+        else -> "Published"
+    }
+}
+
 fun Event.toEventDTO(): EventDTO =
     EventDTO(
         id = id,

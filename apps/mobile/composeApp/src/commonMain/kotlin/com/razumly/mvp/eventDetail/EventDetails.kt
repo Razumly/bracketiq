@@ -80,6 +80,7 @@ import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.lifecycleStateLabel
 import com.razumly.mvp.core.data.dataTypes.toLeagueConfig
 import com.razumly.mvp.core.data.dataTypes.toTournamentConfig
 import com.razumly.mvp.core.data.dataTypes.withLeagueConfig
@@ -1811,6 +1812,7 @@ fun EventDetails(
                                 priceSummary = priceSummary,
                                 registrationSummary = registrationSummary,
                                 refundSummary = refundSummary,
+                                includeLifecycleState = isMobileEventDetailsLayout,
                             ),
                         )
                         ReadOnlyDivisionsList(
@@ -4014,18 +4016,24 @@ private fun buildEventDetailsRows(
     priceSummary: String,
     registrationSummary: String,
     refundSummary: String,
+    includeLifecycleState: Boolean = false,
 ): List<DetailRowSpec> {
-    return listOf(
-        DetailRowSpec("Entry fee", priceSummary),
-        DetailRowSpec(
-            if (event.teamSignup) "Max teams" else "Max players",
-            event.maxParticipants.toString(),
-        ),
-        DetailRowSpec("Team size", event.teamSizeLimit.toString()),
-        DetailRowSpec("Registration closes", "$registrationSummary \u203A"),
-        DetailRowSpec("Refunds", "$refundSummary \u203A"),
-        DetailRowSpec("Waitlist", "${event.waitListIds.size}"),
-    )
+    return buildList {
+        add(DetailRowSpec("Entry fee", priceSummary))
+        add(
+            DetailRowSpec(
+                if (event.teamSignup) "Max teams" else "Max players",
+                event.maxParticipants.toString(),
+            ),
+        )
+        add(DetailRowSpec("Team size", event.teamSizeLimit.toString()))
+        add(DetailRowSpec("Registration closes", "$registrationSummary \u203A"))
+        add(DetailRowSpec("Refunds", "$refundSummary \u203A"))
+        add(DetailRowSpec("Waitlist", "${event.waitListIds.size}"))
+        if (includeLifecycleState) {
+            add(DetailRowSpec("Status", event.lifecycleStateLabel()))
+        }
+    }
 }
 
 private fun buildScheduleDetailsRows(

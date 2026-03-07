@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.isDraftLikeState
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabels
 import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.getImageUrl
@@ -111,6 +112,7 @@ fun EventCard(
             else -> "Division: TBD"
         }
     }
+    val showDraftBadge = remember(event.state) { event.isDraftLikeState() }
 
 
     Box(Modifier.fillMaxWidth().clipToBounds()) {
@@ -253,6 +255,25 @@ fun EventCard(
                         color = MaterialTheme.colorScheme.background,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+            if (showDraftBadge) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 12.dp)
+                        .background(
+                            color = Color(0xFFD32F2F),
+                            shape = RoundedCornerShape(999.dp),
+                        )
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                ) {
+                    Text(
+                        text = "Draft",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White,
                     )
                 }
             }

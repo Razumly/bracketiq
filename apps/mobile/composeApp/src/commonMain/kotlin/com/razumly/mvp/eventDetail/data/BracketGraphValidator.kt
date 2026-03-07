@@ -12,7 +12,6 @@ data class BracketNode(
 enum class BracketValidationErrorCode {
     UNKNOWN_REFERENCE,
     SELF_REFERENCE,
-    DUPLICATE_SOURCE_TARGET,
     TARGET_OVER_CAPACITY,
     CYCLE_DETECTED,
 }
@@ -126,15 +125,6 @@ fun validateAndNormalizeBracketGraph(nodes: List<BracketNode>): BracketValidatio
                     referenceId = ref,
                 )
             }
-        }
-
-        if (winnerNext != null && loserNext != null && winnerNext == loserNext) {
-            errors += BracketValidationError(
-                code = BracketValidationErrorCode.DUPLICATE_SOURCE_TARGET,
-                message = "Match ${node.id} cannot point both winner and loser to $winnerNext.",
-                nodeId = node.id,
-                referenceId = winnerNext,
-            )
         }
 
         if (winnerNext != null && winnerNext in nodeById) {
