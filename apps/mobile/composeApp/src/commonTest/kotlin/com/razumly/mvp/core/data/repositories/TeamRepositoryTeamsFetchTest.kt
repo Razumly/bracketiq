@@ -126,6 +126,8 @@ private class FakeDatabaseService(
 
 private class FakeUserRepository : IUserRepository {
     var lastGetUsersInput: List<String>? = null
+    var lastListInvitesInput: Pair<String, String?>? = null
+    var invitesResult: List<com.razumly.mvp.core.data.dataTypes.Invite> = emptyList()
 
     override val currentUser: StateFlow<Result<UserData>> = MutableStateFlow(Result.failure(Exception("unused")))
     override val currentAccount: StateFlow<Result<AuthAccount>> = MutableStateFlow(Result.failure(Exception("unused")))
@@ -141,6 +143,12 @@ private class FakeUserRepository : IUserRepository {
     override fun getUsersFlow(userIds: List<String>): Flow<Result<List<UserData>>> = error("unused")
     override suspend fun searchPlayers(search: String): Result<List<UserData>> = error("unused")
     override suspend fun ensureUserByEmail(email: String): Result<UserData> = error("unused")
+    override suspend fun listInvites(userId: String, type: String?): Result<List<com.razumly.mvp.core.data.dataTypes.Invite>> {
+        lastListInvitesInput = userId to type
+        return Result.success(invitesResult)
+    }
+    override suspend fun acceptInvite(inviteId: String): Result<Unit> = error("unused")
+    override suspend fun declineInvite(inviteId: String): Result<Unit> = error("unused")
     override suspend fun isCurrentUserChild(minorAgeThreshold: Int): Result<Boolean> = error("unused")
     override suspend fun listChildren(): Result<List<FamilyChild>> = error("unused")
     override suspend fun listPendingChildJoinRequests(): Result<List<FamilyJoinRequest>> = error("unused")
@@ -344,5 +352,39 @@ class TeamRepositoryTeamsFetchTest {
 
         val firstEmission = repo.getTeamWithPlayersFlow("missing-team").first()
         assertTrue(firstEmission.isFailure)
+    }
+
+    @Test
+    fun listTeamInvites_uses_single_normalized_team_query() = runTest {
+        val tokenStore = InMemoryAuthTokenStore("t123")
+        val teamDao = FakeTeamDao()
+        val db = FakeDatabaseService(teamDao)
+        val userRepo = FakeUserRepository().apply {
+            invitesResult = listOf(
+                com.razumly.mvp.core.data.dataTypes.Invite(
+                    type = "TEAM",
+                    email = "u1@example.com",
+                    teamId = "t1",
+                    userId = "u1",
+                    id = "invite_1",
+                )
+            )
+        }
+
+        val engine = MockEngine { _ ->
+            error("HTTP should not be used for listTeamInvites when user repository handles the invite query.")
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = TeamRepository(api, db, userRepo, FakePushNotificationsRepository)
+
+        val invites = repo.listTeamInvites("u1").getOrThrow()
+
+        assertEquals("u1" to "TEAM", userRepo.lastListInvitesInput)
+        assertEquals(listOf("invite_1"), invites.map { it.id })
     }
 }

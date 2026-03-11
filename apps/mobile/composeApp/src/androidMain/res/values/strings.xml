@@ -1,4 +1,4 @@
 <resources>
-    <string name="app_name">MVP</string>
-    <string name="app_deep_links">Open with Your App</string>
+    <string name="app_name">BracketIQ</string>
+    <string name="app_deep_links">Open with BracketIQ</string>
 </resources>

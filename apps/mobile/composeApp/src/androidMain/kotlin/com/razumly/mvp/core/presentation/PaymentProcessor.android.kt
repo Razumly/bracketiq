@@ -30,7 +30,7 @@ actual open class PaymentProcessor : IPaymentProcessor {
             val clientSecret = it.paymentIntent ?: return
             _paymentSheet.value?.presentWithPaymentIntent(
                 paymentIntentClientSecret = clientSecret,
-                configuration = PaymentSheet.Configuration.Builder("MVP").apply {
+                configuration = PaymentSheet.Configuration.Builder("BracketIQ").apply {
                     _customerConfig?.let(::customer)
                 }.allowsDelayedPaymentMethods(true).defaultBillingDetails(
                     PaymentSheet.BillingDetails(email = email, name = name)

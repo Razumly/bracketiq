@@ -60,6 +60,7 @@ interface IEventRepository : IMVPRepository {
     fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>>
     fun resetCursor()
     suspend fun getEvent(eventId: String): Result<Event>
+    suspend fun getEventsByIds(eventIds: List<String>): Result<List<Event>>
     suspend fun getEventsByOrganization(organizationId: String, limit: Int = 200): Result<List<Event>>
     suspend fun createEvent(
         newEvent: Event,
@@ -253,6 +254,15 @@ class EventRepository(
         return res.events.mapNotNull { it.toEventOrNull() }
     }
 
+    private suspend fun fetchRemoteEventsByIds(eventIds: List<String>): List<Event> {
+        val ids = eventIds.map(String::trim).filter(String::isNotBlank).distinct()
+        if (ids.isEmpty()) return emptyList()
+
+        val encodedIds = ids.joinToString(",").encodeURLQueryComponent()
+        val res = api.get<EventsResponseDto>("api/events?ids=$encodedIds&limit=${ids.size.coerceAtLeast(1)}")
+        return res.events.mapNotNull { it.toEventOrNull() }
+    }
+
     private suspend fun insertEventCrossReferences(
         eventId: String, players: List<UserData>, host: List<UserData>, teams: List<Team>
     ) {
@@ -280,6 +290,19 @@ class EventRepository(
             databaseService.getEventDao.getEventById(eventId)
                 ?: throw IllegalStateException("Event $eventId not cached")
         })
+
+    override suspend fun getEventsByIds(eventIds: List<String>): Result<List<Event>> = runCatching {
+        val ids = eventIds.map(String::trim).filter(String::isNotBlank).distinct()
+        if (ids.isEmpty()) return@runCatching emptyList()
+
+        val events = fetchRemoteEventsByIds(ids)
+        if (events.isNotEmpty()) {
+            databaseService.getEventDao.upsertEvents(events)
+        }
+
+        val cachedById = databaseService.getEventDao.getEventsByIds(ids).associateBy { it.id }
+        ids.mapNotNull { cachedById[it] }
+    }
 
     override suspend fun getEventsByOrganization(
         organizationId: String,

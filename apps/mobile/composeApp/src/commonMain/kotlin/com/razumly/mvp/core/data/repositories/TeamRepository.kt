@@ -58,15 +58,6 @@ class TeamRepository(
     private val userRepository: IUserRepository,
     private val pushNotificationRepository: IPushNotificationsRepository,
 ) : ITeamRepository {
-    private companion object {
-        val TEAM_INVITE_TYPES = listOf(
-            "player",
-            "team_manager",
-            "team_head_coach",
-            "team_assistant_coach",
-        )
-    }
-
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun getTeamsFlow(ids: List<String>): Flow<Result<List<TeamWithPlayers>>> {
@@ -284,11 +275,8 @@ class TeamRepository(
     }
 
     override suspend fun listTeamInvites(userId: String): Result<List<Invite>> = runCatching {
-        val encodedUserId = userId.encodeURLQueryComponent()
-        TEAM_INVITE_TYPES.flatMap { inviteType ->
-            val encodedInviteType = inviteType.encodeURLQueryComponent()
-            api.get<InvitesResponseDto>("api/invites?userId=$encodedUserId&type=$encodedInviteType").invites
-        }.filter { it.teamId != null }
+        userRepository.listInvites(userId = userId, type = "TEAM").getOrThrow()
+            .filter { it.teamId != null }
     }
 
     override suspend fun createTeamInvite(
@@ -319,10 +307,7 @@ class TeamRepository(
 
 	    override suspend fun acceptTeamInvite(inviteId: String, teamId: String): Result<Unit> = runCatching {
 	        // Accepting an invite mutates team membership; this must be done server-side (non-captains cannot PATCH teams).
-	        api.postNoResponse("api/invites/$inviteId/accept")
-
-	        // Some servers may already delete the invite as part of acceptance; ignore failures here.
-	        runCatching { deleteInvite(inviteId).getOrThrow() }
+	        userRepository.acceptInvite(inviteId).getOrThrow()
 
 	        // Refresh local caches so UI updates (team membership + relations).
 	        getTeamWithPlayers(teamId).getOrThrow()

@@ -29,6 +29,34 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlin.time.ExperimentalTime
 
+private const val BOLD_SIGN_RATE_LIMIT_FRIENDLY_MESSAGE =
+    "You opened the BoldSign document too many times. Please wait a minute before trying again."
+
+private fun toFriendlyBoldSignMessage(rawMessage: String?): String? {
+    val normalized = rawMessage?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val lowercase = normalized.lowercase()
+    val looksLikeBoldSignRateLimit = lowercase.contains("boldsign")
+        && (
+            lowercase.contains("429")
+                || lowercase.contains("too many requests")
+                || lowercase.contains("rate limit")
+            )
+
+    return if (looksLikeBoldSignRateLimit) {
+        BOLD_SIGN_RATE_LIMIT_FRIENDLY_MESSAGE
+    } else {
+        normalized
+    }
+}
+
+private fun Throwable.withFriendlyBoldSignMessage(): Throwable {
+    val friendlyMessage = toFriendlyBoldSignMessage(message) ?: return this
+    if (friendlyMessage == message) {
+        return this
+    }
+    return Exception(friendlyMessage, this)
+}
+
 enum class SignerContext(val apiValue: String) {
     PARTICIPANT("participant"),
     PARENT_GUARDIAN("parent_guardian"),
@@ -203,8 +231,8 @@ interface IBillingRepository : IMVPRepository {
     ): Result<RecordSignatureResult>
     suspend fun pollBoldSignOperation(
         operationId: String,
-        timeoutMillis: Long = 90_000,
-        intervalMillis: Long = 1_500,
+        timeoutMillis: Long = 120_000,
+        intervalMillis: Long = 5_000,
     ): Result<BoldSignOperationStatus>
 
     suspend fun createAccount(): Result<String>
@@ -304,24 +332,31 @@ class BillingRepository(
         childUserId: String?,
         childUserEmail: String?,
     ): Result<List<SignStep>> = runCatching {
-        val user = userRepository.currentUser.value.getOrThrow()
-        val email = userRepository.currentAccount.value.getOrNull()?.email
-        val response = api.post<EventSignLinksRequestDto, EventSignLinksResponseDto>(
-            path = "api/events/$eventId/sign",
-            body = EventSignLinksRequestDto(
-                userId = user.id,
-                userEmail = email,
-                signerContext = signerContext.apiValue,
-                childUserId = childUserId?.trim()?.takeIf(String::isNotBlank),
-                childEmail = childUserEmail?.trim()?.takeIf(String::isNotBlank),
-            ),
-        )
+        try {
+            val user = userRepository.currentUser.value.getOrThrow()
+            val email = userRepository.currentAccount.value.getOrNull()?.email
+            val response = api.post<EventSignLinksRequestDto, EventSignLinksResponseDto>(
+                path = "api/events/$eventId/sign",
+                body = EventSignLinksRequestDto(
+                    userId = user.id,
+                    userEmail = email,
+                    signerContext = signerContext.apiValue,
+                    childUserId = childUserId?.trim()?.takeIf(String::isNotBlank),
+                    childEmail = childUserEmail?.trim()?.takeIf(String::isNotBlank),
+                ),
+            )
 
-        if (!response.error.isNullOrBlank()) {
-            throw Exception(response.error)
+            response.error
+                ?.let(::toFriendlyBoldSignMessage)
+                ?.takeIf(String::isNotBlank)
+                ?.let { errorMessage ->
+                    throw Exception(errorMessage)
+                }
+
+            response.signLinks.filter { it.templateId.isNotBlank() }
+        } catch (throwable: Throwable) {
+            throw throwable.withFriendlyBoldSignMessage()
         }
-
-        response.signLinks.filter { it.templateId.isNotBlank() }
     }
 
     override suspend fun recordSignature(
@@ -369,11 +404,17 @@ class BillingRepository(
         require(normalizedOperationId.isNotBlank()) { "Operation id is required." }
 
         val effectiveTimeoutMillis = timeoutMillis.coerceAtLeast(1_000)
-        val effectiveIntervalMillis = intervalMillis.coerceIn(500, 10_000)
+        val baseIntervalMillis = intervalMillis.coerceIn(2_000, 30_000)
         val startedAt = kotlin.time.Clock.System.now().toEpochMilliseconds()
         var lastStatus: BoldSignOperationStatus? = null
+        var currentIntervalMillis = baseIntervalMillis
+        var attempt = 0
 
         while (kotlin.time.Clock.System.now().toEpochMilliseconds() - startedAt <= effectiveTimeoutMillis) {
+            if (attempt > 0) {
+                delay(currentIntervalMillis)
+            }
+
             val dto = api.get<BoldSignOperationStatusDto>(
                 path = "api/boldsign/operations/${normalizedOperationId.encodeURLQueryComponent()}",
             )
@@ -384,14 +425,18 @@ class BillingRepository(
                 return@runCatching mapped
             }
             if (mapped.isFailed()) {
-                throw Exception(mapped.error ?: "Document synchronization failed (${mapped.status}).")
+                val failureMessage = toFriendlyBoldSignMessage(mapped.error)
+                    ?: "Document synchronization failed (${mapped.status})."
+                throw Exception(failureMessage)
             }
-
-            delay(effectiveIntervalMillis)
+            attempt += 1
+            currentIntervalMillis = (currentIntervalMillis + baseIntervalMillis).coerceAtMost(30_000)
         }
 
         if (lastStatus != null) {
-            throw Exception(lastStatus.error ?: "Document synchronization is delayed. Please try again shortly.")
+            val delayedMessage = toFriendlyBoldSignMessage(lastStatus.error)
+                ?: "Document synchronization is delayed. Please try again shortly."
+            throw Exception(delayedMessage)
         }
         throw Exception("Document synchronization is delayed. Please try again shortly.")
     }

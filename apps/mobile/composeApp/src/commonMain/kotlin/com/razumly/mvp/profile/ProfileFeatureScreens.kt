@@ -39,7 +39,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.inferTeamInviteRole
+import com.razumly.mvp.core.data.dataTypes.label
+import com.razumly.mvp.core.data.dataTypes.staffInviteRoleLabel
 import com.razumly.mvp.core.data.repositories.ProfileDocumentCard
 import com.razumly.mvp.core.data.repositories.ProfileDocumentType
 import com.razumly.mvp.core.presentation.composables.EmbeddedWebModal
@@ -237,6 +241,120 @@ fun ProfileEventTemplatesScreen(component: ProfileComponent) {
                         template = template,
                         onOpenTemplate = { component.openEventTemplate(template) },
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ProfileInvitesScreen(component: ProfileComponent) {
+    val invitesState by component.invitesState.collectAsState()
+
+    LaunchedEffect(component) {
+        component.refreshInvites()
+    }
+
+    val organizationInvites = remember(invitesState.invites) {
+        invitesState.invites.filter { invite ->
+            invite.type.equals("STAFF", ignoreCase = true) && !invite.organizationId.isNullOrBlank()
+        }
+    }
+    val teamInvites = remember(invitesState.invites) {
+        invitesState.invites.filter { invite ->
+            invite.type.equals("TEAM", ignoreCase = true) && !invite.teamId.isNullOrBlank()
+        }
+    }
+    val eventInvites = remember(invitesState.invites) {
+        invitesState.invites.filter { invite ->
+            invite.type.equals("EVENT", ignoreCase = true) && !invite.eventId.isNullOrBlank()
+        }
+    }
+
+    ProfileSectionScaffold(
+        title = "Invites",
+        description = "Review organization, team, and event invites waiting on you.",
+        onBack = component::onBackClicked,
+        onRefresh = component::refreshInvites,
+        isRefreshing = invitesState.isLoading,
+    ) {
+        invitesState.error?.let { message ->
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
+        when {
+            invitesState.isLoading && invitesState.invites.isEmpty() -> {
+                Text(
+                    text = "Loading invites...",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            invitesState.invites.isEmpty() -> {
+                Text(
+                    text = "No pending invites.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            else -> {
+                if (organizationInvites.isNotEmpty()) {
+                    SectionHeaderRow(title = "Organization Invites")
+                    organizationInvites.forEach { invite ->
+                        val organization = invite.organizationId?.let(invitesState.organizationsById::get)
+                        InviteActionCard(
+                            title = organization?.name ?: "Organization",
+                            subtitle = invite.staffInviteRoleLabel(),
+                            tertiary = invite.email.takeIf(String::isNotBlank),
+                            primaryActionLabel = if (invitesState.activeInviteId == invite.id) "Accepting..." else "Accept",
+                            onPrimaryAction = { component.acceptInvite(invite) },
+                            secondaryActionLabel = if (invitesState.activeInviteId == invite.id) "Declining..." else "Decline",
+                            onSecondaryAction = { component.declineInvite(invite) },
+                            enabled = invitesState.activeInviteId == null || invitesState.activeInviteId == invite.id,
+                        )
+                    }
+                }
+
+                if (teamInvites.isNotEmpty()) {
+                    SectionHeaderRow(title = "Team Invites")
+                    teamInvites.forEach { invite ->
+                        val team = invite.teamId?.let(invitesState.teamsById::get)
+                        InviteActionCard(
+                            title = team?.team?.name?.takeIf(String::isNotBlank) ?: "Team",
+                            subtitle = invite.inferTeamInviteRole(team?.team).label(),
+                            tertiary = invite.email.takeIf(String::isNotBlank),
+                            primaryActionLabel = if (invitesState.activeInviteId == invite.id) "Accepting..." else "Accept",
+                            onPrimaryAction = { component.acceptInvite(invite) },
+                            secondaryActionLabel = if (invitesState.activeInviteId == invite.id) "Declining..." else "Decline",
+                            onSecondaryAction = { component.declineInvite(invite) },
+                            enabled = invitesState.activeInviteId == null || invitesState.activeInviteId == invite.id,
+                        )
+                    }
+                }
+
+                if (eventInvites.isNotEmpty()) {
+                    SectionHeaderRow(title = "Event Invites")
+                    eventInvites.forEach { invite ->
+                        val event = invite.eventId?.let(invitesState.eventsById::get)
+                        InviteActionCard(
+                            title = event?.name?.takeIf(String::isNotBlank) ?: "Event",
+                            subtitle = event?.location?.takeIf(String::isNotBlank) ?: "Event Invite",
+                            tertiary = event?.start?.let(::formatTemplateDateTime),
+                            primaryActionLabel = "Open Event",
+                            onPrimaryAction = {
+                                invite.eventId?.let(component::openInviteEvent)
+                            },
+                            secondaryActionLabel = if (invitesState.activeInviteId == invite.id) "Declining..." else "Decline",
+                            onSecondaryAction = { component.declineInvite(invite) },
+                            enabled = invitesState.activeInviteId == null || invitesState.activeInviteId == invite.id,
+                        )
+                    }
                 }
             }
         }
@@ -1370,6 +1488,68 @@ private fun SectionHeaderRow(
             text = title,
             style = MaterialTheme.typography.titleMedium,
         )
+    }
+}
+
+@Composable
+private fun InviteActionCard(
+    title: String,
+    subtitle: String,
+    tertiary: String? = null,
+    primaryActionLabel: String,
+    onPrimaryAction: () -> Unit,
+    secondaryActionLabel: String,
+    onSecondaryAction: () -> Unit,
+    enabled: Boolean,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            tertiary?.let { tertiaryText ->
+                Text(
+                    text = tertiaryText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    modifier = Modifier.weight(1f),
+                    enabled = enabled,
+                    onClick = onPrimaryAction,
+                ) {
+                    Text(primaryActionLabel)
+                }
+                Button(
+                    modifier = Modifier.weight(1f),
+                    enabled = enabled,
+                    onClick = onSecondaryAction,
+                ) {
+                    Text(secondaryActionLabel)
+                }
+            }
+        }
     }
 }
 

@@ -13,6 +13,7 @@ data class InviteCreateDto(
     val type: String,
     val email: String? = null,
     val status: String? = null,
+    val staffTypes: List<String> = emptyList(),
     val eventId: String? = null,
     val organizationId: String? = null,
     val teamId: String? = null,
@@ -33,4 +34,3 @@ data class DeleteInvitesRequestDto(
     val teamId: String? = null,
     val type: String? = null,
 )
-

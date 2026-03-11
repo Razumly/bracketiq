@@ -19,6 +19,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
@@ -32,6 +33,16 @@ fun EmbeddedWebModal(
     primaryActionLabel: String? = null,
     onPrimaryAction: (() -> Unit)? = null,
 ) {
+    val uriHandler = LocalUriHandler.current
+    val fallbackOpenInBrowserAction = url.trim()
+        .takeIf(String::isNotBlank)
+        ?.let { targetUrl ->
+            {
+                runCatching { uriHandler.openUri(targetUrl) }
+                Unit
+            }
+        }
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
     ) {
@@ -87,6 +98,13 @@ fun EmbeddedWebModal(
                         modifier = Modifier.padding(end = 8.dp),
                     ) {
                         Text(primaryActionLabel)
+                    }
+                } else if (fallbackOpenInBrowserAction != null) {
+                    Button(
+                        onClick = fallbackOpenInBrowserAction,
+                        modifier = Modifier.padding(end = 8.dp),
+                    ) {
+                        Text("Open in browser")
                     }
                 }
 

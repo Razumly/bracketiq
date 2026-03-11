@@ -25,6 +25,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.razumly.mvp.core.data.dataTypes.inferTeamInviteRole
+import com.razumly.mvp.core.data.dataTypes.label
 import androidx.compose.ui.window.Dialog
 import com.razumly.mvp.core.presentation.composables.PlatformBackButton
 import com.razumly.mvp.core.presentation.composables.PlayerCard
@@ -49,14 +51,6 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
     var createTeam by remember { mutableStateOf(false) }
     val deleteEnabled by component.enableDeleteTeam.collectAsState()
     val teamInvites by component.teamInvites.collectAsState()
-    val inviteRoleLabel: (String) -> String = { inviteType ->
-        when (inviteType) {
-            "team_manager" -> "Manager"
-            "team_head_coach" -> "Head Coach"
-            "team_assistant_coach" -> "Assistant Coach"
-            else -> "Player"
-        }
-    }
 
     Scaffold(
         topBar = {
@@ -119,7 +113,7 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
                             team = it
                         )
                     } ?: Text("Invited to team", modifier = Modifier.weight(1f))
-                    Text("Role: ${inviteRoleLabel(invite.invite.type)}")
+                    Text("Role: ${invite.invite.inferTeamInviteRole(team?.team).label()}")
                     Button(onClick = { component.acceptTeamInvite(invite) }) {
                         Text("Accept")
                     }

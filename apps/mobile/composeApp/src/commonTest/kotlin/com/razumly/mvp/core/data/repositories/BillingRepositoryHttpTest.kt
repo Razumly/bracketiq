@@ -69,6 +69,9 @@ private class BillingRepositoryHttp_FakeUserRepository(
     override suspend fun logout(): Result<Unit> = error("unused")
     override suspend fun searchPlayers(search: String): Result<List<UserData>> = error("unused")
     override suspend fun ensureUserByEmail(email: String): Result<UserData> = error("unused")
+    override suspend fun listInvites(userId: String, type: String?): Result<List<com.razumly.mvp.core.data.dataTypes.Invite>> = error("unused")
+    override suspend fun acceptInvite(inviteId: String): Result<Unit> = error("unused")
+    override suspend fun declineInvite(inviteId: String): Result<Unit> = error("unused")
     override suspend fun isCurrentUserChild(minorAgeThreshold: Int): Result<Boolean> = error("unused")
     override suspend fun listChildren(): Result<List<FamilyChild>> = error("unused")
     override suspend fun listPendingChildJoinRequests(): Result<List<FamilyJoinRequest>> = error("unused")
@@ -126,6 +129,7 @@ private object BillingRepositoryHttp_UnusedEventRepository : IEventRepository {
     override fun getEventWithRelationsFlow(eventId: String): Flow<Result<com.razumly.mvp.core.data.dataTypes.EventWithRelations>> = error("unused")
     override fun resetCursor() {}
     override suspend fun getEvent(eventId: String): Result<Event> = error("unused")
+    override suspend fun getEventsByIds(eventIds: List<String>): Result<List<Event>> = error("unused")
     override suspend fun getEventsByOrganization(organizationId: String, limit: Int): Result<List<Event>> = error("unused")
     override suspend fun createEvent(
         newEvent: Event,
@@ -608,6 +612,78 @@ class BillingRepositoryHttpTest {
         assertTrue(capturedBody.contains("\"signerContext\":\"parent_guardian\""))
         assertTrue(capturedBody.contains("\"childUserId\":\"child_1\""))
         assertTrue(capturedBody.contains("\"childEmail\":\"child@example.test\""))
+    }
+
+    @Test
+    fun getRequiredSignLinks_rate_limited_returns_friendly_message() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/events/event_1/sign", request.url.encodedPath)
+            assertEquals(HttpMethod.Post, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+
+            respond(
+                content = """{"error":"BoldSign API request failed (429)"}""",
+                status = HttpStatusCode.BadRequest,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = BillingRepository(api, userRepo, BillingRepositoryHttp_UnusedEventRepository, db)
+
+        val result = repo.getRequiredSignLinks("event_1")
+        assertTrue(result.isFailure)
+        assertEquals(
+            "You opened the BoldSign document too many times. Please wait a minute before trying again.",
+            result.exceptionOrNull()?.message,
+        )
+    }
+
+    @Test
+    fun pollBoldSignOperation_rate_limited_returns_friendly_message() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/boldsign/operations/op_1", request.url.encodedPath)
+            assertEquals(HttpMethod.Get, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+
+            respond(
+                content = """
+                    {
+                      "operationId": "op_1",
+                      "status": "FAILED_RETRYABLE",
+                      "error": "BoldSign API request failed (429)"
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = BillingRepository(api, userRepo, BillingRepositoryHttp_UnusedEventRepository, db)
+
+        val result = repo.pollBoldSignOperation("op_1", timeoutMillis = 1_000, intervalMillis = 500)
+        assertTrue(result.isFailure)
+        assertEquals(
+            "You opened the BoldSign document too many times. Please wait a minute before trying again.",
+            result.exceptionOrNull()?.message,
+        )
     }
 
     @Test

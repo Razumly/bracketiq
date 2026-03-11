@@ -474,6 +474,72 @@ class UserRepositoryAuthTest {
     }
 
     @Test
+    fun listInvites_decodes_staff_types() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("t123")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/invites" -> {
+                    assertEquals("u1", request.url.parameters["userId"])
+                    assertEquals("STAFF", request.url.parameters["type"])
+                    assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+                    respond(
+                        content = """
+                            {
+                              "invites": [
+                                {
+                                  "id":"invite_1",
+                                  "type":"STAFF",
+                                  "email":"host@example.com",
+                                  "status":"PENDING",
+                                  "staffTypes":["HOST","REFEREE"],
+                                  "organizationId":"org_1",
+                                  "userId":"u1"
+                                }
+                              ]
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+                    )
+                }
+
+                "/api/auth/me" -> respond(
+                    content = """{"error":"unauthorized"}""",
+                    status = HttpStatusCode.Unauthorized,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+                )
+
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+            HttpResponseValidator {
+                validateResponse { response ->
+                    if (!response.status.isSuccess()) {
+                        throw IllegalStateException(response.bodyAsText())
+                    }
+                }
+            }
+        }
+
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        val invites = repo.listInvites(userId = "u1", type = "STAFF").getOrThrow()
+
+        assertEquals(1, invites.size)
+        assertEquals("invite_1", invites.first().id)
+        assertEquals(listOf("HOST", "REFEREE"), invites.first().staffTypes)
+    }
+
+    @Test
     fun listChildren_gets_and_maps_family_children() = runTest {
         val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("t123")
         val userDao = FakeUserDataDao()

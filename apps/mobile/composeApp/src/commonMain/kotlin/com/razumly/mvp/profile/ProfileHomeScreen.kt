@@ -17,6 +17,9 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -55,6 +58,7 @@ private data class ProfileAction(
     val description: String,
     val icon: ImageVector,
     val onClick: () -> Unit,
+    val badgeCount: Int = 0,
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -63,7 +67,8 @@ fun ProfileHomeScreen(component: ProfileComponent) {
     val navPadding = LocalNavBarPadding.current
     val showChildrenTab by component.showChildrenTab.collectAsState()
     val pushTargetDebugState by component.pushTargetDebugState.collectAsState()
-    val actions = remember(component, showChildrenTab) {
+    val pendingInviteCount by component.pendingInviteCount.collectAsState()
+    val actions = remember(component, showChildrenTab, pendingInviteCount) {
         buildList {
             add(
                 ProfileAction(
@@ -115,6 +120,15 @@ fun ProfileHomeScreen(component: ProfileComponent) {
                     ),
                 )
             }
+            add(
+                ProfileAction(
+                    title = "Invites",
+                    description = "Pending invites to review",
+                    icon = Icons.Default.Email,
+                    onClick = component::navigateToInvites,
+                    badgeCount = pendingInviteCount,
+                ),
+            )
             add(
                 ProfileAction(
                     title = "Connections",
@@ -244,15 +258,26 @@ private fun ProfileActionCard(action: ProfileAction) {
                 overflow = TextOverflow.Ellipsis,
             )
 
-            Icon(
-                imageVector = action.icon,
-                contentDescription = action.title,
-                tint = MaterialTheme.colorScheme.primary,
+            BadgedBox(
                 modifier = Modifier
                     .align(Alignment.Center)
                     .fillMaxHeight(0.5f)
                     .aspectRatio(1f),
-            )
+                badge = {
+                    if (action.badgeCount > 0) {
+                        Badge {
+                            Text(action.badgeCount.toString())
+                        }
+                    }
+                },
+            ) {
+                Icon(
+                    imageVector = action.icon,
+                    contentDescription = action.title,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
 
             Text(
                 text = action.description,

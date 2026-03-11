@@ -7,6 +7,7 @@ data class Invite(
     val type: String,
     val email: String,
     val status: String? = null,
+    val staffTypes: List<String> = emptyList(),
     val eventId: String? = null,
     val organizationId: String? = null,
     val teamId: String? = null,

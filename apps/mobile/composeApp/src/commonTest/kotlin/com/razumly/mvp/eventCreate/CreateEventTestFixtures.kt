@@ -195,6 +195,10 @@ internal class CreateEvent_FakeUserRepository : IUserRepository {
         flowOf(Result.success(emptyList()))
     override suspend fun searchPlayers(search: String): Result<List<UserData>> = Result.success(emptyList())
     override suspend fun ensureUserByEmail(email: String): Result<UserData> = Result.success(user)
+    override suspend fun listInvites(userId: String, type: String?): Result<List<com.razumly.mvp.core.data.dataTypes.Invite>> =
+        Result.success(emptyList())
+    override suspend fun acceptInvite(inviteId: String): Result<Unit> = Result.success(Unit)
+    override suspend fun declineInvite(inviteId: String): Result<Unit> = Result.success(Unit)
     override suspend fun isCurrentUserChild(minorAgeThreshold: Int): Result<Boolean> = Result.success(false)
     override suspend fun listChildren(): Result<List<FamilyChild>> = Result.success(emptyList())
     override suspend fun listPendingChildJoinRequests(): Result<List<FamilyJoinRequest>> =
@@ -277,6 +281,7 @@ internal class CreateEvent_FakeEventRepository(
 
     override fun resetCursor() = Unit
     override suspend fun getEvent(eventId: String): Result<Event> = Result.failure(IllegalStateException("unused"))
+    override suspend fun getEventsByIds(eventIds: List<String>): Result<List<Event>> = Result.success(emptyList())
 
     override suspend fun getEventsByOrganization(
         organizationId: String,

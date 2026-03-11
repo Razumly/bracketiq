@@ -13,9 +13,12 @@ import com.razumly.mvp.core.data.dataTypes.Bill
 import com.razumly.mvp.core.data.dataTypes.BillPayment
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
+import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.Subscription
 import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.FamilyChild
 import com.razumly.mvp.core.data.repositories.FamilyJoinRequest
@@ -184,6 +187,16 @@ data class ProfilePushTargetDebugState(
     val lastCheckedAt: String? = null,
 )
 
+data class ProfileInvitesState(
+    val isLoading: Boolean = false,
+    val invites: List<Invite> = emptyList(),
+    val organizationsById: Map<String, Organization> = emptyMap(),
+    val teamsById: Map<String, TeamWithPlayers> = emptyMap(),
+    val eventsById: Map<String, Event> = emptyMap(),
+    val error: String? = null,
+    val activeInviteId: String? = null,
+)
+
 data class ProfileTextSignaturePromptState(
     val document: ProfileDocumentCard,
     val step: SignStep,
@@ -213,6 +226,8 @@ interface ProfileComponent : IPaymentProcessor {
     val documentsState: StateFlow<ProfileDocumentsState>
     val myScheduleState: StateFlow<ProfileMyScheduleState>
     val pushTargetDebugState: StateFlow<ProfilePushTargetDebugState>
+    val invitesState: StateFlow<ProfileInvitesState>
+    val pendingInviteCount: StateFlow<Int>
     val activeBillPaymentId: StateFlow<String?>
     val activeMembershipActionId: StateFlow<String?>
     val activeDocumentActionId: StateFlow<String?>
@@ -232,6 +247,7 @@ interface ProfileComponent : IPaymentProcessor {
     fun navigateToConnections()
     fun navigateToDocuments()
     fun navigateToMySchedule()
+    fun navigateToInvites()
 
     fun onLogout()
     fun manageTeams()
@@ -262,6 +278,10 @@ interface ProfileComponent : IPaymentProcessor {
     fun removeFriend(user: UserData)
     fun refreshDocuments()
     fun refreshMySchedule()
+    fun refreshInvites()
+    fun acceptInvite(invite: Invite)
+    fun declineInvite(invite: Invite)
+    fun openInviteEvent(eventId: String)
     fun signDocument(document: ProfileDocumentCard)
     fun openSignedDocument(document: ProfileDocumentCard)
     fun openScheduleEvent(eventId: String)
@@ -302,6 +322,7 @@ interface ProfileComponent : IPaymentProcessor {
         data class Connections(val component: ProfileComponent) : Child()
         data class Documents(val component: ProfileComponent) : Child()
         data class MySchedule(val component: ProfileComponent) : Child()
+        data class Invites(val component: ProfileComponent) : Child()
     }
 }
 
@@ -336,6 +357,9 @@ private sealed class ProfileConfig {
 
     @Serializable
     data object MySchedule : ProfileConfig()
+
+    @Serializable
+    data object Invites : ProfileConfig()
 
 }
 
@@ -383,6 +407,12 @@ class DefaultProfileComponent(
     private val _pushTargetDebugState = MutableStateFlow(ProfilePushTargetDebugState())
     override val pushTargetDebugState = _pushTargetDebugState.asStateFlow()
 
+    private val _invitesState = MutableStateFlow(ProfileInvitesState())
+    override val invitesState = _invitesState.asStateFlow()
+
+    private val _pendingInviteCount = MutableStateFlow(0)
+    override val pendingInviteCount = _pendingInviteCount.asStateFlow()
+
     private val _activeBillPaymentId = MutableStateFlow<String?>(null)
     override val activeBillPaymentId = _activeBillPaymentId.asStateFlow()
 
@@ -422,9 +452,12 @@ class DefaultProfileComponent(
                 if (currentUser == null) {
                     childrenTabVisibilityUserId = null
                     _showChildrenTab.value = true
+                    _pendingInviteCount.value = 0
+                    _invitesState.value = ProfileInvitesState()
                 } else if (childrenTabVisibilityUserId != currentUser.id) {
                     childrenTabVisibilityUserId = currentUser.id
                     resolveChildrenTabVisibility()
+                    refreshInviteCount()
                 }
             }
         }
@@ -498,6 +531,10 @@ class DefaultProfileComponent(
 
     override fun navigateToMySchedule() {
         push(ProfileConfig.MySchedule)
+    }
+
+    override fun navigateToInvites() {
+        push(ProfileConfig.Invites)
     }
 
     override fun onLogout() {
@@ -643,28 +680,147 @@ class DefaultProfileComponent(
         }
     }
 
-    override fun openScheduleEvent(eventId: String) {
-        val normalizedId = eventId.trim()
-        if (normalizedId.isEmpty()) {
-            _errorState.value = ErrorMessage("Invalid event.")
-            return
-        }
+    override fun refreshInvites() {
+        scope.launch {
+            val currentUserId = userRepository.currentUser.value.getOrNull()?.id
+            if (currentUserId.isNullOrBlank()) {
+                _invitesState.value = ProfileInvitesState(
+                    isLoading = false,
+                    invites = emptyList(),
+                    error = "Unable to load invites for the current user.",
+                )
+                _pendingInviteCount.value = 0
+                return@launch
+            }
 
-        val cached = _myScheduleState.value.events.firstOrNull { it.id == normalizedId }
-        if (cached != null) {
-            navigationHandler.navigateToEvent(cached)
+            _invitesState.value = _invitesState.value.copy(
+                isLoading = true,
+                error = null,
+            )
+
+            userRepository.listInvites(currentUserId)
+                .onSuccess { invites ->
+                    val pendingInvites = invites.filter { invite ->
+                        invite.status?.equals("DECLINED", ignoreCase = true) != true
+                    }
+
+                    val organizationIds = pendingInvites.mapNotNull { it.organizationId }
+                        .map(String::trim)
+                        .filter(String::isNotBlank)
+                        .distinct()
+                    val teamIds = pendingInvites.mapNotNull { it.teamId }
+                        .map(String::trim)
+                        .filter(String::isNotBlank)
+                        .distinct()
+                    val eventIds = pendingInvites.mapNotNull { it.eventId }
+                        .map(String::trim)
+                        .filter(String::isNotBlank)
+                        .distinct()
+
+                    val organizationsById = billingRepository.getOrganizationsByIds(organizationIds)
+                        .getOrElse { emptyList() }
+                        .associateBy { it.id }
+                    val teamsById = teamRepository.getTeamsWithPlayers(teamIds)
+                        .getOrElse { emptyList() }
+                        .associateBy { it.team.id }
+                    val eventsById = eventRepository.getEventsByIds(eventIds)
+                        .getOrElse { emptyList() }
+                        .associateBy { it.id }
+
+                    _invitesState.value = ProfileInvitesState(
+                        isLoading = false,
+                        invites = pendingInvites,
+                        organizationsById = organizationsById,
+                        teamsById = teamsById,
+                        eventsById = eventsById,
+                        error = null,
+                        activeInviteId = null,
+                    )
+                    _pendingInviteCount.value = pendingInvites.size
+                }
+                .onFailure { throwable ->
+                    _invitesState.value = ProfileInvitesState(
+                        isLoading = false,
+                        invites = emptyList(),
+                        error = throwable.message ?: "Failed to load invites.",
+                    )
+                    _pendingInviteCount.value = 0
+                }
+        }
+    }
+
+    override fun acceptInvite(invite: Invite) {
+        val inviteId = invite.id.trim()
+        if (inviteId.isEmpty()) {
+            _errorState.value = ErrorMessage("Invalid invite.")
             return
         }
 
         scope.launch {
-            eventRepository.getEvent(normalizedId)
-                .onSuccess { event ->
-                    navigationHandler.navigateToEvent(event)
+            _invitesState.value = _invitesState.value.copy(
+                activeInviteId = inviteId,
+                error = null,
+            )
+
+            userRepository.acceptInvite(inviteId)
+                .onSuccess {
+                    invite.teamId?.trim()?.takeIf(String::isNotBlank)?.let { teamId ->
+                        runCatching { teamRepository.getTeamWithPlayers(teamId).getOrThrow() }
+                    }
+                    runCatching { userRepository.getCurrentAccount().getOrThrow() }
+                    refreshInviteCount()
+                    refreshInvites()
                 }
-                .onFailure {
-                    _errorState.value = ErrorMessage(it.message ?: "Unable to open event.")
+                .onFailure { throwable ->
+                    _invitesState.value = _invitesState.value.copy(
+                        activeInviteId = null,
+                        error = throwable.message ?: "Failed to accept invite.",
+                    )
                 }
         }
+    }
+
+    override fun declineInvite(invite: Invite) {
+        val inviteId = invite.id.trim()
+        if (inviteId.isEmpty()) {
+            _errorState.value = ErrorMessage("Invalid invite.")
+            return
+        }
+
+        scope.launch {
+            _invitesState.value = _invitesState.value.copy(
+                activeInviteId = inviteId,
+                error = null,
+            )
+
+            userRepository.declineInvite(inviteId)
+                .onSuccess {
+                    refreshInviteCount()
+                    refreshInvites()
+                }
+                .onFailure { throwable ->
+                    _invitesState.value = _invitesState.value.copy(
+                        activeInviteId = null,
+                        error = throwable.message ?: "Failed to decline invite.",
+                    )
+                }
+        }
+    }
+
+    override fun openInviteEvent(eventId: String) {
+        openEventById(
+            eventId = eventId,
+            errorMessage = "Unable to open event.",
+            cachedEvents = _invitesState.value.eventsById.values.toList(),
+        )
+    }
+
+    override fun openScheduleEvent(eventId: String) {
+        openEventById(
+            eventId = eventId,
+            errorMessage = "Unable to open event.",
+            cachedEvents = _myScheduleState.value.events,
+        )
     }
 
     override fun manageStripeAccountOnboarding() {
@@ -691,6 +847,55 @@ class DefaultProfileComponent(
                     _errorState.value = ErrorMessage(it.message ?: "")
             }
             loadingHandler?.hideLoading()
+        }
+    }
+
+    private fun refreshInviteCount() {
+        scope.launch {
+            val currentUserId = userRepository.currentUser.value.getOrNull()?.id
+            if (currentUserId.isNullOrBlank()) {
+                _pendingInviteCount.value = 0
+                return@launch
+            }
+
+            userRepository.listInvites(currentUserId)
+                .onSuccess { invites ->
+                    _pendingInviteCount.value = invites.count { invite ->
+                        invite.status?.equals("DECLINED", ignoreCase = true) != true
+                    }
+                }
+                .onFailure { throwable ->
+                    Napier.w("Failed to refresh invite count for user $currentUserId", throwable)
+                    _pendingInviteCount.value = 0
+                }
+        }
+    }
+
+    private fun openEventById(
+        eventId: String,
+        errorMessage: String,
+        cachedEvents: List<Event> = emptyList(),
+    ) {
+        val normalizedId = eventId.trim()
+        if (normalizedId.isEmpty()) {
+            _errorState.value = ErrorMessage("Invalid event.")
+            return
+        }
+
+        val cached = cachedEvents.firstOrNull { it.id == normalizedId }
+        if (cached != null) {
+            navigationHandler.navigateToEvent(cached)
+            return
+        }
+
+        scope.launch {
+            eventRepository.getEvent(normalizedId)
+                .onSuccess { event ->
+                    navigationHandler.navigateToEvent(event)
+                }
+                .onFailure {
+                    _errorState.value = ErrorMessage(it.message ?: errorMessage)
+                }
         }
     }
 
@@ -1572,6 +1777,7 @@ class DefaultProfileComponent(
         ProfileConfig.Connections -> ProfileComponent.Child.Connections(this@DefaultProfileComponent)
         ProfileConfig.Documents -> ProfileComponent.Child.Documents(this@DefaultProfileComponent)
         ProfileConfig.MySchedule -> ProfileComponent.Child.MySchedule(this@DefaultProfileComponent)
+        ProfileConfig.Invites -> ProfileComponent.Child.Invites(this@DefaultProfileComponent)
     }
 }
 

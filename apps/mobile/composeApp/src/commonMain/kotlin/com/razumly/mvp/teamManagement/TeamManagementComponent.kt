@@ -278,7 +278,10 @@ class DefaultTeamManagementComponent(
 
     override fun declineTeamInvite(invite: TeamInvite) {
         scope.launch {
-            teamRepository.deleteInvite(invite.invite.id)
+            userRepository.declineInvite(invite.invite.id).onFailure {
+                _errorState.value = it.message
+                return@launch
+            }
             refreshInvites()
         }
     }

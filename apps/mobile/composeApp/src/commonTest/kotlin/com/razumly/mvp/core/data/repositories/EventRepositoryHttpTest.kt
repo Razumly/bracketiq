@@ -94,6 +94,7 @@ private class EventRepositoryHttp_FakeEventDao : EventDao {
     override suspend fun deleteEventUserCrossRefs(crossRefs: List<EventUserCrossRef>) {}
     override suspend fun deleteEventById(id: String) { events.value = events.value - id }
     override suspend fun getEventById(id: String): Event? = events.value[id]
+    override suspend fun getEventsByIds(ids: List<String>): List<Event> = ids.mapNotNull(events.value::get)
     override suspend fun getEventWithRelationsById(id: String): EventWithRelations = error("unused")
     override fun getEventWithRelationsFlow(id: String): Flow<EventWithRelations> = error("unused")
     override suspend fun upsertEventWithRelations(event: Event) { upsertEvent(event) }
@@ -217,6 +218,9 @@ private class EventRepositoryHttp_FakeUserRepository(
     override suspend fun logout(): Result<Unit> = error("unused")
     override suspend fun searchPlayers(search: String): Result<List<UserData>> = error("unused")
     override suspend fun ensureUserByEmail(email: String): Result<UserData> = error("unused")
+    override suspend fun listInvites(userId: String, type: String?): Result<List<com.razumly.mvp.core.data.dataTypes.Invite>> = error("unused")
+    override suspend fun acceptInvite(inviteId: String): Result<Unit> = error("unused")
+    override suspend fun declineInvite(inviteId: String): Result<Unit> = error("unused")
     override suspend fun isCurrentUserChild(minorAgeThreshold: Int): Result<Boolean> = error("unused")
     override suspend fun listChildren(): Result<List<FamilyChild>> = error("unused")
     override suspend fun listPendingChildJoinRequests(): Result<List<FamilyJoinRequest>> = error("unused")
@@ -300,6 +304,74 @@ private object EventRepositoryHttp_UnusedTeamRepository : ITeamRepository {
 }
 
 class EventRepositoryHttpTest {
+    @Test
+    fun getEventsByIds_requests_batched_ids_query() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/events", request.url.encodedPath)
+            assertEquals("e1,e2", request.url.parameters["ids"])
+            assertEquals("2", request.url.parameters["limit"])
+            respond(
+                content = """
+                    {
+                      "events": [
+                        {
+                          "id": "e1",
+                          "name": "Invite Event",
+                          "hostId": "u1",
+                          "start": "2026-03-01T10:00:00Z",
+                          "end": "2026-03-01T12:00:00Z",
+                          "location": "Gym",
+                          "coordinates": [0, 0],
+                          "priceCents": 0,
+                          "imageId": "",
+                          "maxParticipants": 0,
+                          "teamSizeLimit": 2,
+                          "teamSignup": false,
+                          "singleDivision": true,
+                          "waitListIds": [],
+                          "freeAgentIds": [],
+                          "userIds": [],
+                          "teamIds": [],
+                          "fieldIds": [],
+                          "timeSlotIds": [],
+                          "refereeIds": [],
+                          "assistantHostIds": [],
+                          "cancellationRefundHours": 0,
+                          "registrationCutoffHours": 0,
+                          "seedColor": 0,
+                          "state": "PUBLISHED",
+                          "divisions": []
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val events = repo.getEventsByIds(listOf("e1", "e2")).getOrThrow()
+
+        assertEquals(listOf("e1"), events.map { it.id })
+        assertEquals("e1", eventDao.getEventById("e1")?.id)
+    }
+
     @Test
     fun getEventTemplatesByHostFlow_requests_template_state_and_returns_templates() = runTest {
         val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
