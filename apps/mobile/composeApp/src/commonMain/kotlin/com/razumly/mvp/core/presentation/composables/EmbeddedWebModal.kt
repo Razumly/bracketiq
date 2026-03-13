@@ -18,10 +18,13 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.razumly.mvp.core.util.Platform
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -34,7 +37,11 @@ fun EmbeddedWebModal(
     onPrimaryAction: (() -> Unit)? = null,
 ) {
     val uriHandler = LocalUriHandler.current
-    val fallbackOpenInBrowserAction = url.trim()
+    val normalizedUrl = remember(url) { url.trim() }
+    val preferExternalBrowser = remember(normalizedUrl) {
+        shouldOpenBoldSignExternally(normalizedUrl)
+    }
+    val fallbackOpenInBrowserAction = normalizedUrl
         .takeIf(String::isNotBlank)
         ?.let { targetUrl ->
             {
@@ -42,6 +49,22 @@ fun EmbeddedWebModal(
                 Unit
             }
         }
+    val externalBrowserMessage = remember(description, preferExternalBrowser) {
+        if (!preferExternalBrowser) {
+            description
+        } else {
+            listOfNotNull(
+                description,
+                "BoldSign signing opens in your browser on mobile for compatibility. Return here after completing the document.",
+            ).joinToString("\n\n")
+        }
+    }
+
+    LaunchedEffect(preferExternalBrowser, normalizedUrl) {
+        if (preferExternalBrowser && normalizedUrl.isNotBlank()) {
+            runCatching { uriHandler.openUri(normalizedUrl) }
+        }
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -60,7 +83,7 @@ fun EmbeddedWebModal(
                 overflow = TextOverflow.Ellipsis,
             )
 
-            description
+            externalBrowserMessage
                 ?.trim()
                 ?.takeIf(String::isNotBlank)
                 ?.let { message ->
@@ -82,10 +105,24 @@ fun EmbeddedWebModal(
                         shape = RoundedCornerShape(12.dp),
                     ),
             ) {
-                PlatformWebView(
-                    url = url,
-                    modifier = Modifier.fillMaxSize(),
-                )
+                if (preferExternalBrowser) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(16.dp),
+                    ) {
+                        Text(
+                            text = "The signing page was opened in your browser. If it did not open, use the button below.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                } else {
+                    PlatformWebView(
+                        url = normalizedUrl,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
 
             Row(
@@ -114,4 +151,18 @@ fun EmbeddedWebModal(
             }
         }
     }
+}
+
+private fun shouldOpenBoldSignExternally(url: String): Boolean {
+    if (url.isBlank()) return false
+    val normalizedUrl = url.lowercase()
+    val isMobilePlatform = Platform.isIOS || Platform.name.equals("android", ignoreCase = true)
+    if (!isMobilePlatform) return false
+
+    val isBoldSignHost = normalizedUrl.contains("://app.boldsign.com/")
+        || normalizedUrl.contains("://boldsign.com/")
+    if (!isBoldSignHost) return false
+
+    return normalizedUrl.contains("/document/sign")
+        || normalizedUrl.contains("/sign/")
 }

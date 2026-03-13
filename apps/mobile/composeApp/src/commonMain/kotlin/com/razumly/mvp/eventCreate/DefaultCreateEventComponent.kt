@@ -40,6 +40,13 @@ import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.util.newId
 import com.razumly.mvp.eventCreate.CreateEventComponent.Child
 import com.razumly.mvp.eventCreate.CreateEventComponent.Config
+import com.razumly.mvp.eventDetail.assignedUserIdsForRole
+import com.razumly.mvp.eventDetail.conflictListLabel
+import com.razumly.mvp.eventDetail.EventStaffRole
+import com.razumly.mvp.eventDetail.PendingStaffInviteDraft
+import com.razumly.mvp.eventDetail.mergePendingStaffInviteDraft
+import com.razumly.mvp.eventDetail.normalizeStaffInviteEmail
+import com.razumly.mvp.eventDetail.reconcileEventStaffInvites
 import com.razumly.mvp.eventDetail.data.IMatchRepository
 import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
 import kotlinx.coroutines.Dispatchers
@@ -73,6 +80,7 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     val leagueSlots: StateFlow<List<TimeSlot>>
     val leagueScoringConfig: StateFlow<LeagueScoringConfigDTO>
     val suggestedUsers: StateFlow<List<UserData>>
+    val pendingStaffInvites: StateFlow<List<PendingStaffInviteDraft>>
 
     fun onBackClicked()
     fun updateEventField(update: Event.() -> Event)
@@ -91,6 +99,13 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     fun removeInstallmentRow(index: Int)
     fun searchUsers(query: String)
     suspend fun ensureUserByEmail(email: String): Result<UserData>
+    suspend fun addPendingStaffInvite(
+        firstName: String,
+        lastName: String,
+        email: String,
+        roles: Set<EventStaffRole>,
+    ): Result<Unit>
+    fun removePendingStaffInvite(email: String, role: EventStaffRole? = null)
     fun setLoadingHandler(loadingHandler: LoadingHandler)
     fun createEvent()
     fun nextStep()
@@ -172,6 +187,8 @@ class DefaultCreateEventComponent(
         .stateIn(scope, SharingStarted.Eagerly, null)
     private val _suggestedUsers = MutableStateFlow<List<UserData>>(emptyList())
     override val suggestedUsers = _suggestedUsers.asStateFlow()
+    private val _pendingStaffInvites = MutableStateFlow<List<PendingStaffInviteDraft>>(emptyList())
+    override val pendingStaffInvites = _pendingStaffInvites.asStateFlow()
 
     override val eventImageUrls = imageRepository
         .getUserImageIdsFlow()
@@ -554,7 +571,6 @@ class DefaultCreateEventComponent(
                     _errorState.value = ErrorMessage(error.message ?: "Unable to search users.")
                     emptyList()
                 }
-                .filterNot { suggested -> suggested.id == _newEventState.value.hostId }
         }
     }
 
@@ -568,6 +584,74 @@ class DefaultCreateEventComponent(
             .onFailure { error ->
                 _errorState.value = ErrorMessage(error.message ?: "Unable to invite by email.")
             }
+    }
+
+    override suspend fun addPendingStaffInvite(
+        firstName: String,
+        lastName: String,
+        email: String,
+        roles: Set<EventStaffRole>,
+    ): Result<Unit> = runCatching {
+        val normalizedDraft = PendingStaffInviteDraft(
+            firstName = firstName.trim(),
+            lastName = lastName.trim(),
+            email = normalizeStaffInviteEmail(email),
+            roles = roles,
+        )
+        if (normalizedDraft.email.isBlank()) error("Email is required.")
+        if (normalizedDraft.roles.isEmpty()) error("Select at least one role.")
+
+        val existingDraft = _pendingStaffInvites.value.firstOrNull { draft ->
+            normalizeStaffInviteEmail(draft.email) == normalizedDraft.email
+        }
+        if (existingDraft != null && normalizedDraft.roles.all(existingDraft.roles::contains)) {
+            error("That email is already added for the selected role.")
+        }
+
+        val event = _newEventState.value
+        val assignedUserIds = normalizedDraft.roles
+            .flatMap { role -> event.assignedUserIdsForRole(role) }
+            .distinct()
+        if (assignedUserIds.isNotEmpty()) {
+            val matches = userRepository.findEmailMembership(
+                emails = listOf(normalizedDraft.email),
+                userIds = assignedUserIds,
+            ).getOrThrow()
+            normalizedDraft.roles.forEach { role ->
+                val roleUserIds = event.assignedUserIdsForRole(role)
+                if (matches.any { match -> roleUserIds.contains(match.userId) }) {
+                    error("${normalizedDraft.email} is already added in the ${role.conflictListLabel()}.")
+                }
+            }
+        }
+
+        _pendingStaffInvites.value = mergePendingStaffInviteDraft(
+            existing = _pendingStaffInvites.value,
+            draft = normalizedDraft,
+        )
+    }.onFailure { error ->
+        _errorState.value = ErrorMessage(error.message ?: "Unable to add staff invite.")
+    }
+
+    override fun removePendingStaffInvite(email: String, role: EventStaffRole?) {
+        val normalizedEmail = normalizeStaffInviteEmail(email)
+        if (normalizedEmail.isBlank()) {
+            return
+        }
+        _pendingStaffInvites.value = _pendingStaffInvites.value.mapNotNull { draft ->
+            if (normalizeStaffInviteEmail(draft.email) != normalizedEmail) {
+                draft
+            } else if (role == null) {
+                null
+            } else {
+                val updatedRoles = draft.roles - role
+                if (updatedRoles.isEmpty()) {
+                    null
+                } else {
+                    draft.copy(roles = updatedRoles)
+                }
+            }
+        }
     }
 
     override fun onTypeSelected(type: EventType) {
@@ -925,15 +1009,47 @@ class DefaultCreateEventComponent(
                 .takeIf { eventWithFields.eventType == EventType.LEAGUE },
         )
             .onSuccess { createdEvent ->
+                val syncedEvent = syncEventStaffAssignments(createdEvent)
+                    .onFailure { error ->
+                        _errorState.value = ErrorMessage(
+                            error.message ?: "Event created, but staff invites failed to sync.",
+                        )
+                    }
+                    .getOrDefault(createdEvent)
                 releaseRentalCheckoutLocks()
                 loadingHandler.hideLoading()
-                onEventCreated(createdEvent)
+                onEventCreated(syncedEvent)
             }
             .onFailure {
                 releaseRentalCheckoutLocks()
                 _errorState.value = ErrorMessage(it.message ?: "")
                 loadingHandler.hideLoading()
             }
+    }
+
+    private suspend fun syncEventStaffAssignments(createdEvent: Event): Result<Event> = runCatching {
+        val shouldSyncStaff = createdEvent.assistantHostIds.isNotEmpty() ||
+            createdEvent.refereeIds.isNotEmpty() ||
+            _pendingStaffInvites.value.isNotEmpty()
+        if (!shouldSyncStaff) {
+            return@runCatching createdEvent
+        }
+
+        val saveOutcome = reconcileEventStaffInvites(
+            userRepository = userRepository,
+            event = createdEvent,
+            pendingStaffInvites = _pendingStaffInvites.value,
+            existingStaffInvites = emptyList(),
+            createdByUserId = currentUser.value?.id,
+        ).getOrThrow()
+
+        _pendingStaffInvites.value = emptyList()
+
+        if (saveOutcome.event == createdEvent) {
+            saveOutcome.event
+        } else {
+            eventRepository.updateEvent(saveOutcome.event).getOrThrow()
+        }
     }
 
     private suspend fun prepareEventForCreation(eventDraft: Event): Result<Event> = runCatching {

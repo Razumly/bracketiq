@@ -4,6 +4,7 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -77,6 +78,7 @@ import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
+import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
@@ -111,7 +113,6 @@ import com.razumly.mvp.core.presentation.composables.MoneyInputField
 import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
 import com.razumly.mvp.core.presentation.composables.PlatformDropdown
 import com.razumly.mvp.core.presentation.composables.PlatformTextField
-import com.razumly.mvp.core.presentation.composables.SearchPlayerDialog
 import com.razumly.mvp.core.presentation.composables.StripeButton
 import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
@@ -167,12 +168,6 @@ private const val MAX_READ_ONLY_NAME_LIST_ITEMS = 5
 private val readOnlyNameListItemHeight = 28.dp
 private val readOnlyNameListSpacing = 4.dp
 
-private enum class UserPickerTarget {
-    HOST,
-    ASSISTANT_HOST,
-    REFEREE,
-}
-
 @OptIn(ExperimentalHazeApi::class, ExperimentalTime::class)
 @Composable
 fun EventDetails(
@@ -185,6 +180,7 @@ fun EventDetails(
     eventWithRelations: EventWithFullRelations,
     editEvent: Event,
     editView: Boolean,
+    showRefereesSection: Boolean = true,
     navPadding: PaddingValues = PaddingValues(),
     isNewEvent: Boolean,
     rentalTimeLocked: Boolean = false,
@@ -201,6 +197,7 @@ fun EventDetails(
     organizationTemplates: List<OrganizationTemplateDocument> = emptyList(),
     organizationTemplatesLoading: Boolean = false,
     organizationTemplatesError: String? = null,
+    pendingStaffInvites: List<PendingStaffInviteDraft> = emptyList(),
     onSportSelected: (String) -> Unit = {},
     onSelectFieldCount: (Int) -> Unit,
     onUpdateLocalFieldName: (Int, String) -> Unit = { _, _ -> },
@@ -214,6 +211,15 @@ fun EventDetails(
     onEnsureUserByEmail: suspend (String) -> Result<UserData> = {
         Result.failure(IllegalStateException("Invite by email is not supported."))
     },
+    onAddPendingStaffInvite: suspend (
+        firstName: String,
+        lastName: String,
+        email: String,
+        roles: Set<EventStaffRole>,
+    ) -> Result<Unit> = { _, _, _, _ ->
+        Result.failure(IllegalStateException("Staff invites are not supported."))
+    },
+    onRemovePendingStaffInvite: (String, EventStaffRole?) -> Unit = { _, _ -> },
     onUpdateHostId: (String) -> Unit = {},
     onUpdateAssistantHostIds: (List<String>) -> Unit = {},
     onUpdateDoTeamsRef: (Boolean) -> Unit = {},
@@ -269,9 +275,16 @@ fun EventDetails(
     var paymentPlanValidationErrors by remember { mutableStateOf<List<String>>(emptyList()) }
 
     val coroutineScope = rememberCoroutineScope()
-    var userPickerTarget by remember { mutableStateOf<UserPickerTarget?>(null) }
-    var pickerError by remember { mutableStateOf<String?>(null) }
     val selectedUsersById = remember { mutableStateMapOf<String, UserData>() }
+    var staffSearchQuery by rememberSaveable { mutableStateOf("") }
+    var staffInviteFirstName by rememberSaveable { mutableStateOf("") }
+    var staffInviteLastName by rememberSaveable { mutableStateOf("") }
+    var staffInviteEmail by rememberSaveable { mutableStateOf("") }
+    var draftInviteReferee by rememberSaveable { mutableStateOf(false) }
+    var draftInviteAssistantHost by rememberSaveable { mutableStateOf(false) }
+    var staffEditorError by remember { mutableStateOf<String?>(null) }
+    var visibleRefereeCards by rememberSaveable { mutableStateOf(5) }
+    var visibleHostCards by rememberSaveable { mutableStateOf(5) }
 
     val lazyListState = rememberLazyListState()
 
@@ -1373,6 +1386,78 @@ fun EventDetails(
             selectedUsersById.forEach { (id, user) -> put(id, user) }
         }
     }
+    val persistedStaffInvites = remember(eventWithRelations.staffInvites) {
+        eventWithRelations.staffInvites.filter { invite ->
+            invite.type.equals("STAFF", ignoreCase = true) &&
+                invite.eventId?.trim() == event.id
+        }
+    }
+    val assistantHostIds = remember(editEvent.hostId, editEvent.assistantHostIds) {
+        editEvent.assistantHostIds
+            .map { userId -> userId.trim() }
+            .filter(String::isNotBlank)
+            .filterNot { userId -> userId == editEvent.hostId.trim() }
+            .distinct()
+    }
+    val resolvedHostDisplay = remember(editEvent.hostId, knownUsersById, hostDisplayName) {
+        knownUsersById[editEvent.hostId]?.let(::userDisplayName)
+            ?: hostDisplayName.takeIf(String::isNotBlank)
+            ?: "No host selected"
+    }
+    val visibleUserSuggestions = remember(staffSearchQuery, userSuggestions) {
+        val normalizedQuery = staffSearchQuery.trim()
+        if (normalizedQuery.isBlank()) {
+            emptyList()
+        } else {
+            userSuggestions
+        }
+    }
+    val sortedPendingStaffInvites = remember(pendingStaffInvites) {
+        pendingStaffInvites
+            .map(PendingStaffInviteDraft::normalized)
+            .sortedBy { draft -> draft.displayName().lowercase() }
+    }
+    val refereeStaffCards = remember(editEvent.refereeIds, knownUsersById, persistedStaffInvites, sortedPendingStaffInvites) {
+        buildAssignedStaffCards(
+            role = EventStaffRole.REFEREE,
+            userIds = editEvent.refereeIds,
+            knownUsersById = knownUsersById,
+            staffInvites = persistedStaffInvites,
+        ) + buildDraftStaffCards(
+            role = EventStaffRole.REFEREE,
+            drafts = sortedPendingStaffInvites,
+        )
+    }
+    val hostStaffCards = remember(editEvent.hostId, assistantHostIds, knownUsersById, persistedStaffInvites, sortedPendingStaffInvites) {
+        buildList {
+            if (editEvent.hostId.isNotBlank()) {
+                add(
+                    StaffAssignmentCardModel(
+                        key = "host:${editEvent.hostId}",
+                        title = resolvedHostDisplay,
+                        subtitle = "Primary Host",
+                        role = EventStaffRole.ASSISTANT_HOST,
+                    ),
+                )
+            }
+            addAll(
+                buildAssignedStaffCards(
+                    role = EventStaffRole.ASSISTANT_HOST,
+                    userIds = assistantHostIds,
+                    knownUsersById = knownUsersById,
+                    staffInvites = persistedStaffInvites,
+                ).map { card ->
+                    card.copy(subtitle = card.subtitle ?: "Assistant Host")
+                },
+            )
+            addAll(
+                buildDraftStaffCards(
+                    role = EventStaffRole.ASSISTANT_HOST,
+                    drafts = sortedPendingStaffInvites,
+                ),
+            )
+        }
+    }
     val freeAgentCount = remember(event.freeAgentIds) { event.freeAgentIds.size }
     val teamsCount = remember(eventWithRelations.teams) { eventWithRelations.teams.size }
     val registrationSummary = remember(editEvent.registrationCutoffHours) {
@@ -1826,15 +1911,6 @@ fun EventDetails(
                         } else {
                             stringResource(Res.string.max_teams)
                         }
-                        val assistantHostIds = remember(editEvent.assistantHostIds, editEvent.hostId) {
-                            editEvent.assistantHostIds
-                                .map { it.trim() }
-                                .filter { it.isNotBlank() && it != editEvent.hostId }
-                                .distinct()
-                        }
-                        val resolvedHostDisplay = knownUsersById[editEvent.hostId]?.let(::userDisplayName)
-                            ?: editEvent.hostId.ifBlank { "No host selected" }
-
                         PlatformDropdown(
                             selectedValue = editEvent.eventType.name,
                             onSelectionChange = { selectedValue ->
@@ -1986,100 +2062,10 @@ fun EventDetails(
                                 }
                             }
                         }
-                        val hostInputs: @Composable () -> Unit = {
-                            Text(
-                                text = "Hosts",
-                                style = MaterialTheme.typography.titleSmall,
-                                color = Color(localImageScheme.current.onSurface),
-                            )
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    text = "Primary host: $resolvedHostDisplay",
-                                    modifier = Modifier.weight(1f),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = Color(localImageScheme.current.onSurface),
-                                )
-                                TextButton(
-                                    onClick = {
-                                        pickerError = null
-                                        userPickerTarget = UserPickerTarget.HOST
-                                    },
-                                ) {
-                                    Text("Select host")
-                                }
-                            }
-                            Column(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                Text(
-                                    text = "Assistant hosts",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = Color(localImageScheme.current.onSurface),
-                                )
-                                if (assistantHostIds.isEmpty()) {
-                                    Text(
-                                        text = "No assistant hosts selected.",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = Color(localImageScheme.current.onSurfaceVariant),
-                                    )
-                                } else {
-                                    assistantHostIds.forEach { assistantHostId ->
-                                        val assistantLabel = knownUsersById[assistantHostId]?.let(::userDisplayName)
-                                            ?: assistantHostId
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically,
-                                        ) {
-                                            Text(
-                                                text = assistantLabel,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = Color(localImageScheme.current.onSurface),
-                                            )
-                                            TextButton(
-                                                onClick = {
-                                                    onUpdateAssistantHostIds(
-                                                        assistantHostIds.filterNot { existing -> existing == assistantHostId },
-                                                    )
-                                                },
-                                            ) {
-                                                Text(
-                                                    text = "Remove",
-                                                    color = MaterialTheme.colorScheme.error,
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                                TextButton(
-                                    onClick = {
-                                        pickerError = null
-                                        userPickerTarget = UserPickerTarget.ASSISTANT_HOST
-                                    },
-                                ) {
-                                    Text("Add assistant host")
-                                }
-                            }
-                            if (pickerError != null) {
-                                Text(
-                                    text = pickerError.orEmpty(),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.error,
-                                )
-                            }
-                        }
-
                         if (isMobileEventDetailsLayout) {
                             teamCapacityInputs()
                             leaguePlayoffInputs()
-                            hostInputs()
                         } else {
-                            hostInputs()
                             teamCapacityInputs()
                             leaguePlayoffInputs()
                         }
@@ -2338,102 +2324,300 @@ fun EventDetails(
                     },
                 )
 
-                animatedCardSection(
-                    sectionId = "referees",
-                    sectionTitle = "Referees",
-                    collapsibleInEditMode = true,
-                    collapsibleInViewMode = true,
-                    viewSummary = "${event.refereeIds.size} selected",
-                    defaultExpandedInViewMode = false,
-                    isEditMode = editView,
-                    animationDelay = 300,
-                    viewContent = {
-                        DetailKeyValueList(
-                            rows = buildList {
-                                add(
-                                    DetailRowSpec(
-                                        "Teams provide referees",
-                                        if (event.doTeamsRef == true) "Yes" else "No",
-                                    ),
-                                )
-                                if (event.doTeamsRef == true) {
+                if (showRefereesSection) {
+                    animatedCardSection(
+                        sectionId = "referees",
+                        sectionTitle = "Staff",
+                        collapsibleInEditMode = true,
+                        collapsibleInViewMode = true,
+                        viewSummary = "${assistantHostIds.size + event.refereeIds.size} assigned",
+                        defaultExpandedInViewMode = false,
+                        isEditMode = editView,
+                        animationDelay = 300,
+                        viewContent = {
+                            DetailKeyValueList(
+                                rows = buildList {
                                     add(
                                         DetailRowSpec(
-                                            "Team refs may swap",
-                                            if (event.teamRefsMaySwap == true) "Yes" else "No",
+                                            "Teams provide referees",
+                                            if (event.doTeamsRef == true) "Yes" else "No",
                                         ),
                                     )
-                                }
-                                add(DetailRowSpec("Selected referees", event.refereeIds.size.toString()))
-                            },
-                        )
-                    },
-                    editContent = {
-                        LabeledCheckboxRow(
-                            checked = editEvent.doTeamsRef == true,
-                            label = "Teams provide referees",
-                            onCheckedChange = onUpdateDoTeamsRef,
-                        )
-                        if (editEvent.doTeamsRef == true) {
+                                    if (event.doTeamsRef == true) {
+                                        add(
+                                            DetailRowSpec(
+                                                "Team refs may swap",
+                                                if (event.teamRefsMaySwap == true) "Yes" else "No",
+                                            ),
+                                        )
+                                    }
+                                    add(DetailRowSpec("Primary host", resolvedHostDisplay))
+                                    add(DetailRowSpec("Assistant hosts", assistantHostIds.size.toString()))
+                                    add(DetailRowSpec("Referees", event.refereeIds.size.toString()))
+                                },
+                            )
+                        },
+                        editContent = {
                             LabeledCheckboxRow(
-                                checked = editEvent.teamRefsMaySwap == true,
-                                label = "Team refs may swap",
-                                onCheckedChange = onUpdateTeamRefsMaySwap,
+                                checked = editEvent.doTeamsRef == true,
+                                label = "Teams provide referees",
+                                onCheckedChange = onUpdateDoTeamsRef,
                             )
-                        }
-                        Text(
-                            text = "Selected referees",
-                            style = MaterialTheme.typography.titleSmall,
-                            color = Color(localImageScheme.current.onSurface),
-                        )
-                        if (editEvent.refereeIds.isEmpty()) {
+                            if (editEvent.doTeamsRef == true) {
+                                LabeledCheckboxRow(
+                                    checked = editEvent.teamRefsMaySwap == true,
+                                    label = "Team refs may swap",
+                                    onCheckedChange = onUpdateTeamRefsMaySwap,
+                                )
+                            }
                             Text(
-                                text = "No referees selected yet.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color(localImageScheme.current.onSurfaceVariant),
+                                text = "Add / Invite Staff",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = Color(localImageScheme.current.onSurface),
                             )
-                        } else {
-                            editEvent.refereeIds.forEach { refereeId ->
-                                val refereeLabel = knownUsersById[refereeId]?.let(::userDisplayName)
-                                    ?: refereeId
-                                Row(
+                            PlatformTextField(
+                                value = staffSearchQuery,
+                                onValueChange = { newValue ->
+                                    staffSearchQuery = newValue
+                                    staffEditorError = null
+                                    onSearchUsers(newValue)
+                                },
+                                label = "Search existing users",
+                                placeholder = "Name or username",
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            if (staffSearchQuery.isNotBlank() && visibleUserSuggestions.isEmpty()) {
+                                Text(
+                                    text = "No matching users.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(localImageScheme.current.onSurfaceVariant),
+                                )
+                            }
+                            visibleUserSuggestions.take(6).forEach { suggestedUser ->
+                                val canAddReferee = !editEvent.refereeIds.contains(suggestedUser.id)
+                                val canAddAssistant = suggestedUser.id != editEvent.hostId &&
+                                    !assistantHostIds.contains(suggestedUser.id)
+                                Card(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically,
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                    ),
                                 ) {
-                                    Text(
-                                        text = refereeLabel,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = Color(localImageScheme.current.onSurface),
-                                    )
-                                    TextButton(
-                                        onClick = { onRemoveRefereeId(refereeId) },
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp),
                                     ) {
                                         Text(
-                                            text = "Remove",
-                                            color = MaterialTheme.colorScheme.error,
+                                            text = userDisplayName(suggestedUser),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold,
                                         )
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        ) {
+                                            Button(
+                                                onClick = {
+                                                    staffEditorError = null
+                                                    onAddRefereeId(suggestedUser.id)
+                                                },
+                                                enabled = canAddReferee,
+                                                modifier = Modifier.weight(1f),
+                                            ) {
+                                                Text("Add as referee")
+                                            }
+                                            Button(
+                                                onClick = {
+                                                    staffEditorError = null
+                                                    onUpdateAssistantHostIds(
+                                                        (assistantHostIds + suggestedUser.id)
+                                                            .map(String::trim)
+                                                            .filter(String::isNotBlank)
+                                                            .distinct()
+                                                            .filterNot { userId -> userId == editEvent.hostId },
+                                                    )
+                                                },
+                                                enabled = canAddAssistant,
+                                                modifier = Modifier.weight(1f),
+                                            ) {
+                                                Text("Add as assistant")
+                                            }
+                                        }
                                     }
                                 }
                             }
-                        }
-                        TextButton(
-                            onClick = {
-                                pickerError = null
-                                userPickerTarget = UserPickerTarget.REFEREE
-                            },
-                        ) {
-                            Text("Add referee by name/email")
-                        }
-                        if (pickerError != null && userPickerTarget == UserPickerTarget.REFEREE) {
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                             Text(
-                                text = pickerError.orEmpty(),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error,
+                                text = "Email invite",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = Color(localImageScheme.current.onSurface),
                             )
-                        }
-                    },
-                )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                PlatformTextField(
+                                    value = staffInviteFirstName,
+                                    onValueChange = { staffInviteFirstName = it },
+                                    label = "First Name",
+                                    modifier = Modifier.weight(1f),
+                                )
+                                PlatformTextField(
+                                    value = staffInviteLastName,
+                                    onValueChange = { staffInviteLastName = it },
+                                    label = "Last Name",
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                            PlatformTextField(
+                                value = staffInviteEmail,
+                                onValueChange = { staffInviteEmail = it },
+                                label = "Email",
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Box(modifier = Modifier.weight(1f)) {
+                                    LabeledCheckboxRow(
+                                        checked = draftInviteReferee,
+                                        label = "Referee",
+                                        onCheckedChange = { draftInviteReferee = it },
+                                    )
+                                }
+                                Box(modifier = Modifier.weight(1f)) {
+                                    LabeledCheckboxRow(
+                                        checked = draftInviteAssistantHost,
+                                        label = "Assistant Host",
+                                        onCheckedChange = { draftInviteAssistantHost = it },
+                                    )
+                                }
+                            }
+                            Button(
+                                onClick = {
+                                    val roles = buildSet {
+                                        if (draftInviteReferee) add(EventStaffRole.REFEREE)
+                                        if (draftInviteAssistantHost) add(EventStaffRole.ASSISTANT_HOST)
+                                    }
+                                    coroutineScope.launch {
+                                        onAddPendingStaffInvite(
+                                            staffInviteFirstName,
+                                            staffInviteLastName,
+                                            staffInviteEmail,
+                                            roles,
+                                        ).onSuccess {
+                                            staffEditorError = null
+                                            staffInviteFirstName = ""
+                                            staffInviteLastName = ""
+                                            staffInviteEmail = ""
+                                            draftInviteReferee = false
+                                            draftInviteAssistantHost = false
+                                        }.onFailure { error ->
+                                            staffEditorError = error.message ?: "Unable to add staff invite."
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text("Add email invite")
+                            }
+                            staffEditorError?.let { errorText ->
+                                Text(
+                                    text = errorText,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            }
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                            Text(
+                                text = "Assigned staff",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = Color(localImageScheme.current.onSurface),
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.Top,
+                            ) {
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Text(
+                                        text = "Referees",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                    if (refereeStaffCards.isEmpty()) {
+                                        Text(
+                                            text = "No referees selected yet.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Color(localImageScheme.current.onSurfaceVariant),
+                                        )
+                                    } else {
+                                        refereeStaffCards.take(visibleRefereeCards).forEach { card ->
+                                            StaffAssignmentCard(
+                                                card = card,
+                                                editView = true,
+                                                onRemoveAssigned = { userId, role ->
+                                                    if (role == EventStaffRole.REFEREE) {
+                                                        onRemoveRefereeId(userId)
+                                                    }
+                                                },
+                                                onRemoveDraft = onRemovePendingStaffInvite,
+                                            )
+                                        }
+                                        if (refereeStaffCards.size > visibleRefereeCards) {
+                                            TextButton(onClick = { visibleRefereeCards += 5 }) {
+                                                Text("Show 5 more")
+                                            }
+                                        }
+                                    }
+                                }
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Text(
+                                        text = "Hosts",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                    if (hostStaffCards.isEmpty()) {
+                                        Text(
+                                            text = "No host staff assigned yet.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Color(localImageScheme.current.onSurfaceVariant),
+                                        )
+                                    } else {
+                                        hostStaffCards.take(visibleHostCards).forEach { card ->
+                                            StaffAssignmentCard(
+                                                card = card,
+                                                editView = true,
+                                                onRemoveAssigned = { userId, role ->
+                                                    if (role == EventStaffRole.ASSISTANT_HOST) {
+                                                        onUpdateAssistantHostIds(
+                                                            assistantHostIds.filterNot { existingId ->
+                                                                existingId == userId
+                                                            },
+                                                        )
+                                                    }
+                                                },
+                                                onRemoveDraft = onRemovePendingStaffInvite,
+                                            )
+                                        }
+                                        if (hostStaffCards.size > visibleHostCards) {
+                                            TextButton(onClick = { visibleHostCards += 5 }) {
+                                                Text("Show 5 more")
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                    )
+                }
 
                 if (editView) {
                     // Specifics Card
@@ -3593,83 +3777,9 @@ fun EventDetails(
             }
         }
     }
-    userPickerTarget?.let { pickerTarget ->
-        val selectedIdsForTarget = when (pickerTarget) {
-            UserPickerTarget.HOST -> listOfNotNull(editEvent.hostId.takeIf(String::isNotBlank))
-            UserPickerTarget.ASSISTANT_HOST -> editEvent.assistantHostIds
-            UserPickerTarget.REFEREE -> editEvent.refereeIds
-        }
-        SearchPlayerDialog(
-            freeAgents = emptyList(),
-            friends = emptyList(),
-            suggestions = userSuggestions.filterNot { candidate ->
-                selectedIdsForTarget.contains(candidate.id)
-            },
-            onSearch = onSearchUsers,
-            onPlayerSelected = { user ->
-                selectedUsersById[user.id] = user
-                when (pickerTarget) {
-                    UserPickerTarget.HOST -> onUpdateHostId(user.id)
-                    UserPickerTarget.ASSISTANT_HOST -> {
-                        val updated = (
-                            editEvent.assistantHostIds +
-                                user.id
-                            ).map { id -> id.trim() }
-                            .filter(String::isNotBlank)
-                            .distinct()
-                            .filterNot { id -> id == editEvent.hostId }
-                        onUpdateAssistantHostIds(updated)
-                    }
-
-                    UserPickerTarget.REFEREE -> onAddRefereeId(user.id)
-                }
-                pickerError = null
-                userPickerTarget = null
-            },
-            onInviteByEmail = { email ->
-                coroutineScope.launch {
-                    onEnsureUserByEmail(email)
-                        .onSuccess { user ->
-                            selectedUsersById[user.id] = user
-                            when (pickerTarget) {
-                                UserPickerTarget.HOST -> onUpdateHostId(user.id)
-                                UserPickerTarget.ASSISTANT_HOST -> {
-                                    val updated = (
-                                        editEvent.assistantHostIds +
-                                            user.id
-                                        ).map { id -> id.trim() }
-                                        .filter(String::isNotBlank)
-                                        .distinct()
-                                        .filterNot { id -> id == editEvent.hostId }
-                                    onUpdateAssistantHostIds(updated)
-                                }
-
-                                UserPickerTarget.REFEREE -> onAddRefereeId(user.id)
-                            }
-                            pickerError = null
-                            userPickerTarget = null
-                        }
-                        .onFailure { error ->
-                            pickerError = error.message ?: "Unable to invite by email."
-                        }
-                }
-            },
-            onDismiss = {
-                userPickerTarget = null
-                pickerError = null
-            },
-            eventName = editEvent.name.ifBlank { "Event" },
-            entryLabel = when (pickerTarget) {
-                UserPickerTarget.HOST -> "Host"
-                UserPickerTarget.ASSISTANT_HOST -> "Assistant Host"
-                UserPickerTarget.REFEREE -> "Referee"
-            },
-        )
-    }
-
     PlatformDateTimePicker(
         onDateSelected = { selectedInstant ->
-            val selected = selectedInstant ?: Clock.System.now()
+            val selected = selectedInstant ?: return@PlatformDateTimePicker
             onEditEvent {
                 val minimumEnd = kotlin.time.Instant.fromEpochMilliseconds(
                     selected.toEpochMilliseconds() + 60L * 60L * 1000L
@@ -3690,7 +3800,8 @@ fun EventDetails(
 
     PlatformDateTimePicker(
         onDateSelected = { selectedInstant ->
-            onEditEvent { copy(end = selectedInstant ?: Clock.System.now()) }
+            val selected = selectedInstant ?: return@PlatformDateTimePicker
+            onEditEvent { copy(end = selected) }
             showEndPicker = false
         },
         onDismissRequest = { showEndPicker = false },
@@ -4965,6 +5076,151 @@ private fun userDisplayName(user: UserData): String {
         fullName.isNotBlank() -> fullName
         user.userName.trim().isNotBlank() -> user.userName.trim()
         else -> user.id
+    }
+}
+
+private data class StaffAssignmentCardModel(
+    val key: String,
+    val title: String,
+    val subtitle: String? = null,
+    val email: String? = null,
+    val statusLabel: String? = null,
+    val role: EventStaffRole,
+    val userId: String? = null,
+    val draftEmail: String? = null,
+    val isDraft: Boolean = false,
+)
+
+private fun eventStaffStatusLabel(status: String?): String? = when (status?.trim()?.uppercase()) {
+    "PENDING" -> "Pending"
+    "DECLINED" -> "Declined"
+    else -> null
+}
+
+private fun buildAssignedStaffCards(
+    role: EventStaffRole,
+    userIds: List<String>,
+    knownUsersById: Map<String, UserData>,
+    staffInvites: List<Invite>,
+): List<StaffAssignmentCardModel> {
+    return userIds
+        .map { userId -> userId.trim() }
+        .filter(String::isNotBlank)
+        .distinct()
+        .map { userId ->
+            val user = knownUsersById[userId]
+            val invite = staffInvites.firstOrNull { candidate ->
+                candidate.userId?.trim() == userId && candidate.includesEventStaffRole(role)
+            }
+            StaffAssignmentCardModel(
+                key = "${role.name}:$userId",
+                title = user?.let(::userDisplayName) ?: userId,
+                email = invite?.email?.trim()?.takeIf(String::isNotBlank),
+                statusLabel = eventStaffStatusLabel(invite?.normalizedStatusOrNull()),
+                role = role,
+                userId = userId,
+            )
+        }
+}
+
+private fun buildDraftStaffCards(
+    role: EventStaffRole,
+    drafts: List<PendingStaffInviteDraft>,
+): List<StaffAssignmentCardModel> {
+    return drafts
+        .map(PendingStaffInviteDraft::normalized)
+        .filter { draft -> draft.hasRole(role) }
+        .map { draft ->
+            StaffAssignmentCardModel(
+                key = "draft:${role.name}:${draft.email}",
+                title = draft.displayName(),
+                subtitle = role.label(),
+                email = draft.email,
+                statusLabel = "Email invite",
+                role = role,
+                draftEmail = draft.email,
+                isDraft = true,
+            )
+        }
+}
+
+@Composable
+private fun StaffAssignmentCard(
+    card: StaffAssignmentCardModel,
+    editView: Boolean,
+    onRemoveAssigned: (String, EventStaffRole) -> Unit,
+    onRemoveDraft: (String, EventStaffRole) -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        ),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                text = card.title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            card.subtitle?.takeIf(String::isNotBlank)?.let { subtitle ->
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            card.email?.takeIf(String::isNotBlank)?.let { email ->
+                Text(
+                    text = email,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            card.statusLabel?.takeIf(String::isNotBlank)?.let { statusLabel ->
+                Text(
+                    text = statusLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (statusLabel.equals("Declined", ignoreCase = true)) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.primary
+                    },
+                )
+            }
+            if (editView) {
+                val removeAction: (() -> Unit)? = when {
+                    card.isDraft && !card.draftEmail.isNullOrBlank() -> {
+                        { onRemoveDraft(card.draftEmail, card.role) }
+                    }
+
+                    !card.userId.isNullOrBlank() -> {
+                        { onRemoveAssigned(card.userId, card.role) }
+                    }
+
+                    else -> null
+                }
+                removeAction?.let { onRemove ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        Text(
+                            text = "Remove",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier
+                                .clickable(onClick = onRemove)
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 

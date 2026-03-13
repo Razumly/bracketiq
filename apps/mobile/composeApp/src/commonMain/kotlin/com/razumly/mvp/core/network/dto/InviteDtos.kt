@@ -14,6 +14,7 @@ data class InviteCreateDto(
     val email: String? = null,
     val status: String? = null,
     val staffTypes: List<String> = emptyList(),
+    val replaceStaffTypes: Boolean? = null,
     val eventId: String? = null,
     val organizationId: String? = null,
     val teamId: String? = null,
@@ -33,4 +34,21 @@ data class DeleteInvitesRequestDto(
     val userId: String? = null,
     val teamId: String? = null,
     val type: String? = null,
+)
+
+@Serializable
+data class EmailMembershipLookupRequestDto(
+    val emails: List<String> = emptyList(),
+    val userIds: List<String> = emptyList(),
+)
+
+@Serializable
+data class UserEmailMembershipMatchDto(
+    val email: String,
+    val userId: String,
+)
+
+@Serializable
+data class EmailMembershipLookupResponseDto(
+    val matches: List<UserEmailMembershipMatchDto> = emptyList(),
 )

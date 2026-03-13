@@ -97,8 +97,10 @@ import androidx.compose.ui.unit.dp
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.ktx.DynamicScheme
+import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfig
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
+import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
@@ -164,6 +166,22 @@ private data class BracketDivisionOption(
     val id: String,
     val label: String,
 )
+
+internal fun canViewRefereesSection(
+    currentUserId: String,
+    event: Event,
+    organization: Organization?,
+): Boolean {
+    val normalizedCurrentUserId = currentUserId.trim()
+    if (normalizedCurrentUserId.isBlank()) {
+        return false
+    }
+    return event.hostId == normalizedCurrentUserId ||
+        event.assistantHostIds.any { assistantHostId -> assistantHostId == normalizedCurrentUserId } ||
+        event.refereeIds.any { refereeId -> refereeId == normalizedCurrentUserId } ||
+        organization?.ownerId == normalizedCurrentUserId ||
+        organization?.hostIds?.any { hostId -> hostId == normalizedCurrentUserId } == true
+}
 
 private fun List<BracketDivisionOption>.resolveSelectedDivisionId(preferredId: String?): String? {
     if (isEmpty()) return null
@@ -1132,6 +1150,8 @@ fun EventDetailScreen(
     val leagueDivisionStandings by component.leagueDivisionStandings.collectAsState()
     val leagueDivisionStandingsLoading by component.leagueDivisionStandingsLoading.collectAsState()
     val leagueStandingsConfirming by component.leagueStandingsConfirming.collectAsState()
+    val suggestedUsers by component.suggestedUsers.collectAsState()
+    val pendingStaffInvites by component.pendingStaffInvites.collectAsState()
 
     var isRefundAutomatic by remember { mutableStateOf(false) }
     val isHost by component.isHost.collectAsState()
@@ -1203,6 +1223,17 @@ fun EventDetailScreen(
                     assistantHostId == currentUserId
                 }
             )
+    }
+    val showRefereesSection = remember(
+        currentUser.id,
+        selectedEvent.event,
+        selectedEvent.organization,
+    ) {
+        canViewRefereesSection(
+            currentUserId = currentUser.id,
+            event = selectedEvent.event,
+            organization = selectedEvent.organization,
+        )
     }
     val canConfirmLeagueResultsFromDock = hasStandingsView && canManageLeagueStandings
     val canManageMatchEditingFromDock = canManageTemplate
@@ -1588,6 +1619,7 @@ fun EventDetailScreen(
                             editEvent = editedEvent,
                             navPadding = LocalNavBarPadding.current,
                             editView = isEditing,
+                            showRefereesSection = showRefereesSection,
                             isNewEvent = false,
                             onAddCurrentUser = {},
                             imageScheme = imageScheme,
@@ -1633,6 +1665,39 @@ fun EventDetailScreen(
                             organizationTemplates = organizationTemplates,
                             organizationTemplatesLoading = organizationTemplatesLoading,
                             organizationTemplatesError = organizationTemplatesError,
+                            pendingStaffInvites = pendingStaffInvites,
+                            userSuggestions = suggestedUsers,
+                            onSearchUsers = component::searchUsers,
+                            onAddPendingStaffInvite = { firstName, lastName, email, roles ->
+                                component.addPendingStaffInvite(firstName, lastName, email, roles)
+                            },
+                            onRemovePendingStaffInvite = component::removePendingStaffInvite,
+                            onUpdateAssistantHostIds = { assistantHostIds ->
+                                component.editEventField {
+                                    copy(
+                                        assistantHostIds = assistantHostIds
+                                            .map(String::trim)
+                                            .filter(String::isNotBlank)
+                                            .filterNot { userId -> userId == hostId }
+                                            .distinct(),
+                                    )
+                                }
+                            },
+                            onAddRefereeId = { refereeId ->
+                                component.editEventField {
+                                    copy(
+                                        refereeIds = (refereeIds + refereeId)
+                                            .map(String::trim)
+                                            .filter(String::isNotBlank)
+                                            .distinct(),
+                                    )
+                                }
+                            },
+                            onRemoveRefereeId = { refereeId ->
+                                component.editEventField {
+                                    copy(refereeIds = refereeIds.filterNot { existingId -> existingId == refereeId })
+                                }
+                            },
                         ) { isValid ->
                             val buttonColors = ButtonColors(
                                 containerColor = Color(imageScheme.primary),

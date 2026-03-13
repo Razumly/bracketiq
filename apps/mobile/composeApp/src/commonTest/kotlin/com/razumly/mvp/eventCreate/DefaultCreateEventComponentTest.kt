@@ -1,8 +1,10 @@
 package com.razumly.mvp.eventCreate
 
+import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.presentation.RentalCreateContext
+import com.razumly.mvp.eventDetail.EventStaffRole
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -52,6 +54,104 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         assertEquals(true, updatedEvent.doTeamsRef)
         assertEquals(true, updatedEvent.teamRefsMaySwap)
         assertEquals(listOf("ref-2"), updatedEvent.refereeIds)
+    }
+
+    @Test
+    fun pending_staff_invites_merge_roles_by_email_and_reject_duplicate_role_staging() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        advance()
+
+        harness.component.addPendingStaffInvite(
+            firstName = "Taylor",
+            lastName = "Ref",
+            email = " Taylor@example.com ",
+            roles = setOf(EventStaffRole.REFEREE),
+        ).getOrThrow()
+        harness.component.addPendingStaffInvite(
+            firstName = "Taylor",
+            lastName = "Ref",
+            email = "taylor@example.com",
+            roles = setOf(EventStaffRole.ASSISTANT_HOST),
+        ).getOrThrow()
+
+        val pending = harness.component.pendingStaffInvites.value
+        assertEquals(1, pending.size)
+        assertEquals("taylor@example.com", pending.single().email)
+        assertEquals(
+            setOf(EventStaffRole.REFEREE, EventStaffRole.ASSISTANT_HOST),
+            pending.single().roles,
+        )
+
+        val duplicate = harness.component.addPendingStaffInvite(
+            firstName = "Taylor",
+            lastName = "Ref",
+            email = "taylor@example.com",
+            roles = setOf(EventStaffRole.REFEREE),
+        )
+        assertTrue(duplicate.isFailure)
+    }
+
+    @Test
+    fun pending_staff_invites_reject_email_that_already_belongs_to_assigned_host_side_user() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        advance()
+
+        harness.component.updateAssistantHostIds(listOf("assistant-1"))
+        advance()
+        harness.userRepository.emailMembershipMatches = listOf(
+            com.razumly.mvp.core.data.repositories.UserEmailMembershipMatch(
+                email = "assistant@example.com",
+                userId = "assistant-1",
+            ),
+        )
+
+        val result = harness.component.addPendingStaffInvite(
+            firstName = "Alex",
+            lastName = "Host",
+            email = "assistant@example.com",
+            roles = setOf(EventStaffRole.ASSISTANT_HOST),
+        )
+
+        assertTrue(result.isFailure)
+        assertTrue(harness.component.pendingStaffInvites.value.isEmpty())
+    }
+
+    @Test
+    fun create_event_syncs_staff_invites_with_replace_staff_types() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        advance()
+
+        harness.component.updateAssistantHostIds(listOf("assistant-1"))
+        harness.component.addRefereeId("ref-1")
+        advance()
+        harness.userRepository.createdInvitesResult = listOf(
+            Invite(
+                type = "STAFF",
+                email = "assistant@example.com",
+                eventId = harness.component.newEventState.value.id,
+                userId = "assistant-1",
+                staffTypes = listOf("HOST"),
+                id = "invite-assistant",
+            ),
+            Invite(
+                type = "STAFF",
+                email = "ref@example.com",
+                eventId = harness.component.newEventState.value.id,
+                userId = "ref-1",
+                staffTypes = listOf("REFEREE"),
+                id = "invite-ref",
+            ),
+        )
+
+        harness.component.createEvent()
+        advance()
+
+        assertEquals(1, harness.userRepository.createInviteCalls.size)
+        val invitePayloads = harness.userRepository.createInviteCalls.single()
+        assertEquals(2, invitePayloads.size)
+        assertTrue(invitePayloads.all { it.replaceStaffTypes == true })
+        assertTrue(invitePayloads.any { it.userId == "assistant-1" && it.staffTypes == listOf("HOST") })
+        assertTrue(invitePayloads.any { it.userId == "ref-1" && it.staffTypes == listOf("REFEREE") })
     }
 
     @Test

@@ -1,11 +1,11 @@
+
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
 import java.io.ByteArrayOutputStream
 import java.net.InetSocketAddress
-import java.net.URI
 import java.net.Socket
+import java.net.URI
 import java.util.Properties
-import java.util.concurrent.TimeUnit
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
@@ -30,8 +30,8 @@ compose.resources {
     generateResClass = always
 }
 
-val mvpVersion = "0.4.6"
-val mvpVersionCode = 11
+val mvpVersion = "0.5.1"
+val mvpVersionCode = 13
 kotlin {
     androidTarget {
         compilerOptions {
@@ -200,26 +200,6 @@ kotlin {
             }
         }
 
-        val osName = System.getProperty("os.name")
-        val targetOs = when {
-            osName == "Mac OS X" -> "macos"
-            osName.startsWith("Win") -> "windows"
-            osName.startsWith("Linux") -> "linux"
-            else -> error("Unsupported OS: $osName")
-        }
-
-        val osArch = System.getProperty("os.arch")
-        val targetArch = when (osArch) {
-            "x86_64", "amd64" -> "x64"
-            "aarch64" -> "arm64"
-            else -> error("Unsupported arch: $osArch")
-        }
-
-        val version = "0.9.22" // or any more recent version
-        val target = "${targetOs}-${targetArch}"
-        dependencies {
-            implementation("org.jetbrains.skiko:skiko-awt-runtime-$target:$version")
-        }
     }
 }
 
@@ -698,7 +678,7 @@ val startLocalBackend = tasks.register("startLocalBackend") {
                 val builder = ProcessBuilder(
                     wslArgs(
                         wslDistro,
-                        "cd \"$wslDir\" && npm run dev -- --hostname 0.0.0.0 --port $backendPort",
+                        "cd \"$wslDir\" && npm run dev:plain -- --webpack --hostname 0.0.0.0 --port $backendPort",
                     )
                 ).sanitizeNodeDebugEnvironment()
 
@@ -732,9 +712,9 @@ val startLocalBackend = tasks.register("startLocalBackend") {
             }
 
             val devArgs = when (pm) {
-                "pnpm" -> listOf(pmCmd, "run", "dev", "--", "--hostname", "0.0.0.0", "--port", backendPort.toString())
-                "yarn" -> listOf(pmCmd, "run", "dev", "--hostname", "0.0.0.0", "--port", backendPort.toString())
-                else -> listOf(pmCmd, "run", "dev", "--", "--hostname", "0.0.0.0", "--port", backendPort.toString())
+                "pnpm" -> listOf(pmCmd, "run", "dev:plain", "--", "--webpack", "--hostname", "0.0.0.0", "--port", backendPort.toString())
+                "yarn" -> listOf(pmCmd, "run", "dev:plain", "--webpack", "--hostname", "0.0.0.0", "--port", backendPort.toString())
+                else -> listOf(pmCmd, "run", "dev:plain", "--", "--webpack", "--hostname", "0.0.0.0", "--port", backendPort.toString())
             }
 
             logger.lifecycle(

@@ -4,6 +4,7 @@ import androidx.compose.ui.graphics.toArgb
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
+import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
@@ -88,6 +89,7 @@ data class EventApiDto(
     val state: String? = null,
     val pointsToVictory: List<Int>? = null,
     val refereeIds: List<String>? = null,
+    val staffInvites: List<Invite>? = null,
 
     val allowPaymentPlans: Boolean? = null,
     val installmentCount: Int? = null,

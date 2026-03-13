@@ -143,6 +143,12 @@ private class FakeUserRepository : IUserRepository {
     override fun getUsersFlow(userIds: List<String>): Flow<Result<List<UserData>>> = error("unused")
     override suspend fun searchPlayers(search: String): Result<List<UserData>> = error("unused")
     override suspend fun ensureUserByEmail(email: String): Result<UserData> = error("unused")
+    override suspend fun createInvites(invites: List<com.razumly.mvp.core.network.dto.InviteCreateDto>): Result<List<com.razumly.mvp.core.data.dataTypes.Invite>> = error("unused")
+    override suspend fun deleteInvite(inviteId: String): Result<Unit> = error("unused")
+    override suspend fun findEmailMembership(
+        emails: List<String>,
+        userIds: List<String>,
+    ): Result<List<UserEmailMembershipMatch>> = error("unused")
     override suspend fun listInvites(userId: String, type: String?): Result<List<com.razumly.mvp.core.data.dataTypes.Invite>> {
         lastListInvitesInput = userId to type
         return Result.success(invitesResult)

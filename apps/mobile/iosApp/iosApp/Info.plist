@@ -91,9 +91,8 @@
 	</array>
 	<key>com.apple.developer.associated-domains</key>
 	<array>
-		<string>applinks:mvp.razumly.com</string>
-		<string>applinks:www.razumly.com</string>
-		<string>applinks:razumly.com</string>
+		<string>applinks:bracket-iq.com</string>
+		<string>applinks:www.bracket-iq.com</string>
 	</array>
 </dict>
 </plist>

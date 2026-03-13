@@ -343,6 +343,7 @@ class BillingRepository(
                     signerContext = signerContext.apiValue,
                     childUserId = childUserId?.trim()?.takeIf(String::isNotBlank),
                     childEmail = childUserEmail?.trim()?.takeIf(String::isNotBlank),
+                    redirectUrl = buildEmbeddedSigningRedirectUrl(eventId),
                 ),
             )
 
@@ -898,6 +899,11 @@ class BillingRepository(
 
         databaseService.getRefundRequestDao.deleteRefundRequest(refundId)
     }
+}
+
+private fun buildEmbeddedSigningRedirectUrl(eventId: String): String? {
+    val normalizedEventId = eventId.trim().takeIf(String::isNotBlank) ?: return null
+    return "https://bracket-iq.com/event/$normalizedEventId"
 }
 
 private fun Throwable.isNotFound(): Boolean {

@@ -51,6 +51,9 @@ actual fun PlatformDateTimePicker(
         var selectedDate by remember(clampedInitialMillis) {
             mutableStateOf(initialDateTime.toLocalDate())
         }
+        val initialDatePickerMillis = remember(selectedDate) {
+            selectedDate.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+        }
 
         val timeState = rememberTimePickerState(
             initialHour = initialDateTime.hour,
@@ -60,7 +63,7 @@ actual fun PlatformDateTimePicker(
 
         if (showDatePicker) {
             val datePickerState = rememberDatePickerState(
-                initialSelectedDateMillis = clampedInitialMillis,
+                initialSelectedDateMillis = initialDatePickerMillis,
                 selectableDates = PastOrFutureSelectableDates(canSelectPast)
             )
 

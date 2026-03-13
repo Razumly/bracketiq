@@ -195,7 +195,13 @@ data class ProfileInvitesState(
     val eventsById: Map<String, Event> = emptyMap(),
     val error: String? = null,
     val activeInviteId: String? = null,
+    val activeInviteAction: ProfileInviteAction? = null,
 )
+
+enum class ProfileInviteAction {
+    ACCEPT,
+    DECLINE,
+}
 
 data class ProfileTextSignaturePromptState(
     val document: ProfileDocumentCard,
@@ -735,6 +741,7 @@ class DefaultProfileComponent(
                         eventsById = eventsById,
                         error = null,
                         activeInviteId = null,
+                        activeInviteAction = null,
                     )
                     _pendingInviteCount.value = pendingInvites.size
                 }
@@ -759,6 +766,7 @@ class DefaultProfileComponent(
         scope.launch {
             _invitesState.value = _invitesState.value.copy(
                 activeInviteId = inviteId,
+                activeInviteAction = ProfileInviteAction.ACCEPT,
                 error = null,
             )
 
@@ -774,6 +782,7 @@ class DefaultProfileComponent(
                 .onFailure { throwable ->
                     _invitesState.value = _invitesState.value.copy(
                         activeInviteId = null,
+                        activeInviteAction = null,
                         error = throwable.message ?: "Failed to accept invite.",
                     )
                 }
@@ -790,6 +799,7 @@ class DefaultProfileComponent(
         scope.launch {
             _invitesState.value = _invitesState.value.copy(
                 activeInviteId = inviteId,
+                activeInviteAction = ProfileInviteAction.DECLINE,
                 error = null,
             )
 
@@ -801,6 +811,7 @@ class DefaultProfileComponent(
                 .onFailure { throwable ->
                     _invitesState.value = _invitesState.value.copy(
                         activeInviteId = null,
+                        activeInviteAction = null,
                         error = throwable.message ?: "Failed to decline invite.",
                     )
                 }

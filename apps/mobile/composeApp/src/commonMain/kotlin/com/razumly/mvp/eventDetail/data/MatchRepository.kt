@@ -4,7 +4,6 @@ import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.repositories.IMVPRepository
-import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResponse
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.dto.BulkMatchCreateEntryDto
@@ -16,6 +15,7 @@ import com.razumly.mvp.core.network.dto.MatchUpdateDto
 import com.razumly.mvp.core.network.dto.MatchesResponseDto
 import com.razumly.mvp.core.network.dto.toBulkMatchCreateEntryDto
 import com.razumly.mvp.core.network.dto.toBulkMatchUpdateEntryDto
+import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -92,6 +92,26 @@ class MatchRepository(
         loserNextMatchId = sanitizeMatchRef(loserNextMatchId),
         division = normalizeOptionalToken(division),
     )
+
+    private suspend fun fetchRemoteMatches(tournamentId: String): List<MatchMVP> {
+        return api.get<MatchesResponseDto>("api/events/$tournamentId/matches")
+            .matches
+            .mapNotNull { it.toMatchOrNull() }
+    }
+
+    private suspend fun refreshMatchesFromRemote(tournamentId: String): List<MatchMVP> {
+        val localMatches = databaseService.getMatchDao.getMatchesOfTournament(tournamentId)
+        val remoteMatches = fetchRemoteMatches(tournamentId)
+        val staleIds = localMatches.map { it.id }.toSet() - remoteMatches.map { it.id }.toSet()
+        if (staleIds.isNotEmpty()) {
+            databaseService.getMatchDao.deleteMatchesById(staleIds.toList())
+        }
+        if (remoteMatches.isNotEmpty()) {
+            databaseService.getMatchDao.upsertMatches(remoteMatches)
+            return remoteMatches
+        }
+        return localMatches
+    }
 
     override suspend fun getMatch(matchId: String): Result<MatchMVP> =
         singleResponse(
@@ -242,19 +262,12 @@ class MatchRepository(
             }
 
             val remoteJob = launch {
-                multiResponse(getRemoteData = {
-                    api.get<MatchesResponseDto>("api/events/$tournamentId/matches")
-                        .matches.mapNotNull { it.toMatchOrNull() }
-                },
-                    getLocalData = {
-                        databaseService.getMatchDao.getMatchesOfTournament(tournamentId)
-                    },
-                    saveData = { matches ->
-                        databaseService.getMatchDao.upsertMatches(matches)
-                    },
-                    deleteData = { databaseService.getMatchDao.deleteMatchesById(it) }).onFailure { error ->
-                    trySend(Result.failure(error))
-                }
+                runCatching { refreshMatchesFromRemote(tournamentId) }
+                    .onFailure { error ->
+                        Napier.w(
+                            "Failed to refresh matches for event $tournamentId; keeping cached matches: ${error.message}"
+                        )
+                    }
             }
 
             awaitClose {
@@ -302,14 +315,14 @@ class MatchRepository(
         )
 
     override suspend fun getMatchesOfTournament(tournamentId: String): Result<List<MatchMVP>> =
-        multiResponse(getRemoteData = {
-            api.get<MatchesResponseDto>("api/events/$tournamentId/matches")
-                .matches.mapNotNull { it.toMatchOrNull() }
-        }, getLocalData = {
+        runCatching {
+            refreshMatchesFromRemote(tournamentId)
+        }.recoverCatching { error ->
+            Napier.w(
+                "Remote matches load failed for event $tournamentId; returning cached matches: ${error.message}"
+            )
             databaseService.getMatchDao.getMatchesOfTournament(tournamentId)
-        }, saveData = { matches ->
-            databaseService.getMatchDao.upsertMatches(matches)
-        }, deleteData = { databaseService.getMatchDao.deleteMatchesById(it) })
+        }
 
     override suspend fun deleteMatchesOfTournament(tournamentId: String): Result<Unit> = runCatching {
         val normalizedId = tournamentId.trim()

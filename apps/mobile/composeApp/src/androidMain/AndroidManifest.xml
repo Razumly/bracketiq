@@ -46,7 +46,7 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="http"/>
                 <data android:scheme="https"/>
-                <data android:host="mvp.razumly.com"/>
+                <data android:host="bracket-iq.com"/>
                 <data android:pathPrefix="/"/>
             </intent-filter>
 
@@ -56,8 +56,8 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="http"/>
                 <data android:scheme="https"/>
-                <data android:host="www.razumly.com"/>
-                <data android:pathPrefix="/mvp"/>
+                <data android:host="www.bracket-iq.com"/>
+                <data android:pathPrefix="/"/>
             </intent-filter>
         </activity>
     </application>

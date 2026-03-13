@@ -52,6 +52,8 @@ import com.razumly.mvp.core.data.repositories.SelfRegistrationResult
 import com.razumly.mvp.core.data.repositories.SignerContext
 import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.SignupProfileSelection
+import com.razumly.mvp.core.data.repositories.UserEmailMembershipMatch
+import com.razumly.mvp.core.network.dto.InviteCreateDto
 import com.razumly.mvp.core.network.MvpUploadFile
 import com.razumly.mvp.core.presentation.RentalCreateContext
 import com.razumly.mvp.core.util.LoadingHandler
@@ -120,7 +122,9 @@ internal class CreateEventHarness(
         imageRepository = imageRepository,
         rentalContext = rentalContext,
         onEventCreated = { onEventCreatedCount += 1 }
-    )
+    ).also { component ->
+        component.setLoadingHandler(loadingHandler)
+    }
 }
 
 internal fun createSport(id: String, usePointsPerSetWin: Boolean): Sport =
@@ -184,6 +188,10 @@ internal class CreateEvent_FakeUserRepository : IUserRepository {
         email = "user@example.test",
         name = user.fullName,
     )
+    val createInviteCalls = mutableListOf<List<InviteCreateDto>>()
+    var createdInvitesResult: List<com.razumly.mvp.core.data.dataTypes.Invite> = emptyList()
+    var emailMembershipMatches: List<UserEmailMembershipMatch> = emptyList()
+    var searchResults: List<UserData> = emptyList()
 
     override val currentUser: StateFlow<Result<UserData>> = MutableStateFlow(Result.success(user))
     override val currentAccount: StateFlow<Result<AuthAccount>> = MutableStateFlow(Result.success(account))
@@ -193,8 +201,17 @@ internal class CreateEvent_FakeUserRepository : IUserRepository {
     override suspend fun getUsers(userIds: List<String>): Result<List<UserData>> = Result.success(emptyList())
     override fun getUsersFlow(userIds: List<String>): Flow<Result<List<UserData>>> =
         flowOf(Result.success(emptyList()))
-    override suspend fun searchPlayers(search: String): Result<List<UserData>> = Result.success(emptyList())
+    override suspend fun searchPlayers(search: String): Result<List<UserData>> = Result.success(searchResults)
     override suspend fun ensureUserByEmail(email: String): Result<UserData> = Result.success(user)
+    override suspend fun createInvites(invites: List<InviteCreateDto>): Result<List<com.razumly.mvp.core.data.dataTypes.Invite>> =
+        Result.success(createdInvitesResult).also {
+            createInviteCalls += invites
+        }
+    override suspend fun deleteInvite(inviteId: String): Result<Unit> = Result.success(Unit)
+    override suspend fun findEmailMembership(
+        emails: List<String>,
+        userIds: List<String>,
+    ): Result<List<UserEmailMembershipMatch>> = Result.success(emailMembershipMatches)
     override suspend fun listInvites(userId: String, type: String?): Result<List<com.razumly.mvp.core.data.dataTypes.Invite>> =
         Result.success(emptyList())
     override suspend fun acceptInvite(inviteId: String): Result<Unit> = Result.success(Unit)
@@ -272,6 +289,7 @@ internal class CreateEvent_FakeEventRepository(
     private val organizationEvents: List<Event> = emptyList(),
 ) : IEventRepository {
     val createEventCalls = mutableListOf<CreateEventCall>()
+    val updateEventCalls = mutableListOf<Event>()
 
     override fun getCachedEventsFlow(): Flow<Result<List<Event>>> =
         flowOf(Result.success(emptyList()))
@@ -281,6 +299,8 @@ internal class CreateEvent_FakeEventRepository(
 
     override fun resetCursor() = Unit
     override suspend fun getEvent(eventId: String): Result<Event> = Result.failure(IllegalStateException("unused"))
+    override suspend fun getEventStaffInvites(eventId: String): Result<List<com.razumly.mvp.core.data.dataTypes.Invite>> =
+        Result.success(emptyList())
     override suspend fun getEventsByIds(eventIds: List<String>): Result<List<Event>> = Result.success(emptyList())
 
     override suspend fun getEventsByOrganization(
@@ -304,7 +324,10 @@ internal class CreateEvent_FakeEventRepository(
     override suspend fun scheduleEvent(eventId: String, participantCount: Int?): Result<Event> =
         Result.failure(IllegalStateException("unused"))
 
-    override suspend fun updateEvent(newEvent: Event): Result<Event> = Result.failure(IllegalStateException("unused"))
+    override suspend fun updateEvent(newEvent: Event): Result<Event> = runCatching {
+        updateEventCalls += newEvent
+        newEvent
+    }
     override suspend fun updateLocalEvent(newEvent: Event): Result<Event> = Result.failure(IllegalStateException("unused"))
     override fun getEventsInBoundsFlow(bounds: Bounds): Flow<Result<List<Event>>> =
         flowOf(Result.success(emptyList()))

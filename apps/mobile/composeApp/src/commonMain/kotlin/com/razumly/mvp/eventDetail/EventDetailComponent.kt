@@ -10,6 +10,7 @@ import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
+import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfig
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
@@ -132,6 +133,8 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val leagueDivisionStandings: StateFlow<LeagueDivisionStandings?>
     val leagueDivisionStandingsLoading: StateFlow<Boolean>
     val leagueStandingsConfirming: StateFlow<Boolean>
+    val suggestedUsers: StateFlow<List<UserData>>
+    val pendingStaffInvites: StateFlow<List<PendingStaffInviteDraft>>
 
 
     fun onNavigateToChat(user: UserData)
@@ -213,6 +216,14 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun onUploadSelected(photo: GalleryPhotoResult)
     fun deleteImage(imageId: String)
     fun sendNotification(title: String, message: String)
+    fun searchUsers(query: String)
+    suspend fun addPendingStaffInvite(
+        firstName: String,
+        lastName: String,
+        email: String,
+        roles: Set<EventStaffRole>,
+    ): Result<Unit>
+    fun removePendingStaffInvite(email: String, role: EventStaffRole? = null)
 }
 
 data class TeamSelectionDialogState(
@@ -315,7 +326,8 @@ data class EventWithFullRelations(
     val organization: Organization? = null,
     val sport: Sport? = null,
     val leagueScoringConfig: LeagueScoringConfig? = null,
-    val host: UserData? = null
+    val host: UserData? = null,
+    val staffInvites: List<Invite> = emptyList(),
 )
 
 fun EventWithRelations.toEventWithFullRelations(
@@ -432,6 +444,11 @@ class DefaultEventDetailComponent(
             AuthAccount.empty()
         }
     }.stateIn(scope, SharingStarted.Eagerly, AuthAccount.empty())
+    private val _suggestedUsers = MutableStateFlow<List<UserData>>(emptyList())
+    override val suggestedUsers = _suggestedUsers.asStateFlow()
+    private val _pendingStaffInvites = MutableStateFlow<List<PendingStaffInviteDraft>>(emptyList())
+    override val pendingStaffInvites = _pendingStaffInvites.asStateFlow()
+    private val _eventStaffInvites = MutableStateFlow<List<Invite>>(emptyList())
 
     private val _errorState = MutableStateFlow<ErrorMessage?>(null)
     override val errorState = _errorState.asStateFlow()
@@ -537,9 +554,8 @@ class DefaultEventDetailComponent(
                     _errorState.value =
                         ErrorMessage("Error loading matches: ${it.message}"); emptyList()
                 }
-            }, teamRepository.getTeamsFlow(
-                relations.event.teamIds
-            ).map { result ->
+            },
+            teamRepository.getTeamsFlow(relations.event.teamIds).map { result ->
                 result.getOrElse {
                     _errorState.value =
                         ErrorMessage("Failed to load teams: ${it.message}"); emptyList()
@@ -555,8 +571,10 @@ class DefaultEventDetailComponent(
             relations.toEventWithFullRelations(matches, teams).copy(
                 timeSlots = timeSlots,
                 sport = sport,
-                host = relations.host ?: hostFallback
+                host = relations.host ?: hostFallback,
             )
+        }.combine(_eventStaffInvites) { combinedRelations, staffInvites ->
+            combinedRelations.copy(staffInvites = staffInvites)
         }
     }.stateIn(
         scope, SharingStarted.Eagerly, EventWithFullRelations(
@@ -802,6 +820,19 @@ class DefaultEventDetailComponent(
                         }
                     }
                     loadingHandler.hideLoading()
+                }
+            }
+        }
+        scope.launch {
+            selectedEvent.collect { selected ->
+                if (selected.id.isBlank()) {
+                    _eventStaffInvites.value = emptyList()
+                } else {
+                    _eventStaffInvites.value = eventRepository.getEventStaffInvites(selected.id)
+                        .getOrElse { error ->
+                            Napier.w("Failed to refresh staff invites for event ${selected.id}: ${error.message}")
+                            emptyList()
+                        }
                 }
             }
         }
@@ -1860,6 +1891,10 @@ class DefaultEventDetailComponent(
         } else {
             selected
         }
+        if (!enabled) {
+            _pendingStaffInvites.value = emptyList()
+            _suggestedUsers.value = emptyList()
+        }
         _isEditing.value = enabled
     }
 
@@ -1875,18 +1910,121 @@ class DefaultEventDetailComponent(
             .withSportRules()
     }
 
+    override fun searchUsers(query: String) {
+        val normalizedQuery = query.trim()
+        if (normalizedQuery.isEmpty()) {
+            _suggestedUsers.value = emptyList()
+            return
+        }
+
+        scope.launch {
+            _suggestedUsers.value = userRepository.searchPlayers(normalizedQuery)
+                .getOrElse { error ->
+                    _errorState.value = ErrorMessage(error.message ?: "Unable to search users.")
+                    emptyList()
+                }
+        }
+    }
+
+    override suspend fun addPendingStaffInvite(
+        firstName: String,
+        lastName: String,
+        email: String,
+        roles: Set<EventStaffRole>,
+    ): Result<Unit> = runCatching {
+        val normalizedDraft = PendingStaffInviteDraft(
+            firstName = firstName.trim(),
+            lastName = lastName.trim(),
+            email = normalizeStaffInviteEmail(email),
+            roles = roles,
+        )
+        if (normalizedDraft.email.isBlank()) error("Email is required.")
+        if (normalizedDraft.roles.isEmpty()) error("Select at least one role.")
+
+        val existingDraft = _pendingStaffInvites.value.firstOrNull { draft ->
+            normalizeStaffInviteEmail(draft.email) == normalizedDraft.email
+        }
+        if (existingDraft != null && normalizedDraft.roles.all(existingDraft.roles::contains)) {
+            error("That email is already added for the selected role.")
+        }
+
+        val event = _editedEvent.value
+        val assignedUserIds = normalizedDraft.roles
+            .flatMap { role -> event.assignedUserIdsForRole(role) }
+            .distinct()
+        if (assignedUserIds.isNotEmpty()) {
+            val matches = userRepository.findEmailMembership(
+                emails = listOf(normalizedDraft.email),
+                userIds = assignedUserIds,
+            ).getOrThrow()
+            normalizedDraft.roles.forEach { role ->
+                val roleUserIds = event.assignedUserIdsForRole(role)
+                if (matches.any { match -> roleUserIds.contains(match.userId) }) {
+                    error("${normalizedDraft.email} is already added in the ${role.conflictListLabel()}.")
+                }
+            }
+        }
+
+        _pendingStaffInvites.value = mergePendingStaffInviteDraft(
+            existing = _pendingStaffInvites.value,
+            draft = normalizedDraft,
+        )
+    }.onFailure { error ->
+        _errorState.value = ErrorMessage(error.message ?: "Unable to add staff invite.")
+    }
+
+    override fun removePendingStaffInvite(email: String, role: EventStaffRole?) {
+        val normalizedEmail = normalizeStaffInviteEmail(email)
+        if (normalizedEmail.isBlank()) {
+            return
+        }
+        _pendingStaffInvites.value = _pendingStaffInvites.value.mapNotNull { draft ->
+            if (normalizeStaffInviteEmail(draft.email) != normalizedEmail) {
+                draft
+            } else if (role == null) {
+                null
+            } else {
+                val updatedRoles = draft.roles - role
+                if (updatedRoles.isEmpty()) {
+                    null
+                } else {
+                    draft.copy(roles = updatedRoles)
+                }
+            }
+        }
+    }
+
     override fun updateEvent() {
         scope.launch {
-            eventRepository.updateEvent(_editedEvent.value)
-                .onSuccess { updated ->
-                    if (updated.eventType == EventType.LEAGUE || updated.eventType == EventType.TOURNAMENT) {
-                        matchRepository.getMatchesOfTournament(updated.id)
-                    }
+            loadingHandler.showLoading("Saving event...")
+            runCatching {
+                val updated = eventRepository.updateEvent(_editedEvent.value).getOrThrow()
+                val saveOutcome = reconcileEventStaffInvites(
+                    userRepository = userRepository,
+                    event = updated,
+                    pendingStaffInvites = _pendingStaffInvites.value,
+                    existingStaffInvites = _eventStaffInvites.value,
+                    createdByUserId = currentUser.value.id,
+                ).getOrThrow()
+                val finalEvent = if (saveOutcome.event == updated) {
+                    updated
+                } else {
+                    eventRepository.updateEvent(saveOutcome.event).getOrThrow()
                 }
-                .onFailure {
-                    _errorState.value = ErrorMessage(it.message ?: "")
+                _eventStaffInvites.value = saveOutcome.staffInvites
+                _pendingStaffInvites.value = emptyList()
+                _suggestedUsers.value = emptyList()
+                if (finalEvent.eventType == EventType.LEAGUE || finalEvent.eventType == EventType.TOURNAMENT) {
+                    matchRepository.getMatchesOfTournament(finalEvent.id)
                 }
-            cancelEditingEvent()
+                finalEvent
+            }.onSuccess {
+                loadingHandler.hideLoading()
+                cancelEditingEvent()
+            }.onFailure { error ->
+                loadingHandler.hideLoading()
+                _errorState.value = ErrorMessage(error.message ?: "Unable to save event.")
+            }
         }
     }
 

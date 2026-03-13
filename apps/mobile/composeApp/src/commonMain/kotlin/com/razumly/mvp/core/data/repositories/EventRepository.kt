@@ -4,6 +4,7 @@ import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.Bounds
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
@@ -60,6 +61,7 @@ interface IEventRepository : IMVPRepository {
     fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>>
     fun resetCursor()
     suspend fun getEvent(eventId: String): Result<Event>
+    suspend fun getEventStaffInvites(eventId: String): Result<List<Invite>>
     suspend fun getEventsByIds(eventIds: List<String>): Result<List<Event>>
     suspend fun getEventsByOrganization(organizationId: String, limit: Int = 200): Result<List<Event>>
     suspend fun createEvent(
@@ -226,8 +228,12 @@ class EventRepository(
             }
         }
 
+    private suspend fun fetchRemoteEventDto(eventId: String): EventApiDto {
+        return api.get<EventApiDto>("api/events/$eventId")
+    }
+
     private suspend fun fetchRemoteEvent(eventId: String): Event {
-        val dto = api.get<EventApiDto>("api/events/$eventId")
+        val dto = fetchRemoteEventDto(eventId)
         return dto.toEventOrNull() ?: error("Event $eventId response missing required fields")
     }
 
@@ -290,6 +296,11 @@ class EventRepository(
             databaseService.getEventDao.getEventById(eventId)
                 ?: throw IllegalStateException("Event $eventId not cached")
         })
+
+    override suspend fun getEventStaffInvites(eventId: String): Result<List<Invite>> = runCatching {
+        val normalizedEventId = eventId.trim().takeIf(String::isNotBlank) ?: return@runCatching emptyList()
+        fetchRemoteEventDto(normalizedEventId).staffInvites.orEmpty()
+    }
 
     override suspend fun getEventsByIds(eventIds: List<String>): Result<List<Event>> = runCatching {
         val ids = eventIds.map(String::trim).filter(String::isNotBlank).distinct()
@@ -802,6 +813,8 @@ class EventRepository(
             event.playerIds +
                 event.freeAgentIds +
                 event.waitListIds +
+                event.assistantHostIds +
+                event.refereeIds +
                 event.hostId +
                 teamPlayerIds
             )

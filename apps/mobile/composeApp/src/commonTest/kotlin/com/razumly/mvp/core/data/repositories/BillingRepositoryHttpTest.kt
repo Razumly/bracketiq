@@ -69,6 +69,12 @@ private class BillingRepositoryHttp_FakeUserRepository(
     override suspend fun logout(): Result<Unit> = error("unused")
     override suspend fun searchPlayers(search: String): Result<List<UserData>> = error("unused")
     override suspend fun ensureUserByEmail(email: String): Result<UserData> = error("unused")
+    override suspend fun createInvites(invites: List<com.razumly.mvp.core.network.dto.InviteCreateDto>): Result<List<com.razumly.mvp.core.data.dataTypes.Invite>> = error("unused")
+    override suspend fun deleteInvite(inviteId: String): Result<Unit> = error("unused")
+    override suspend fun findEmailMembership(
+        emails: List<String>,
+        userIds: List<String>,
+    ): Result<List<UserEmailMembershipMatch>> = error("unused")
     override suspend fun listInvites(userId: String, type: String?): Result<List<com.razumly.mvp.core.data.dataTypes.Invite>> = error("unused")
     override suspend fun acceptInvite(inviteId: String): Result<Unit> = error("unused")
     override suspend fun declineInvite(inviteId: String): Result<Unit> = error("unused")
@@ -129,6 +135,7 @@ private object BillingRepositoryHttp_UnusedEventRepository : IEventRepository {
     override fun getEventWithRelationsFlow(eventId: String): Flow<Result<com.razumly.mvp.core.data.dataTypes.EventWithRelations>> = error("unused")
     override fun resetCursor() {}
     override suspend fun getEvent(eventId: String): Result<Event> = error("unused")
+    override suspend fun getEventStaffInvites(eventId: String): Result<List<com.razumly.mvp.core.data.dataTypes.Invite>> = error("unused")
     override suspend fun getEventsByIds(eventIds: List<String>): Result<List<Event>> = error("unused")
     override suspend fun getEventsByOrganization(organizationId: String, limit: Int): Result<List<Event>> = error("unused")
     override suspend fun createEvent(
@@ -528,11 +535,16 @@ class BillingRepositoryHttpTest {
             currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
         )
         val db = BillingRepositoryHttp_FakeDatabaseService()
+        var capturedBody = ""
 
         val engine = MockEngine { request ->
             assertEquals("/api/events/event_1/sign", request.url.encodedPath)
             assertEquals(HttpMethod.Post, request.method)
             assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
 
             respond(
                 content = """
@@ -570,6 +582,7 @@ class BillingRepositoryHttpTest {
         assertTrue(signLinks[0].isTextStep())
         assertEquals("https://app.boldsign.com/sign/doc_123", signLinks[1].resolvedSigningUrl())
         assertEquals("doc_123", signLinks[1].resolvedDocumentId())
+        assertTrue(capturedBody.contains("\"redirectUrl\":\"https://bracket-iq.com/event/event_1\""))
     }
 
     @Test
@@ -612,6 +625,7 @@ class BillingRepositoryHttpTest {
         assertTrue(capturedBody.contains("\"signerContext\":\"parent_guardian\""))
         assertTrue(capturedBody.contains("\"childUserId\":\"child_1\""))
         assertTrue(capturedBody.contains("\"childEmail\":\"child@example.test\""))
+        assertTrue(capturedBody.contains("\"redirectUrl\":\"https://bracket-iq.com/event/event_1\""))
     }
 
     @Test

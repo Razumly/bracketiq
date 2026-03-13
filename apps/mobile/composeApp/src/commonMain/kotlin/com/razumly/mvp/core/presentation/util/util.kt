@@ -211,7 +211,7 @@ fun AnimatedContentTransitionScope<Boolean>.buttonTransitionSpec() =
     }.using(SizeTransform(clip = false))
 
 fun createEventUrl(event: Event): String {
-    return "https://www.razumly.com/mvp/${if (event.eventType == EventType.TOURNAMENT) "tournament/" else "event/"}${event.id}"
+    return "https://bracket-iq.com/${if (event.eventType == EventType.TOURNAMENT) "tournament/" else "event/"}${event.id}"
 }
 fun getImageUrl(fileId: String, width: Int? = null, height: Int? = null): String =
     buildString {

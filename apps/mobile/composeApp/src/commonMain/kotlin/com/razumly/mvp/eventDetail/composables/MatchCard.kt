@@ -38,6 +38,7 @@ import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
+import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.divisionsEquivalent
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
@@ -67,6 +68,10 @@ fun MatchCard(
     val matches by component.divisionMatches.collectAsState()
     val fields by component.divisionFields.collectAsState()
     val selectedEvent by component.selectedEvent.collectAsState()
+    val eventWithRelations by component.eventWithRelations.collectAsState()
+    val usersById = remember(eventWithRelations.players) {
+        eventWithRelations.players.associateBy(UserData::id)
+    }
     val matchCardColorPallet = if (match != null && match.match.losersBracket) {
         ColorPallete(MaterialTheme.colorScheme.tertiary,
             MaterialTheme.colorScheme.onTertiary,
@@ -120,10 +125,15 @@ fun MatchCard(
                     }
                 }
                 val matchDateTimeLabel = formatMatchDateTimeLabel(match.match.start)
-                val showReferee = !match.match.teamRefereeId.isNullOrBlank() || match.teamReferee != null
+                val showReferee =
+                    !match.match.teamRefereeId.isNullOrBlank() ||
+                    !match.match.refereeId.isNullOrBlank() ||
+                    match.teamReferee != null
                 val refereeLabel = resolveRefereeLabel(
+                    refereeUserId = match.match.refereeId,
                     refereeTeamId = match.match.teamRefereeId,
                     teams = teams,
+                    usersById = usersById,
                     fallbackTeamName = match.teamReferee?.name,
                 )
                 FloatingBox(
@@ -369,16 +379,33 @@ private fun resolveTeamLabel(team: TeamWithPlayers): String {
 }
 
 private fun resolveRefereeLabel(
+    refereeUserId: String?,
     refereeTeamId: String?,
     teams: Map<String, TeamWithPlayers>,
+    usersById: Map<String, UserData>,
     fallbackTeamName: String?,
 ): String {
     val refereeTeam = refereeTeamId?.let { teams[it] }
     if (refereeTeam != null) {
         return resolveTeamLabel(refereeTeam)
     }
+
+    val refereeUser = refereeUserId?.let { usersById[it] }
+    if (refereeUser != null) {
+        return resolveUserLabel(refereeUser)
+    }
+
     val fallback = fallbackTeamName?.trim().orEmpty()
     return fallback.ifBlank { "TBD" }
+}
+
+private fun resolveUserLabel(user: UserData): String {
+    val fullName = user.fullName.trim()
+    if (fullName.isNotEmpty()) {
+        return fullName
+    }
+    val userName = user.userName.trim()
+    return userName.ifBlank { "TBD" }
 }
 
 internal enum class BracketTeamSlot { TEAM1, TEAM2 }

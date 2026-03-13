@@ -67,6 +67,7 @@ fun CreateEventScreen(
     val leagueSlots by component.leagueSlots.collectAsState()
     val leagueScoringConfig by component.leagueScoringConfig.collectAsState()
     val suggestedUsers by component.suggestedUsers.collectAsState()
+    val pendingStaffInvites by component.pendingStaffInvites.collectAsState()
     val isEditing = true
     val currentUser by component.currentUser.collectAsState()
     val isDark = isSystemInDarkTheme()
@@ -170,6 +171,14 @@ fun CreateEventScreen(
     val onSearchUsers: (String) -> Unit = remember(component) { component::searchUsers }
     val onEnsureUserByEmail: suspend (String) -> Result<UserData> =
         remember(component) { { email -> component.ensureUserByEmail(email) } }
+    val onAddPendingStaffInvite:
+        suspend (String, String, String, Set<com.razumly.mvp.eventDetail.EventStaffRole>) -> Result<Unit> =
+        remember(component) { { firstName, lastName, email, roles ->
+            component.addPendingStaffInvite(firstName, lastName, email, roles)
+        } }
+    val onRemovePendingStaffInvite:
+        (String, com.razumly.mvp.eventDetail.EventStaffRole?) -> Unit =
+        remember(component) { component::removePendingStaffInvite }
 
     Scaffold(
         modifier = Modifier.padding(LocalNavBarPadding.current),
@@ -265,9 +274,12 @@ fun CreateEventScreen(
                         onLeagueScoringConfigChange = { updated ->
                             component.updateLeagueScoringConfig { updated }
                         },
+                        pendingStaffInvites = pendingStaffInvites,
                         userSuggestions = suggestedUsers,
                         onSearchUsers = onSearchUsers,
                         onEnsureUserByEmail = onEnsureUserByEmail,
+                        onAddPendingStaffInvite = onAddPendingStaffInvite,
+                        onRemovePendingStaffInvite = onRemovePendingStaffInvite,
                         onUpdateHostId = onUpdateHostId,
                         onUpdateAssistantHostIds = onUpdateAssistantHostIds,
                         onUpdateDoTeamsRef = onUpdateDoTeamsRef,

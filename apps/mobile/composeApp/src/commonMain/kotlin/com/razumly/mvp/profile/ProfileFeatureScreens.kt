@@ -265,6 +265,13 @@ fun ProfileInvitesScreen(component: ProfileComponent) {
             invite.type.equals("TEAM", ignoreCase = true) && !invite.teamId.isNullOrBlank()
         }
     }
+    val eventStaffInvites = remember(invitesState.invites) {
+        invitesState.invites.filter { invite ->
+            invite.type.equals("STAFF", ignoreCase = true) &&
+                invite.organizationId.isNullOrBlank() &&
+                !invite.eventId.isNullOrBlank()
+        }
+    }
     val eventInvites = remember(invitesState.invites) {
         invitesState.invites.filter { invite ->
             invite.type.equals("EVENT", ignoreCase = true) && !invite.eventId.isNullOrBlank()
@@ -273,7 +280,7 @@ fun ProfileInvitesScreen(component: ProfileComponent) {
 
     ProfileSectionScaffold(
         title = "Invites",
-        description = "Review organization, team, and event invites waiting on you.",
+        description = "Review organization, team, event staff, and event invites waiting on you.",
         onBack = component::onBackClicked,
         onRefresh = component::refreshInvites,
         isRefreshing = invitesState.isLoading,
@@ -304,19 +311,25 @@ fun ProfileInvitesScreen(component: ProfileComponent) {
             }
 
             else -> {
+                val hasActiveInviteAction = invitesState.activeInviteId != null
                 if (organizationInvites.isNotEmpty()) {
                     SectionHeaderRow(title = "Organization Invites")
                     organizationInvites.forEach { invite ->
                         val organization = invite.organizationId?.let(invitesState.organizationsById::get)
+                        val isAccepting = invitesState.activeInviteId == invite.id &&
+                            invitesState.activeInviteAction == ProfileInviteAction.ACCEPT
+                        val isDeclining = invitesState.activeInviteId == invite.id &&
+                            invitesState.activeInviteAction == ProfileInviteAction.DECLINE
                         InviteActionCard(
                             title = organization?.name ?: "Organization",
                             subtitle = invite.staffInviteRoleLabel(),
                             tertiary = invite.email.takeIf(String::isNotBlank),
-                            primaryActionLabel = if (invitesState.activeInviteId == invite.id) "Accepting..." else "Accept",
+                            primaryActionLabel = if (isAccepting) "Accepting..." else "Accept",
                             onPrimaryAction = { component.acceptInvite(invite) },
-                            secondaryActionLabel = if (invitesState.activeInviteId == invite.id) "Declining..." else "Decline",
+                            secondaryActionLabel = if (isDeclining) "Declining..." else "Decline",
                             onSecondaryAction = { component.declineInvite(invite) },
-                            enabled = invitesState.activeInviteId == null || invitesState.activeInviteId == invite.id,
+                            primaryEnabled = !hasActiveInviteAction || isAccepting,
+                            secondaryEnabled = !hasActiveInviteAction || isDeclining,
                         )
                     }
                 }
@@ -325,15 +338,44 @@ fun ProfileInvitesScreen(component: ProfileComponent) {
                     SectionHeaderRow(title = "Team Invites")
                     teamInvites.forEach { invite ->
                         val team = invite.teamId?.let(invitesState.teamsById::get)
+                        val isAccepting = invitesState.activeInviteId == invite.id &&
+                            invitesState.activeInviteAction == ProfileInviteAction.ACCEPT
+                        val isDeclining = invitesState.activeInviteId == invite.id &&
+                            invitesState.activeInviteAction == ProfileInviteAction.DECLINE
                         InviteActionCard(
                             title = team?.team?.name?.takeIf(String::isNotBlank) ?: "Team",
                             subtitle = invite.inferTeamInviteRole(team?.team).label(),
                             tertiary = invite.email.takeIf(String::isNotBlank),
-                            primaryActionLabel = if (invitesState.activeInviteId == invite.id) "Accepting..." else "Accept",
+                            primaryActionLabel = if (isAccepting) "Accepting..." else "Accept",
                             onPrimaryAction = { component.acceptInvite(invite) },
-                            secondaryActionLabel = if (invitesState.activeInviteId == invite.id) "Declining..." else "Decline",
+                            secondaryActionLabel = if (isDeclining) "Declining..." else "Decline",
                             onSecondaryAction = { component.declineInvite(invite) },
-                            enabled = invitesState.activeInviteId == null || invitesState.activeInviteId == invite.id,
+                            primaryEnabled = !hasActiveInviteAction || isAccepting,
+                            secondaryEnabled = !hasActiveInviteAction || isDeclining,
+                        )
+                    }
+                }
+
+                if (eventStaffInvites.isNotEmpty()) {
+                    SectionHeaderRow(title = "Event Staff Invites")
+                    eventStaffInvites.forEach { invite ->
+                        val event = invite.eventId?.let(invitesState.eventsById::get)
+                        val isAccepting = invitesState.activeInviteId == invite.id &&
+                            invitesState.activeInviteAction == ProfileInviteAction.ACCEPT
+                        val isDeclining = invitesState.activeInviteId == invite.id &&
+                            invitesState.activeInviteAction == ProfileInviteAction.DECLINE
+                        InviteActionCard(
+                            title = event?.name?.takeIf(String::isNotBlank) ?: "Event",
+                            subtitle = invite.staffInviteRoleLabel(),
+                            tertiary = event?.start?.let(::formatTemplateDateTime)
+                                ?: event?.location?.takeIf(String::isNotBlank)
+                                ?: invite.email.takeIf(String::isNotBlank),
+                            primaryActionLabel = if (isAccepting) "Accepting..." else "Accept",
+                            onPrimaryAction = { component.acceptInvite(invite) },
+                            secondaryActionLabel = if (isDeclining) "Declining..." else "Decline",
+                            onSecondaryAction = { component.declineInvite(invite) },
+                            primaryEnabled = !hasActiveInviteAction || isAccepting,
+                            secondaryEnabled = !hasActiveInviteAction || isDeclining,
                         )
                     }
                 }
@@ -342,6 +384,8 @@ fun ProfileInvitesScreen(component: ProfileComponent) {
                     SectionHeaderRow(title = "Event Invites")
                     eventInvites.forEach { invite ->
                         val event = invite.eventId?.let(invitesState.eventsById::get)
+                        val isDeclining = invitesState.activeInviteId == invite.id &&
+                            invitesState.activeInviteAction == ProfileInviteAction.DECLINE
                         InviteActionCard(
                             title = event?.name?.takeIf(String::isNotBlank) ?: "Event",
                             subtitle = event?.location?.takeIf(String::isNotBlank) ?: "Event Invite",
@@ -350,9 +394,10 @@ fun ProfileInvitesScreen(component: ProfileComponent) {
                             onPrimaryAction = {
                                 invite.eventId?.let(component::openInviteEvent)
                             },
-                            secondaryActionLabel = if (invitesState.activeInviteId == invite.id) "Declining..." else "Decline",
+                            secondaryActionLabel = if (isDeclining) "Declining..." else "Decline",
                             onSecondaryAction = { component.declineInvite(invite) },
-                            enabled = invitesState.activeInviteId == null || invitesState.activeInviteId == invite.id,
+                            primaryEnabled = !hasActiveInviteAction,
+                            secondaryEnabled = !hasActiveInviteAction || isDeclining,
                         )
                     }
                 }
@@ -1500,7 +1545,8 @@ private fun InviteActionCard(
     onPrimaryAction: () -> Unit,
     secondaryActionLabel: String,
     onSecondaryAction: () -> Unit,
-    enabled: Boolean,
+    primaryEnabled: Boolean,
+    secondaryEnabled: Boolean,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -1536,14 +1582,14 @@ private fun InviteActionCard(
             ) {
                 Button(
                     modifier = Modifier.weight(1f),
-                    enabled = enabled,
+                    enabled = primaryEnabled,
                     onClick = onPrimaryAction,
                 ) {
                     Text(primaryActionLabel)
                 }
                 Button(
                     modifier = Modifier.weight(1f),
-                    enabled = enabled,
+                    enabled = secondaryEnabled,
                     onClick = onSecondaryAction,
                 ) {
                     Text(secondaryActionLabel)

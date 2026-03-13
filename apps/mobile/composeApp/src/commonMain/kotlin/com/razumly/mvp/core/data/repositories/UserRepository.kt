@@ -10,8 +10,12 @@ import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.AuthTokenStore
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.dto.AuthResponseDto
+import com.razumly.mvp.core.network.dto.CreateInvitesRequestDto
+import com.razumly.mvp.core.network.dto.EmailMembershipLookupRequestDto
+import com.razumly.mvp.core.network.dto.EmailMembershipLookupResponseDto
 import com.razumly.mvp.core.network.dto.EnsureUserByEmailRequestDto
 import com.razumly.mvp.core.network.dto.GoogleMobileLoginRequestDto
+import com.razumly.mvp.core.network.dto.InviteCreateDto
 import com.razumly.mvp.core.network.dto.InvitesResponseDto
 import com.razumly.mvp.core.network.dto.LoginRequestDto
 import com.razumly.mvp.core.network.dto.OkResponseDto
@@ -139,6 +143,11 @@ data class SignupProfileConflict(
     val incoming: SignupProfileSnapshot,
 )
 
+data class UserEmailMembershipMatch(
+    val email: String,
+    val userId: String,
+)
+
 class SignupProfileConflictException(
     val conflict: SignupProfileConflict,
 ) : Exception(
@@ -167,6 +176,12 @@ interface IUserRepository : IMVPRepository {
      * The returned [UserData] must not contain sensitive information (email/password/etc).
      */
     suspend fun ensureUserByEmail(email: String): Result<UserData>
+    suspend fun createInvites(invites: List<InviteCreateDto>): Result<List<Invite>>
+    suspend fun deleteInvite(inviteId: String): Result<Unit>
+    suspend fun findEmailMembership(
+        emails: List<String>,
+        userIds: List<String>,
+    ): Result<List<UserEmailMembershipMatch>>
     suspend fun listInvites(userId: String, type: String? = null): Result<List<Invite>>
     suspend fun acceptInvite(inviteId: String): Result<Unit>
     suspend fun declineInvite(inviteId: String): Result<Unit>
@@ -550,6 +565,81 @@ class UserRepository(
         val user = res.user?.toUserDataOrNull() ?: error("Ensure user response missing user")
         databaseService.getUserDataDao.upsertUserData(user)
         user
+    }
+
+    override suspend fun createInvites(invites: List<InviteCreateDto>): Result<List<Invite>> = runCatching {
+        val normalizedInvites = invites.mapNotNull { invite ->
+            val normalizedType = invite.type.trim()
+            if (normalizedType.isBlank()) {
+                null
+            } else {
+                invite.copy(
+                    type = normalizedType,
+                    email = invite.email?.trim()?.lowercase()?.takeIf(String::isNotBlank),
+                    status = invite.status?.trim()?.takeIf(String::isNotBlank),
+                    staffTypes = invite.staffTypes
+                        .map { staffType -> staffType.trim().uppercase() }
+                        .filter(String::isNotBlank)
+                        .distinct(),
+                    eventId = invite.eventId?.trim()?.takeIf(String::isNotBlank),
+                    organizationId = invite.organizationId?.trim()?.takeIf(String::isNotBlank),
+                    teamId = invite.teamId?.trim()?.takeIf(String::isNotBlank),
+                    userId = invite.userId?.trim()?.takeIf(String::isNotBlank),
+                    createdBy = invite.createdBy?.trim()?.takeIf(String::isNotBlank),
+                    firstName = invite.firstName?.trim()?.takeIf(String::isNotBlank),
+                    lastName = invite.lastName?.trim()?.takeIf(String::isNotBlank),
+                )
+            }
+        }
+        if (normalizedInvites.isEmpty()) {
+            emptyList()
+        } else {
+            api.post<CreateInvitesRequestDto, InvitesResponseDto>(
+                path = "api/invites",
+                body = CreateInvitesRequestDto(invites = normalizedInvites),
+            ).invites
+        }
+    }
+
+    override suspend fun deleteInvite(inviteId: String): Result<Unit> = runCatching {
+        val normalizedInviteId = inviteId.trim().takeIf(String::isNotBlank) ?: error("Invite id is required")
+        api.deleteNoResponse("api/invites/${normalizedInviteId.encodeURLQueryComponent()}")
+    }
+
+    override suspend fun findEmailMembership(
+        emails: List<String>,
+        userIds: List<String>,
+    ): Result<List<UserEmailMembershipMatch>> = runCatching {
+        val normalizedEmails = emails
+            .map { email -> email.trim().lowercase() }
+            .filter(String::isNotBlank)
+            .distinct()
+        val normalizedUserIds = userIds
+            .map { userId -> userId.trim() }
+            .filter(String::isNotBlank)
+            .distinct()
+        if (normalizedEmails.isEmpty() || normalizedUserIds.isEmpty()) {
+            emptyList()
+        } else {
+            api.post<EmailMembershipLookupRequestDto, EmailMembershipLookupResponseDto>(
+                path = "api/users/email-membership",
+                body = EmailMembershipLookupRequestDto(
+                    emails = normalizedEmails,
+                    userIds = normalizedUserIds,
+                ),
+            ).matches.mapNotNull { match ->
+                val normalizedEmail = match.email.trim().lowercase()
+                val normalizedUserId = match.userId.trim()
+                if (normalizedEmail.isBlank() || normalizedUserId.isBlank()) {
+                    null
+                } else {
+                    UserEmailMembershipMatch(
+                        email = normalizedEmail,
+                        userId = normalizedUserId,
+                    )
+                }
+            }
+        }
     }
 
     override suspend fun listInvites(userId: String, type: String?): Result<List<Invite>> = runCatching {
