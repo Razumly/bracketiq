@@ -125,7 +125,12 @@ val componentModule = module {
         )
     }
 
-    factory<ChatGroupComponent> { (componentContext: ComponentContext, user: UserData?, chat: ChatGroupWithRelations?) ->
+    factory<ChatGroupComponent> { (
+        componentContext: ComponentContext,
+        user: UserData?,
+        chat: ChatGroupWithRelations?,
+        navHandler: INavigationHandler,
+    ) ->
         DefaultChatGroupComponent(
             componentContext = componentContext,
             messageUser = user,
@@ -134,6 +139,7 @@ val componentModule = module {
             messagesRepository = get(),
             pushNotificationsRepository = get(),
             chatGroupRepository = get(),
+            navigationHandler = navHandler,
         )
     }
 

@@ -191,6 +191,7 @@ private object BillingRepositoryHttp_UnusedEventRepository : IEventRepository {
     override suspend fun removeCurrentUserFromEvent(event: Event, targetUserId: String?): Result<Unit> = error("unused")
 }
 
+@Suppress("SameParameterValue")
 private fun billingMakeUser(id: String): UserData {
     return UserData(
         firstName = "Test",

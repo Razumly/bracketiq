@@ -270,7 +270,9 @@ class EventRepository(
     }
 
     private suspend fun insertEventCrossReferences(
-        eventId: String, players: List<UserData>, host: List<UserData>, teams: List<Team>
+        eventId: String,
+        players: List<UserData>,
+        teams: List<Team>,
     ) {
         databaseService.getEventDao.deleteEventCrossRefs(eventId)
 
@@ -831,9 +833,7 @@ class EventRepository(
         } else {
             emptyList()
         }
-        val host = users.filter { it.id == event.hostId }
-
-        insertEventCrossReferences(event.id, relatedUsers, host, teams)
+        insertEventCrossReferences(event.id, relatedUsers, teams)
     }
 
     private fun resolveSelectedDivisionDetail(

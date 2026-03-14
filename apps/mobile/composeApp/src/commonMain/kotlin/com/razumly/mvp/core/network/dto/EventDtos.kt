@@ -455,10 +455,9 @@ fun Event.toUpdateDto(
 ): EventUpdateDto {
     val sourceRequiredTemplateIds = requiredTemplateIdsOverride ?: requiredTemplateIds
     val resolvedRequiredTemplateIds = sourceRequiredTemplateIds
-        ?.map { templateId -> templateId.trim() }
-        ?.filter { templateId -> templateId.isNotEmpty() }
-        ?.distinct()
-        ?: emptyList()
+        .map { templateId -> templateId.trim() }
+        .filter { templateId -> templateId.isNotEmpty() }
+        .distinct()
     val normalizedDivisions = divisions.normalizeDivisionIdentifiers()
     val normalizedDivisionDetails = mergeDivisionDetailsForDivisions(
         divisions = normalizedDivisions,

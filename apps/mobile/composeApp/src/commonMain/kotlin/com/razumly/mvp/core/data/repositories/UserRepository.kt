@@ -49,7 +49,6 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.decodeFromString
 import kotlin.time.Clock
 
 private const val USER_REPOSITORY_LOG_TAG = "UserRepository"
@@ -478,7 +477,7 @@ class UserRepository(
 
     private fun ApiException.toSignupConflictOrNull(): SignupProfileConflict? {
         if (statusCode != 409 || responseBody.isNullOrBlank()) return null
-        val body = responseBody ?: return null
+        val body = responseBody
         val payload = runCatching {
             jsonMVP.decodeFromString<RegisterConflictResponseDto>(body)
         }.getOrNull() ?: return null
@@ -536,8 +535,8 @@ class UserRepository(
         val today = Clock.System.now().toLocalDateTime(TimeZone.UTC).date
 
         var age = today.year - birthDate.year
-        if (today.monthNumber < birthDate.monthNumber ||
-            (today.monthNumber == birthDate.monthNumber && today.dayOfMonth < birthDate.dayOfMonth)
+        if (today.month < birthDate.month ||
+            (today.month == birthDate.month && today.day < birthDate.day)
         ) {
             age -= 1
         }
@@ -1090,7 +1089,7 @@ private data class FamilyJoinRequestDto(
             childFullName = childFullName?.trim()?.takeIf(String::isNotBlank),
             childDateOfBirth = childDateOfBirth?.trim()?.takeIf(String::isNotBlank),
             childEmail = childEmail?.trim()?.takeIf(String::isNotBlank),
-            childHasEmail = childHasEmail ?: childEmail?.isNotBlank() == true,
+            childHasEmail = childHasEmail ?: (childEmail?.isNotBlank() == true),
             consentStatus = consentStatus?.trim()?.takeIf(String::isNotBlank),
             divisionId = divisionId?.trim()?.takeIf(String::isNotBlank),
             divisionTypeId = divisionTypeId?.trim()?.takeIf(String::isNotBlank),

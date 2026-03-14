@@ -1554,7 +1554,7 @@ class DefaultCreateEventComponent(
 
     private fun createChild(
         config: Config,
-        componentContext: ComponentContext
+        _componentContext: ComponentContext,
     ): Child = when (config) {
         is Config.EventInfo -> Child.EventInfo
         is Config.Preview -> Child.Preview

@@ -717,8 +717,8 @@ private fun formatMatchDateTimeLabel(start: Instant?): String {
         return "TBD"
     }
     val localDateTime = start.toLocalDateTime(TimeZone.currentSystemDefault())
-    val month = localDateTime.date.monthNumber.toString().padStart(2, '0')
-    val day = localDateTime.date.dayOfMonth.toString().padStart(2, '0')
+    val month = localDateTime.date.month.toString().padStart(2, '0')
+    val day = localDateTime.date.day.toString().padStart(2, '0')
     val year = localDateTime.date.year
     val hour24 = localDateTime.time.hour
     val minute = localDateTime.time.minute.toString().padStart(2, '0')

@@ -822,6 +822,7 @@ private fun BracketFloatingBar(
 }
 
 @Composable
+@Suppress("DEPRECATION")
 private fun ScrollableFloatingDockRow(
     modifier: Modifier = Modifier,
     content: @Composable RowScope.() -> Unit,

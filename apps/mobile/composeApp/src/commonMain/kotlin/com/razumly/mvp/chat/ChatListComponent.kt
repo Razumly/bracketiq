@@ -50,7 +50,7 @@ class DefaultChatListComponent(
     private val _newChat = MutableStateFlow(
         ChatGroupWithRelations(
             ChatGroup(newId(), "", listOf(currentUser.id), currentUser.id),
-            users = listOf(currentUser),
+            users = listOf(),
             messages = listOf(),
         )
     )
@@ -96,27 +96,45 @@ class DefaultChatListComponent(
 
     override fun onChatCreated() {
         scope.launch {
-            chatGroupRepository.createChatGroup(newChat.value).onFailure {
+            val chatToCreate = newChat.value.copy(
+                chatGroup = newChat.value.chatGroup.copy(
+                    userIds = (newChat.value.chatGroup.userIds + currentUser.id).distinct()
+                ),
+                users = newChat.value.users
+                    .filterNot { it.id == currentUser.id }
+                    .distinctBy { it.id }
+            )
+
+            chatGroupRepository.createChatGroup(chatToCreate).onFailure {
                 _errorState.value = it.message
             }
             _newChat.value =
                 ChatGroupWithRelations(
                     ChatGroup(newId(), "", listOf(currentUser.id), currentUser.id),
-                    users = listOf(currentUser),
+                    users = listOf(),
                     messages = listOf(),
                 )
         }
     }
 
     override fun addUserToNewChat(user: UserData) {
+        if (user.id == currentUser.id) {
+            return
+        }
         val newChatGroup = _newChat.value.chatGroup
+        if (newChatGroup.userIds.contains(user.id)) {
+            return
+        }
         _newChat.value = _newChat.value.copy(
-            chatGroup = newChatGroup.copy(userIds = newChatGroup.userIds + user.id),
-            users = _newChat.value.users + user
+            chatGroup = newChatGroup.copy(userIds = (newChatGroup.userIds + user.id).distinct()),
+            users = (_newChat.value.users + user).distinctBy { it.id }
         )
     }
 
     override fun removeUserFromNewChat(user: UserData) {
+        if (user.id == currentUser.id) {
+            return
+        }
         if (!_newChat.value.chatGroup.userIds.contains(user.id)) {
             return
         }

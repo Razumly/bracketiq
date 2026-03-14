@@ -49,7 +49,6 @@ fun ChatListScreen(component: ChatListComponent) {
     val chatList by component.chatGroups.collectAsState()
     var showNewChatDialog by remember { mutableStateOf(false) }
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
-    val currentUser = component.currentUser
 
     Scaffold(
         topBar = {
@@ -94,10 +93,14 @@ fun NewChatDialog(component: ChatListComponent, onDismiss: () -> Unit) {
     var showSearchDialog by remember { mutableStateOf(false) }
     val suggestions by component.suggestedPlayers.collectAsState()
     val friends by component.friends.collectAsState()
+    val currentUserId = component.currentUser.id
+    val selectedUserIds = newChat.users.map { it.id }.toSet()
+    val selectedOtherUsers = newChat.users.filter { it.id != currentUserId }
     var isValid by remember { mutableStateOf(false) }
 
     LaunchedEffect(newChat) {
-        isValid = newChat.chatGroup.name.isNotEmpty() && newChat.users.size > 1
+        isValid = newChat.chatGroup.name.isNotEmpty() &&
+            newChat.chatGroup.userIds.distinct().size > 1
     }
 
     Dialog(onDismissRequest = { onDismiss() }) {
@@ -116,7 +119,7 @@ fun NewChatDialog(component: ChatListComponent, onDismiss: () -> Unit) {
                     label = "Chat Name",
                 )
                 LazyColumn {
-                    items(newChat.users) {
+                    items(selectedOtherUsers) {
                         Row(
                             Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -152,12 +155,14 @@ fun NewChatDialog(component: ChatListComponent, onDismiss: () -> Unit) {
         if (showSearchDialog) {
             SearchPlayerDialog(
                 freeAgents = listOf(),
-                friends = friends,
+                friends = friends.filter { friend ->
+                    friend.id != currentUserId && !selectedUserIds.contains(friend.id)
+                },
                 onSearch = { component.searchPlayers(it) },
                 onPlayerSelected = { component.addUserToNewChat(it) },
                 onDismiss = { showSearchDialog = false },
                 suggestions = suggestions.filter { suggestedUser ->
-                    !newChat.users.map { chatUser -> chatUser.id }.contains(suggestedUser.id)
+                    suggestedUser.id != currentUserId && !selectedUserIds.contains(suggestedUser.id)
                 },
                 eventName = "",
             )

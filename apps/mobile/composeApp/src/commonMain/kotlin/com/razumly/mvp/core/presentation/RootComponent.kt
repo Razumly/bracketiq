@@ -300,7 +300,7 @@ class RootComponent(
         )
 
         is AppConfig.Chat -> Child.Chat(
-            _koin.get { parametersOf(componentContext, config.user, config.chat) }
+            _koin.get { parametersOf(componentContext, config.user, config.chat, this@RootComponent) }
         )
 
         is AppConfig.Create -> Child.Create(

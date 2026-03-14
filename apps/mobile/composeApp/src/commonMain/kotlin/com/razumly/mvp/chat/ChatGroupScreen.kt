@@ -33,6 +33,7 @@ import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.MessageMVP
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
+import com.razumly.mvp.core.presentation.composables.PlatformBackButton
 import com.razumly.mvp.core.presentation.composables.PlatformTextField
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
 import kotlinx.datetime.TimeZone
@@ -59,7 +60,15 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
 
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text(chatGroup.name) })
+            TopAppBar(
+                title = { Text(chatGroup.name) },
+                navigationIcon = {
+                    PlatformBackButton(
+                        onBack = component::onBack,
+                        arrow = true,
+                    )
+                }
+            )
         },
         contentWindowInsets = WindowInsets(0)
     ) { paddingValues ->

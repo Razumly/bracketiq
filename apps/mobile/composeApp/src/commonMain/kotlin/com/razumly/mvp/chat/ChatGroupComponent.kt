@@ -9,6 +9,7 @@ import com.razumly.mvp.core.data.dataTypes.MessageMVP
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.util.newId
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -28,6 +29,7 @@ interface ChatGroupComponent {
     val chatGroup: StateFlow<ChatGroupWithRelations?>
     val errorState: StateFlow<String?>
 
+    fun onBack()
     fun onMessageInputChange(newText: String)
     fun sendMessage()
 }
@@ -41,7 +43,8 @@ class DefaultChatGroupComponent(
     messageUser: UserData?,
     chatGroup: ChatGroupWithRelations?,
     private val messagesRepository: IMessageRepository,
-    private val pushNotificationsRepository: IPushNotificationsRepository
+    private val pushNotificationsRepository: IPushNotificationsRepository,
+    private val navigationHandler: INavigationHandler,
 ) : ChatGroupComponent, ComponentContext by componentContext {
 
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
@@ -62,6 +65,10 @@ class DefaultChatGroupComponent(
     override val messageInput: StateFlow<String> = _messageInput
 
     override val currentUser = userRepository.currentUser.value.getOrThrow()
+
+    override fun onBack() {
+        navigationHandler.navigateBack()
+    }
 
     override fun onMessageInputChange(newText: String) {
         _messageInput.value = newText

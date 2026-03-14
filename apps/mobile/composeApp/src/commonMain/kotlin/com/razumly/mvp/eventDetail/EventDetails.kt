@@ -169,6 +169,7 @@ private val readOnlyNameListItemHeight = 28.dp
 private val readOnlyNameListSpacing = 4.dp
 
 @OptIn(ExperimentalHazeApi::class, ExperimentalTime::class)
+@Suppress("UNUSED_PARAMETER")
 @Composable
 fun EventDetails(
     paymentProcessor: IPaymentProcessor,
@@ -753,7 +754,6 @@ fun EventDetails(
             editEvent.singleDivision -> (
                 editEvent.playoffTeamCount
                     ?: divisionEditor.playoffTeamCount
-                    ?: fallbackMaxParticipants
                 ).coerceAtLeast(2)
 
             else -> divisionEditor.playoffTeamCount.coerceAtLeast(2)
@@ -1356,6 +1356,7 @@ fun EventDetails(
         }
     }
     val hostDisplayName = remember(host, eventWithRelations.organization) {
+        val organizationName = eventWithRelations.organization?.name.orEmpty()
         val hostName = buildString {
             val firstName = host?.firstName?.toTitleCase().orEmpty()
             val lastName = host?.lastName?.toTitleCase().orEmpty()
@@ -1369,7 +1370,7 @@ fun EventDetails(
         }.trim()
         when {
             hostName.isNotBlank() -> hostName
-            !eventWithRelations.organization?.name.isNullOrBlank() -> eventWithRelations.organization?.name.orEmpty()
+            organizationName.isNotBlank() -> organizationName
             else -> "Hosted by organizer"
         }
     }
@@ -1493,12 +1494,12 @@ fun EventDetails(
         } else {
             null
         }
-        listOf(
+        listOfNotNull(
             if (event.singleDivision) "Single division" else "Multi division",
             maxLabel,
             "Team size ${event.teamSizeLimit}",
             leagueSummary,
-        ).filterNotNull().joinToString(" • ")
+        ).joinToString(" • ")
     }
     val readOnlyFieldCount = remember(event.fieldIds, editableFields.size) {
         resolveReadOnlyFieldCount(event = event, editableFields = editableFields)
@@ -1511,7 +1512,7 @@ fun EventDetails(
         } else {
             null
         }
-        listOf(fieldSummary, slotSummary).filterNotNull().joinToString(" • ")
+        listOfNotNull(fieldSummary, slotSummary).joinToString(" • ")
     }
     val normalizedEventDivisions = remember(event.divisions) {
         event.divisions.normalizeDivisionIdentifiers()
@@ -5145,6 +5146,7 @@ private fun buildDraftStaffCards(
 }
 
 @Composable
+@Suppress("SameParameterValue")
 private fun StaffAssignmentCard(
     card: StaffAssignmentCardModel,
     editView: Boolean,

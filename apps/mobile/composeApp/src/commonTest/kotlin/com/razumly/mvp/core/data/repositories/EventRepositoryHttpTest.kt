@@ -3,13 +3,9 @@ package com.razumly.mvp.core.data.repositories
 import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.AuthAccount
 import com.razumly.mvp.core.data.dataTypes.Bounds
-import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
-import com.razumly.mvp.core.data.dataTypes.Field
-import com.razumly.mvp.core.data.dataTypes.MatchMVP
-import com.razumly.mvp.core.data.dataTypes.RefundRequest
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
@@ -162,6 +158,7 @@ private class EventRepositoryHttp_FakeDatabaseService(
 }
 
 @OptIn(ExperimentalTime::class)
+@Suppress("SameParameterValue")
 private fun makeEvent(
     id: String,
     hostId: String,

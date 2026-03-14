@@ -39,10 +39,6 @@ import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
-fun instantToDateTimeString(instant: Instant): String {
-    return instant.toLocalDateTime(timeZone = TimeZone.currentSystemDefault()).toString()
-}
-
 @Composable
 expect fun getScreenWidth(): Int
 

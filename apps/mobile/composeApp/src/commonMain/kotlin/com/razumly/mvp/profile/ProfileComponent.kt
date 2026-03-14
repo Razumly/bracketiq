@@ -821,7 +821,6 @@ class DefaultProfileComponent(
     override fun openInviteEvent(eventId: String) {
         openEventById(
             eventId = eventId,
-            errorMessage = "Unable to open event.",
             cachedEvents = _invitesState.value.eventsById.values.toList(),
         )
     }
@@ -829,7 +828,6 @@ class DefaultProfileComponent(
     override fun openScheduleEvent(eventId: String) {
         openEventById(
             eventId = eventId,
-            errorMessage = "Unable to open event.",
             cachedEvents = _myScheduleState.value.events,
         )
     }
@@ -884,7 +882,6 @@ class DefaultProfileComponent(
 
     private fun openEventById(
         eventId: String,
-        errorMessage: String,
         cachedEvents: List<Event> = emptyList(),
     ) {
         val normalizedId = eventId.trim()
@@ -905,7 +902,7 @@ class DefaultProfileComponent(
                     navigationHandler.navigateToEvent(event)
                 }
                 .onFailure {
-                    _errorState.value = ErrorMessage(it.message ?: errorMessage)
+                    _errorState.value = ErrorMessage(it.message ?: "Unable to open event.")
                 }
         }
     }
