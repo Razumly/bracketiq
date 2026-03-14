@@ -6,7 +6,10 @@ import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.SignupProfileConflict
 import com.razumly.mvp.core.data.repositories.SignupProfileConflictException
 import com.razumly.mvp.core.data.repositories.SignupProfileSelection
+import com.razumly.mvp.core.network.ApiException
+import com.razumly.mvp.core.network.dto.RegisterConflictResponseDto
 import com.razumly.mvp.core.presentation.INavigationHandler
+import com.razumly.mvp.core.util.jsonMVP
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
@@ -186,7 +189,7 @@ class DefaultAuthComponent(
                         return@onFailure
                     }
                     logAuthFailure("signup", throwable)
-                    _loginState.value = LoginState.Error("Failed to signup")
+                    _loginState.value = LoginState.Error(resolveSignupFailureMessage(throwable))
                 }
         }
     }
@@ -198,6 +201,36 @@ class DefaultAuthComponent(
 
     private fun logAuthFailure(action: String, throwable: Throwable) {
         Napier.e("Auth: $action failed: ${throwable.message}", throwable)
+    }
+
+    private fun resolveSignupFailureMessage(throwable: Throwable): String {
+        val apiException = throwable as? ApiException
+        if (apiException != null) {
+            val parsedPayload = apiException.responseBody
+                ?.takeIf(String::isNotBlank)
+                ?.let { body ->
+                    runCatching { jsonMVP.decodeFromString<RegisterConflictResponseDto>(body) }.getOrNull()
+                }
+            parsedPayload?.error
+                ?.trim()
+                ?.takeIf(String::isNotBlank)
+                ?.let { return it }
+
+            if (apiException.statusCode == 409 &&
+                parsedPayload?.code?.equals("PROFILE_CONFLICT", ignoreCase = true) == true
+            ) {
+                return "Profile selection is required for this email."
+            }
+
+            if (apiException.statusCode == 409) {
+                return "Signup conflict. This email or username may already be in use."
+            }
+        }
+
+        return throwable.message
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?: "Failed to signup"
     }
 
     private fun maskEmail(email: String): String {

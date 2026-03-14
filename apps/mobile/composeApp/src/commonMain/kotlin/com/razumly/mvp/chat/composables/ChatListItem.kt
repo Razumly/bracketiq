@@ -15,9 +15,25 @@ fun ChatListItem(
     modifier: Modifier = Modifier,
     chatGroup: ChatGroupWithRelations,
 ) {
+    val participantNames = chatGroup.users
+        .mapNotNull { user -> user.fullName.asMeaningfulText() }
+        .distinct()
+        .joinToString(", ")
+        .asMeaningfulText()
+    val displayName = chatGroup.chatGroup.displayName.asMeaningfulText()
+        ?: chatGroup.chatGroup.name.asMeaningfulText()
+        ?: participantNames
+        ?: "Unknown chat"
+    val imageUrl = chatGroup.chatGroup.imageUrl.asMeaningfulText()
+        ?: chatGroup.users.firstNotNullOfOrNull { user -> user.imageUrl.asMeaningfulText() }
+    val subtitle = chatGroup.messages.lastOrNull()?.body.asMeaningfulText()
+    val displayChat = chatGroup.chatGroup.copy()
+        .setDisplayName(displayName)
+        .setImageUrl(imageUrl)
+
     UnifiedCard(
-        entity = chatGroup.chatGroup,
-        subtitle = chatGroup.messages.lastOrNull()?.body,
+        entity = displayChat,
+        subtitle = subtitle,
         trailingContent = {
             chatGroup.messages.lastOrNull()?.let { message ->
                 Text(
@@ -29,3 +45,8 @@ fun ChatListItem(
         modifier = modifier
     )
 }
+
+private fun String?.asMeaningfulText(): String? =
+    this
+        ?.trim()
+        ?.takeIf { value -> value.isNotEmpty() && !value.equals("null", ignoreCase = true) }

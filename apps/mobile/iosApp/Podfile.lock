@@ -9,7 +9,9 @@ PODS:
     - GoogleUtilities/Environment (~> 8.0)
     - GoogleUtilities/UserDefaults (~> 8.0)
     - PromisesObjC (~> 2.4)
-  - composeApp (0.4.6):
+  - composeApp (0.5.1):
+    - FirebaseCore
+    - FirebaseMessaging
     - GooglePlaces
     - GoogleSignIn
     - IQKeyboardManagerSwift
@@ -154,7 +156,7 @@ EXTERNAL SOURCES:
 SPEC CHECKSUMS:
   AppAuth: 1c1a8afa7e12f2ec3a294d9882dfa5ab7d3cb063
   AppCheckCore: cc8fd0a3a230ddd401f326489c99990b013f0c4f
-  composeApp: d2c252d1017b14025a1c3eb44e5d9627c2c38097
+  composeApp: 8b1ef55324266933309ccd26fc409ef30bcf44a7
   FirebaseCore: 5a452ffa66f37c8e281076996837626c5d08c090
   FirebaseCoreInternal: ff526c22671bb564d1b34a47615e29ba99389dee
   FirebaseInstallations: 6836550c466a6c3f753a777bec6f4e58ea228779

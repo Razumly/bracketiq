@@ -689,42 +689,111 @@ class UserRepositoryAuthTest {
 
     @Test
     fun getUsers_requests_ids_in_batch_query() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("t123")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+        var usersRequestCount = 0
+
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> respond(
+                    content = """
+                        {
+                          "user": { "id":"u_boot", "email":"boot@example.com", "name":"Boot User" },
+                          "session": { "userId":"u_boot", "isAdmin":false },
+                          "token":"t123"
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                "/api/users" -> {
+                    usersRequestCount += 1
+                    assertEquals(HttpMethod.Get, request.method)
+                    val ids = request.url.parameters["ids"]
+                    assertEquals("user_1,user_2,user_3", ids)
+                    respond(
+                        content = """
+                            {
+                              "users": [
+                                {
+                                  "id":"user_1",
+                                  "firstName":"One",
+                                  "lastName":"User",
+                                  "userName":"user_one"
+                                },
+                                {
+                                  "id":"user_2",
+                                  "firstName":"Two",
+                                  "lastName":"User",
+                                  "userName":"user_two"
+                                },
+                                {
+                                  "id":"user_3",
+                                  "firstName":"Three",
+                                  "lastName":"User",
+                                  "userName":"user_three"
+                                }
+                              ]
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        val users = repo.getUsers(listOf("user_1", "user_2", "user_3")).getOrThrow()
+
+        assertEquals(1, usersRequestCount)
+        assertEquals(listOf("user_1", "user_2", "user_3"), users.map { it.id })
+    }
+
+    @Test
+    fun init_bootstraps_auth_token_from_auth_me_when_token_missing() = runTest {
         val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("")
         val userDao = FakeUserDataDao()
         val db = UserRepositoryAuth_FakeDatabaseService(userDao)
         val prefsStore = InMemoryPreferencesDataStore()
         val currentUserDataSource = CurrentUserDataSource(prefsStore)
-        var requestCount = 0
 
         val engine = MockEngine { request ->
-            requestCount += 1
-            assertEquals("/api/users", request.url.encodedPath)
+            assertEquals("/api/auth/me", request.url.encodedPath)
             assertEquals(HttpMethod.Get, request.method)
-            val ids = request.url.parameters["ids"]
-            assertEquals("user_1,user_2,user_3", ids)
+            request.headers[HttpHeaders.Authorization]?.let { header ->
+                assertEquals("Bearer boot_token", header)
+            }
             respond(
                 content = """
                     {
-                      "users": [
-                        {
-                          "id":"user_1",
-                          "firstName":"One",
-                          "lastName":"User",
-                          "userName":"user_one"
-                        },
-                        {
-                          "id":"user_2",
-                          "firstName":"Two",
-                          "lastName":"User",
-                          "userName":"user_two"
-                        },
-                        {
-                          "id":"user_3",
-                          "firstName":"Three",
-                          "lastName":"User",
-                          "userName":"user_three"
-                        }
-                      ]
+                      "user": { "id":"u_boot", "email":"boot@example.com", "name":"Boot User" },
+                      "session": { "userId":"u_boot", "isAdmin":false },
+                      "token":"boot_token",
+                      "profile": {
+                        "id":"u_boot",
+                        "firstName":"Boot",
+                        "lastName":"User",
+                        "userName":"boot_user",
+                        "teamIds":[],
+                        "friendIds":[],
+                        "friendRequestIds":[],
+                        "friendRequestSentIds":[],
+                        "followingIds":[],
+                        "uploadedImages":[],
+                        "hasStripeAccount":false
+                      }
                     }
                 """.trimIndent(),
                 status = HttpStatusCode.OK,
@@ -738,9 +807,43 @@ class UserRepositoryAuthTest {
         val api = MvpApiClient(http, "http://example.test", tokenStore)
         val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
 
-        val users = repo.getUsers(listOf("user_1", "user_2", "user_3")).getOrThrow()
+        repo.getCurrentAccount().getOrThrow()
 
-        assertEquals(1, requestCount)
-        assertEquals(listOf("user_1", "user_2", "user_3"), users.map { it.id })
+        assertEquals("boot_token", tokenStore.get())
+        assertEquals("u_boot", currentUserDataSource.getUserId().first())
+        assertEquals("u_boot", repo.currentAccount.value.getOrThrow().id)
+        assertEquals("u_boot", repo.currentUser.value.getOrThrow().id)
+    }
+
+    @Test
+    fun init_clears_cached_user_id_when_token_missing_and_auth_me_has_no_session() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+        currentUserDataSource.saveUserId("stale_user")
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/auth/me", request.url.encodedPath)
+            respond(
+                content = """{"user":null,"session":null}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        repo.getCurrentAccount().getOrThrow()
+
+        assertEquals("", tokenStore.get())
+        assertEquals("", currentUserDataSource.getUserId().first())
+        assertTrue(repo.currentAccount.value.isFailure)
+        assertTrue(repo.currentUser.value.isFailure)
     }
 }

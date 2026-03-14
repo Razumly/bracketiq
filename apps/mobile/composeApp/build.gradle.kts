@@ -1,5 +1,6 @@
 
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.plugin.mpp.NativeBuildType
 import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
 import java.io.ByteArrayOutputStream
 import java.net.InetSocketAddress
@@ -48,8 +49,27 @@ kotlin {
     listOf(iosX64(), iosArm64(), iosSimulatorArm64()).forEach { target ->
         target.binaries.framework {
             baseName = "ComposeApp"
-            // your extra linker flags
             linkerOpts.add("-lsqlite3")
+            val podConfiguration = when (buildType) {
+                NativeBuildType.DEBUG -> "Debug"
+                NativeBuildType.RELEASE -> "Release"
+            }
+            val podSdk = if (target.name == "iosArm64") "iphoneos" else "iphonesimulator"
+            val syntheticPodsBuildPath = layout.buildDirectory.asFile.get().absolutePath +
+                "/cocoapods/synthetic/ios/build/$podConfiguration-$podSdk"
+
+            // K/N does not always propagate CocoaPods -F search paths when a transitive klib
+            // (for example kmpnotifier's FirebaseMessaging cinterop) contributes linker flags.
+            listOf(
+                "GoogleSignIn",
+                "GooglePlaces",
+                "FirebaseCore",
+                "FirebaseMessaging",
+                "IQKeyboardManagerSwift",
+            ).forEach { podName ->
+                linkerOpts.add("-F$syntheticPodsBuildPath/$podName")
+                linkerOpts.add("-F$syntheticPodsBuildPath/XCFrameworkIntermediates/$podName")
+            }
         }
     }
 
@@ -62,6 +82,8 @@ kotlin {
 
         pod("GoogleSignIn")
         pod("GooglePlaces")
+        pod("FirebaseCore")
+        pod("FirebaseMessaging")
         pod("IQKeyboardManagerSwift") {
             extraOpts += listOf("-compiler-option", "-fmodules")
         }

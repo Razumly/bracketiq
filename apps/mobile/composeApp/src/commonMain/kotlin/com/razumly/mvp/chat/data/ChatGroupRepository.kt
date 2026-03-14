@@ -83,8 +83,8 @@ class ChatGroupRepository(
 
                 it.forEach { group ->
                     val otherUsers = users.filter { user -> user.id != currentUserId && group.userIds.contains(user.id) }
-                    group.setDisplayName(otherUsers.joinToString(", ") { user -> user.fullName })
-                        .setImageUrl(otherUsers.firstOrNull()?.imageUrl)
+                    group.setDisplayName(resolveDisplayName(group, otherUsers))
+                        .setImageUrl(resolveImageUrl(group, otherUsers))
                 }
 
                 it.forEach { group ->
@@ -117,11 +117,11 @@ class ChatGroupRepository(
                 ),
             ).toChatGroupOrNull() ?: error("Create chat group response missing group")
         }, saveCall = { chatGroup ->
-            databaseService.getChatGroupDao.upsertChatGroupWithRelations(chatGroup)
             val currentUserId = userRepository.currentUser.value.getOrThrow().id
             val otherUsers = newChatGroup.users.filter { user -> user.id != currentUserId && chatGroup.userIds.contains(user.id) }
-            chatGroup.setDisplayName(otherUsers.joinToString(", ") { user -> user.fullName })
-                .setImageUrl(otherUsers.firstOrNull()?.imageUrl)
+            chatGroup.setDisplayName(resolveDisplayName(chatGroup, otherUsers))
+                .setImageUrl(resolveImageUrl(chatGroup, otherUsers))
+            databaseService.getChatGroupDao.upsertChatGroupWithRelations(chatGroup)
         }, onReturn = { })
 
     override suspend fun updateChatGroup(newChatGroup: ChatGroup): Result<ChatGroup> =
@@ -148,6 +148,30 @@ class ChatGroupRepository(
         val newChatGroup = chatGroup.copy(userIds = (chatGroup.userIds + userId).distinct())
         return updateChatGroup(newChatGroup).map {}
     }
+
+    private fun resolveDisplayName(chatGroup: ChatGroup, otherUsers: List<UserData>): String {
+        val participantNames = otherUsers
+            .mapNotNull { user -> user.fullName.asMeaningfulValue() }
+            .distinct()
+            .joinToString(", ")
+            .asMeaningfulValue()
+        return participantNames
+            ?: chatGroup.name.asMeaningfulValue()
+            ?: chatGroup.displayName.asMeaningfulValue()
+            ?: "Unknown chat"
+    }
+
+    private fun resolveImageUrl(chatGroup: ChatGroup, otherUsers: List<UserData>): String? =
+        otherUsers
+            .asSequence()
+            .mapNotNull { user -> user.imageUrl.asMeaningfulValue() }
+            .firstOrNull()
+            ?: chatGroup.imageUrl.asMeaningfulValue()
+
+    private fun String?.asMeaningfulValue(): String? =
+        this
+            ?.trim()
+            ?.takeIf { value -> value.isNotEmpty() && !value.equals("null", ignoreCase = true) }
 
     private suspend fun findOrCreateDirectMessage(otherUserId: String): Result<ChatGroupWithRelations> =
         runCatching {

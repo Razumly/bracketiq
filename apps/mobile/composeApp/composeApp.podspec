@@ -9,6 +9,8 @@ Pod::Spec.new do |spec|
     spec.vendored_frameworks      = 'build/cocoapods/framework/ComposeApp.framework'
     spec.libraries                = 'c++'
     spec.ios.deployment_target    = '15.3'
+    spec.dependency 'FirebaseCore'
+    spec.dependency 'FirebaseMessaging'
     spec.dependency 'GooglePlaces'
     spec.dependency 'GoogleSignIn'
     spec.dependency 'IQKeyboardManagerSwift'
@@ -45,5 +47,5 @@ Pod::Spec.new do |spec|
             SCRIPT
         }
     ]
-    spec.resources = ['build\compose\cocoapods\compose-resources']
+    spec.resources = ['build/compose/cocoapods/compose-resources']
 end

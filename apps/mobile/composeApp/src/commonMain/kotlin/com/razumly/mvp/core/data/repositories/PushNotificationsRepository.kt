@@ -7,6 +7,7 @@ import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.network.MvpApiClient
+import com.razumly.mvp.core.network.dto.AuthResponseDto
 import com.razumly.mvp.core.network.dto.MessagingTopicMessageRequestDto
 import com.razumly.mvp.core.network.dto.MessagingTopicSubscriptionDebugResponseDto
 import com.razumly.mvp.core.network.dto.MessagingTopicSubscriptionRequestDto
@@ -16,6 +17,7 @@ import io.ktor.http.encodeURLQueryComponent
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
@@ -100,11 +102,14 @@ class PushNotificationsRepository(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val pushTokenState =
         userDataSource.getPushToken().stateIn(scope, SharingStarted.Eagerly, "")
+    private var deferredTokenSyncJob: Job? = null
 
     private val managerListener = object : NotifierManager.Listener {
         override fun onNewToken(token: String) {
             scope.launch {
                 runCatching {
+                    deferredTokenSyncJob?.cancel()
+                    deferredTokenSyncJob = null
                     userDataSource.savePushToken(token)
                     val userId = resolveCurrentOrCachedPushUserId()
                     if (!userId.isNullOrBlank()) {
@@ -247,6 +252,7 @@ class PushNotificationsRepository(
         val token = currentCachedPushTokenOrNull() ?: fetchPushTokenFromNotifier()
         if (token.isNullOrBlank()) {
             Napier.w("Push token unavailable; storing backend target for later token refresh.")
+            scheduleDeferredDeviceTargetSync(userId)
         }
 
         syncDeviceTargetWithBackend(userId, token)
@@ -257,25 +263,32 @@ class PushNotificationsRepository(
         val cachedTarget = userDataSource.getPushTarget().first().trim()
 
         val resolvedUserId = userId ?: userIdFromTopicId(cachedTarget)
+        val localPushToken = currentCachedPushTokenOrNull()?.trim()?.takeIf(String::isNotBlank)
         val targetTopicId = when {
             cachedTarget.isNotBlank() -> cachedTarget
             !resolvedUserId.isNullOrBlank() -> userTopicId(resolvedUserId)
             else -> null
         }
 
-        if (!targetTopicId.isNullOrBlank() && !resolvedUserId.isNullOrBlank()) {
+        if (!targetTopicId.isNullOrBlank() && !resolvedUserId.isNullOrBlank() && !localPushToken.isNullOrBlank()) {
             runCatching {
                 api.deleteNoResponse(
                     path = "api/messaging/topics/$targetTopicId/subscriptions",
                     body = MessagingTopicSubscriptionRequestDto(
                         userIds = listOf(resolvedUserId),
+                        pushToken = localPushToken,
+                        pushTarget = targetTopicId,
                     ),
                 )
             }.onFailure { error ->
                 Napier.w("Failed to remove device target from backend: ${error.message}")
             }
+        } else if (!targetTopicId.isNullOrBlank() && !resolvedUserId.isNullOrBlank()) {
+            Napier.w("Skipping backend push target removal because local device token is unavailable.")
         }
 
+        deferredTokenSyncJob?.cancel()
+        deferredTokenSyncJob = null
         userDataSource.savePushTarget("")
         userDataSource.savePushToken("")
     }
@@ -391,17 +404,30 @@ class PushNotificationsRepository(
     }
 
     private suspend fun fetchPushTokenFromNotifier(): String? {
-        val token = runCatching {
+        val notifierToken = runCatching {
             NotifierManager.getPushNotifier().getToken()
         }.getOrElse { error ->
             Napier.w("Failed to fetch push token from notifier: ${error.message}")
             null
         }
 
-        if (!token.isNullOrBlank()) {
-            userDataSource.savePushToken(token)
-            return token
+        val normalizedNotifierToken = notifierToken?.trim()?.takeIf(String::isNotBlank)
+        if (normalizedNotifierToken != null) {
+            userDataSource.savePushToken(normalizedNotifierToken)
+            return normalizedNotifierToken
         }
+
+        val platformToken = runCatching {
+            platformPushTokenOrNull()?.trim()?.takeIf(String::isNotBlank)
+        }.onFailure { error ->
+            Napier.w("Failed to fetch platform push token fallback: ${error.message}")
+        }.getOrNull()
+
+        if (!platformToken.isNullOrBlank()) {
+            userDataSource.savePushToken(platformToken)
+            return platformToken
+        }
+
         return null
     }
 
@@ -412,6 +438,11 @@ class PushNotificationsRepository(
     }
 
     private suspend fun syncDeviceTargetWithBackend(userId: String, pushToken: String?) {
+        if (!ensureAuthTokenAvailableForPushSync()) {
+            Napier.w("Skipping push target sync because auth token is missing.")
+            return
+        }
+
         val normalizedUserId = normalizeId(userId, "User id")
         val topicId = userTopicId(normalizedUserId)
 
@@ -424,6 +455,46 @@ class PushNotificationsRepository(
             ),
         )
         userDataSource.savePushTarget(topicId)
+    }
+
+    private suspend fun ensureAuthTokenAvailableForPushSync(): Boolean {
+        val existing = api.tokenStore.get().trim()
+        if (existing.isNotBlank()) return true
+
+        val refreshed = runCatching {
+            api.get<AuthResponseDto>("api/auth/me").token?.trim()
+        }.onFailure { error ->
+            Napier.w("Failed to bootstrap auth token for push sync: ${error.message}")
+        }.getOrNull()
+
+        val token = refreshed?.takeIf(String::isNotBlank) ?: return false
+        api.tokenStore.set(token)
+        return true
+    }
+
+    private fun scheduleDeferredDeviceTargetSync(userId: String) {
+        val activeJob = deferredTokenSyncJob
+        if (activeJob != null && activeJob.isActive) return
+
+        deferredTokenSyncJob = scope.launch {
+            val normalizedUserId = normalizeId(userId, "User id")
+            repeat(DEFERRED_TOKEN_SYNC_ATTEMPTS) { attempt ->
+                delay(DEFERRED_TOKEN_SYNC_INTERVAL_MS * (attempt + 1))
+                val token = currentCachedPushTokenOrNull()
+                if (token.isNullOrBlank()) {
+                    return@repeat
+                }
+
+                runCatching {
+                    syncDeviceTargetWithBackend(normalizedUserId, token)
+                }.onFailure { error ->
+                    Napier.w("Deferred push target sync attempt failed: ${error.message}")
+                }
+                return@launch
+            }
+
+            Napier.w("Push token still unavailable after deferred sync attempts.")
+        }
     }
 
     private suspend fun resolveCurrentOrCachedPushUserId(): String? {
@@ -458,5 +529,7 @@ class PushNotificationsRepository(
         const val EVENT_TOPIC_PREFIX = "event_"
         const val TOURNAMENT_TOPIC_PREFIX = "tournament_"
         const val MATCH_TOPIC_PREFIX = "match_"
+        const val DEFERRED_TOKEN_SYNC_ATTEMPTS = 6
+        const val DEFERRED_TOKEN_SYNC_INTERVAL_MS = 2_000L
     }
 }

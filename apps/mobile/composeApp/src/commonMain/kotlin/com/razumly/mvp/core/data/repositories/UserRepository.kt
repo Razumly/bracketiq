@@ -387,7 +387,13 @@ class UserRepository(
     }
 
     private suspend fun loadCurrentUser() {
-        val token = tokenStore.get().takeIf(String::isNotBlank) ?: return
+        val token = tokenStore.get().takeIf(String::isNotBlank)
+        if (token.isNullOrBlank()) {
+            if (!bootstrapSessionFromAuthMe()) {
+                clearLoginState()
+            }
+            return
+        }
 
         // If we have a stored user id, surface cached data quickly while validating token.
         val savedId = runCatching {
@@ -423,6 +429,29 @@ class UserRepository(
         if (remoteProfile != null) {
             cacheCurrentUserProfile(remoteProfile)
         }
+    }
+
+    private suspend fun bootstrapSessionFromAuthMe(): Boolean {
+        val me = runCatching {
+            api.get<AuthResponseDto>("api/auth/me")
+        }.onFailure { throwable ->
+            Napier.w(tag = USER_REPOSITORY_LOG_TAG) {
+                "Session bootstrap via /api/auth/me failed: ${throwable.message}"
+            }
+        }.getOrNull() ?: return false
+
+        val account = me.user?.toAuthAccountOrNull() ?: return false
+        val refreshed = me.token?.takeIf(String::isNotBlank) ?: return false
+        tokenStore.set(refreshed)
+        _currentAccount.value = Result.success(account)
+
+        val remoteProfile = me.profile?.toUserDataOrNull() ?: fetchUserProfile(account.id)
+        if (remoteProfile != null) {
+            cacheCurrentUserProfile(remoteProfile)
+        } else {
+            currentUserDataSource.saveUserId(account.id)
+        }
+        return true
     }
 
     private suspend fun cacheCurrentUserProfile(profile: UserData) {
