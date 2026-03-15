@@ -20,8 +20,8 @@ fun ChatListItem(
         .distinct()
         .joinToString(", ")
         .asMeaningfulText()
-    val displayName = chatGroup.chatGroup.displayName.asMeaningfulText()
-        ?: chatGroup.chatGroup.name.asMeaningfulText()
+    val displayName = chatGroup.chatGroup.name.asMeaningfulText()
+        ?: chatGroup.chatGroup.displayName.asMeaningfulText()
         ?: participantNames
         ?: "Unknown chat"
     val imageUrl = chatGroup.chatGroup.imageUrl.asMeaningfulText()

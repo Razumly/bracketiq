@@ -69,6 +69,13 @@ data class TeamsResponseDto(
 )
 
 @Serializable
+data class TeamInviteFreeAgentsResponseDto(
+    val users: List<UserProfileDto> = emptyList(),
+    val eventIds: List<String> = emptyList(),
+    val freeAgentIds: List<String> = emptyList(),
+)
+
+@Serializable
 data class TeamUpdateDto(
     val name: String? = null,
     val division: String? = null,

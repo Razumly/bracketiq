@@ -301,6 +301,9 @@ private class MatchDetailFakeTeamRepository(
         inviteType: String,
     ): Result<Unit> = Result.success(Unit)
 
+    override suspend fun getInviteFreeAgents(teamId: String): Result<List<UserData>> =
+        Result.success(emptyList())
+
     override suspend fun deleteInvite(inviteId: String): Result<Unit> = Result.success(Unit)
     override suspend fun acceptTeamInvite(inviteId: String, teamId: String): Result<Unit> = Result.success(Unit)
 }

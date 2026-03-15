@@ -48,16 +48,17 @@ fun PlayerCardWithActions(
     val isFriend = currentUser.friendIds.contains(player.id)
     val hasSentFriendRequest = currentUser.friendRequestSentIds.contains(player.id)
     val isCurrentUser = currentUser.id == player.id
+    val isActionRestricted = player.shouldRestrictSocialActions
 
     Box {
         PlayerCard(
             player = player,
-            modifier = modifier.clickable(enabled = !isCurrentUser) {
+            modifier = modifier.clickable(enabled = !isCurrentUser && !isActionRestricted) {
                 showPopup = true
             }
         )
 
-        if (showPopup && !isCurrentUser) {
+        if (showPopup && !isCurrentUser && !isActionRestricted) {
             Popup(
                 alignment = Alignment.Center,
                 properties = PopupProperties(
@@ -127,11 +128,13 @@ private fun PlayerActionPopup(
                 text = player.fullName,
                 style = MaterialTheme.typography.titleMedium
             )
-            Text(
-                text = "@${player.userName.ifBlank { "user" }}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            player.publicHandle?.let { handle ->
+                Text(
+                    text = handle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
 
             HorizontalDivider()
 

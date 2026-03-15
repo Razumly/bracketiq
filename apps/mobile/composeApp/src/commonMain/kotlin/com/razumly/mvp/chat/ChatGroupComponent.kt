@@ -17,6 +17,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -28,20 +30,29 @@ interface ChatGroupComponent {
     val messageInput: StateFlow<String>
     val chatGroup: StateFlow<ChatGroupWithRelations?>
     val errorState: StateFlow<String?>
+    val suggestedPlayers: StateFlow<List<UserData>>
+    val friends: StateFlow<List<UserData>>
+    val isChatMuted: StateFlow<Boolean>
 
     fun onBack()
     fun onMessageInputChange(newText: String)
     fun sendMessage()
+    fun deleteChat()
+    fun leaveChat()
+    fun searchPlayers(query: String)
+    fun addUserToChat(user: UserData)
+    fun removeUserFromChat(user: UserData)
+    fun toggleChatMute()
 }
 
 
 @OptIn(ExperimentalTime::class)
 class DefaultChatGroupComponent(
     componentContext: ComponentContext,
-    userRepository: IUserRepository,
-    chatGroupRepository: IChatGroupRepository,
+    private val userRepository: IUserRepository,
+    private val chatGroupRepository: IChatGroupRepository,
     messageUser: UserData?,
-    chatGroup: ChatGroupWithRelations?,
+    initialChatGroup: ChatGroupWithRelations?,
     private val messagesRepository: IMessageRepository,
     private val pushNotificationsRepository: IPushNotificationsRepository,
     private val navigationHandler: INavigationHandler,
@@ -51,9 +62,15 @@ class DefaultChatGroupComponent(
 
     private val _errorState = MutableStateFlow<String?>(null)
     override val errorState = _errorState.asStateFlow()
+    private val _suggestedPlayers = MutableStateFlow<List<UserData>>(listOf())
+    override val suggestedPlayers = _suggestedPlayers.asStateFlow()
+    private val _friends = MutableStateFlow<List<UserData>>(listOf())
+    override val friends = _friends.asStateFlow()
+    private val _isChatMuted = MutableStateFlow(false)
+    override val isChatMuted: StateFlow<Boolean> = _isChatMuted.asStateFlow()
 
     override val chatGroup =
-        chatGroupRepository.getChatGroupFlow(messageUser, chatGroup).map { result ->
+        chatGroupRepository.getChatGroupFlow(messageUser, initialChatGroup).map { result ->
             val chatGroup = result.getOrElse {
                 _errorState.value = it.message
                 null
@@ -65,8 +82,37 @@ class DefaultChatGroupComponent(
     override val messageInput: StateFlow<String> = _messageInput
 
     override val currentUser = userRepository.currentUser.value.getOrThrow()
+    init {
+        scope.launch {
+            _friends.value = currentUser.friendIds.let { friends ->
+                userRepository.getUsers(friends).getOrElse {
+                    _errorState.value = it.message
+                    emptyList()
+                }
+            }
+        }
+        scope.launch {
+            chatGroup
+                .map { it?.chatGroup?.id?.trim().orEmpty() }
+                .distinctUntilChanged()
+                .collect { chatId ->
+                    pushNotificationsRepository.setActiveChat(chatId.ifBlank { null })
+                    if (chatId.isBlank()) {
+                        _isChatMuted.value = false
+                        return@collect
+                    }
+                    chatGroupRepository.getCurrentUserMuteStatus(chatId).onSuccess { muted ->
+                        _isChatMuted.value = muted
+                    }.onFailure {
+                        _errorState.value = it.message
+                        _isChatMuted.value = false
+                    }
+                }
+        }
+    }
 
     override fun onBack() {
+        pushNotificationsRepository.setActiveChat(null)
         navigationHandler.navigateBack()
     }
 
@@ -98,6 +144,93 @@ class DefaultChatGroupComponent(
                 ).onFailure {
                     _errorState.value = it.message
                 }
+            }
+        }
+    }
+
+    override fun deleteChat() {
+        val currentChat = chatGroup.value?.chatGroup ?: return
+        if (currentChat.hostId != currentUser.id) {
+            _errorState.value = "Only the host can delete this chat."
+            return
+        }
+        scope.launch {
+            chatGroupRepository.deleteChatGroup(currentChat.id).onSuccess {
+                pushNotificationsRepository.setActiveChat(null)
+                navigationHandler.navigateBack()
+            }.onFailure {
+                _errorState.value = it.message ?: "Failed to delete chat."
+            }
+        }
+    }
+
+    override fun leaveChat() {
+        val currentChat = chatGroup.value?.chatGroup ?: return
+        if (currentChat.hostId == currentUser.id) {
+            _errorState.value = "Host cannot leave chat. Delete it instead."
+            return
+        }
+        scope.launch {
+            chatGroupRepository.deleteUserFromChatGroup(currentChat, currentUser.id).onSuccess {
+                pushNotificationsRepository.setActiveChat(null)
+                navigationHandler.navigateBack()
+            }.onFailure {
+                _errorState.value = it.message ?: "Failed to leave chat."
+            }
+        }
+    }
+
+    override fun searchPlayers(query: String) {
+        scope.launch {
+            _suggestedPlayers.value = userRepository.searchPlayers(query).getOrElse {
+                _errorState.value = it.message
+                emptyList()
+            }.filterNot { user -> user.id == currentUser.id }
+        }
+    }
+
+    override fun addUserToChat(user: UserData) {
+        val currentChat = chatGroup.value?.chatGroup ?: return
+        if (currentChat.hostId != currentUser.id) {
+            _errorState.value = "Only the host can manage people."
+            return
+        }
+        if (currentChat.userIds.contains(user.id)) return
+
+        scope.launch {
+            chatGroupRepository.addUserToChatGroup(currentChat, user.id).onFailure {
+                _errorState.value = it.message ?: "Failed to add user to chat."
+            }
+        }
+    }
+
+    override fun removeUserFromChat(user: UserData) {
+        val currentChat = chatGroup.value?.chatGroup ?: return
+        if (currentChat.hostId != currentUser.id) {
+            _errorState.value = "Only the host can manage people."
+            return
+        }
+        if (user.id == currentUser.id) {
+            _errorState.value = "Host cannot remove themselves from the chat."
+            return
+        }
+        if (!currentChat.userIds.contains(user.id)) return
+
+        scope.launch {
+            chatGroupRepository.deleteUserFromChatGroup(currentChat, user.id).onFailure {
+                _errorState.value = it.message ?: "Failed to remove user from chat."
+            }
+        }
+    }
+
+    override fun toggleChatMute() {
+        val currentChat = chatGroup.value?.chatGroup ?: return
+        val nextMuted = !isChatMuted.value
+        scope.launch {
+            chatGroupRepository.setCurrentUserMuteStatus(currentChat.id, nextMuted).onSuccess { muted ->
+                _isChatMuted.value = muted
+            }.onFailure {
+                _errorState.value = it.message ?: "Failed to update mute setting."
             }
         }
     }

@@ -63,7 +63,7 @@ fun ProfilePaymentsScreen(component: ProfileComponent) {
     val hasStripeAccount by component.isStripeAccountConnected.collectAsState()
 
     ProfileSectionScaffold(
-        title = "Payments",
+        title = "Manage Stripe",
         description = if (hasStripeAccount) {
             "Manage your Stripe account to update payout details."
         } else {
@@ -91,8 +91,8 @@ fun ProfilePaymentPlansScreen(component: ProfileComponent) {
     }
 
     ProfileSectionScaffold(
-        title = "Payment Plans",
-        description = "Review and manage installment plans for your account.",
+        title = "Bills",
+        description = "Review and manage bills for your account.",
         onBack = component::onBackClicked,
         onRefresh = component::refreshPaymentPlans,
         isRefreshing = plansState.isLoading,
@@ -110,7 +110,7 @@ fun ProfilePaymentPlansScreen(component: ProfileComponent) {
         when {
             plansState.isLoading -> {
                 Text(
-                    text = "Loading payment plans...",
+                    text = "Loading bills...",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -118,7 +118,7 @@ fun ProfilePaymentPlansScreen(component: ProfileComponent) {
 
             plansState.plans.isEmpty() -> {
                 Text(
-                    text = "No payment plans are available.",
+                    text = "No bills are available.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -879,6 +879,7 @@ fun ProfileConnectionsScreen(component: ProfileComponent) {
                         val hasIncomingRequest = currentUser?.friendRequestIds?.contains(candidateId) == true
                         val hasOutgoingRequest = currentUser?.friendRequestSentIds?.contains(candidateId) == true
                         val isActionInProgress = state.activeUserId == candidateId
+                        val isActionRestricted = candidate.shouldRestrictSocialActions
 
                         ConnectionUserCard(
                             user = candidate,
@@ -899,7 +900,7 @@ fun ProfileConnectionsScreen(component: ProfileComponent) {
                                         Button(
                                             modifier = Modifier.weight(1f),
                                             onClick = { component.acceptFriendRequest(candidate) },
-                                            enabled = !isActionInProgress,
+                                            enabled = !isActionInProgress && !isActionRestricted,
                                         ) {
                                             Text(if (isActionInProgress) "Working..." else "Accept")
                                         }
@@ -926,7 +927,7 @@ fun ProfileConnectionsScreen(component: ProfileComponent) {
                                         Button(
                                             modifier = Modifier.weight(1f),
                                             onClick = { component.sendFriendRequest(candidate) },
-                                            enabled = !isActionInProgress,
+                                            enabled = !isActionInProgress && !isActionRestricted,
                                         ) {
                                             Text(if (isActionInProgress) "Working..." else "Add friend")
                                         }
@@ -943,7 +944,7 @@ fun ProfileConnectionsScreen(component: ProfileComponent) {
                                             component.followUser(candidate)
                                         }
                                     },
-                                    enabled = !isActionInProgress,
+                                    enabled = !isActionInProgress && (isFollowing || !isActionRestricted),
                                 ) {
                                     when {
                                         isActionInProgress -> Text("Working...")
@@ -983,6 +984,7 @@ fun ProfileConnectionsScreen(component: ProfileComponent) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 state.incomingFriendRequests.forEach { requester ->
                     val isActionInProgress = state.activeUserId == requester.id
+                    val isActionRestricted = requester.shouldRestrictSocialActions
                     ConnectionUserCard(
                         user = requester,
                         isActionInProgress = isActionInProgress,
@@ -990,7 +992,7 @@ fun ProfileConnectionsScreen(component: ProfileComponent) {
                             Button(
                                 modifier = Modifier.weight(1f),
                                 onClick = { component.acceptFriendRequest(requester) },
-                                enabled = !isActionInProgress,
+                                enabled = !isActionInProgress && !isActionRestricted,
                             ) {
                                 Text(if (isActionInProgress) "Working..." else "Accept")
                             }
@@ -1349,7 +1351,7 @@ private fun ConnectionUserCard(
     secondaryActions: (@Composable () -> Unit)? = null,
 ) {
     val avatarSize = 56.dp
-    val avatarDisplayName = user.fullName.ifBlank { user.userName.ifBlank { "User" } }
+    val avatarDisplayName = user.displayName.ifBlank { user.userName.ifBlank { "User" } }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -1380,14 +1382,23 @@ private fun ConnectionUserCard(
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
                     Text(
-                        text = user.fullName.ifBlank { "User" },
+                        text = user.displayName.ifBlank { "User" },
                         style = MaterialTheme.typography.titleMedium,
                     )
-                    Text(
-                        text = "@${user.userName.ifBlank { "user" }}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    user.publicHandle?.let { handle ->
+                        Text(
+                            text = handle,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (user.shouldRestrictSocialActions) {
+                        Text(
+                            text = "Social actions unavailable",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
 

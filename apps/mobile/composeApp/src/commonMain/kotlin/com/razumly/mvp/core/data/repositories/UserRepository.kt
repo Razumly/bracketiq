@@ -147,6 +147,11 @@ data class UserEmailMembershipMatch(
     val userId: String,
 )
 
+data class UserVisibilityContext(
+    val teamId: String? = null,
+    val eventId: String? = null,
+)
+
 class SignupProfileConflictException(
     val conflict: SignupProfileConflict,
 ) : Exception(
@@ -163,8 +168,14 @@ interface IUserRepository : IMVPRepository {
     suspend fun login(email: String, password: String): Result<UserData>
     suspend fun logout(): Result<Unit>
 
-    suspend fun getUsers(userIds: List<String>): Result<List<UserData>>
-    fun getUsersFlow(userIds: List<String>): Flow<Result<List<UserData>>>
+    suspend fun getUsers(
+        userIds: List<String>,
+        visibilityContext: UserVisibilityContext = UserVisibilityContext(),
+    ): Result<List<UserData>>
+    fun getUsersFlow(
+        userIds: List<String>,
+        visibilityContext: UserVisibilityContext = UserVisibilityContext(),
+    ): Flow<Result<List<UserData>>>
 
     suspend fun searchPlayers(search: String): Result<List<UserData>>
 
@@ -268,10 +279,12 @@ class UserRepository(
     }
 
     override suspend fun login(email: String, password: String): Result<UserData> = runCatching {
-        Napier.d(tag = USER_REPOSITORY_LOG_TAG) { "Email login started for ${maskEmail(email)}" }
+        val normalizedEmail = normalizeEmail(email)
+        if (normalizedEmail.isBlank()) error("Email is required")
+        Napier.d(tag = USER_REPOSITORY_LOG_TAG) { "Email login started for ${maskEmail(normalizedEmail)}" }
         val res = api.post<LoginRequestDto, AuthResponseDto>(
             path = "api/auth/login",
-            body = LoginRequestDto(email = email, password = password),
+            body = LoginRequestDto(email = normalizedEmail, password = password),
         )
 
         val token = res.token?.takeIf(String::isNotBlank)
@@ -330,12 +343,14 @@ class UserRepository(
         dateOfBirth: String?,
         profileSelection: SignupProfileSelection?,
     ): Result<UserData> = runCatching {
-        Napier.d(tag = USER_REPOSITORY_LOG_TAG) { "Signup started for ${maskEmail(email)}" }
+        val normalizedEmail = normalizeEmail(email)
+        if (normalizedEmail.isBlank()) error("Email is required")
+        Napier.d(tag = USER_REPOSITORY_LOG_TAG) { "Signup started for ${maskEmail(normalizedEmail)}" }
         val res = try {
             api.post<RegisterRequestDto, AuthResponseDto>(
                 path = "api/auth/register",
                 body = RegisterRequestDto(
-                    email = email,
+                    email = normalizedEmail,
                     password = password,
                     name = userName,
                     firstName = firstName,
@@ -480,16 +495,33 @@ class UserRepository(
         }.getOrNull()
     }
 
-    private suspend fun fetchUsersByIds(userIds: List<String>): List<UserData> {
+    private fun UserVisibilityContext.toQuerySuffix(): String {
+        val params = buildList {
+            teamId?.trim()?.takeIf(String::isNotBlank)?.let { normalizedTeamId ->
+                add("teamId=${normalizedTeamId.encodeURLQueryComponent()}")
+            }
+            eventId?.trim()?.takeIf(String::isNotBlank)?.let { normalizedEventId ->
+                add("eventId=${normalizedEventId.encodeURLQueryComponent()}")
+            }
+        }
+
+        return if (params.isEmpty()) "" else "&${params.joinToString("&")}"
+    }
+
+    private suspend fun fetchUsersByIds(
+        userIds: List<String>,
+        visibilityContext: UserVisibilityContext = UserVisibilityContext(),
+    ): List<UserData> {
         if (userIds.isEmpty()) return emptyList()
 
         val orderedIds = userIds.distinct().filter(String::isNotBlank)
         if (orderedIds.isEmpty()) return emptyList()
 
         val byId = LinkedHashMap<String, UserData>()
+        val visibilityContextQuerySuffix = visibilityContext.toQuerySuffix()
         orderedIds.chunked(100).forEach { chunk ->
             val encodedIds = chunk.joinToString(",") { it.encodeURLQueryComponent() }
-            val response = api.get<UsersResponseDto>("api/users?ids=$encodedIds")
+            val response = api.get<UsersResponseDto>("api/users?ids=$encodedIds$visibilityContextQuerySuffix")
             response.users.mapNotNull { it.toUserDataOrNull() }.forEach { user ->
                 byId[user.id] = user
             }
@@ -497,6 +529,8 @@ class UserRepository(
 
         return orderedIds.mapNotNull { byId[it] }
     }
+
+    private fun normalizeEmail(email: String): String = email.trim().lowercase()
 
     private fun maskEmail(email: String): String {
         val atIndex = email.indexOf('@')
@@ -818,13 +852,16 @@ class UserRepository(
         response.error?.takeIf(String::isNotBlank)?.let { error(it) }
     }
 
-    override suspend fun getUsers(userIds: List<String>): Result<List<UserData>> {
+    override suspend fun getUsers(
+        userIds: List<String>,
+        visibilityContext: UserVisibilityContext,
+    ): Result<List<UserData>> {
         val ids = userIds.distinct().filter(String::isNotBlank)
         if (ids.isEmpty()) return Result.success(emptyList())
 
         return multiResponse(
             getRemoteData = {
-                fetchUsersByIds(ids)
+                fetchUsersByIds(ids, visibilityContext)
             },
             getLocalData = { databaseService.getUserDataDao.getUserDatasById(ids) },
             saveData = { usersData -> databaseService.getUserDataDao.upsertUsersData(usersData) },
@@ -832,13 +869,18 @@ class UserRepository(
         )
     }
 
-    override fun getUsersFlow(userIds: List<String>): Flow<Result<List<UserData>>> {
+    override fun getUsersFlow(
+        userIds: List<String>,
+        visibilityContext: UserVisibilityContext,
+    ): Flow<Result<List<UserData>>> {
         val ids = userIds.distinct().filter(String::isNotBlank)
+        if (ids.isEmpty()) return kotlinx.coroutines.flow.flowOf(Result.success(emptyList()))
+
         val localUsersFlow = databaseService.getUserDataDao.getUserDatasByIdFlow(ids)
             .map { Result.success(it) }
 
         scope.launch {
-            getUsers(ids)
+            getUsers(ids, visibilityContext)
         }
 
         return localUsersFlow

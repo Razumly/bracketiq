@@ -17,6 +17,9 @@ data class UserDataDTO(
     val hasStripeAccount: Boolean?,
     val uploadedImages: List<String>,
     val profileImageId: String? = null,
+    val displayName: String? = null,
+    val isMinor: Boolean = false,
+    val isIdentityHidden: Boolean = false,
     @Transient val id: String = "",
 ) {
     companion object {
@@ -35,6 +38,9 @@ data class UserDataDTO(
                 hasStripeAccount = false,
                 uploadedImages = listOf(),
                 profileImageId = null,
+                displayName = null,
+                isMinor = false,
+                isIdentityHidden = false,
                 id = userId,
             )
         }
@@ -54,6 +60,9 @@ suspend fun UserDataDTO.toUserData(id: String): UserData {
         hasStripeAccount = hasStripeAccount,
         uploadedImages = uploadedImages,
         profileImageId = profileImageId,
+        privacyDisplayName = displayName,
+        isMinor = isMinor,
+        isIdentityHidden = isIdentityHidden,
         id = id
     )
 }

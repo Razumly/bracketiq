@@ -7,6 +7,7 @@ import GoogleSignIn
 import IQKeyboardManagerSwift
 
 class AppDelegate: NSObject, UIApplicationDelegate {
+    private static let appForegroundKey = "mvp_app_is_foreground"
     private let apiKey: String = {
         guard let filePath = Bundle.main.path(forResource: "Secrets", ofType: "plist") else {
             fatalError("Couldn't find file 'Secrets.plist'.")
@@ -32,7 +33,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         IQKeyboardManager.shared.keyboardDistance = 10
         
         NotifierManager.shared.initialize(configuration: NotificationPlatformConfigurationIos(
-            showPushNotification: true,
+            showPushNotification: false,
             askNotificationPermissionOnStart: false,
             notificationSoundName: nil
         ))
@@ -45,6 +46,8 @@ class AppDelegate: NSObject, UIApplicationDelegate {
             }
         }
         
+        UserDefaults.standard.set(true, forKey: AppDelegate.appForegroundKey)
+
         // Handle deep link when app is launched from scratch
         if let url = launchOptions?[.url] as? URL {
             AppDelegate.pendingDeepLink = url
@@ -76,6 +79,18 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         Messaging.messaging().apnsToken = deviceToken
+    }
+
+    func applicationDidBecomeActive(_ application: UIApplication) {
+        UserDefaults.standard.set(true, forKey: AppDelegate.appForegroundKey)
+    }
+
+    func applicationWillResignActive(_ application: UIApplication) {
+        UserDefaults.standard.set(false, forKey: AppDelegate.appForegroundKey)
+    }
+
+    func applicationDidEnterBackground(_ application: UIApplication) {
+        UserDefaults.standard.set(false, forKey: AppDelegate.appForegroundKey)
     }
 }
 
@@ -124,6 +139,4 @@ struct iOSApp: App {
         print("Deep link updated: \(url.absoluteString) with ID: \(deepLinkId)")
     }
 }
-
-
 

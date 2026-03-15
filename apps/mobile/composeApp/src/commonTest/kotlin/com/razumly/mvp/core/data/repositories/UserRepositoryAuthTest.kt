@@ -130,6 +130,59 @@ private class UserRepositoryAuth_FakeDatabaseService(
 
 class UserRepositoryAuthTest {
     @Test
+    fun login_normalizes_email_before_request() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+        var capturedBody = ""
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/auth/login", request.url.encodedPath)
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+            respond(
+                content = """
+                    {
+                      "user": { "id":"u1", "email":"u1@example.com", "name":"U1" },
+                      "session": { "userId":"u1", "isAdmin":false },
+                      "token":"t123",
+                      "profile": {
+                        "id":"u1",
+                        "firstName":"A",
+                        "lastName":"B",
+                        "userName":"ab",
+                        "teamIds":[],
+                        "friendIds":[],
+                        "friendRequestIds":[],
+                        "friendRequestSentIds":[],
+                        "followingIds":[],
+                        "uploadedImages":[],
+                        "hasStripeAccount":false
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        repo.login("  U1@Example.com  ", "password123").getOrThrow()
+
+        assertEquals(true, capturedBody.contains("\"email\":\"u1@example.com\""))
+    }
+
+    @Test
     fun login_stores_token_and_sets_current_user_and_account() = runTest {
         val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("")
         val userDao = FakeUserDataDao()

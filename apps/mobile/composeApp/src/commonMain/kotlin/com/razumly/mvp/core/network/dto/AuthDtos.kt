@@ -96,6 +96,9 @@ data class UserProfileDto(
     val hasStripeAccount: Boolean? = null,
     val uploadedImages: List<String>? = null,
     val profileImageId: String? = null,
+    val displayName: String? = null,
+    val isMinor: Boolean? = null,
+    val isIdentityHidden: Boolean? = null,
     // Server includes fields not present in app UserData; we keep them here only to avoid decode failures.
     val dateOfBirth: String? = null,
     val createdAt: String? = null,
@@ -172,6 +175,9 @@ fun UserProfileDto.toUserDataOrNull(): UserData? {
         hasStripeAccount = hasStripeAccount,
         uploadedImages = uploadedImages ?: emptyList(),
         profileImageId = profileImageId,
+        privacyDisplayName = displayName,
+        isMinor = isMinor ?: false,
+        isIdentityHidden = isIdentityHidden ?: false,
         id = resolvedId,
     )
 }

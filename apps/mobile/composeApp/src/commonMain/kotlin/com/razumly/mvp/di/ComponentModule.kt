@@ -134,7 +134,7 @@ val componentModule = module {
         DefaultChatGroupComponent(
             componentContext = componentContext,
             messageUser = user,
-            chatGroup = chat,
+            initialChatGroup = chat,
             userRepository = get(),
             messagesRepository = get(),
             pushNotificationsRepository = get(),
@@ -187,7 +187,7 @@ val componentModule = module {
             teamRepository = get(),
             userRepository = get(),
             sportsRepository = get(),
-            freeAgents = freeAgents,
+            _legacyFreeAgents = freeAgents,
             selectedEvent = selectedEvent,
             selectedFreeAgentId = selectedFreeAgentId,
             eventRepository = get(),

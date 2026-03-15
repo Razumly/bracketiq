@@ -74,6 +74,7 @@ interface IPushNotificationsRepository {
     suspend fun createEventTopic(event: Event): Result<Unit>
     suspend fun createTournamentTopic(event: Event): Result<Unit>
     suspend fun createChatGroupTopic(chatGroup: ChatGroup): Result<Unit>
+    fun setActiveChat(chatGroupId: String?)
 
     suspend fun addDeviceAsTarget(): Result<Unit>
     suspend fun removeDeviceAsTarget(): Result<Unit>
@@ -103,6 +104,7 @@ class PushNotificationsRepository(
     private val pushTokenState =
         userDataSource.getPushToken().stateIn(scope, SharingStarted.Eagerly, "")
     private var deferredTokenSyncJob: Job? = null
+    private var activeChatId: String? = null
 
     private val managerListener = object : NotifierManager.Listener {
         override fun onNewToken(token: String) {
@@ -122,21 +124,65 @@ class PushNotificationsRepository(
         }
 
         override fun onNotificationClicked(data: PayloadData) {
-            super.onNotificationClicked(data)
-            Napier.d(
-                tag = "PushNotificationsRepository",
-                message = "Notification clicked: $data"
-            )
+            scope.launch {
+                Napier.d(
+                    tag = "PushNotificationsRepository",
+                    message = "Notification clicked: $data"
+                )
+            }
         }
 
         override fun onPushNotificationWithPayloadData(
             title: String?, body: String?, data: PayloadData
         ) {
-            super.onPushNotificationWithPayloadData(title, body, data)
-            Napier.d(
-                tag = "PushNotificationsRepository",
-                message = "Push notification with payload data: $data"
-            )
+            scope.launch {
+                val normalizedTopicId =
+                    data["topicId"]?.toString()?.trim()?.takeIf(String::isNotBlank)
+                if (!isApplicationInForeground()) {
+                    Napier.d(
+                        tag = "PushNotificationsRepository",
+                        message = "Skipping manual notification rendering because app is not foreground."
+                    )
+                    return@launch
+                }
+
+                if (!normalizedTopicId.isNullOrBlank() && normalizedTopicId == activeChatId) {
+                    Napier.d(
+                        tag = "PushNotificationsRepository",
+                        message = "Suppressing foreground notification for active chat topicId=$normalizedTopicId"
+                    )
+                    return@launch
+                }
+
+                val normalizedTitle = title?.trim().orEmpty()
+                val normalizedBody = body?.trim().orEmpty()
+                if (normalizedTitle.isBlank() && normalizedBody.isBlank()) {
+                    Napier.d(
+                        tag = "PushNotificationsRepository",
+                        message = "Skipping manual notification rendering because title/body is empty."
+                    )
+                    return@launch
+                }
+
+                runCatching {
+                    NotifierManager.getLocalNotifier().notify(
+                        title = normalizedTitle.ifBlank { "Notification" },
+                        body = normalizedBody.ifBlank { "You have a new update." },
+                        payloadData = data.mapValues { (_, value) -> value?.toString().orEmpty() },
+                    )
+                }.onFailure { error ->
+                    Napier.e(
+                        tag = "PushNotificationsRepository",
+                        throwable = error,
+                        message = "Failed to manually render foreground notification."
+                    )
+                }
+
+                Napier.d(
+                    tag = "PushNotificationsRepository",
+                    message = "Push notification with payload data: $data"
+                )
+            }
         }
     }
 
@@ -244,6 +290,12 @@ class PushNotificationsRepository(
         topicName = chatGroup.name,
         userIds = chatGroup.userIds,
     )
+
+    override fun setActiveChat(chatGroupId: String?) {
+        activeChatId = chatGroupId
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+    }
 
     override suspend fun addDeviceAsTarget(): Result<Unit> = runCatching {
         val userId = resolveCurrentOrCachedPushUserId()

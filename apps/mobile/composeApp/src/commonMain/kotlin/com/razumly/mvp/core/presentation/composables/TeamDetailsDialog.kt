@@ -27,6 +27,7 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 fun TeamDetailsDialog(
     team: TeamWithPlayers,
     currentUser: UserData,
+    knownUsers: List<UserData> = emptyList(),
     onDismiss: () -> Unit,
     onPlayerMessage: (UserData) -> Unit,
     onPlayerAction: (UserData, PlayerAction) -> Unit = { _, _ -> }
@@ -42,16 +43,26 @@ fun TeamDetailsDialog(
             Column(
                 modifier = Modifier.padding(24.dp)
             ) {
-                val knownUsers = (team.players + team.pendingPlayers + listOfNotNull(team.captain))
+                val knownUsersById = (knownUsers + team.players + team.pendingPlayers + listOfNotNull(team.captain, currentUser))
                     .associateBy { it.id }
-                val managerId = team.team.managerId ?: team.team.captainId
-                val managerLabel = knownUsers[managerId]?.displayName ?: managerId
-                val headCoachLabel = team.team.headCoachId?.let { headCoachId ->
-                    knownUsers[headCoachId]?.displayName ?: headCoachId
+                val managerId = (team.team.managerId ?: team.team.captainId)
+                    ?.trim()
+                    ?.takeIf(String::isNotBlank)
+                val managerLabel = managerId?.let { id ->
+                    knownUsersById[id]?.displayName ?: id
                 } ?: "Unassigned"
-                val assistantCoachLabel = if (team.team.assistantCoachIds.isNotEmpty()) {
-                    team.team.assistantCoachIds.joinToString { assistantCoachId ->
-                        knownUsers[assistantCoachId]?.displayName ?: assistantCoachId
+                val headCoachLabel = team.team.headCoachId
+                    ?.trim()
+                    ?.takeIf(String::isNotBlank)
+                    ?.let { headCoachId ->
+                    knownUsersById[headCoachId]?.displayName ?: headCoachId
+                } ?: "Unassigned"
+                val assistantCoachIds = team.team.assistantCoachIds
+                    .map(String::trim)
+                    .filter(String::isNotBlank)
+                val assistantCoachLabel = if (assistantCoachIds.isNotEmpty()) {
+                    assistantCoachIds.joinToString { assistantCoachId ->
+                        knownUsersById[assistantCoachId]?.displayName ?: assistantCoachId
                     }
                 } else {
                     "Unassigned"

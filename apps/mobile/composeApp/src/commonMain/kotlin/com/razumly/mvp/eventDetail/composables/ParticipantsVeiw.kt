@@ -35,6 +35,8 @@ import com.razumly.mvp.core.data.util.isPlaceholderSlot
 import com.razumly.mvp.core.data.repositories.EventTeamBillCreateRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
 import com.razumly.mvp.core.data.repositories.EventTeamBillingUserOption
+import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.data.repositories.UserVisibilityContext
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.PlayerInteractionComponent
 import com.razumly.mvp.core.presentation.composables.MoneyInputField
@@ -157,6 +159,7 @@ fun ParticipantsView(
 
     var selectedTeam by remember { mutableStateOf<TeamWithPlayers?>(null) }
     var showTeamDialog by remember { mutableStateOf(false) }
+    var teamDialogKnownUsers by remember { mutableStateOf<Map<String, UserData>>(emptyMap()) }
 
     var removeTarget by remember { mutableStateOf<ParticipantRemoveTarget?>(null) }
 
@@ -180,6 +183,9 @@ fun ParticipantsView(
     val playerInteractionComponent = remember {
         getKoin().get<PlayerInteractionComponent> { parametersOf(component) }
     }
+    val userRepository = remember {
+        getKoin().get<IUserRepository>()
+    }
 
     LaunchedEffect(Unit) {
         playerInteractionComponent.setLoadingHandler(loadingHandler)
@@ -187,6 +193,46 @@ fun ParticipantsView(
             if (error != null) {
                 popUpHandler.showPopup(error)
             }
+        }
+    }
+
+    LaunchedEffect(showTeamDialog, selectedTeam?.team?.id, currentUser.id, selectedEvent.players) {
+        val team = selectedTeam
+        if (!showTeamDialog || team == null) {
+            teamDialogKnownUsers = emptyMap()
+            return@LaunchedEffect
+        }
+
+        val baseKnownUsers = (
+            selectedEvent.players +
+                team.players +
+                team.pendingPlayers +
+                listOfNotNull(team.captain, currentUser)
+            )
+            .distinctBy(UserData::id)
+            .associateBy(UserData::id)
+        teamDialogKnownUsers = baseKnownUsers
+
+        val roleIds = buildSet {
+            add(team.team.captainId)
+            team.team.managerId?.let(::add)
+            team.team.headCoachId?.let(::add)
+            addAll(team.team.assistantCoachIds)
+        }
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .distinct()
+
+        val missingRoleIds = roleIds.filterNot(baseKnownUsers::containsKey)
+        if (missingRoleIds.isEmpty()) return@LaunchedEffect
+
+        userRepository.getUsers(
+            userIds = missingRoleIds,
+            visibilityContext = UserVisibilityContext(teamId = team.team.id),
+        ).onSuccess { loadedUsers ->
+            teamDialogKnownUsers = (baseKnownUsers.values + loadedUsers)
+                .distinctBy(UserData::id)
+                .associateBy(UserData::id)
         }
     }
 
@@ -514,6 +560,7 @@ fun ParticipantsView(
         TeamDetailsDialog(
             team = selectedTeam!!,
             currentUser = currentUser,
+            knownUsers = teamDialogKnownUsers.values.toList(),
             onDismiss = {
                 showTeamDialog = false
                 selectedTeam = null

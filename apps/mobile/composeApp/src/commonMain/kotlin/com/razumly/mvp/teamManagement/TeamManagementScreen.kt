@@ -17,6 +17,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -25,17 +26,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import com.razumly.mvp.core.data.dataTypes.inferTeamInviteRole
 import com.razumly.mvp.core.data.dataTypes.label
-import androidx.compose.ui.window.Dialog
 import com.razumly.mvp.core.presentation.composables.PlatformBackButton
 import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.TeamCard
-import com.razumly.mvp.teamManagement.TeamInvite
+import com.razumly.mvp.core.util.LocalLoadingHandler
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TeamManagementScreen(component: TeamManagementComponent) {
+    val loadingHandler = LocalLoadingHandler.current
     val currentTeams by component.currentTeams.collectAsState()
     val lazyListState = rememberLazyListState()
     val friends by component.friends.collectAsState()
@@ -51,6 +53,10 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
     var createTeam by remember { mutableStateOf(false) }
     val deleteEnabled by component.enableDeleteTeam.collectAsState()
     val teamInvites by component.teamInvites.collectAsState()
+
+    LaunchedEffect(component, loadingHandler) {
+        component.setLoadingHandler(loadingHandler)
+    }
 
     Scaffold(
         topBar = {

@@ -48,6 +48,16 @@ data class UpdateChatGroupRequestDto(
 )
 
 @Serializable
+data class ChatMuteRequestDto(
+    val muted: Boolean,
+)
+
+@Serializable
+data class ChatMuteResponseDto(
+    val muted: Boolean,
+)
+
+@Serializable
 data class MessageApiDto(
     val id: String? = null,
     @SerialName("\$id") val legacyId: String? = null,
@@ -96,4 +106,3 @@ data class CreateMessageRequestDto(
     val readByIds: List<String>? = null,
     val attachmentUrls: List<String>? = null,
 )
-

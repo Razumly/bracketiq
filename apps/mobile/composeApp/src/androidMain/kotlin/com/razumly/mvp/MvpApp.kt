@@ -22,7 +22,7 @@ class MvpApp : Application() {
         NotifierManager.initialize(
             configuration = NotificationPlatformConfiguration.Android(
                 notificationIconResId = R.drawable.ic_launcher_foreground,
-                showPushNotification = true,
+                showPushNotification = false,
             )
         )
         NotifierManager.setLogger { message ->

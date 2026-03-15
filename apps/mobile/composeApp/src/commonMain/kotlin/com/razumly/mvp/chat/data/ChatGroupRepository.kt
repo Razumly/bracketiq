@@ -12,9 +12,12 @@ import com.razumly.mvp.core.util.newId
 import io.github.aakira.napier.Napier
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.dto.ChatGroupApiDto
+import com.razumly.mvp.core.network.dto.ChatMuteRequestDto
+import com.razumly.mvp.core.network.dto.ChatMuteResponseDto
 import com.razumly.mvp.core.network.dto.ChatGroupsResponseDto
 import com.razumly.mvp.core.network.dto.CreateChatGroupRequestDto
 import com.razumly.mvp.core.network.dto.UpdateChatGroupRequestDto
+import io.ktor.http.encodeURLPathPart
 import io.ktor.http.encodeURLQueryComponent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
@@ -35,8 +38,11 @@ interface IChatGroupRepository : IMVPRepository {
 
     suspend fun createChatGroup(newChatGroup: ChatGroupWithRelations): Result<Unit>
     suspend fun updateChatGroup(newChatGroup: ChatGroup): Result<ChatGroup>
+    suspend fun deleteChatGroup(chatGroupId: String): Result<Unit>
     suspend fun deleteUserFromChatGroup(chatGroup: ChatGroup, userId: String): Result<Unit>
     suspend fun addUserToChatGroup(chatGroup: ChatGroup, userId: String): Result<Unit>
+    suspend fun getCurrentUserMuteStatus(chatGroupId: String): Result<Boolean>
+    suspend fun setCurrentUserMuteStatus(chatGroupId: String, muted: Boolean): Result<Boolean>
 }
 
 class ChatGroupRepository(
@@ -111,7 +117,7 @@ class ChatGroupRepository(
                 path = "api/chat/groups",
                 body = CreateChatGroupRequestDto(
                     id = newChatGroup.chatGroup.id,
-                    name = newChatGroup.chatGroup.name,
+                    name = newChatGroup.chatGroup.name.asMeaningfulValue(),
                     userIds = newChatGroup.chatGroup.userIds,
                     hostId = newChatGroup.chatGroup.hostId,
                 ),
@@ -129,13 +135,28 @@ class ChatGroupRepository(
             api.patch<UpdateChatGroupRequestDto, ChatGroupApiDto>(
                 path = "api/chat/groups/${newChatGroup.id}",
                 body = UpdateChatGroupRequestDto(
-                    name = newChatGroup.name,
+                    name = newChatGroup.name.asMeaningfulValue(),
                     userIds = newChatGroup.userIds,
                 ),
             ).toChatGroupOrNull() ?: error("Update chat group response missing group")
         }, saveCall = { chatGroup ->
+            val currentUserId = userRepository.currentUser.value.getOrThrow().id
+            val users = userRepository.getUsers(chatGroup.userIds).getOrElse { emptyList() }
+            val otherUsers = users.filter { user -> user.id != currentUserId && chatGroup.userIds.contains(user.id) }
+            chatGroup.setDisplayName(resolveDisplayName(chatGroup, otherUsers))
+                .setImageUrl(resolveImageUrl(chatGroup, otherUsers))
+
+            if (users.isNotEmpty()) {
+                databaseService.getUserDataDao.upsertUsersData(users)
+            }
             databaseService.getChatGroupDao.upsertChatGroupWithRelations(chatGroup)
         }, onReturn = { it })
+
+    override suspend fun deleteChatGroup(chatGroupId: String): Result<Unit> = runCatching {
+        val normalizedId = chatGroupId.trim().takeIf(String::isNotBlank) ?: error("Chat group id cannot be blank.")
+        api.deleteNoResponse("api/chat/groups/${normalizedId.encodeURLPathPart()}")
+        databaseService.getChatGroupDao.deleteChatGroupsByIds(listOf(normalizedId))
+    }
 
     override suspend fun deleteUserFromChatGroup(
         chatGroup: ChatGroup, userId: String
@@ -149,14 +170,29 @@ class ChatGroupRepository(
         return updateChatGroup(newChatGroup).map {}
     }
 
+    override suspend fun getCurrentUserMuteStatus(chatGroupId: String): Result<Boolean> = runCatching {
+        val normalizedId = chatGroupId.trim().takeIf(String::isNotBlank) ?: error("Chat group id cannot be blank.")
+        api.get<ChatMuteResponseDto>(
+            "api/chat/groups/${normalizedId.encodeURLPathPart()}/mute"
+        ).muted
+    }
+
+    override suspend fun setCurrentUserMuteStatus(chatGroupId: String, muted: Boolean): Result<Boolean> = runCatching {
+        val normalizedId = chatGroupId.trim().takeIf(String::isNotBlank) ?: error("Chat group id cannot be blank.")
+        api.post<ChatMuteRequestDto, ChatMuteResponseDto>(
+            path = "api/chat/groups/${normalizedId.encodeURLPathPart()}/mute",
+            body = ChatMuteRequestDto(muted = muted),
+        ).muted
+    }
+
     private fun resolveDisplayName(chatGroup: ChatGroup, otherUsers: List<UserData>): String {
         val participantNames = otherUsers
             .mapNotNull { user -> user.fullName.asMeaningfulValue() }
             .distinct()
             .joinToString(", ")
             .asMeaningfulValue()
-        return participantNames
-            ?: chatGroup.name.asMeaningfulValue()
+        return chatGroup.name.asMeaningfulValue()
+            ?: participantNames
             ?: chatGroup.displayName.asMeaningfulValue()
             ?: "Unknown chat"
     }

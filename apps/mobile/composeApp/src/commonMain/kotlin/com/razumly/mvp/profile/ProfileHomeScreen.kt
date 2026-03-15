@@ -66,9 +66,10 @@ private data class ProfileAction(
 fun ProfileHomeScreen(component: ProfileComponent) {
     val navPadding = LocalNavBarPadding.current
     val showChildrenTab by component.showChildrenTab.collectAsState()
+    val hasStripeAccount by component.isStripeAccountConnected.collectAsState()
     val pushTargetDebugState by component.pushTargetDebugState.collectAsState()
     val pendingInviteCount by component.pendingInviteCount.collectAsState()
-    val actions = remember(component, showChildrenTab, pendingInviteCount) {
+    val actions = remember(component, showChildrenTab, hasStripeAccount, pendingInviteCount) {
         buildList {
             add(
                 ProfileAction(
@@ -80,16 +81,24 @@ fun ProfileHomeScreen(component: ProfileComponent) {
             )
             add(
                 ProfileAction(
-                    title = "Payments",
-                    description = "Stripe account actions",
+                    title = "Manage Stripe",
+                    description = if (hasStripeAccount) {
+                        "Manage your Stripe account"
+                    } else {
+                        "Connect your Stripe account"
+                    },
                     icon = MVPIcons.ProfileActionPayments,
-                    onClick = component::navigateToPayments,
+                    onClick = if (hasStripeAccount) {
+                        component::manageStripeAccount
+                    } else {
+                        component::manageStripeAccountOnboarding
+                    },
                 ),
             )
             add(
                 ProfileAction(
-                    title = "Payment Plans",
-                    description = "Installment plan section",
+                    title = "Bills",
+                    description = "Billing and installment plans",
                     icon = MVPIcons.ProfileActionPaymentPlans,
                     onClick = component::navigateToPaymentPlans,
                 ),
@@ -199,9 +208,13 @@ fun ProfileHomeScreen(component: ProfileComponent) {
             columns = GridCells.Fixed(2),
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
-                .padding(navPadding),
-            contentPadding = PaddingValues(16.dp),
+                .padding(innerPadding),
+            contentPadding = PaddingValues(
+                start = 16.dp,
+                top = 16.dp,
+                end = 16.dp,
+                bottom = 16.dp + navPadding.calculateBottomPadding(),
+            ),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {

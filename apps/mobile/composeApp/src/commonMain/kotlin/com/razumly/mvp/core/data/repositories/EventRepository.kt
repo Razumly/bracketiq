@@ -823,7 +823,10 @@ class EventRepository(
             .distinct()
             .filter(String::isNotBlank)
         val users = if (relatedUserIds.isNotEmpty()) {
-            userRepository.getUsers(relatedUserIds).getOrThrow()
+            userRepository.getUsers(
+                userIds = relatedUserIds,
+                visibilityContext = UserVisibilityContext(eventId = event.id),
+            ).getOrThrow()
         } else {
             emptyList()
         }

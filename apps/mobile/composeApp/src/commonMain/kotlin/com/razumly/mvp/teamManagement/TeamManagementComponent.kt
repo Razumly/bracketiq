@@ -11,7 +11,9 @@ import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.ISportsRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.data.repositories.UserVisibilityContext
 import com.razumly.mvp.core.presentation.INavigationHandler
+import com.razumly.mvp.core.util.LoadingHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -44,6 +46,7 @@ interface TeamManagementComponent {
     val enableDeleteTeam: StateFlow<Boolean>
     val onBack: () -> Unit
 
+    fun setLoadingHandler(handler: LoadingHandler)
     fun selectTeam(team: TeamWithPlayers?)
     fun createTeam(team: Team)
     fun joinTeam(team: Team)
@@ -69,12 +72,13 @@ class DefaultTeamManagementComponent(
     private val sportsRepository: ISportsRepository,
     private val teamRepository: ITeamRepository,
     private val userRepository: IUserRepository,
-    private val freeAgents: List<String>,
+    private val _legacyFreeAgents: List<String>,
     override val selectedEvent: Event?,
     override val selectedFreeAgentId: String?,
     private val navigationHandler: INavigationHandler
 ) : ComponentContext by componentContext, TeamManagementComponent {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private var loadingHandler: LoadingHandler? = null
 
     override val onBack = navigationHandler::navigateBack
     private val _errorState = MutableStateFlow<String?>(null)
@@ -112,25 +116,32 @@ class DefaultTeamManagementComponent(
 
     override val freeAgentsFiltered = selectedTeam
         .flatMapLatest { team ->
+            val teamId = team?.team?.id?.trim()?.takeIf(String::isNotBlank)
             val playerIdsToExclude = buildSet {
                 add(currentUser.id) // uses direct value, not flow
                 team?.players?.forEach { add(it.id) }
             }
 
             flow {
-                val filteredFreeAgents = freeAgents.filterNot { it in playerIdsToExclude }
+                if (teamId == null) {
+                    emit(emptyList())
+                    return@flow
+                }
+
+                val inviteFreeAgents = teamRepository.getInviteFreeAgents(teamId).getOrElse {
+                    _errorState.value = it.message
+                    emptyList()
+                }
+                val filteredFreeAgents = inviteFreeAgents.filterNot { it.id in playerIdsToExclude }
                 val orderedFreeAgents = normalizedSelectedFreeAgentId?.let { selectedId ->
-                    if (filteredFreeAgents.contains(selectedId)) {
-                        listOf(selectedId) + filteredFreeAgents.filterNot { it == selectedId }
+                    if (filteredFreeAgents.any { it.id == selectedId }) {
+                        val prioritized = filteredFreeAgents.firstOrNull { it.id == selectedId }
+                        listOfNotNull(prioritized) + filteredFreeAgents.filterNot { it.id == selectedId }
                     } else {
                         filteredFreeAgents
                     }
                 } ?: filteredFreeAgents
-                val result = userRepository.getUsers(orderedFreeAgents)
-                emit(result.getOrElse {
-                    _errorState.value = it.message
-                    emptyList()
-                })
+                emit(orderedFreeAgents)
             }
         }
         .stateIn(scope, SharingStarted.Eagerly, emptyList())
@@ -182,6 +193,10 @@ class DefaultTeamManagementComponent(
         scope.launch { refreshInvites() }
     }
 
+    override fun setLoadingHandler(handler: LoadingHandler) {
+        loadingHandler = handler
+    }
+
     override fun selectTeam(team: TeamWithPlayers?) {
         val resolvedTeam = team ?: TeamWithPlayers(
             Team(currentUser.id), currentUser, listOf(currentUser), listOf()
@@ -191,17 +206,40 @@ class DefaultTeamManagementComponent(
     }
 
     override fun createTeam(team: Team) {
+        deselectTeam()
         scope.launch {
-            teamRepository.createTeam(
-                team.copy(
-                    captainId = currentUser.id,
-                    managerId = currentUser.id,
+            try {
+                loadingHandler?.showLoading("Creating team...")
+                val createResult = teamRepository.createTeam(
+                    team.copy(
+                        captainId = currentUser.id,
+                        managerId = currentUser.id,
+                    )
                 )
-            ).onFailure {
-                _errorState.value = it.message
+
+                createResult.onFailure {
+                    _errorState.value = it.message
+                    return@launch
+                }
+
+                val createdTeam = createResult.getOrNull() ?: return@launch
+
+                loadingHandler?.showLoading("Fetching teams...")
+                val teamIdsToRefresh = (currentTeams.value.map { teamWithPlayers ->
+                    teamWithPlayers.team.id
+                } + createdTeam.id)
+                    .filter(String::isNotBlank)
+                    .distinct()
+
+                if (teamIdsToRefresh.isNotEmpty()) {
+                    teamRepository.getTeamsWithPlayers(teamIdsToRefresh).onFailure {
+                        _errorState.value = it.message
+                    }
+                }
+            } finally {
+                loadingHandler?.hideLoading()
             }
         }
-        deselectTeam()
     }
 
     override fun joinTeam(team: Team) {
@@ -329,7 +367,10 @@ class DefaultTeamManagementComponent(
         }
 
         scope.launch {
-            val fetchedUsers = userRepository.getUsers(missingUserIds).getOrElse {
+            val fetchedUsers = userRepository.getUsers(
+                userIds = missingUserIds,
+                visibilityContext = UserVisibilityContext(teamId = selectedTeamId),
+            ).getOrElse {
                 _errorState.value = it.message
                 emptyList()
             }

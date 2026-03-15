@@ -63,8 +63,14 @@ private class BillingRepositoryHttp_FakeUserRepository(
     override val currentUser: StateFlow<Result<UserData>> = MutableStateFlow(Result.success(currentUser))
     override val currentAccount: StateFlow<Result<AuthAccount>> = MutableStateFlow(Result.success(currentAccount))
 
-    override suspend fun getUsers(userIds: List<String>): Result<List<UserData>> = error("unused")
-    override fun getUsersFlow(userIds: List<String>): Flow<Result<List<UserData>>> = flowOf(Result.success(emptyList()))
+    override suspend fun getUsers(
+        userIds: List<String>,
+        visibilityContext: UserVisibilityContext,
+    ): Result<List<UserData>> = error("unused")
+    override fun getUsersFlow(
+        userIds: List<String>,
+        visibilityContext: UserVisibilityContext,
+    ): Flow<Result<List<UserData>>> = flowOf(Result.success(emptyList()))
     override suspend fun login(email: String, password: String): Result<UserData> = error("unused")
     override suspend fun logout(): Result<Unit> = error("unused")
     override suspend fun searchPlayers(search: String): Result<List<UserData>> = error("unused")

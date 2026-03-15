@@ -203,13 +203,19 @@ private class EventRepositoryHttp_FakeUserRepository(
     var lastGetUsersInput: List<String>? = null
     val requestedUserIds: MutableSet<String> = mutableSetOf()
 
-    override suspend fun getUsers(userIds: List<String>): Result<List<UserData>> {
+    override suspend fun getUsers(
+        userIds: List<String>,
+        visibilityContext: UserVisibilityContext,
+    ): Result<List<UserData>> {
         lastGetUsersInput = userIds
         requestedUserIds.addAll(userIds.filter(String::isNotBlank))
         return Result.success(userIds.distinct().filter(String::isNotBlank).map(::makeUser))
     }
 
-    override fun getUsersFlow(userIds: List<String>): Flow<Result<List<UserData>>> = flowOf(Result.success(emptyList()))
+    override fun getUsersFlow(
+        userIds: List<String>,
+        visibilityContext: UserVisibilityContext,
+    ): Flow<Result<List<UserData>>> = flowOf(Result.success(emptyList()))
 
     override suspend fun login(email: String, password: String): Result<UserData> = error("unused")
     override suspend fun logout(): Result<Unit> = error("unused")
@@ -302,6 +308,7 @@ private object EventRepositoryHttp_UnusedTeamRepository : ITeamRepository {
         createdBy: String,
         inviteType: String,
     ): Result<Unit> = error("unused")
+    override suspend fun getInviteFreeAgents(teamId: String): Result<List<UserData>> = error("unused")
     override suspend fun deleteInvite(inviteId: String): Result<Unit> = error("unused")
     override suspend fun acceptTeamInvite(inviteId: String, teamId: String): Result<Unit> = error("unused")
 }

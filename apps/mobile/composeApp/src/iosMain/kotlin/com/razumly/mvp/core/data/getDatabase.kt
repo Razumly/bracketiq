@@ -20,7 +20,11 @@ fun getDatabase() : RoomDatabase.Builder<MVPDatabaseservice> {
         )
             .setDriver(BundledSQLiteDriver())
             .setQueryCoroutineContext(Dispatchers.Default)
-            .addMigrations(MIGRATION_1_2_NO_OP, MIGRATION_2_3_MATCH_START_NULLABLE)
+            .addMigrations(
+                MIGRATION_1_2_NO_OP,
+                MIGRATION_2_3_MATCH_START_NULLABLE,
+                MIGRATION_3_4_USER_PRIVACY_FIELDS,
+            )
             .fallbackToDestructiveMigrationOnDowngrade(true)
 
             .also { Napier.d(tag = "Database") { "Database builder created successfully" } }
@@ -241,6 +245,22 @@ private val MIGRATION_2_3_MATCH_START_NULLABLE = object : Migration(2, 3) {
             "DROP TABLE IF EXISTS `team_user_cross_ref_backup`",
             "DROP TABLE IF EXISTS `team_pending_player_cross_ref_backup`",
             "DROP TABLE IF EXISTS `event_team_cross_ref_backup`",
+        )
+
+        migrationSql.forEach { sql ->
+            connection.prepare(sql).use { statement ->
+                statement.step()
+            }
+        }
+    }
+}
+
+private val MIGRATION_3_4_USER_PRIVACY_FIELDS = object : Migration(3, 4) {
+    override fun migrate(connection: SQLiteConnection) {
+        val migrationSql = listOf(
+            "ALTER TABLE `UserData` ADD COLUMN `privacyDisplayName` TEXT",
+            "ALTER TABLE `UserData` ADD COLUMN `isMinor` INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE `UserData` ADD COLUMN `isIdentityHidden` INTEGER NOT NULL DEFAULT 0",
         )
 
         migrationSql.forEach { sql ->

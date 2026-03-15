@@ -32,6 +32,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -61,10 +62,21 @@ private class FakeTeamDao : TeamDao {
     override suspend fun getTeams(teamIds: List<String>): List<Team> = teamIds.mapNotNull { teams.value[it] }
 
     override suspend fun getTeamsForUser(userId: String): List<Team> =
-        teams.value.values.filter { userId in it.playerIds }
+        teams.value.values.filter { userId in it.playerIds || it.managerId == userId }
 
     override fun getTeamsForUserFlow(userId: String): Flow<List<com.razumly.mvp.core.data.dataTypes.TeamWithPlayers>> =
-        error("unused")
+        teams.map { cached ->
+            cached.values
+                .filter { userId in it.playerIds || it.managerId == userId }
+                .map { team ->
+                    com.razumly.mvp.core.data.dataTypes.TeamWithPlayers(
+                        team = team,
+                        captain = null,
+                        players = emptyList(),
+                        pendingPlayers = emptyList(),
+                    )
+                }
+        }
 
     override suspend fun getTeamInvitesForUser(userId: String): List<Team> = emptyList()
 
@@ -135,12 +147,18 @@ private class FakeUserRepository : IUserRepository {
     override suspend fun login(email: String, password: String): Result<UserData> = error("unused")
     override suspend fun logout(): Result<Unit> = error("unused")
 
-    override suspend fun getUsers(userIds: List<String>): Result<List<UserData>> {
+    override suspend fun getUsers(
+        userIds: List<String>,
+        visibilityContext: UserVisibilityContext,
+    ): Result<List<UserData>> {
         lastGetUsersInput = userIds
         return Result.success(emptyList())
     }
 
-    override fun getUsersFlow(userIds: List<String>): Flow<Result<List<UserData>>> = error("unused")
+    override fun getUsersFlow(
+        userIds: List<String>,
+        visibilityContext: UserVisibilityContext,
+    ): Flow<Result<List<UserData>>> = error("unused")
     override suspend fun searchPlayers(search: String): Result<List<UserData>> = error("unused")
     override suspend fun ensureUserByEmail(email: String): Result<UserData> = error("unused")
     override suspend fun createInvites(invites: List<com.razumly.mvp.core.network.dto.InviteCreateDto>): Result<List<com.razumly.mvp.core.data.dataTypes.Invite>> = error("unused")
@@ -275,6 +293,8 @@ private object FakePushNotificationsRepository : IPushNotificationsRepository {
     override suspend fun createChatGroupTopic(chatGroup: ChatGroup): Result<Unit> =
         Result.success(Unit)
 
+    override fun setActiveChat(chatGroupId: String?) {}
+
     override suspend fun addDeviceAsTarget(): Result<Unit> = Result.success(Unit)
     override suspend fun removeDeviceAsTarget(): Result<Unit> = Result.success(Unit)
     override suspend fun getDeviceTargetDebugStatus(syncBeforeCheck: Boolean): Result<PushDeviceTargetDebugStatus> =
@@ -392,5 +412,63 @@ class TeamRepositoryTeamsFetchTest {
 
         assertEquals("u1" to "TEAM", userRepo.lastListInvitesInput)
         assertEquals(listOf("invite_1"), invites.map { it.id })
+    }
+
+    @Test
+    fun getTeamsWithPlayersFlow_fetches_manager_teams_when_user_not_player() = runTest {
+        val tokenStore = InMemoryAuthTokenStore("t123")
+        val teamDao = FakeTeamDao()
+        val db = FakeDatabaseService(teamDao)
+        val userRepo = FakeUserRepository()
+        var capturedPlayerId: String? = null
+        var capturedManagerId: String? = null
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/teams", request.url.encodedPath)
+            capturedPlayerId = request.url.parameters["playerId"]
+            capturedManagerId = request.url.parameters["managerId"]
+            assertEquals("200", request.url.parameters["limit"])
+
+            respond(
+                content = """
+                    {
+                      "teams": [
+                        {
+                          "id": "t_manager_only",
+                          "name": "Sam's Soccer",
+                          "division": null,
+                          "playerIds": [],
+                          "captainId": "u_other",
+                          "managerId": "u_manager",
+                          "pending": [],
+                          "teamSize": 10
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = TeamRepository(api, db, userRepo, FakePushNotificationsRepository)
+
+        repo.getTeamsWithPlayersFlow("u_manager").first()
+
+        var pollAttempts = 0
+        while (teamDao.getTeamsForUser("u_manager").isEmpty() && pollAttempts < 100) {
+            Thread.sleep(10)
+            pollAttempts += 1
+        }
+
+        val cachedTeams = teamDao.getTeamsForUser("u_manager")
+        assertTrue(cachedTeams.isNotEmpty(), "Expected manager team to be persisted in local cache.")
+        assertEquals("u_manager", capturedPlayerId)
+        assertEquals("u_manager", capturedManagerId)
+        assertTrue(cachedTeams.any { it.id == "t_manager_only" })
     }
 }

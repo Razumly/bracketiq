@@ -15,9 +15,11 @@ import com.razumly.mvp.core.network.dto.DeleteInvitesRequestDto
 import com.razumly.mvp.core.network.dto.InviteCreateDto
 import com.razumly.mvp.core.network.dto.InvitesResponseDto
 import com.razumly.mvp.core.network.dto.TeamApiDto
+import com.razumly.mvp.core.network.dto.TeamInviteFreeAgentsResponseDto
 import com.razumly.mvp.core.network.dto.TeamsResponseDto
 import com.razumly.mvp.core.network.dto.UpdateTeamRequestDto
 import com.razumly.mvp.core.network.dto.toUpdateDto
+import com.razumly.mvp.core.network.dto.toUserDataOrNull
 import com.razumly.mvp.core.util.newId
 import io.ktor.http.encodeURLQueryComponent
 import kotlinx.coroutines.CoroutineScope
@@ -42,6 +44,7 @@ interface ITeamRepository : IMVPRepository {
     fun getTeamsWithPlayersFlow(id: String): Flow<Result<List<TeamWithPlayers>>>
     fun getTeamWithPlayersFlow(id: String): Flow<Result<TeamWithRelations>>
     suspend fun listTeamInvites(userId: String): Result<List<Invite>>
+    suspend fun getInviteFreeAgents(teamId: String): Result<List<UserData>>
     suspend fun createTeamInvite(
         teamId: String,
         userId: String,
@@ -249,7 +252,7 @@ class TeamRepository(
 
     private suspend fun fetchRemoteTeamsForUser(userId: String): Result<List<Team>> {
         return multiResponse(
-            getRemoteData = { fetchRemoteTeamsByPlayerId(userId) },
+            getRemoteData = { fetchRemoteTeamsByMembership(userId) },
             getLocalData = { databaseService.getTeamDao.getTeamsForUser(userId) },
             saveData = { teams -> databaseService.getTeamDao.upsertTeamsWithRelations(teams) },
             deleteData = { staleIds -> databaseService.getTeamDao.deleteTeamsByIds(staleIds) },
@@ -277,6 +280,20 @@ class TeamRepository(
     override suspend fun listTeamInvites(userId: String): Result<List<Invite>> = runCatching {
         userRepository.listInvites(userId = userId, type = "TEAM").getOrThrow()
             .filter { it.teamId != null }
+    }
+
+    override suspend fun getInviteFreeAgents(teamId: String): Result<List<UserData>> = runCatching {
+        val normalizedTeamId = teamId.trim().takeIf(String::isNotBlank)
+            ?: return@runCatching emptyList()
+        val encodedTeamId = normalizedTeamId.encodeURLQueryComponent()
+        val response = api.get<TeamInviteFreeAgentsResponseDto>(
+            path = "api/teams/$encodedTeamId/invite-free-agents",
+        )
+        val users = response.users.mapNotNull { it.toUserDataOrNull() }
+        if (users.isNotEmpty()) {
+            databaseService.getUserDataDao.upsertUsersData(users)
+        }
+        users
     }
 
     override suspend fun createTeamInvite(
@@ -324,9 +341,9 @@ class TeamRepository(
         return teams
     }
 
-    private suspend fun fetchRemoteTeamsByPlayerId(playerId: String): List<Team> {
-        val encoded = playerId.encodeURLQueryComponent()
-        val res = api.get<TeamsResponseDto>("api/teams?playerId=$encoded&limit=200")
+    private suspend fun fetchRemoteTeamsByMembership(userId: String): List<Team> {
+        val encoded = userId.encodeURLQueryComponent()
+        val res = api.get<TeamsResponseDto>("api/teams?playerId=$encoded&managerId=$encoded&limit=200")
         val teams = res.teams.mapNotNull { it.toTeamOrNull() }
         ensureUsersCachedForTeams(teams)
         return teams
@@ -340,19 +357,8 @@ class TeamRepository(
     }
 
     private suspend fun ensureUsersCachedForTeams(teams: List<Team>) {
-        val userIds = buildSet {
-            teams.forEach { team ->
-                add(team.captainId)
-                team.managerId?.let(::add)
-                team.headCoachId?.let(::add)
-                team.coachIds.forEach(::add)
-                team.playerIds.forEach(::add)
-                team.pending.forEach(::add)
-            }
-        }.filter(String::isNotBlank)
-
-        if (userIds.isNotEmpty()) {
-            userRepository.getUsers(userIds).getOrThrow()
+        teams.forEach { team ->
+            ensureUsersCachedForTeam(team)
         }
     }
 
@@ -367,7 +373,10 @@ class TeamRepository(
         }.distinct().filter(String::isNotBlank)
 
         if (userIds.isNotEmpty()) {
-            userRepository.getUsers(userIds).getOrThrow()
+            userRepository.getUsers(
+                userIds = userIds,
+                visibilityContext = UserVisibilityContext(teamId = team.id),
+            ).getOrThrow()
         }
     }
 

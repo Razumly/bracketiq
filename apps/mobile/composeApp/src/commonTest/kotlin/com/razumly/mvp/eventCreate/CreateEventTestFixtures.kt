@@ -53,6 +53,7 @@ import com.razumly.mvp.core.data.repositories.SignerContext
 import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.SignupProfileSelection
 import com.razumly.mvp.core.data.repositories.UserEmailMembershipMatch
+import com.razumly.mvp.core.data.repositories.UserVisibilityContext
 import com.razumly.mvp.core.network.dto.InviteCreateDto
 import com.razumly.mvp.core.network.MvpUploadFile
 import com.razumly.mvp.core.presentation.RentalCreateContext
@@ -198,8 +199,14 @@ internal class CreateEvent_FakeUserRepository : IUserRepository {
 
     override suspend fun login(email: String, password: String): Result<UserData> = error("unused")
     override suspend fun logout(): Result<Unit> = error("unused")
-    override suspend fun getUsers(userIds: List<String>): Result<List<UserData>> = Result.success(emptyList())
-    override fun getUsersFlow(userIds: List<String>): Flow<Result<List<UserData>>> =
+    override suspend fun getUsers(
+        userIds: List<String>,
+        visibilityContext: UserVisibilityContext,
+    ): Result<List<UserData>> = Result.success(emptyList())
+    override fun getUsersFlow(
+        userIds: List<String>,
+        visibilityContext: UserVisibilityContext,
+    ): Flow<Result<List<UserData>>> =
         flowOf(Result.success(emptyList()))
     override suspend fun searchPlayers(search: String): Result<List<UserData>> = Result.success(searchResults)
     override suspend fun ensureUserByEmail(email: String): Result<UserData> = Result.success(user)

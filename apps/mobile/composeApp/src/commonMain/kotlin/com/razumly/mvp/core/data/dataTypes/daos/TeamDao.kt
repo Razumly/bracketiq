@@ -28,12 +28,12 @@ interface TeamDao {
     @Query("SELECT * FROM Team WHERE id in (:teamIds)")
     suspend fun getTeams(teamIds: List<String>): List<Team>
 
-    @Query("SELECT * FROM Team WHERE playerIds LIKE '%' || :userId || '%'")
+    @Query("SELECT * FROM Team WHERE playerIds LIKE '%' || :userId || '%' OR managerId = :userId")
     suspend fun getTeamsForUser(userId: String): List<Team>
 
     @RewriteQueriesToDropUnusedColumns
     @Transaction
-    @Query("SELECT * FROM Team WHERE playerIds LIKE '%' || :userId || '%'")
+    @Query("SELECT * FROM Team WHERE playerIds LIKE '%' || :userId || '%' OR managerId = :userId")
     fun getTeamsForUserFlow(userId: String): Flow<List<TeamWithPlayers>>
 
     @Query("SELECT * FROM Team WHERE pending LIKE '%' || :userId || '%'")

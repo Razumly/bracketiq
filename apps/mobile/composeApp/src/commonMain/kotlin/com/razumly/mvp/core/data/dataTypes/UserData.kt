@@ -20,12 +20,17 @@ data class UserData(
     val hasStripeAccount: Boolean?,
     val uploadedImages: List<String>,
     val profileImageId: String? = null,
+    val privacyDisplayName: String? = null,
+    val isMinor: Boolean = false,
+    val isIdentityHidden: Boolean = false,
     @PrimaryKey override val id: String,
 ) : MVPDocument, DisplayableEntity {
     override val displayName: String get() = fullName
     override val imageUrl: String? get() = profileImageId
 
     companion object {
+        const val NAME_HIDDEN_LABEL = "Name Hidden"
+
         operator fun invoke(): UserData {
             return UserData(
                 firstName = "",
@@ -39,13 +44,43 @@ data class UserData(
                 friendRequestSentIds = emptyList(),
                 followingIds = emptyList(),
                 profileImageId = null,
+                privacyDisplayName = null,
+                isMinor = false,
+                isIdentityHidden = false,
                 id = ""
             )
         }
     }
 
     val fullName: String
-        get() = "$firstName $lastName".toTitleCase()
+        get() {
+            val explicitDisplayName = privacyDisplayName?.trim()?.takeIf(String::isNotBlank)
+            if (explicitDisplayName != null) {
+                return explicitDisplayName
+            }
+
+            val resolvedFullName = "$firstName $lastName".trim()
+            if (resolvedFullName.isNotBlank()) {
+                return resolvedFullName.toTitleCase()
+            }
+
+            if (isIdentityHidden) {
+                return NAME_HIDDEN_LABEL
+            }
+
+            val normalizedHandle = userName.trim()
+            return if (normalizedHandle.isNotBlank()) normalizedHandle else "User"
+        }
+
+    val shouldRestrictSocialActions: Boolean
+        get() = isMinor || isIdentityHidden
+
+    val publicHandle: String?
+        get() {
+            if (isIdentityHidden) return null
+            val normalizedHandle = userName.trim().ifBlank { "user" }
+            return "@$normalizedHandle"
+        }
 
     fun toUserDataDTO(): UserDataDTO {
         return UserDataDTO(
@@ -53,14 +88,17 @@ data class UserData(
             lastName = lastName,
             teamIds = teamIds,
             friendIds = friendIds,
-        friendRequestIds = friendRequestIds,
-        friendRequestSentIds = friendRequestSentIds,
-        followingIds = followingIds,
-        userName = userName,
-        hasStripeAccount = hasStripeAccount,
-        uploadedImages = uploadedImages,
-        profileImageId = profileImageId,
-        id = id
-    )
-}
+            friendRequestIds = friendRequestIds,
+            friendRequestSentIds = friendRequestSentIds,
+            followingIds = followingIds,
+            userName = userName,
+            hasStripeAccount = hasStripeAccount,
+            uploadedImages = uploadedImages,
+            profileImageId = profileImageId,
+            displayName = privacyDisplayName,
+            isMinor = isMinor,
+            isIdentityHidden = isIdentityHidden,
+            id = id,
+        )
+    }
 }

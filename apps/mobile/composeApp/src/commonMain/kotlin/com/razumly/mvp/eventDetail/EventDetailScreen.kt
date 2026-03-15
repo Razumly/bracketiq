@@ -197,6 +197,7 @@ private fun EventOverviewSections(
     eventWithRelations: EventWithFullRelations,
     teamsAndParticipantsLoading: Boolean,
     matchesLoading: Boolean,
+    showOpenDetailsAction: Boolean,
     onOpenDetails: () -> Unit,
 ) {
     val event = eventWithRelations.event
@@ -423,18 +424,20 @@ private fun EventOverviewSections(
                 }
             }
         }
-        TextButton(
-            onClick = onOpenDetails,
-            enabled = !openDetailsLoading,
-            modifier = Modifier.align(Alignment.End),
-        ) {
-            Text(
-                if (openDetailsLoading) {
-                    "Loading participants & schedule..."
-                } else {
-                    "View participants & schedule"
-                }
-            )
+        if (showOpenDetailsAction) {
+            TextButton(
+                onClick = onOpenDetails,
+                enabled = !openDetailsLoading,
+                modifier = Modifier.align(Alignment.End),
+            ) {
+                Text(
+                    if (openDetailsLoading) {
+                        "Loading schedule and participants..."
+                    } else {
+                        "View Schedule and Participants"
+                    }
+                )
+            }
         }
     }
 }
@@ -1179,6 +1182,12 @@ fun EventDetailScreen(
             assistantHostId == currentUserId
         }
     }
+    val isReferee = remember(currentUser.id, selectedEvent.event.refereeIds) {
+        val currentUserId = currentUser.id.trim()
+        currentUserId.isNotBlank() && selectedEvent.event.refereeIds.any { refereeId ->
+            refereeId == currentUserId
+        }
+    }
     val isOrganizationManager = remember(
         currentUser.id,
         selectedEvent.organization?.ownerId,
@@ -1405,6 +1414,33 @@ fun EventDetailScreen(
             component.leaveEvent(target?.userId)
         }
     }
+    val leaveOrRefundActionLabel = when {
+        canRequestRefundAfterStart -> {
+            if (actionWithdrawTargets.size > 1) {
+                "Request Refunds"
+            } else {
+                "Request Refund"
+            }
+        }
+        else -> leaveMessage
+    }
+    val openLeaveOrRefundAction: () -> Unit = {
+        when {
+            actionWithdrawTargets.size > 1 -> {
+                showWithdrawTargetDialog = true
+            }
+
+            actionWithdrawTargets.size == 1 -> {
+                openLeaveOrRefundForTarget(actionWithdrawTargets.first())
+            }
+
+            else -> {
+                openLeaveOrRefundForTarget(null)
+            }
+        }
+    }
+    val shouldShowViewSchedulePrimaryAction = isUserInEvent || isHost || isAssistantHost || isReferee
+    val showOverviewOpenDetailsAction = !shouldShowViewSchedulePrimaryAction
     val showStickyActions = !showDetails && !isEditing && !showMap && showStickyDockByScroll
     val joinDivisionOptions = remember(
         selectedDivision,
@@ -1782,6 +1818,7 @@ fun EventDetailScreen(
                                         eventWithRelations = selectedEvent,
                                         teamsAndParticipantsLoading = eventTeamsAndParticipantsLoading,
                                         matchesLoading = eventMatchesLoading,
+                                        showOpenDetailsAction = showOverviewOpenDetailsAction,
                                         onOpenDetails = component::viewEvent
                                     )
                                 }
@@ -1878,6 +1915,19 @@ fun EventDetailScreen(
                                     }, leadingIcon = {
                                         Icon(Icons.Default.Share, contentDescription = null)
                                     })
+
+                                    if (canRequestRefundAfterStart || canLeaveEvent) {
+                                        DropdownMenuItem(
+                                            text = { Text(leaveOrRefundActionLabel) },
+                                            onClick = {
+                                                showOptionsDropdown = false
+                                                openLeaveOrRefundAction()
+                                            },
+                                            leadingIcon = {
+                                                Icon(Icons.Default.Close, contentDescription = null)
+                                            },
+                                        )
+                                    }
 
                                     if (isHost) {
                                         DropdownMenuItem(
@@ -2260,37 +2310,15 @@ fun EventDetailScreen(
             ) {
                 StickyActionBar(
                     primaryLabel = when {
-                        canRequestRefundAfterStart -> {
-                            if (actionWithdrawTargets.size > 1) {
-                                "Request Refunds"
-                            } else {
-                                "Request Refund"
-                            }
-                        }
-                        canLeaveEvent -> leaveMessage
+                        shouldShowViewSchedulePrimaryAction -> "View Schedule and Participants"
                         !isUserInEvent && !eventHasStarted -> "Join options"
                         eventHasStarted -> "Event Started"
                         else -> "Joined with Team"
                     },
-                    primaryEnabled = canRequestRefundAfterStart || canLeaveEvent || (!isUserInEvent && !eventHasStarted),
+                    primaryEnabled = shouldShowViewSchedulePrimaryAction || (!isUserInEvent && !eventHasStarted),
                     onPrimaryClick = {
                         when {
-                            canRequestRefundAfterStart || canLeaveEvent -> {
-                                when {
-                                    actionWithdrawTargets.size > 1 -> {
-                                        showWithdrawTargetDialog = true
-                                    }
-
-                                    actionWithdrawTargets.size == 1 -> {
-                                        openLeaveOrRefundForTarget(actionWithdrawTargets.first())
-                                    }
-
-                                    else -> {
-                                        openLeaveOrRefundForTarget(null)
-                                    }
-                                }
-                            }
-
+                            shouldShowViewSchedulePrimaryAction -> component.viewEvent()
                             !isUserInEvent && !eventHasStarted -> showJoinOptionsSheet = true
                         }
                     },

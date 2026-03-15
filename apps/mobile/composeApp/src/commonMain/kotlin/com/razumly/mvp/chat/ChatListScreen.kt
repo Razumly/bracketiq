@@ -18,6 +18,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FabPosition
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
@@ -59,10 +60,10 @@ fun ChatListScreen(component: ChatListComponent) {
         modifier = Modifier.padding(LocalNavBarPadding.current)
             .nestedScroll(scrollBehavior.nestedScrollConnection),
         floatingActionButton = {
-            IconButton(
-                onClick = { showNewChatDialog = true },
-            ) {
-                if (!showNewChatDialog) {
+            if (!showNewChatDialog) {
+                FloatingActionButton(
+                    onClick = { showNewChatDialog = true },
+                ) {
                     Icon(Icons.Default.Add, contentDescription = "Create Chat")
                 }
             }
@@ -99,8 +100,7 @@ fun NewChatDialog(component: ChatListComponent, onDismiss: () -> Unit) {
     var isValid by remember { mutableStateOf(false) }
 
     LaunchedEffect(newChat) {
-        isValid = newChat.chatGroup.name.isNotEmpty() &&
-            newChat.chatGroup.userIds.distinct().size > 1
+        isValid = newChat.chatGroup.userIds.distinct().size > 1
     }
 
     Dialog(onDismissRequest = { onDismiss() }) {
@@ -116,7 +116,7 @@ fun NewChatDialog(component: ChatListComponent, onDismiss: () -> Unit) {
                         component.updateNewChatField { newChat.chatGroup.copy(name = it) }
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    label = "Chat Name",
+                    label = "Chat Name (Optional)",
                 )
                 LazyColumn {
                     items(selectedOtherUsers) {

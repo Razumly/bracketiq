@@ -40,6 +40,7 @@ import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.data.repositories.CreateBillRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillCreateRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
+import com.razumly.mvp.core.data.repositories.UserVisibilityContext
 import com.razumly.mvp.core.data.util.divisionsEquivalent
 import com.razumly.mvp.core.data.util.isPlaceholderSlot
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
@@ -544,7 +545,10 @@ class DefaultEventDetailComponent(
         val hostFallbackFlow = if (relations.host != null || relations.event.hostId.isBlank()) {
             flowOf(relations.host)
         } else {
-            userRepository.getUsersFlow(listOf(relations.event.hostId)).map { result ->
+            userRepository.getUsersFlow(
+                userIds = listOf(relations.event.hostId),
+                visibilityContext = UserVisibilityContext(eventId = relations.event.id),
+            ).map { result ->
                 result.getOrElse { emptyList() }.firstOrNull()
             }
         }
@@ -1179,9 +1183,7 @@ class DefaultEventDetailComponent(
     }
 
     override fun showChildJoinSelection() {
-        val children = if (joinableChildren.isNotEmpty()) {
-            joinableChildren
-        } else {
+        val children = joinableChildren.ifEmpty {
             _joinChoiceDialog.value?.children.orEmpty()
         }
         _joinChoiceDialog.value = null

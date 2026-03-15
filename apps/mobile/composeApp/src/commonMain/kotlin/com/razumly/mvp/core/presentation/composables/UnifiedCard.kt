@@ -15,7 +15,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.DisplayableEntity
 import com.razumly.mvp.core.data.dataTypes.UserData
-import com.razumly.mvp.core.presentation.util.toTitleCase
 import com.razumly.mvp.core.util.UIConstants
 
 @Composable
@@ -27,10 +26,7 @@ fun UnifiedCard(
     isPending: Boolean = false
 ) {
     val userHandle = (entity as? UserData)
-        ?.userName
-        ?.trim()
-        ?.takeIf { it.isNotBlank() }
-        ?.let { "@$it" }
+        ?.publicHandle
 
     Column(modifier = modifier.fillMaxWidth()) {
         Row(
@@ -53,7 +49,7 @@ fun UnifiedCard(
                 verticalArrangement = Arrangement.Center
             ) {
                 Text(
-                    text = entity.displayName.toTitleCase(),
+                    text = entity.displayName,
                     overflow = TextOverflow.Ellipsis,
                     maxLines = 1,
                     style = MaterialTheme.typography.titleMedium,
