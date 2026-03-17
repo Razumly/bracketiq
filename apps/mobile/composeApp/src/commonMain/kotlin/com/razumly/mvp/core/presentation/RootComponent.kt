@@ -17,6 +17,7 @@ import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.data.repositories.StartupAuthState
 import com.razumly.mvp.eventCreate.CreateEventComponent
 import com.razumly.mvp.eventDetail.EventDetailComponent
 import com.razumly.mvp.eventManagement.EventManagementComponent
@@ -43,6 +44,7 @@ import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.core.parameter.parametersOf
 import org.koin.mp.KoinPlatform.getKoin
@@ -55,6 +57,11 @@ class RootComponent(
     private val userRepository: IUserRepository,
     private val pushNotificationsRepository: IPushNotificationsRepository,
 ) : ComponentContext by componentContext, INavigationHandler {
+    companion object {
+        private const val STARTUP_AUTH_TIMEOUT_MS = 3_000L
+        private const val STARTUP_TIMEOUT_NOTICE =
+            "We couldn't restore your session in time. Please log in."
+    }
 
     private val navigation = StackNavigation<AppConfig>()
     private val _koin = getKoin()
@@ -80,13 +87,18 @@ class RootComponent(
 
     private val deepLinkNav = MutableStateFlow(deepLinkNavStart)
     private var registeredPushUserId: String? = null
+    private var startupDecisionMade = false
 
     private val _selectedPage = MutableStateFlow<AppConfig>(AppConfig.Search())
     val selectedPage: StateFlow<AppConfig> = _selectedPage.asStateFlow()
+    private val _isStartupInProgress = MutableStateFlow(true)
+    val isStartupInProgress: StateFlow<Boolean> = _isStartupInProgress.asStateFlow()
+    private val _startupNotice = MutableStateFlow<String?>(null)
+    val startupNotice: StateFlow<String?> = _startupNotice.asStateFlow()
 
     val childStack: Value<ChildStack<AppConfig, Child>> = childStack(
         source = navigation,
-        initialConfiguration = AppConfig.Login, // Always start with login check
+        initialConfiguration = AppConfig.Splash,
         serializer = AppConfig.serializer(),
         handleBackButton = true,
         childFactory = ::createChild
@@ -94,35 +106,64 @@ class RootComponent(
 
     init {
         scope.launch {
-            // Check if user is already logged in
-            userRepository.currentUser.collect { userResult ->
+            userRepository.startupAuthState.collect { state ->
                 val currentConfig = childStack.value.active.configuration
-
-                userResult.fold(
-                    onSuccess = { userData ->
-                        if (userData.id.isNotBlank()) {
-                            registerPushTargetIfNeeded(userData.id)
-                            if (currentConfig == AppConfig.Login) {
-                                // User is logged in, navigate to main app
-                                handleDeepLinkOrDefault()
-                            }
-                        } else {
-                            clearPushTargetIfNeeded()
-                            if (currentConfig != AppConfig.Login) {
-                                // User is not logged in, navigate to login
-                                navigation.replaceAll(AppConfig.Login)
-                            }
+                when (state) {
+                    StartupAuthState.Checking -> {
+                        if (!startupDecisionMade) {
+                            _isStartupInProgress.value = true
                         }
-                    },
-                    onFailure = {
-                        clearPushTargetIfNeeded()
+                    }
+
+                    StartupAuthState.Authenticated -> {
+                        startupDecisionMade = true
+                        _isStartupInProgress.value = false
+                        if (currentConfig == AppConfig.Splash || currentConfig == AppConfig.Login) {
+                            handleDeepLinkOrDefault()
+                        }
+                    }
+
+                    StartupAuthState.Unauthenticated -> {
+                        startupDecisionMade = true
+                        _isStartupInProgress.value = false
                         if (currentConfig != AppConfig.Login) {
                             navigation.replaceAll(AppConfig.Login)
                         }
                     }
+                }
+            }
+        }
+
+        scope.launch {
+            delay(STARTUP_AUTH_TIMEOUT_MS)
+            if (!startupDecisionMade && userRepository.startupAuthState.value == StartupAuthState.Checking) {
+                startupDecisionMade = true
+                _isStartupInProgress.value = false
+                _startupNotice.value = STARTUP_TIMEOUT_NOTICE
+                navigation.replaceAll(AppConfig.Login)
+            }
+        }
+
+        scope.launch {
+            userRepository.currentUser.collect { userResult ->
+                userResult.fold(
+                    onSuccess = { userData ->
+                        if (userData.id.isNotBlank()) {
+                            registerPushTargetIfNeeded(userData.id)
+                        } else {
+                            clearPushTargetIfNeeded()
+                        }
+                    },
+                    onFailure = {
+                        clearPushTargetIfNeeded()
+                    }
                 )
             }
         }
+    }
+
+    fun onStartupNoticeShown() {
+        _startupNotice.value = null
     }
 
     private fun handleDeepLinkOrDefault() {
@@ -270,6 +311,8 @@ class RootComponent(
         config: AppConfig,
         componentContext: ComponentContext
     ): Child = when (config) {
+        AppConfig.Splash -> Child.Splash
+
         AppConfig.Login -> Child.Login(
             _koin.get { parametersOf(componentContext, this@RootComponent) }
         )
@@ -338,6 +381,7 @@ class RootComponent(
     }
 
     sealed class Child {
+        data object Splash : Child()
         data class Login(val component: AuthComponent) : Child()
         data class Search(val component: EventSearchComponent, val mapComponent: MapComponent) : Child()
         data class EventContent(val component: EventDetailComponent, val mapComponent: MapComponent) : Child()

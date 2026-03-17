@@ -31,8 +31,8 @@ compose.resources {
     generateResClass = always
 }
 
-val mvpVersion = "0.5.1"
-val mvpVersionCode = 13
+val mvpVersion = "1.0"
+val mvpVersionCode = 14
 kotlin {
     androidTarget {
         compilerOptions {
@@ -174,6 +174,7 @@ kotlin {
                 implementation(libs.androidx.activity.ktx)
                 implementation(libs.androidx.credentials)
                 implementation(libs.androidx.credentials.play.services.auth)
+                implementation(libs.androidx.core.splashscreen)
                 implementation(libs.googleid)
                 implementation("com.google.auth:google-auth-library-oauth2-http:1.37.1") {
                     exclude(group = "org.apache.httpcomponents", module = "httpclient")

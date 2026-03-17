@@ -108,6 +108,16 @@ fun App(root: RootComponent) {
             }
         }
     }
+
+    LaunchedEffect(root) {
+        root.startupNotice.collect { notice ->
+            if (!notice.isNullOrBlank()) {
+                snackbarHostState.showSnackbar(message = notice)
+                root.onStartupNoticeShown()
+            }
+        }
+    }
+
     CompositionLocalProvider(localAllFocusManagers provides allFocusManagers) {
         CompositionLocalProvider(
             LocalPopupHandler provides popupHandler, LocalLoadingHandler provides loadingHandler
@@ -115,8 +125,8 @@ fun App(root: RootComponent) {
             Box(modifier = Modifier.fillMaxSize()) {
                 val currentChild = childStack.active.instance
 
-                // Show bottom nav for main app screens (not login)
-                if (currentChild !is RootComponent.Child.Login) {
+                // Show bottom nav for main app screens (not login/startup splash)
+                if (currentChild !is RootComponent.Child.Login && currentChild !is RootComponent.Child.Splash) {
                     MVPBottomNavBar(
                         selectedPage = selectedPage,
                         onPageSelected = { root.onTabSelected(it) }) { paddingValues ->
@@ -131,7 +141,13 @@ fun App(root: RootComponent) {
                         }
                     }
                 } else {
-                    AppContent(root, childStack, null)
+                    Scaffold(
+                        snackbarHost = {
+                            SnackbarHost(hostState = snackbarHostState)
+                        }
+                    ) { _ ->
+                        AppContent(root, childStack, null)
+                    }
                 }
 
                 // Global Loading Overlay from your HomeScreen
@@ -163,6 +179,10 @@ private fun AppContent(
             )
         ) { child ->
             when (val instance = child.instance) {
+                RootComponent.Child.Splash -> {
+                    StartupSplashScreen()
+                }
+
                 is RootComponent.Child.Login -> {
                     AuthScreen(instance.component as DefaultAuthComponent)
                 }
@@ -215,6 +235,27 @@ private fun AppContent(
                     ProfileDetailsScreen(instance.component)
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun StartupSplashScreen() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Text(
+                text = "BracketIQ",
+                style = MaterialTheme.typography.headlineMedium,
+            )
+            CircularProgressIndicator(modifier = Modifier.size(40.dp))
         }
     }
 }

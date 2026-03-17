@@ -53,6 +53,15 @@ import kotlin.time.Clock
 
 private const val USER_REPOSITORY_LOG_TAG = "UserRepository"
 
+sealed class StartupAuthState {
+    data object Checking : StartupAuthState()
+    data object Authenticated : StartupAuthState()
+    data object Unauthenticated : StartupAuthState()
+}
+
+private val defaultStartupAuthStateFlow =
+    MutableStateFlow<StartupAuthState>(StartupAuthState.Unauthenticated)
+
 data class FamilyChild(
     val userId: String,
     val firstName: String,
@@ -164,6 +173,8 @@ class SignupProfileConflictException(
 interface IUserRepository : IMVPRepository {
     val currentUser: StateFlow<Result<UserData>>
     val currentAccount: StateFlow<Result<AuthAccount>>
+    val startupAuthState: StateFlow<StartupAuthState>
+        get() = defaultStartupAuthStateFlow
 
     suspend fun login(email: String, password: String): Result<UserData>
     suspend fun logout(): Result<Unit>
@@ -273,6 +284,8 @@ class UserRepository(
 
     private val _currentAccount = MutableStateFlow(Result.failure<AuthAccount>(Exception("No Account")))
     override val currentAccount: StateFlow<Result<AuthAccount>> = _currentAccount.asStateFlow()
+    private val _startupAuthState = MutableStateFlow<StartupAuthState>(StartupAuthState.Checking)
+    override val startupAuthState: StateFlow<StartupAuthState> = _startupAuthState.asStateFlow()
 
     init {
         scope.launch { runCatching { loadCurrentUser() }.onFailure { Napier.w("loadCurrentUser failed", it) } }
@@ -299,6 +312,7 @@ class UserRepository(
             ?: error("Login response missing profile")
 
         cacheCurrentUserProfile(profile)
+        _startupAuthState.value = StartupAuthState.Authenticated
         Napier.i(tag = USER_REPOSITORY_LOG_TAG) { "Email login succeeded for userId=${profile.id}" }
         profile
     }.onFailure { throwable ->
@@ -326,6 +340,7 @@ class UserRepository(
             ?: error("Google login response missing profile")
 
         cacheCurrentUserProfile(profile)
+        _startupAuthState.value = StartupAuthState.Authenticated
         Napier.i(tag = USER_REPOSITORY_LOG_TAG) { "Google login succeeded for userId=${profile.id}" }
         profile
     }.onFailure { throwable ->
@@ -379,6 +394,7 @@ class UserRepository(
             ?: error("Register response missing profile")
 
         cacheCurrentUserProfile(profile)
+        _startupAuthState.value = StartupAuthState.Authenticated
         Napier.i(tag = USER_REPOSITORY_LOG_TAG) { "Signup succeeded for userId=${profile.id}" }
         profile
     }.onFailure { throwable ->
@@ -389,12 +405,7 @@ class UserRepository(
 
     override suspend fun logout(): Result<Unit> = runCatching {
         runCatching { api.postNoResponse("api/auth/logout") }
-
-        tokenStore.clear()
-        currentUserDataSource.saveUserId("")
-
-        _currentUser.value = Result.failure(Exception("No User"))
-        _currentAccount.value = Result.failure(Exception("No Account"))
+        clearLoginState()
     }
 
     override suspend fun getCurrentAccount(): Result<Unit> = runCatching {
@@ -402,47 +413,58 @@ class UserRepository(
     }
 
     private suspend fun loadCurrentUser() {
-        val token = tokenStore.get().takeIf(String::isNotBlank)
-        if (token.isNullOrBlank()) {
-            if (!bootstrapSessionFromAuthMe()) {
-                clearLoginState()
-            }
-            return
-        }
-
-        // If we have a stored user id, surface cached data quickly while validating token.
-        val savedId = runCatching {
-            currentUserDataSource.getUserId().first().takeIf(String::isNotBlank)
-        }.getOrNull()
-
-        if (!savedId.isNullOrBlank()) {
-            val local = runCatching {
-                databaseService.getUserDataDao.getUserDataById(savedId)
-            }.onFailure { throwable ->
-                Napier.e(tag = USER_REPOSITORY_LOG_TAG, throwable = throwable) {
-                    "Failed reading local cached user for id=$savedId"
+        _startupAuthState.value = StartupAuthState.Checking
+        try {
+            val token = tokenStore.get().takeIf(String::isNotBlank)
+            if (token.isNullOrBlank()) {
+                if (!bootstrapSessionFromAuthMe()) {
+                    clearLoginState()
+                } else {
+                    updateStartupAuthStateFromCurrentUser()
                 }
+                return
+            }
+
+            // If we have a stored user id, surface cached data quickly while validating token.
+            val savedId = runCatching {
+                currentUserDataSource.getUserId().first().takeIf(String::isNotBlank)
             }.getOrNull()
-            if (local != null) _currentUser.value = Result.success(local)
-        }
 
-        val me = api.get<AuthResponseDto>("api/auth/me")
-        val account = me.user?.toAuthAccountOrNull()
-        if (account == null) {
+            if (!savedId.isNullOrBlank()) {
+                val local = runCatching {
+                    databaseService.getUserDataDao.getUserDataById(savedId)
+                }.onFailure { throwable ->
+                    Napier.e(tag = USER_REPOSITORY_LOG_TAG, throwable = throwable) {
+                        "Failed reading local cached user for id=$savedId"
+                    }
+                }.getOrNull()
+                if (local != null) _currentUser.value = Result.success(local)
+            }
+
+            val me = api.get<AuthResponseDto>("api/auth/me")
+            val account = me.user?.toAuthAccountOrNull()
+            if (account == null) {
+                clearLoginState()
+                return
+            }
+
+            _currentAccount.value = Result.success(account)
+
+            val refreshed = me.token?.takeIf(String::isNotBlank)
+            if (!refreshed.isNullOrBlank() && refreshed != token) {
+                tokenStore.set(refreshed)
+            }
+
+            val remoteProfile = me.profile?.toUserDataOrNull() ?: fetchUserProfile(account.id)
+            if (remoteProfile != null) {
+                cacheCurrentUserProfile(remoteProfile)
+            }
+            updateStartupAuthStateFromCurrentUser()
+        } catch (throwable: Throwable) {
+            Napier.w(tag = USER_REPOSITORY_LOG_TAG) {
+                "loadCurrentUser failed: ${throwable.message}"
+            }
             clearLoginState()
-            return
-        }
-
-        _currentAccount.value = Result.success(account)
-
-        val refreshed = me.token?.takeIf(String::isNotBlank)
-        if (!refreshed.isNullOrBlank() && refreshed != token) {
-            tokenStore.set(refreshed)
-        }
-
-        val remoteProfile = me.profile?.toUserDataOrNull() ?: fetchUserProfile(account.id)
-        if (remoteProfile != null) {
-            cacheCurrentUserProfile(remoteProfile)
         }
     }
 
@@ -479,6 +501,7 @@ class UserRepository(
             }
         }
         _currentUser.value = Result.success(profile)
+        _startupAuthState.value = StartupAuthState.Authenticated
     }
 
     private suspend fun clearLoginState() {
@@ -486,6 +509,16 @@ class UserRepository(
         runCatching { currentUserDataSource.saveUserId("") }
         _currentUser.value = Result.failure(Exception("No User"))
         _currentAccount.value = Result.failure(Exception("No Account"))
+        _startupAuthState.value = StartupAuthState.Unauthenticated
+    }
+
+    private fun updateStartupAuthStateFromCurrentUser() {
+        val currentUserId = _currentUser.value.getOrNull()?.id?.trim()
+        _startupAuthState.value = if (currentUserId.isNullOrEmpty()) {
+            StartupAuthState.Unauthenticated
+        } else {
+            StartupAuthState.Authenticated
+        }
     }
 
     private suspend fun fetchUserProfile(userId: String): UserData? {

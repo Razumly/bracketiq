@@ -57,6 +57,7 @@ animationAndroid = "1.10.2"
 browser = "1.9.0"
 credentials = "1.5.0"
 googleId = "1.2.0"
+splashscreen = "1.0.1"
 
 [libraries]
 androidx-core = { module = "androidx.test:core", version.ref = "core" }
@@ -139,6 +140,7 @@ androidx-browser = { group = "androidx.browser", name = "browser", version.ref =
 androidx-credentials = { module = "androidx.credentials:credentials", version.ref = "credentials" }
 androidx-credentials-play-services-auth = { module = "androidx.credentials:credentials-play-services-auth", version.ref = "credentials" }
 googleid = { module = "com.google.android.libraries.identity.googleid:googleid", version.ref = "googleId" }
+androidx-core-splashscreen = { module = "androidx.core:core-splashscreen", version.ref = "splashscreen" }
 
 
 [plugins]

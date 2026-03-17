@@ -165,6 +165,7 @@ private data class RentalBusyRange(
 )
 
 private const val DISCOVER_ORGANIZATION_PLACEHOLDER_COUNT = 4
+private val DISCOVER_FIRST_ITEM_EXTRA_TOP_GAP = 4.dp
 
 @OptIn(ExperimentalHazeMaterialsApi::class)
 @Composable
@@ -392,7 +393,7 @@ fun EventSearchScreen(
             floatingActionButtonPosition = FabPosition.Center,
         ) { paddingValues ->
             val firstElementPadding = PaddingValues(
-                top = paddingValues.calculateTopPadding().plus(72.dp)
+                top = paddingValues.calculateTopPadding().plus(72.dp + DISCOVER_FIRST_ITEM_EXTRA_TOP_GAP)
             )
             PullToRefreshContainer(
                 isRefreshing = isRefreshingCurrentTab,

@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
 import com.arkivanov.decompose.ExperimentalDecomposeApi
@@ -19,6 +20,8 @@ import com.razumly.mvp.core.presentation.RootComponent.DeepLinkNav
 import dev.icerock.moko.geo.compose.BindLocationTrackerEffect
 import dev.icerock.moko.permissions.compose.BindEffect
 import io.github.aakira.napier.Napier
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import org.koin.core.parameter.parametersOf
 import org.koin.mp.KoinPlatform.getKoin
 
@@ -26,9 +29,13 @@ val LocalRootComponent = compositionLocalOf<RootComponent> { error("No component
 
 class MainActivity : ComponentActivity() {
     private lateinit var rootComponent: RootComponent
+    @Volatile
+    private var keepSystemSplashVisible: Boolean = true
 
     @OptIn(ExperimentalDecomposeApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
+        val splashScreen = installSplashScreen()
+        splashScreen.setKeepOnScreenCondition { keepSystemSplashVisible }
         super.onCreate(savedInstanceState)
 
         NotifierManager.onCreateOrOnNewIntent(intent)
@@ -40,6 +47,13 @@ class MainActivity : ComponentActivity() {
                 getKoin().get<RootComponent> { parametersOf(it, deepLinkNav) }
             }
         } ?: return
+
+        lifecycleScope.launch {
+            rootComponent.isStartupInProgress.collect { inProgress ->
+                keepSystemSplashVisible = inProgress
+            }
+        }
+
         setContent {
             MVPTheme {
                 CompositionLocalProvider(LocalRootComponent provides rootComponent) {

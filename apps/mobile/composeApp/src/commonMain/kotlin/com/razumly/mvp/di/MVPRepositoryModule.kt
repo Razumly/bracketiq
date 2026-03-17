@@ -35,7 +35,7 @@ val MVPRepositoryModule = module {
     single {
         TeamRepository(get(), get(), get(), get())
     } bind ITeamRepository::class
-    single {
+    single(createdAtStart = true) {
         UserRepository(get(), get(), get(), get())
     } bind IUserRepository::class
     single {

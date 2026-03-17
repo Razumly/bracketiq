@@ -18,6 +18,9 @@ enum class OrganizationDetailTab {
 @Serializable
 sealed class AppConfig {
     @Serializable
+    data object Splash : AppConfig()
+
+    @Serializable
     data object Login : AppConfig()
 
     @Serializable
