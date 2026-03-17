@@ -35,6 +35,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Announcement
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -1179,13 +1180,13 @@ fun EventDetailScreen(
     val isAssistantHost = remember(currentUser.id, selectedEvent.event.assistantHostIds) {
         val currentUserId = currentUser.id.trim()
         currentUserId.isNotBlank() && selectedEvent.event.assistantHostIds.any { assistantHostId ->
-            assistantHostId == currentUserId
+            assistantHostId.trim() == currentUserId
         }
     }
     val isReferee = remember(currentUser.id, selectedEvent.event.refereeIds) {
         val currentUserId = currentUser.id.trim()
         currentUserId.isNotBlank() && selectedEvent.event.refereeIds.any { refereeId ->
-            refereeId == currentUserId
+            refereeId.trim() == currentUserId
         }
     }
     val isOrganizationManager = remember(
@@ -1195,8 +1196,8 @@ fun EventDetailScreen(
     ) {
         val currentUserId = currentUser.id.trim()
         currentUserId.isNotBlank() && (
-            selectedEvent.organization?.ownerId == currentUserId ||
-                selectedEvent.organization?.hostIds?.any { hostId -> hostId == currentUserId } == true
+            selectedEvent.organization?.ownerId?.trim() == currentUserId ||
+                selectedEvent.organization?.hostIds?.any { hostId -> hostId.trim() == currentUserId } == true
             )
     }
     val canManageTemplate = remember(isHost, isAssistantHost, isOrganizationManager) {
@@ -1228,9 +1229,9 @@ fun EventDetailScreen(
     ) {
         val currentUserId = currentUser.id.trim()
         currentUserId.isNotBlank() && (
-            selectedEvent.event.hostId == currentUserId ||
+            selectedEvent.event.hostId.trim() == currentUserId ||
                 selectedEvent.event.assistantHostIds.any { assistantHostId ->
-                    assistantHostId == currentUserId
+                    assistantHostId.trim() == currentUserId
                 }
             )
     }
@@ -1905,6 +1906,19 @@ fun EventDetailScreen(
                                             },
                                             leadingIcon = {
                                                 Icon(Icons.Default.Check, contentDescription = null)
+                                            },
+                                        )
+                                    }
+
+                                    if (isHost && joinOptions.isNotEmpty()) {
+                                        DropdownMenuItem(
+                                            text = { Text("Join Event") },
+                                            onClick = {
+                                                showJoinOptionsSheet = true
+                                                showOptionsDropdown = false
+                                            },
+                                            leadingIcon = {
+                                                Icon(Icons.Default.Add, contentDescription = null)
                                             },
                                         )
                                     }

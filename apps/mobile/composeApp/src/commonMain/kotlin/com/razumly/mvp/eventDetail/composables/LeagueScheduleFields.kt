@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -51,6 +52,7 @@ import com.razumly.mvp.core.presentation.composables.PlatformTextField
 import com.razumly.mvp.core.util.Platform
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atStartOfDayIn
+import kotlinx.datetime.isoDayNumber
 import kotlinx.datetime.toLocalDateTime
 import kotlin.math.min
 import kotlin.time.Clock
@@ -79,6 +81,8 @@ fun ColumnScope.LeagueScheduleFields(
     fieldCount: Int,
     fields: List<Field>,
     slots: List<TimeSlot>,
+    eventStart: Instant,
+    eventEnd: Instant? = null,
     onFieldCountChange: (Int) -> Unit,
     onFieldNameChange: (Int, String) -> Unit,
     onAddSlot: () -> Unit,
@@ -171,7 +175,7 @@ fun ColumnScope.LeagueScheduleFields(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("Weekly Timeslots (${slots.size})", style = MaterialTheme.typography.titleMedium)
+        Text("Timeslots (${slots.size})", style = MaterialTheme.typography.titleMedium)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Button(onClick = onAddSlot) {
                 Icon(Icons.Default.Add, contentDescription = null)
@@ -202,6 +206,8 @@ fun ColumnScope.LeagueScheduleFields(
                         index = index,
                         slot = slot,
                         slots = slots,
+                        eventStart = eventStart,
+                        eventEnd = eventEnd,
                         fieldOptions = fieldOptions,
                         slotDivisionOptions = slotDivisionOptions,
                         lockSlotDivisions = lockSlotDivisions,
@@ -224,6 +230,8 @@ fun ColumnScope.LeagueScheduleFields(
                         index = index,
                         slot = slot,
                         slots = slots,
+                        eventStart = eventStart,
+                        eventEnd = eventEnd,
                         fieldOptions = fieldOptions,
                         slotDivisionOptions = slotDivisionOptions,
                         lockSlotDivisions = lockSlotDivisions,
@@ -243,6 +251,8 @@ private fun TimeslotCard(
     index: Int,
     slot: TimeSlot,
     slots: List<TimeSlot>,
+    eventStart: Instant,
+    eventEnd: Instant?,
     fieldOptions: List<DropdownOption>,
     slotDivisionOptions: List<DropdownOption>,
     lockSlotDivisions: Boolean,
@@ -260,6 +270,7 @@ private fun TimeslotCard(
             val selectedFieldIds = slot.normalizedScheduledFieldIds()
             val normalizedLockedDivisionIds = lockedDivisionIds.normalizeDivisionIdentifiers()
             val selectedDivisionIds = slot.normalizedDivisionIds().normalizeDivisionIdentifiers()
+            val repeating = slot.repeating
             val effectiveDivisionIds = if (lockSlotDivisions && normalizedLockedDivisionIds.isNotEmpty()) {
                 normalizedLockedDivisionIds
             } else {
@@ -333,52 +344,91 @@ private fun TimeslotCard(
                 enabled = !lockSlotDivisions,
             )
 
-            PlatformDropdown(
-                selectedValue = "",
-                onSelectionChange = {},
-                options = dayOptions,
-                label = "Days of Week",
-                placeholder = "Select days",
-                multiSelect = true,
-                selectedValues = selectedDays.map(Int::toString),
-                onMultiSelectionChange = { selected ->
-                    val days = selected
-                        .mapNotNull(String::toIntOrNull)
-                        .map { ((it % 7) + 7) % 7 }
-                        .distinct()
-                        .sorted()
-                    onUpdateSlot(
-                        index,
-                        slot.copy(
-                            dayOfWeek = days.firstOrNull(),
-                            daysOfWeek = days,
-                        )
-                    )
-                },
-                isError = selectedDays.isEmpty(),
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                TimeOfDayPickerField(
-                    label = "Start Time",
-                    minutes = slot.startTimeMinutes,
-                    onMinutesSelected = { minutes ->
-                        onUpdateSlot(index, slot.copy(startTimeMinutes = minutes))
+            if (repeating) {
+                val repeatingStartDate = slot.startDate.takeUnless { it == Instant.DISTANT_PAST } ?: eventStart
+                DatePickerField(
+                    label = "Start Date (Optional)",
+                    value = repeatingStartDate,
+                    onDateSelected = { selected ->
+                        onUpdateSlot(index, slot.copy(startDate = selected))
                     },
-                    modifier = Modifier.weight(1f),
-                    isError = slot.startTimeMinutes == null,
+                    supportingText = "Defaults to the event start date.",
                 )
-                TimeOfDayPickerField(
-                    label = "End Time",
-                    minutes = slot.endTimeMinutes,
-                    onMinutesSelected = { minutes ->
-                        onUpdateSlot(index, slot.copy(endTimeMinutes = minutes))
+                if (repeatingStartDate != eventStart) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(onClick = { onUpdateSlot(index, slot.copy(startDate = eventStart)) }) {
+                            Text("Use event start date")
+                        }
+                    }
+                }
+
+                PlatformDropdown(
+                    selectedValue = "",
+                    onSelectionChange = {},
+                    options = dayOptions,
+                    label = "Days of Week",
+                    placeholder = "Select days",
+                    multiSelect = true,
+                    selectedValues = selectedDays.map(Int::toString),
+                    onMultiSelectionChange = { selected ->
+                        val days = selected
+                            .mapNotNull(String::toIntOrNull)
+                            .map { ((it % 7) + 7) % 7 }
+                            .distinct()
+                            .sorted()
+                        onUpdateSlot(
+                            index,
+                            slot.copy(
+                                dayOfWeek = days.firstOrNull(),
+                                daysOfWeek = days,
+                            )
+                        )
                     },
-                    modifier = Modifier.weight(1f),
-                    isError = slot.endTimeMinutes == null,
+                    isError = selectedDays.isEmpty(),
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    TimeOfDayPickerField(
+                        label = "Start Time",
+                        minutes = slot.startTimeMinutes,
+                        onMinutesSelected = { minutes ->
+                            onUpdateSlot(index, slot.copy(startTimeMinutes = minutes))
+                        },
+                        modifier = Modifier.weight(1f),
+                        isError = slot.startTimeMinutes == null,
+                    )
+                    TimeOfDayPickerField(
+                        label = "End Time",
+                        minutes = slot.endTimeMinutes,
+                        onMinutesSelected = { minutes ->
+                            onUpdateSlot(index, slot.copy(endTimeMinutes = minutes))
+                        },
+                        modifier = Modifier.weight(1f),
+                        isError = slot.endTimeMinutes == null,
+                    )
+                }
+            } else {
+                DateTimePickerField(
+                    label = "Start Date & Time",
+                    value = slot.startDate.takeUnless { it == Instant.DISTANT_PAST },
+                    onDateTimeSelected = { selected ->
+                        onUpdateSlot(index, slot.copy(startDate = selected))
+                    },
+                    isError = slot.startDate == Instant.DISTANT_PAST,
+                )
+                DateTimePickerField(
+                    label = "End Date & Time",
+                    value = slot.endDate,
+                    onDateTimeSelected = { selected ->
+                        onUpdateSlot(index, slot.copy(endDate = selected))
+                    },
+                    isError = slot.endDate == null || slot.endDate <= slot.startDate,
                 )
             }
 
@@ -386,7 +436,9 @@ private fun TimeslotCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
             ) {
-                TextButton(onClick = { onUpdateSlot(index, slot.copy(repeating = !slot.repeating)) }) {
+                TextButton(onClick = {
+                    onUpdateSlot(index, slot.toggleRepeating(eventStart = eventStart, eventEnd = eventEnd))
+                }) {
                     Text(if (slot.repeating) "Repeats weekly" else "One-time slot")
                 }
             }
@@ -400,6 +452,55 @@ private fun TimeslotCard(
             }
         }
     }
+}
+
+@OptIn(ExperimentalTime::class)
+private fun TimeSlot.toggleRepeating(eventStart: Instant, eventEnd: Instant?): TimeSlot {
+    return if (repeating) {
+        toOneTimeSlot(eventStart = eventStart, eventEnd = eventEnd)
+    } else {
+        toRepeatingSlot(eventStart = eventStart, eventEnd = eventEnd)
+    }
+}
+
+@OptIn(ExperimentalTime::class)
+private fun TimeSlot.toOneTimeSlot(eventStart: Instant, eventEnd: Instant?): TimeSlot {
+    val baselineDate = startDate.takeUnless { it == Instant.DISTANT_PAST } ?: eventStart
+    val startInstant = startTimeMinutes?.let { baselineDate.withMinutesOfDay(it) } ?: baselineDate
+    val fallbackEnd = when {
+        endDate != null && endDate > startInstant -> endDate
+        endTimeMinutes != null && startTimeMinutes != null && endTimeMinutes > startTimeMinutes ->
+            baselineDate.withMinutesOfDay(endTimeMinutes)
+        eventEnd != null && eventEnd > startInstant -> eventEnd
+        else -> Instant.fromEpochMilliseconds(startInstant.toEpochMilliseconds() + 60L * 60L * 1000L)
+    }
+    val day = startInstant.toMondayFirstDay()
+    return copy(
+        repeating = false,
+        dayOfWeek = day,
+        daysOfWeek = listOf(day),
+        startDate = startInstant,
+        endDate = fallbackEnd,
+        startTimeMinutes = startInstant.toMinutesOfDay(),
+        endTimeMinutes = fallbackEnd.toMinutesOfDay(),
+    )
+}
+
+@OptIn(ExperimentalTime::class)
+private fun TimeSlot.toRepeatingSlot(eventStart: Instant, eventEnd: Instant?): TimeSlot {
+    val effectiveStart = startDate.takeUnless { it == Instant.DISTANT_PAST } ?: eventStart
+    val day = effectiveStart.toMondayFirstDay()
+    val resolvedStartMinutes = startTimeMinutes ?: effectiveStart.toMinutesOfDay()
+    val resolvedEndMinutes = endTimeMinutes ?: endDate?.toMinutesOfDay()
+    return copy(
+        repeating = true,
+        dayOfWeek = day,
+        daysOfWeek = listOf(day),
+        startDate = effectiveStart,
+        endDate = eventEnd?.takeIf { it > effectiveStart },
+        startTimeMinutes = resolvedStartMinutes,
+        endTimeMinutes = resolvedEndMinutes,
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalTime::class)
@@ -496,6 +597,86 @@ private fun TimeOfDayPickerField(
 }
 
 @OptIn(ExperimentalTime::class)
+@Composable
+private fun DatePickerField(
+    label: String,
+    value: Instant,
+    onDateSelected: (Instant) -> Unit,
+    modifier: Modifier = Modifier,
+    isError: Boolean = false,
+    supportingText: String = "",
+) {
+    var showPicker by remember { mutableStateOf(false) }
+    PlatformTextField(
+        value = value.toDateLabel(),
+        onValueChange = {},
+        modifier = modifier,
+        label = label,
+        readOnly = true,
+        isError = isError,
+        supportingText = supportingText,
+        trailingIcon = {
+            IconButton(onClick = { showPicker = true }) {
+                Icon(Icons.Default.DateRange, contentDescription = "Select date")
+            }
+        },
+        onTap = { showPicker = true },
+    )
+    if (showPicker) {
+        PlatformDateTimePicker(
+            onDateSelected = { selected ->
+                selected?.let(onDateSelected)
+                showPicker = false
+            },
+            onDismissRequest = { showPicker = false },
+            showPicker = showPicker,
+            getTime = false,
+            canSelectPast = true,
+            initialDate = value,
+        )
+    }
+}
+
+@OptIn(ExperimentalTime::class)
+@Composable
+private fun DateTimePickerField(
+    label: String,
+    value: Instant?,
+    onDateTimeSelected: (Instant) -> Unit,
+    modifier: Modifier = Modifier,
+    isError: Boolean = false,
+) {
+    var showPicker by remember { mutableStateOf(false) }
+    PlatformTextField(
+        value = value?.toDateTimeLabel() ?: "Select date and time",
+        onValueChange = {},
+        modifier = modifier,
+        label = label,
+        readOnly = true,
+        isError = isError,
+        trailingIcon = {
+            IconButton(onClick = { showPicker = true }) {
+                Icon(Icons.Default.DateRange, contentDescription = "Select date and time")
+            }
+        },
+        onTap = { showPicker = true },
+    )
+    if (showPicker) {
+        PlatformDateTimePicker(
+            onDateSelected = { selected ->
+                selected?.let(onDateTimeSelected)
+                showPicker = false
+            },
+            onDismissRequest = { showPicker = false },
+            showPicker = showPicker,
+            getTime = true,
+            canSelectPast = true,
+            initialDate = value,
+        )
+    }
+}
+
+@OptIn(ExperimentalTime::class)
 private fun Int.toTodayInstant(): Instant {
     val timezone = TimeZone.currentSystemDefault()
     val nowLocalDate = Clock.System.now().toLocalDateTime(timezone).date
@@ -503,6 +684,39 @@ private fun Int.toTodayInstant(): Instant {
     return Instant.fromEpochMilliseconds(
         startOfToday.toEpochMilliseconds() + this.toLong() * 60_000L
     )
+}
+
+@OptIn(ExperimentalTime::class)
+private fun Instant.toDateLabel(): String = this.toLocalDateTime(TimeZone.currentSystemDefault()).date.toString()
+
+@OptIn(ExperimentalTime::class)
+private fun Instant.toDateTimeLabel(): String {
+    val local = this.toLocalDateTime(TimeZone.currentSystemDefault())
+    val minutes = local.time.hour * 60 + local.time.minute
+    return "${local.date} ${minutes.toTimeLabel()}"
+}
+
+@OptIn(ExperimentalTime::class)
+private fun Instant.withMinutesOfDay(minutes: Int): Instant {
+    val timezone = TimeZone.currentSystemDefault()
+    val localDate = this.toLocalDateTime(timezone).date
+    val clampedMinutes = minutes.coerceIn(0, 23 * 60 + 59)
+    val startOfDay = localDate.atStartOfDayIn(timezone)
+    return Instant.fromEpochMilliseconds(
+        startOfDay.toEpochMilliseconds() + clampedMinutes.toLong() * 60_000L
+    )
+}
+
+@OptIn(ExperimentalTime::class)
+private fun Instant.toMinutesOfDay(): Int {
+    val localTime = this.toLocalDateTime(TimeZone.currentSystemDefault()).time
+    return localTime.hour * 60 + localTime.minute
+}
+
+@OptIn(ExperimentalTime::class)
+private fun Instant.toMondayFirstDay(): Int {
+    val isoDay = this.toLocalDateTime(TimeZone.currentSystemDefault()).date.dayOfWeek.isoDayNumber
+    return (isoDay - 1).mod(7)
 }
 
 private fun Int.toTimeLabel(): String {

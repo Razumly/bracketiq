@@ -20,7 +20,7 @@ plugins {
     alias(libs.plugins.compose.vectorize)
     alias(libs.plugins.secrets)
     id("kotlin-parcelize")
-    id("com.google.gms.google-services") version "4.4.3"
+    id("com.google.gms.google-services") version "4.4.4"
     id("co.touchlab.skie") version "0.10.10"
 }
 composeCompiler {
@@ -31,8 +31,8 @@ compose.resources {
     generateResClass = always
 }
 
-val mvpVersion = "1.0"
-val mvpVersionCode = 14
+val mvpVersion = "1.1"
+val mvpVersionCode = 15
 kotlin {
     androidTarget {
         compilerOptions {
@@ -105,13 +105,13 @@ kotlin {
         }
         commonMain {
             dependencies {
-                implementation(compose.runtime)
-                implementation(compose.foundation)
-                implementation(compose.material3)
-                implementation(compose.materialIconsExtended)
-                implementation(compose.ui)
-                implementation(compose.components.resources)
-                implementation(compose.components.uiToolingPreview)
+                implementation(libs.runtime)
+                implementation(libs.foundation)
+                implementation(libs.material3)
+                implementation(libs.material.icons.extended)
+                implementation(libs.jetbrains.ui)
+                implementation(libs.jetbrains.components.resources)
+                implementation(libs.jetbrains.ui.tooling.preview)
                 implementation(libs.runtime.saveable)
                 implementation(libs.coil.compose)
                 implementation(libs.androidx.room.runtime)

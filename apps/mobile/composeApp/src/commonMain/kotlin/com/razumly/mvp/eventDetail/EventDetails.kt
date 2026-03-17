@@ -3452,6 +3452,58 @@ fun EventDetails(
                             }
 
                             if (editEvent.eventType == EventType.TOURNAMENT) {
+                                LabeledCheckboxRow(
+                                    checked = editEvent.usesSets,
+                                    label = "Use set-based scoring",
+                                    onCheckedChange = { checked ->
+                                        onEditTournament {
+                                            val winnerSets = when (winnerSetCount) {
+                                                1, 3, 5 -> winnerSetCount
+                                                else -> 1
+                                            }
+                                            val loserSets = when (loserSetCount) {
+                                                1, 3, 5 -> loserSetCount
+                                                else -> 1
+                                            }
+                                            if (checked) {
+                                                copy(
+                                                    usesSets = true,
+                                                    setDurationMinutes = setDurationMinutes ?: 20,
+                                                    matchDurationMinutes = matchDurationMinutes ?: 60,
+                                                    winnerSetCount = winnerSets,
+                                                    loserSetCount = loserSets,
+                                                    winnerBracketPointsToVictory = winnerBracketPointsToVictory
+                                                        .take(winnerSets)
+                                                        .toMutableList()
+                                                        .apply {
+                                                            while (size < winnerSets) add(21)
+                                                        },
+                                                    loserBracketPointsToVictory = loserBracketPointsToVictory
+                                                        .take(loserSets)
+                                                        .toMutableList()
+                                                        .apply {
+                                                            while (size < loserSets) add(21)
+                                                        },
+                                                )
+                                            } else {
+                                                copy(
+                                                    usesSets = false,
+                                                    setDurationMinutes = null,
+                                                    matchDurationMinutes = (matchDurationMinutes ?: 60).coerceAtLeast(15),
+                                                    winnerSetCount = 1,
+                                                    loserSetCount = 1,
+                                                    winnerBracketPointsToVictory = winnerBracketPointsToVictory
+                                                        .take(1)
+                                                        .ifEmpty { listOf(21) },
+                                                    loserBracketPointsToVictory = loserBracketPointsToVictory
+                                                        .take(1)
+                                                        .ifEmpty { listOf(21) },
+                                                )
+                                            }
+                                        }
+                                    },
+                                )
+
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -3528,206 +3580,210 @@ fun EventDetails(
                                     Box(modifier = Modifier.weight(1f))
                                 }
 
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalAlignment = Alignment.Top,
-                                ) {
-                                    val normalizedWinnerSetCount = remember(editEvent.winnerSetCount) {
-                                        when (editEvent.winnerSetCount) {
-                                            1, 3, 5 -> editEvent.winnerSetCount
-                                            else -> 1
-                                        }
-                                    }
-
-                                    PlatformDropdown(
-                                        selectedValue = normalizedWinnerSetCount.toString(),
-                                        onSelectionChange = { selected ->
-                                            val newValue = selected.toInt()
-                                            onEditTournament {
-                                                copy(
-                                                    winnerSetCount = newValue,
-                                                    winnerBracketPointsToVictory = List(newValue) { 21 }
-                                                )
-                                            }
-                                        },
-                                        options = setCountOptions,
-                                        label = "Winner Set Count",
-                                        modifier = Modifier.weight(1f),
-                                        isError = !isWinnerSetCountValid,
-                                        supportingText = if (!isWinnerSetCountValid) {
-                                            "Winner set count must be 1, 3, or 5."
-                                        } else {
-                                            ""
-                                        },
-                                    )
-
-                                    Box(modifier = Modifier.weight(1f))
-                                }
-
-                                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                                    val constrainedWinnerSetCount = remember(editEvent.winnerSetCount) {
-                                        when (editEvent.winnerSetCount) {
-                                            1, 3, 5 -> editEvent.winnerSetCount
-                                            else -> 1
-                                        }
-                                    }
-
-                                    val focusRequesters = remember(constrainedWinnerSetCount) {
-                                        List(constrainedWinnerSetCount) { FocusRequester() }
-                                    }
-
-                                    FlowRow(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        repeat(constrainedWinnerSetCount) { index ->
-                                            PointsTextField(
-                                                modifier = Modifier.fillMaxWidth(0.48f),
-                                                value = editEvent.winnerBracketPointsToVictory.getOrNull(
-                                                    index
-                                                )?.toString() ?: "",
-                                                label = "Set ${index + 1} Points",
-                                                onValueChange = { newValue ->
-                                                    if (newValue.all { it.isDigit() } && newValue.length <= 2) {
-                                                        val winnerPoints = if (newValue.isBlank()) {
-                                                            0
-                                                        } else {
-                                                            if (editEvent.winnerBracketPointsToVictory.getOrNull(
-                                                                    index
-                                                                ) == 0 && newValue.toInt() >= 10
-                                                            ) {
-                                                                newValue.toInt() / 10
-                                                            } else {
-                                                                newValue.toInt()
-                                                            }
-                                                        }
-                                                        onEditTournament {
-                                                            copy(
-                                                                winnerBracketPointsToVictory = editEvent.winnerBracketPointsToVictory.toMutableList()
-                                                                    .apply {
-                                                                        while (size <= index) add(0)
-                                                                        set(index, winnerPoints)
-                                                                    }
-                                                            )
-                                                        }
-                                                    }
-                                                },
-                                                isError = editEvent.winnerBracketPointsToVictory.getOrNull(
-                                                    index
-                                                )?.let { it <= 0 } ?: true,
-                                                errorMessage = "Points must be greater than 0",
-                                                focusRequester = focusRequesters[index],
-                                                nextFocus = {
-                                                    if (index < constrainedWinnerSetCount - 1) {
-                                                        focusRequesters[index + 1].requestFocus()
-                                                    }
-                                                })
-                                        }
-                                    }
-                                    if (!isWinnerPointsValid) {
-                                        Text(
-                                            text = "Winner points must be greater than 0 for every set.",
-                                            color = MaterialTheme.colorScheme.error,
-                                        )
-                                    }
-                                }
-
-                                if (editEvent.doubleElimination) {
-                                    val normalizedLoserSetCount = remember(editEvent.loserSetCount) {
-                                        when (editEvent.loserSetCount) {
-                                            1, 3, 5 -> editEvent.loserSetCount
-                                            else -> 1
-                                        }
-                                    }
+                                if (editEvent.usesSets) {
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                                         verticalAlignment = Alignment.Top,
                                     ) {
+                                        val normalizedWinnerSetCount = remember(editEvent.winnerSetCount) {
+                                            when (editEvent.winnerSetCount) {
+                                                1, 3, 5 -> editEvent.winnerSetCount
+                                                else -> 1
+                                            }
+                                        }
+
                                         PlatformDropdown(
-                                            selectedValue = normalizedLoserSetCount.toString(),
+                                            selectedValue = normalizedWinnerSetCount.toString(),
                                             onSelectionChange = { selected ->
                                                 val newValue = selected.toInt()
                                                 onEditTournament {
                                                     copy(
-                                                        loserSetCount = newValue,
-                                                        loserBracketPointsToVictory = List(newValue) { 21 }
+                                                        winnerSetCount = newValue,
+                                                        winnerBracketPointsToVictory = List(newValue) { 21 }
                                                     )
                                                 }
                                             },
                                             options = setCountOptions,
-                                            label = "Loser Set Count",
+                                            label = "Winner Set Count",
                                             modifier = Modifier.weight(1f),
-                                            isError = !isLoserSetCountValid,
-                                            supportingText = if (!isLoserSetCountValid) {
-                                                "Loser set count must be 1, 3, or 5."
+                                            isError = !isWinnerSetCountValid,
+                                            supportingText = if (!isWinnerSetCountValid) {
+                                                "Winner set count must be 1, 3, or 5."
                                             } else {
                                                 ""
                                             },
                                         )
+
                                         Box(modifier = Modifier.weight(1f))
                                     }
 
-                                    val constrainedLoserSetCount = remember(editEvent.loserSetCount) {
-                                        when (editEvent.loserSetCount) {
-                                            1, 3, 5 -> editEvent.loserSetCount
-                                            else -> 1
+                                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                        val constrainedWinnerSetCount = remember(editEvent.winnerSetCount) {
+                                            when (editEvent.winnerSetCount) {
+                                                1, 3, 5 -> editEvent.winnerSetCount
+                                                else -> 1
+                                            }
+                                        }
+
+                                        val focusRequesters = remember(constrainedWinnerSetCount) {
+                                            List(constrainedWinnerSetCount) { FocusRequester() }
+                                        }
+
+                                        FlowRow(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            repeat(constrainedWinnerSetCount) { index ->
+                                                PointsTextField(
+                                                    modifier = Modifier.fillMaxWidth(0.48f),
+                                                    value = editEvent.winnerBracketPointsToVictory.getOrNull(
+                                                        index
+                                                    )?.toString() ?: "",
+                                                    label = "Set ${index + 1} Points",
+                                                    onValueChange = { newValue ->
+                                                        if (newValue.all { it.isDigit() } && newValue.length <= 2) {
+                                                            val winnerPoints = if (newValue.isBlank()) {
+                                                                0
+                                                            } else {
+                                                                if (editEvent.winnerBracketPointsToVictory.getOrNull(
+                                                                        index
+                                                                    ) == 0 && newValue.toInt() >= 10
+                                                                ) {
+                                                                    newValue.toInt() / 10
+                                                                } else {
+                                                                    newValue.toInt()
+                                                                }
+                                                            }
+                                                            onEditTournament {
+                                                                copy(
+                                                                    winnerBracketPointsToVictory = editEvent.winnerBracketPointsToVictory.toMutableList()
+                                                                        .apply {
+                                                                            while (size <= index) add(0)
+                                                                            set(index, winnerPoints)
+                                                                        }
+                                                                )
+                                                            }
+                                                        }
+                                                    },
+                                                    isError = editEvent.winnerBracketPointsToVictory.getOrNull(
+                                                        index
+                                                    )?.let { it <= 0 } ?: true,
+                                                    errorMessage = "Points must be greater than 0",
+                                                    focusRequester = focusRequesters[index],
+                                                    nextFocus = {
+                                                        if (index < constrainedWinnerSetCount - 1) {
+                                                            focusRequesters[index + 1].requestFocus()
+                                                        }
+                                                    })
+                                            }
+                                        }
+                                        if (!isWinnerPointsValid) {
+                                            Text(
+                                                text = "Winner points must be greater than 0 for every set.",
+                                                color = MaterialTheme.colorScheme.error,
+                                            )
                                         }
                                     }
 
-                                    val loserFocusRequesters = remember(constrainedLoserSetCount) {
-                                        List(constrainedLoserSetCount) { FocusRequester() }
-                                    }
-
-                                    FlowRow(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        repeat(constrainedLoserSetCount) { index ->
-                                            PointsTextField(
-                                                modifier = Modifier.fillMaxWidth(0.48f),
-                                                value = editEvent.loserBracketPointsToVictory.getOrNull(
-                                                    index
-                                                )?.toString() ?: "",
-                                                label = "Set ${index + 1} Points",
-                                                onValueChange = { newValue ->
-                                                    if (newValue.all { it.isDigit() } && newValue.length <= 2) {
-                                                        val loserPoints = if (newValue.isBlank()) {
-                                                            0
-                                                        } else {
-                                                            newValue.toInt()
-                                                        }
-                                                        onEditTournament {
-                                                            copy(
-                                                                loserBracketPointsToVictory = editEvent.loserBracketPointsToVictory.toMutableList()
-                                                                    .apply {
-                                                                        while (size <= index) add(0)
-                                                                        set(index, loserPoints)
-                                                                    })
-                                                        }
+                                    if (editEvent.doubleElimination) {
+                                        val normalizedLoserSetCount = remember(editEvent.loserSetCount) {
+                                            when (editEvent.loserSetCount) {
+                                                1, 3, 5 -> editEvent.loserSetCount
+                                                else -> 1
+                                            }
+                                        }
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            verticalAlignment = Alignment.Top,
+                                        ) {
+                                            PlatformDropdown(
+                                                selectedValue = normalizedLoserSetCount.toString(),
+                                                onSelectionChange = { selected ->
+                                                    val newValue = selected.toInt()
+                                                    onEditTournament {
+                                                        copy(
+                                                            loserSetCount = newValue,
+                                                            loserBracketPointsToVictory = List(newValue) { 21 }
+                                                        )
                                                     }
                                                 },
-                                                isError = editEvent.loserBracketPointsToVictory.getOrNull(
-                                                    index
-                                                )?.let { it <= 0 } ?: true,
-                                                errorMessage = "Points must be greater than 0",
-                                                focusRequester = loserFocusRequesters[index],
-                                                nextFocus = {
-                                                    if (index < constrainedLoserSetCount - 1) {
-                                                        loserFocusRequesters[index + 1].requestFocus()
-                                                    }
-                                                })
+                                                options = setCountOptions,
+                                                label = "Loser Set Count",
+                                                modifier = Modifier.weight(1f),
+                                                isError = !isLoserSetCountValid,
+                                                supportingText = if (!isLoserSetCountValid) {
+                                                    "Loser set count must be 1, 3, or 5."
+                                                } else {
+                                                    ""
+                                                },
+                                            )
+                                            Box(modifier = Modifier.weight(1f))
                                         }
+
+                                        val constrainedLoserSetCount = remember(editEvent.loserSetCount) {
+                                            when (editEvent.loserSetCount) {
+                                                1, 3, 5 -> editEvent.loserSetCount
+                                                else -> 1
+                                            }
+                                        }
+
+                                        val loserFocusRequesters = remember(constrainedLoserSetCount) {
+                                            List(constrainedLoserSetCount) { FocusRequester() }
+                                        }
+
+                                        FlowRow(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            repeat(constrainedLoserSetCount) { index ->
+                                                PointsTextField(
+                                                    modifier = Modifier.fillMaxWidth(0.48f),
+                                                    value = editEvent.loserBracketPointsToVictory.getOrNull(
+                                                        index
+                                                    )?.toString() ?: "",
+                                                    label = "Set ${index + 1} Points",
+                                                    onValueChange = { newValue ->
+                                                        if (newValue.all { it.isDigit() } && newValue.length <= 2) {
+                                                            val loserPoints = if (newValue.isBlank()) {
+                                                                0
+                                                            } else {
+                                                                newValue.toInt()
+                                                            }
+                                                            onEditTournament {
+                                                                copy(
+                                                                    loserBracketPointsToVictory = editEvent.loserBracketPointsToVictory.toMutableList()
+                                                                        .apply {
+                                                                            while (size <= index) add(0)
+                                                                            set(index, loserPoints)
+                                                                        })
+                                                            }
+                                                        }
+                                                    },
+                                                    isError = editEvent.loserBracketPointsToVictory.getOrNull(
+                                                        index
+                                                    )?.let { it <= 0 } ?: true,
+                                                    errorMessage = "Points must be greater than 0",
+                                                    focusRequester = loserFocusRequesters[index],
+                                                    nextFocus = {
+                                                        if (index < constrainedLoserSetCount - 1) {
+                                                            loserFocusRequesters[index + 1].requestFocus()
+                                                        }
+                                                    })
+                                            }
+                                        }
+                                        if (!isLoserPointsValid) {
+                                            Text(
+                                                text = "Loser points must be greater than 0 for every set.",
+                                                color = MaterialTheme.colorScheme.error,
+                                            )
+                                        }
+                                        Spacer(Modifier.height(12.dp))
                                     }
-                                    if (!isLoserPointsValid) {
-                                        Text(
-                                            text = "Loser points must be greater than 0 for every set.",
-                                            color = MaterialTheme.colorScheme.error,
-                                        )
-                                    }
+                                } else {
                                     Spacer(Modifier.height(12.dp))
                                 }
                             }
@@ -3736,6 +3792,8 @@ fun EventDetails(
                                 fieldCount = fieldCount,
                                 fields = editableFields,
                                 slots = leagueTimeSlots,
+                                eventStart = editEvent.start,
+                                eventEnd = editEvent.end.takeIf { it > editEvent.start },
                                 onFieldCountChange = { count ->
                                     fieldCount = count
                                     onSelectFieldCount(count)
@@ -5342,7 +5400,7 @@ private fun LabeledCheckboxRow(
     }
 }
 
-private fun computeLeagueSlotErrors(
+internal fun computeLeagueSlotErrors(
     slots: List<TimeSlot>,
     singleDivision: Boolean,
     selectedDivisionIds: List<String>,
@@ -5361,6 +5419,43 @@ private fun computeLeagueSlotErrors(
         val slotDivisionSet = slotDivisionIds.toSet()
         val start = slot.startTimeMinutes
         val end = slot.endTimeMinutes
+
+        if (!slot.repeating) {
+            val slotStart = slot.startDate
+            val slotEnd = slot.endDate
+            val requiredMissing = when {
+                fieldIds.isEmpty() -> "Select at least one field."
+                slotEnd == null -> "Select start and end date/time."
+                slotEnd <= slotStart -> "Timeslot must end after it starts."
+                else -> null
+            }
+            if (requiredMissing != null) {
+                errors[index] = requiredMissing
+                return@forEachIndexed
+            }
+
+            if (singleDivision && selectedDivisionSet.isNotEmpty() && slotDivisionSet != selectedDivisionSet) {
+                errors[index] = "Single division requires every timeslot to include all selected divisions."
+                return@forEachIndexed
+            }
+            val nonRepeatingEnd = slotEnd ?: return@forEachIndexed
+
+            val hasOverlap = slots.withIndex().any { (otherIndex, other) ->
+                if (otherIndex == index || other.repeating) return@any false
+                val otherFieldSet = other.normalizedScheduledFieldIds().toSet()
+                if (otherFieldSet.isEmpty() || otherFieldSet.intersect(fieldIdSet).isEmpty()) return@any false
+
+                val otherStart = other.startDate
+                val otherEnd = other.endDate ?: return@any false
+                if (otherEnd <= otherStart) return@any false
+                slotStart < otherEnd && otherStart < nonRepeatingEnd
+            }
+
+            if (hasOverlap) {
+                errors[index] = "Overlaps with another timeslot for one or more selected fields."
+            }
+            return@forEachIndexed
+        }
 
         val requiredMissing = when {
             fieldIds.isEmpty() -> "Select at least one field."
@@ -5382,6 +5477,7 @@ private fun computeLeagueSlotErrors(
 
         val hasOverlap = slots.withIndex().any { (otherIndex, other) ->
             if (otherIndex == index) return@any false
+            if (!other.repeating) return@any false
             val otherFieldSet = other.normalizedScheduledFieldIds().toSet()
             if (otherFieldSet.isEmpty() || otherFieldSet.intersect(fieldIdSet).isEmpty()) return@any false
             val otherDays = other.normalizedDaysOfWeek()

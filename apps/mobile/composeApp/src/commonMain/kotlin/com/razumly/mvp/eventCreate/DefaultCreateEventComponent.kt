@@ -49,6 +49,9 @@ import com.razumly.mvp.eventDetail.normalizeStaffInviteEmail
 import com.razumly.mvp.eventDetail.reconcileEventStaffInvites
 import com.razumly.mvp.eventDetail.data.IMatchRepository
 import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.isoDayNumber
+import kotlinx.datetime.toLocalDateTime
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -321,6 +324,7 @@ class DefaultCreateEventComponent(
             if (sportChanged) {
                 _leagueScoringConfig.value = defaultLeagueScoringConfigForSport(normalized.sportId)
             }
+            syncLeagueSlotDefaultStartDates(previousEvent = previous, updatedEvent = normalized)
             syncLocalFieldsForEvent(normalized)
         }
     }
@@ -338,6 +342,7 @@ class DefaultCreateEventComponent(
             if (sportChanged) {
                 _leagueScoringConfig.value = defaultLeagueScoringConfigForSport(normalized.sportId)
             }
+            syncLeagueSlotDefaultStartDates(previousEvent = previous, updatedEvent = normalized)
             syncLocalFieldsForEvent(normalized)
         }
     }
@@ -381,6 +386,7 @@ class DefaultCreateEventComponent(
             val normalized = applyRentalConstraints(updated)
 
             _newEventState.value = normalized
+            syncLeagueSlotDefaultStartDates(previousEvent = previous, updatedEvent = normalized)
             syncLocalFieldsForEvent(normalized)
         }
     }
@@ -1165,13 +1171,39 @@ class DefaultCreateEventComponent(
             val startMinutes = slot.startTimeMinutes
             val endMinutes = slot.endTimeMinutes
 
-            if (mappedFieldIds.isEmpty() || normalizedDays.isEmpty() || startMinutes == null || endMinutes == null) {
+            if (mappedFieldIds.isEmpty()) {
+                return@mapNotNull null
+            }
+
+            if (!slot.repeating) {
+                val slotStartDate = slot.startDate.takeUnless { it == Instant.DISTANT_PAST } ?: event.start
+                val slotEndDate = slot.endDate ?: return@mapNotNull null
+                if (slotEndDate <= slotStartDate) {
+                    return@mapNotNull null
+                }
+                val slotDayOfWeek = slotStartDate.toMondayFirstDay()
+                return@mapNotNull slot.copy(
+                    id = slot.id.ifBlank { newId() },
+                    dayOfWeek = slotDayOfWeek,
+                    daysOfWeek = listOf(slotDayOfWeek),
+                    divisions = effectiveDivisionIds,
+                    scheduledFieldId = mappedFieldIds.first(),
+                    scheduledFieldIds = mappedFieldIds,
+                    startDate = slotStartDate,
+                    endDate = slotEndDate,
+                    startTimeMinutes = slotStartDate.toMinutesOfDay(),
+                    endTimeMinutes = slotEndDate.toMinutesOfDay(),
+                    repeating = false,
+                )
+            }
+
+            if (normalizedDays.isEmpty() || startMinutes == null || endMinutes == null) {
                 return@mapNotNull null
             }
             if (endMinutes <= startMinutes) {
                 return@mapNotNull null
             }
-
+            val slotStartDate = slot.startDate.takeUnless { it == Instant.DISTANT_PAST } ?: event.start
             slot.copy(
                 id = slot.id.ifBlank { newId() },
                 dayOfWeek = normalizedDays.first(),
@@ -1179,9 +1211,23 @@ class DefaultCreateEventComponent(
                 divisions = effectiveDivisionIds,
                 scheduledFieldId = mappedFieldIds.first(),
                 scheduledFieldIds = mappedFieldIds,
-                startDate = event.start,
+                startDate = slotStartDate,
                 endDate = event.end.takeIf { it > event.start },
+                repeating = true,
             )
+        }
+    }
+
+    private fun syncLeagueSlotDefaultStartDates(previousEvent: Event, updatedEvent: Event) {
+        if (previousEvent.start == updatedEvent.start) {
+            return
+        }
+        _leagueSlots.value = _leagueSlots.value.map { slot ->
+            if (slot.repeating && slot.startDate == previousEvent.start) {
+                slot.copy(startDate = updatedEvent.start)
+            } else {
+                slot
+            }
         }
     }
 
@@ -1335,6 +1381,16 @@ class DefaultCreateEventComponent(
     private fun defaultFieldDivisions(event: Event): List<String> {
         val eventDivisions = event.divisions.normalizeDivisionIdentifiers()
         return eventDivisions.ifEmpty { listOf(DEFAULT_DIVISION) }
+    }
+
+    private fun Instant.toMinutesOfDay(): Int {
+        val localTime = toLocalDateTime(TimeZone.currentSystemDefault()).time
+        return localTime.hour * 60 + localTime.minute
+    }
+
+    private fun Instant.toMondayFirstDay(): Int {
+        val isoDay = toLocalDateTime(TimeZone.currentSystemDefault()).date.dayOfWeek.isoDayNumber
+        return (isoDay - 1).mod(7)
     }
 
     private fun Event.currentInstallmentCount(): Int {

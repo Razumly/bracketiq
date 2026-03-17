@@ -1,41 +1,45 @@
 [versions]
-activityKtx = "1.10.1"
-agp = "8.12.0"
+activityKtx = "1.13.0"
+agp = "8.12.3"
 android-compileSdk = "36"
 android-minSdk = "26"
-android-targetSdk = "35"
-androidx-activityCompose = "1.11.0"
+android-targetSdk = "36"
+androidx-activityCompose = "1.13.0"
 androidx-lifecycle = "2.9.6"
 assertk = "0.28.1"
-coil3 = "3.3.0"
-compose-multiplatform = "1.10.1"
-calendar = "2.9.0"
+coil3 = "3.4.0"
+componentsResourcesVersion = "1.10.2"
+compose-multiplatform = "1.10.2"
+calendar = "2.10.0"
 concurrentFuturesKtx = "1.3.0"
 core = "1.7.0"
 coroutines = "1.10.2"
-datastore = "1.1.7"
-decompose = "3.4.0"
+datastore = "1.2.1"
+decompose = "3.5.0"
 firebaseMessaging = "25.0.1"
-foundationLayout = "1.9.4"
+foundation = "1.10.2"
+foundationLayout = "1.10.5"
 geo = "0.8.0"
 googleApiServicesOauth2 = "v2-rev20200213-2.0.0"
-googleAuthLibraryOauth2Http = "1.42.1"
+googleAuthLibraryOauth2Http = "1.43.0"
 googleHttpClientGson = "2.1.0"
 hazeMaterials = "1.7.2"
-imagepickerkmp = "1.0.32"
+imagepickerkmp = "1.0.34"
 kmpalette = "3.1.0"
 kmpnotifier = "1.6.1"
 koin = "4.1.1"
-kotlin = "2.3.0"
+kotlin = "2.3.10"
 kotlinxDatetime = "0.7.1"
 kotlinx_datetime_ext = "1.4.0"
 kotlinxSerializationJson = "1.10.0"
 ksp = "2.3.0"
-ktor = "3.4.0"
+ktor = "3.4.1"
 lifecycle = "2.5.0"
 lifecycleRuntimeComposeAndroid = "2.10.0"
-mapsCompose = "8.1.0"
-material = "1.10.2"
+mapsCompose = "8.2.1"
+material = "1.10.5"
+material3 = "1.9.0"
+materialIconsExtended = "1.7.3"
 materialKolor = "4.1.1"
 mockk = "1.14.9"
 napier = "2.7.1"
@@ -47,28 +51,35 @@ playServicesLocation = "21.3.0"
 playServicesMaps = "20.0.0"
 robolectric = "4.16.1"
 room = "2.8.4"
-runtimeSaveable = "1.10.1"
+runtimeSaveable = "1.10.2"
 secrets = "2.0.1"
 sqlite = "2.6.2"
-stripeAndroid = "22.8.0"
+stripeAndroid = "23.0.2"
 turbine = "1.2.1"
-vectorize = "1.1.0"
-animationAndroid = "1.10.2"
+uiVersion = "1.10.2"
+vectorize = "1.2.0"
+animationAndroid = "1.10.5"
 browser = "1.9.0"
 credentials = "1.5.0"
 googleId = "1.2.0"
-splashscreen = "1.0.1"
+splashscreen = "1.2.0"
 
 [libraries]
 androidx-core = { module = "androidx.test:core", version.ref = "core" }
 androidx-performance-annotation = { module = "androidx.performance:performance-annotation", version.ref = "performanceAnnotation" }
 compose-multiplatform = { module = "com.kizitonwose.calendar:compose-multiplatform", version.ref = "calendar" }
 firebase-messaging = { module = "com.google.firebase:firebase-messaging", version.ref = "firebaseMessaging" }
+foundation = { module = "org.jetbrains.compose.foundation:foundation", version.ref = "foundation" }
 imagepickerkmp = { module = "io.github.ismoy:imagepickerkmp", version.ref = "imagepickerkmp" }
+jetbrains-components-resources = { module = "org.jetbrains.compose.components:components-resources", version.ref = "componentsResourcesVersion" }
 jetbrains-kotlin-metadata-jvm = { module = "org.jetbrains.kotlin:kotlin-metadata-jvm", version.ref = "kotlin" }
+jetbrains-ui = { module = "org.jetbrains.compose.ui:ui", version.ref = "uiVersion" }
+jetbrains-ui-tooling-preview = { module = "org.jetbrains.compose.ui:ui-tooling-preview", version.ref = "uiVersion" }
 kmpnotifier = { module = "io.github.mirzemehdi:kmpnotifier", version.ref = "kmpnotifier" }
 lifecycle = { module = "com.arkivanov.essenty:lifecycle", version.ref = "lifecycle" }
 lifecycle-coroutines = { module = "com.arkivanov.essenty:lifecycle-coroutines", version.ref = "lifecycle" }
+material-icons-extended = { module = "org.jetbrains.compose.material:material-icons-extended", version.ref = "materialIconsExtended" }
+material3 = { module = "org.jetbrains.compose.material3:material3", version.ref = "material3" }
 materialKolor = { module = "com.materialkolor:material-kolor", version.ref = "materialKolor" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activityCompose" }
 androidx-activity-ktx = { group = "androidx.activity", name = "activity-ktx", version.ref = "activityKtx" }
@@ -131,6 +142,7 @@ places = { module = "com.google.android.libraries.places:places", version.ref = 
 play-services-location = { module = "com.google.android.gms:play-services-location", version.ref = "playServicesLocation" }
 play-services-maps = { module = "com.google.android.gms:play-services-maps", version.ref = "playServicesMaps" }
 robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
+runtime = { module = "org.jetbrains.compose.runtime:runtime", version.ref = "runtimeSaveable" }
 runtime-saveable = { module = "org.jetbrains.compose.runtime:runtime-saveable", version.ref = "runtimeSaveable" }
 androidx-animation-android = { group = "androidx.compose.animation", name = "animation-android", version.ref = "animationAndroid" }
 stripe-android = { group = "com.stripe", name = "stripe-android", version.ref = "stripeAndroid" }

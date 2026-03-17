@@ -5,6 +5,9 @@ import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.presentation.RentalCreateContext
 import com.razumly.mvp.eventDetail.EventStaffRole
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.isoDayNumber
+import kotlinx.datetime.toLocalDateTime
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -450,6 +453,108 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         assertEquals(listOf(1, 3), createdSlots[0].daysOfWeek)
         assertEquals(3, createCall.leagueScoringConfig?.pointsForWin)
         assertEquals(emptyList(), createCall.requiredTemplateIds)
+    }
+
+    @Test
+    fun given_repeating_league_slot_with_custom_start_date_when_submitted_then_custom_start_date_is_preserved() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        harness.component.setLoadingHandler(harness.loadingHandler)
+        advance()
+
+        harness.component.onTypeSelected(EventType.LEAGUE)
+        advance()
+        harness.component.selectFieldCount(1)
+        advance()
+        val localFieldId = harness.component.localFields.value.first().id
+        val eventStart = instant(1_700_000_000_000)
+        val customSlotStart = instant(1_700_172_800_000)
+
+        harness.component.updateEventField {
+            copy(
+                name = "League Custom Slot Start",
+                organizationId = "org-slot-start",
+                divisions = listOf("Open"),
+                start = eventStart,
+                end = instant(1_700_259_200_000),
+            )
+        }
+        harness.component.updateLeagueTimeSlot(0) {
+            copy(
+                repeating = true,
+                startDate = customSlotStart,
+                dayOfWeek = 1,
+                daysOfWeek = listOf(1, 3),
+                startTimeMinutes = 600,
+                endTimeMinutes = 660,
+                scheduledFieldId = localFieldId,
+            )
+        }
+        advance()
+
+        harness.component.createEvent()
+        advance()
+
+        val createdSlots = harness.fieldRepository.createdTimeSlots
+        assertEquals(1, createdSlots.size)
+        assertEquals(true, createdSlots[0].repeating)
+        assertEquals(customSlotStart, createdSlots[0].startDate)
+    }
+
+    @Test
+    fun given_one_time_league_slot_when_submitted_then_datetime_range_is_persisted_and_derived_weekday_time_fields_are_set() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        harness.component.setLoadingHandler(harness.loadingHandler)
+        advance()
+
+        harness.component.onTypeSelected(EventType.LEAGUE)
+        advance()
+        harness.component.selectFieldCount(1)
+        advance()
+        val localFieldId = harness.component.localFields.value.first().id
+        val slotStart = instant(1_700_000_000_000)
+        val slotEnd = instant(1_700_003_600_000)
+        val timezone = TimeZone.currentSystemDefault()
+        val localStart = slotStart.toLocalDateTime(timezone)
+        val localEnd = slotEnd.toLocalDateTime(timezone)
+        val expectedDay = (localStart.date.dayOfWeek.isoDayNumber - 1).mod(7)
+        val expectedStartMinutes = localStart.time.hour * 60 + localStart.time.minute
+        val expectedEndMinutes = localEnd.time.hour * 60 + localEnd.time.minute
+
+        harness.component.updateEventField {
+            copy(
+                name = "League One-Time Slot",
+                organizationId = "org-one-time",
+                divisions = listOf("Open"),
+                start = instant(1_699_913_600_000),
+                end = instant(1_700_345_600_000),
+            )
+        }
+        harness.component.updateLeagueTimeSlot(0) {
+            copy(
+                repeating = false,
+                startDate = slotStart,
+                endDate = slotEnd,
+                dayOfWeek = null,
+                daysOfWeek = emptyList(),
+                startTimeMinutes = null,
+                endTimeMinutes = null,
+                scheduledFieldId = localFieldId,
+            )
+        }
+        advance()
+
+        harness.component.createEvent()
+        advance()
+
+        val createdSlots = harness.fieldRepository.createdTimeSlots
+        assertEquals(1, createdSlots.size)
+        assertEquals(false, createdSlots[0].repeating)
+        assertEquals(slotStart, createdSlots[0].startDate)
+        assertEquals(slotEnd, createdSlots[0].endDate)
+        assertEquals(expectedDay, createdSlots[0].dayOfWeek)
+        assertEquals(listOf(expectedDay), createdSlots[0].daysOfWeek)
+        assertEquals(expectedStartMinutes, createdSlots[0].startTimeMinutes)
+        assertEquals(expectedEndMinutes, createdSlots[0].endTimeMinutes)
     }
 
     @Test
