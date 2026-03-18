@@ -108,16 +108,24 @@ data class EventApiDto(
         val resolvedStart = start
         val resolvedEnd = end
         if (resolvedId.isNullOrBlank() || resolvedName.isNullOrBlank() || resolvedHostId.isNullOrBlank()) return null
-        if (resolvedStart.isNullOrBlank() || resolvedEnd.isNullOrBlank()) return null
+        if (resolvedStart.isNullOrBlank()) return null
+        val parsedStart = runCatching { Instant.parse(resolvedStart) }.getOrNull() ?: return null
 
         val resolvedEventType = runCatching { EventType.valueOf(eventType ?: EventType.EVENT.name) }
             .getOrDefault(EventType.EVENT)
         val resolvedNoFixedEndDateTime = when {
             noFixedEndDateTime != null -> noFixedEndDateTime
             resolvedEventType == EventType.LEAGUE || resolvedEventType == EventType.TOURNAMENT ->
-                resolvedStart == resolvedEnd
+                resolvedEnd.isNullOrBlank() || resolvedStart == resolvedEnd
+            eventType?.uppercase() == "WEEKLY_EVENT" ->
+                resolvedEnd.isNullOrBlank()
             else -> false
         }
+        val parsedEnd = when {
+            !resolvedEnd.isNullOrBlank() -> runCatching { Instant.parse(resolvedEnd) }.getOrNull()
+            resolvedNoFixedEndDateTime -> parsedStart
+            else -> null
+        } ?: return null
         val normalizedDetails = (divisionDetails ?: emptyList()).normalizeDivisionDetails(resolvedId)
         val normalizedDivisions = (
             (divisions ?: emptyList()).normalizeDivisionIdentifiers() +
@@ -206,8 +214,8 @@ data class EventApiDto(
             divisions = normalizedDivisions,
             divisionDetails = mergedDetailsWithCapacity,
             location = location ?: "",
-            start = Instant.parse(resolvedStart),
-            end = Instant.parse(resolvedEnd),
+            start = parsedStart,
+            end = parsedEnd,
             priceCents = resolvedPriceCents,
             rating = rating,
             imageId = imageId ?: "",
