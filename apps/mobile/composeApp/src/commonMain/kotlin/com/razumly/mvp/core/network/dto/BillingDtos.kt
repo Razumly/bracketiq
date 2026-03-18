@@ -22,9 +22,17 @@ data class BillingEventRefDto(
 )
 
 @Serializable
+data class BillingTeamRefDto(
+    val id: String? = null,
+    @SerialName("\$id") val legacyId: String? = null,
+    val name: String? = null,
+)
+
+@Serializable
 data class PurchaseIntentRequestDto(
     val user: BillingUserRefDto? = null,
     val event: BillingEventRefDto? = null,
+    val team: BillingTeamRefDto? = null,
     val productId: String? = null,
 )
 

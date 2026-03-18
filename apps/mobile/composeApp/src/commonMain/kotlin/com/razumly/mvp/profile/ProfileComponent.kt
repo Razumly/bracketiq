@@ -483,6 +483,7 @@ class DefaultProfileComponent(
 
                 loadingHandler?.hideLoading()
                 _activeBillPaymentId.value = null
+                clearPaymentResult()
             }
         }
     }
@@ -992,6 +993,7 @@ class DefaultProfileComponent(
                 billPaymentId = nextPayment.id,
             ).onSuccess { intent ->
                 runCatching {
+                    clearPaymentResult()
                     setPaymentIntent(intent)
                     val account = userRepository.currentAccount.value.getOrThrow()
                     val user = userRepository.currentUser.value.getOrThrow()

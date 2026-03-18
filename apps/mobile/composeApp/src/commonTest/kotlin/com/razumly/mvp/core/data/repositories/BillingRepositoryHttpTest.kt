@@ -535,6 +535,48 @@ class BillingRepositoryHttpTest {
     }
 
     @Test
+    fun createPurchaseIntent_with_teamId_includes_team_reference() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+        var capturedBody = ""
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/billing/purchase-intent", request.url.encodedPath)
+            assertEquals(HttpMethod.Post, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+
+            respond(
+                content = """
+                    {
+                      "paymentIntent": "pi_123_secret_team",
+                      "publishableKey": "pk_test_123"
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = BillingRepository(api, userRepo, BillingRepositoryHttp_UnusedEventRepository, db)
+
+        val event = Event(id = "e1", hostId = "h1", priceCents = 1000, eventType = EventType.EVENT)
+        repo.createPurchaseIntent(event = event, teamId = "team_123").getOrThrow()
+
+        assertTrue(capturedBody.contains("\"team\""))
+        assertTrue(capturedBody.contains("\"id\":\"team_123\""))
+    }
+
+    @Test
     fun getRequiredSignLinks_posts_and_parses_response() = runTest {
         val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
         val userRepo = BillingRepositoryHttp_FakeUserRepository(

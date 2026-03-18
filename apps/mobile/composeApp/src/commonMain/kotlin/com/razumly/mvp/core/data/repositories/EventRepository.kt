@@ -280,11 +280,20 @@ class EventRepository(
             teams.map { EventTeamCrossRef(it.id, eventId) })
         databaseService.getUserDataDao.upsertUserEventCrossRefs(
             (players).map { EventUserCrossRef(it.id, eventId) })
+        val validUserIds = players.map { it.id.trim() }
+            .filter(String::isNotBlank)
+            .toSet()
         databaseService.getTeamDao.upsertTeamPlayerCrossRefs(
             teams.flatMap { team ->
                 team.playerIds.map { playerId ->
-                    TeamPlayerCrossRef(team.id, playerId)
+                    val normalizedPlayerId = playerId.trim()
+                    if (validUserIds.contains(normalizedPlayerId)) {
+                        TeamPlayerCrossRef(team.id, normalizedPlayerId)
+                    } else {
+                        null
+                    }
                 }
+                    .filterNotNull()
             })
     }
 

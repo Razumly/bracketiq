@@ -1,11 +1,9 @@
 package com.razumly.mvp.teamManagement
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -14,6 +12,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -33,7 +32,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.Team
@@ -240,6 +238,7 @@ fun CreateOrEditTeamDialog(
         )
     }
     val normalizedDivisionGender = divisionGenderInput.trim().uppercase()
+    val normalizedTeamName = teamName.trim()
     val normalizedSportName = sportInput.trim()
     val normalizedSkillDivisionTypeId = skillDivisionTypeInput.normalizeDivisionIdentifier()
     val normalizedAgeDivisionTypeId = ageDivisionTypeInput.normalizeDivisionIdentifier()
@@ -292,6 +291,7 @@ fun CreateOrEditTeamDialog(
         }
         optionLabels.map { label -> DropdownOption(value = label, label = label) }
     }
+    val isTeamNameValid = normalizedTeamName.isNotBlank()
     LaunchedEffect(team.team.id, resolvedEventSportName) {
         if (sportInput.isBlank() && resolvedEventSportName.isNotBlank()) {
             sportInput = resolvedEventSportName
@@ -359,6 +359,12 @@ fun CreateOrEditTeamDialog(
                 },
                 modifier = Modifier.fillMaxWidth(),
                 label = "Team Name",
+                isError = showEditDetails && !isTeamNameValid,
+                supportingText = if (showEditDetails && !isTeamNameValid) {
+                    "Team name is required."
+                } else {
+                    ""
+                },
                 readOnly = !showEditDetails
             )
 
@@ -547,7 +553,7 @@ fun CreateOrEditTeamDialog(
                         onFinish(
                             team.team.copy(playerIds = playersInTeam.map { it.id },
                                 pending = invitedPlayers.map { it.id },
-                                name = teamName,
+                                name = normalizedTeamName,
                                 sport = normalizedSportName.ifBlank { null },
                                 teamSize = resolvedTeamSize,
                                 division = resolvedDivisionToken,
@@ -560,7 +566,7 @@ fun CreateOrEditTeamDialog(
                                 divisionGender = normalizedDivisionGender,
                             )
                         )
-                    }, enabled = isTeamSizeValid && isTeamDivisionValid) {
+                    }, enabled = isTeamSizeValid && isTeamDivisionValid && isTeamNameValid) {
                         Text("Finish")
                     }
                 } else {
@@ -587,43 +593,51 @@ fun CreateOrEditTeamDialog(
     }
 
     if (showDeleteDialog) {
-        Dialog(onDismissRequest = { showDeleteDialog = false }) {
-            Box(Modifier.fillMaxSize()) {
-                Text("Are you sure you want to delete this team?")
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Delete Team") },
+            text = { Text("Are you sure you want to delete this team? This action cannot be undone.") },
+            confirmButton = {
                 Button(onClick = {
                     onDelete(team)
                     showDeleteDialog = false
                 }) {
-                    Text("Yes")
+                    Text("Delete")
                 }
-                Button(onClick = { showDeleteDialog = false }) {
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showDeleteDialog = false }) {
                     Text("Cancel")
                 }
-            }
-        }
+            },
+        )
     }
 
     if (showLeaveTeamDialog) {
-        Dialog(onDismissRequest = { showLeaveTeamDialog = false }) {
-            Box(Modifier.fillMaxSize()) {
-                Text("Are you sure you want to leave this team?")
+        AlertDialog(
+            onDismissRequest = { showLeaveTeamDialog = false },
+            title = { Text("Leave Team") },
+            text = { Text("Are you sure you want to leave this team?") },
+            confirmButton = {
                 Button(onClick = {
                     onFinish(
                         team.team.copy(playerIds = (playersInTeam - currentUser).map { it.id },
                             pending = invitedPlayers.map { it.id },
-                            name = teamName,
+                            name = normalizedTeamName,
                             teamSize = resolvedTeamSize
                         )
                     )
                     showLeaveTeamDialog = false
                 }) {
-                    Text("Yes")
+                    Text("Leave")
                 }
-                Button(onClick = { showLeaveTeamDialog = false }) {
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showLeaveTeamDialog = false }) {
                     Text("Cancel")
                 }
-            }
-        }
+            },
+        )
     }
 
     if (showSearchDialog) {

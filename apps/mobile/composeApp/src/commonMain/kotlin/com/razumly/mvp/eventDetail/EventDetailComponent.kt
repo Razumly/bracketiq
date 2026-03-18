@@ -824,6 +824,7 @@ class DefaultEventDetailComponent(
                         }
                     }
                     loadingHandler.hideLoading()
+                    clearPaymentResult()
                 }
             }
         }
@@ -1688,6 +1689,7 @@ class DefaultEventDetailComponent(
     }
 
     private suspend fun showPaymentSheet(intent: PurchaseIntent) {
+        clearPaymentResult()
         setPaymentIntent(intent)
         loadingHandler.showLoading("Waiting for Payment Completion ..")
         presentPaymentSheet(
@@ -2468,6 +2470,17 @@ class DefaultEventDetailComponent(
         }
     }
 
+    private fun TeamWithPlayers.isActiveMembershipForUser(userTeamIds: Set<String>): Boolean {
+        val team = team
+        if (team.isPlaceholderSlot()) {
+            return false
+        }
+        val normalizedTeamId = team.id.trim()
+        val parentTeamId = team.parentTeamId?.trim()?.takeIf(String::isNotBlank)
+        return (parentTeamId != null && userTeamIds.contains(parentTeamId)) ||
+            userTeamIds.contains(normalizedTeamId)
+    }
+
     private fun checkIsUserParticipant(event: Event): Boolean {
         if (event.playerIds.contains(currentUser.value.id)) {
             return true
@@ -2477,9 +2490,7 @@ class DefaultEventDetailComponent(
         }
         val userTeamIds = currentUserTeamIds()
         return eventWithRelations.value.teams.any { teamWithPlayers ->
-            val team = teamWithPlayers.team
-            val parentTeamId = team.parentTeamId?.trim()?.takeIf(String::isNotBlank)
-            (parentTeamId != null && userTeamIds.contains(parentTeamId)) || userTeamIds.contains(team.id)
+            teamWithPlayers.isActiveMembershipForUser(userTeamIds)
         }
     }
 
@@ -2547,9 +2558,7 @@ class DefaultEventDetailComponent(
                 val userTeamIds = currentUserTeamIds()
                 when {
                     eventWithRelations.value.teams.any { teamWithPlayers ->
-                        val team = teamWithPlayers.team
-                        val parentTeamId = team.parentTeamId?.trim()?.takeIf(String::isNotBlank)
-                        (parentTeamId != null && userTeamIds.contains(parentTeamId)) || userTeamIds.contains(team.id)
+                        teamWithPlayers.isActiveMembershipForUser(userTeamIds)
                     } ->
                         WithdrawTargetMembership.PARTICIPANT
                     event.waitList.any { teamId -> userTeamIds.contains(teamId) } ->

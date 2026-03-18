@@ -14,6 +14,7 @@ import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.apiBaseUrl
 import com.razumly.mvp.core.network.dto.BillingEventRefDto
 import com.razumly.mvp.core.network.dto.BillingRefundRequestDto
+import com.razumly.mvp.core.network.dto.BillingTeamRefDto
 import com.razumly.mvp.core.network.dto.BillingUserRefDto
 import com.razumly.mvp.core.network.dto.PurchaseIntentRequestDto
 import com.razumly.mvp.core.network.dto.RefundAllRequestDto
@@ -296,6 +297,9 @@ class BillingRepository(
         val effectivePriceCents = priceCents
             ?.takeIf { value -> value >= 0 }
             ?: event.priceCents
+        val normalizedTeamId = teamId
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
 
         val response = api.post<PurchaseIntentRequestDto, PurchaseIntent>(
             path = "api/billing/purchase-intent",
@@ -308,6 +312,7 @@ class BillingRepository(
                     hostId = event.hostId,
                     organizationId = event.organizationId,
                 ),
+                team = normalizedTeamId?.let { BillingTeamRefDto(id = it) },
             ),
         )
 

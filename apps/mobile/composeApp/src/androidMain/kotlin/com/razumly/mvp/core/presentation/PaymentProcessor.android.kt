@@ -4,6 +4,7 @@ import android.content.Context
 import com.razumly.mvp.BuildConfig
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.util.UrlHandler
+import com.stripe.android.core.exception.APIConnectionException
 import com.stripe.android.PaymentConfiguration
 import com.stripe.android.paymentelement.AddressAutocompletePreview
 import com.stripe.android.paymentsheet.PaymentSheet
@@ -11,6 +12,7 @@ import com.stripe.android.paymentsheet.PaymentSheetResult
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.net.UnknownHostException
 
 actual open class PaymentProcessor : IPaymentProcessor {
     private val _paymentSheet = MutableStateFlow<PaymentSheet?>(null)
@@ -72,9 +74,10 @@ actual open class PaymentProcessor : IPaymentProcessor {
             }
 
             is PaymentSheetResult.Failed -> {
-                Napier.d("Failed Purchase", throwable = paymentSheetResult.error, tag = "Stripe")
+                val message = paymentSheetResult.error.toUserFacingPaymentMessage()
+                Napier.w("Failed Purchase: $message", tag = "Stripe")
                 _paymentResult.value = PaymentResult.Failed(
-                    paymentSheetResult.error.localizedMessage ?: "Unknown Error"
+                    message
                 )
             }
 
@@ -92,5 +95,52 @@ actual open class PaymentProcessor : IPaymentProcessor {
     fun setContext(context: Context) {
         _context = context
         urlHandler = UrlHandler(context)
+    }
+
+    private fun Throwable.toUserFacingPaymentMessage(): String {
+        val rootCause = rootCause()
+        return when {
+            this is UnknownHostException ||
+                rootCause is UnknownHostException ||
+                containsDnsResolutionFailure(this.message) ||
+                containsDnsResolutionFailure(this.localizedMessage) ||
+                containsDnsResolutionFailure(rootCause.message) ||
+                containsDnsResolutionFailure(rootCause.localizedMessage) -> {
+                "Unable to reach Stripe. Check your internet, VPN/Private DNS, or ad blocker, then try again."
+            }
+
+            this is APIConnectionException || rootCause is APIConnectionException -> {
+                "Unable to connect to Stripe right now. Please try again."
+            }
+
+            else -> {
+                val sanitized = sanitizeSensitiveQueryValues(
+                    this.localizedMessage ?: this.message.orEmpty()
+                ).trim()
+                if (sanitized.isNotBlank()) sanitized else "Unable to process payment right now."
+            }
+        }
+    }
+
+    private fun Throwable.rootCause(): Throwable {
+        var current: Throwable = this
+        while (current.cause != null && current.cause !== current) {
+            current = current.cause!!
+        }
+        return current
+    }
+
+    private fun containsDnsResolutionFailure(message: String?): Boolean {
+        if (message.isNullOrBlank()) return false
+        val normalized = message.lowercase()
+        return normalized.contains("unable to resolve host") ||
+            normalized.contains("no address associated with hostname") ||
+            normalized.contains("android_getaddrinfo failed")
+    }
+
+    private fun sanitizeSensitiveQueryValues(message: String): String {
+        return message
+            .replace(Regex("client_secret=[^&\\s]+", RegexOption.IGNORE_CASE), "client_secret=***")
+            .replace(Regex("ephemeral_key=[^&\\s]+", RegexOption.IGNORE_CASE), "ephemeral_key=***")
     }
 }

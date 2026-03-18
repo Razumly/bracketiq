@@ -1021,6 +1021,8 @@ private fun JoinOptionsSheet(
     onSelectOption: (JoinOption) -> Unit,
 ) {
     var isDivisionMenuExpanded by remember { mutableStateOf(false) }
+    var divisionMenuAnchorSize by remember { mutableStateOf(IntSize.Zero) }
+    val density = LocalDensity.current
     val hasRequiredDivisionSelection = remember(selectedDivisionId, divisionOptions) {
         selectedDivisionId?.let { selectedId ->
             divisionOptions.any { option -> option.id == selectedId }
@@ -1047,7 +1049,9 @@ private fun JoinOptionsSheet(
             Box(modifier = Modifier.fillMaxWidth()) {
                 Button(
                     onClick = { isDivisionMenuExpanded = true },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onSizeChanged { size -> divisionMenuAnchorSize = size }
                 ) {
                     val label = if (selectedDivisionLabel.isNotBlank()) {
                         "Division: $selectedDivisionLabel"
@@ -1058,7 +1062,12 @@ private fun JoinOptionsSheet(
                 }
                 DropdownMenu(
                     expanded = isDivisionMenuExpanded,
-                    onDismissRequest = { isDivisionMenuExpanded = false }
+                    onDismissRequest = { isDivisionMenuExpanded = false },
+                    modifier = if (divisionMenuAnchorSize.width > 0) {
+                        Modifier.width(with(density) { divisionMenuAnchorSize.width.toDp() })
+                    } else {
+                        Modifier
+                    }
                 ) {
                     divisionOptions.forEach { option ->
                         DropdownMenuItem(
