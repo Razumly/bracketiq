@@ -111,13 +111,14 @@ data class EventApiDto(
         if (resolvedStart.isNullOrBlank()) return null
         val parsedStart = runCatching { Instant.parse(resolvedStart) }.getOrNull() ?: return null
 
-        val resolvedEventType = runCatching { EventType.valueOf(eventType ?: EventType.EVENT.name) }
+        val normalizedEventType = eventType?.trim()?.uppercase()
+        val resolvedEventType = runCatching { EventType.valueOf(normalizedEventType ?: EventType.EVENT.name) }
             .getOrDefault(EventType.EVENT)
         val resolvedNoFixedEndDateTime = when {
             noFixedEndDateTime != null -> noFixedEndDateTime
             resolvedEventType == EventType.LEAGUE || resolvedEventType == EventType.TOURNAMENT ->
                 resolvedEnd.isNullOrBlank() || resolvedStart == resolvedEnd
-            eventType?.uppercase() == "WEEKLY_EVENT" ->
+            resolvedEventType == EventType.WEEKLY_EVENT ->
                 resolvedEnd.isNullOrBlank()
             else -> false
         }
@@ -287,6 +288,16 @@ data class EventsResponseDto(
 @Serializable
 data class EventResponseDto(
     val event: EventApiDto? = null,
+)
+
+@Serializable
+data class WeeklySessionCreateRequestDto(
+    val sessionStart: String,
+    val sessionEnd: String,
+    val slotId: String? = null,
+    val divisionId: String? = null,
+    val divisionTypeId: String? = null,
+    val divisionTypeKey: String? = null,
 )
 
 @Serializable

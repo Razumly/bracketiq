@@ -13,6 +13,7 @@ import com.razumly.mvp.core.data.dataTypes.daos.RefundRequestDao
 import com.razumly.mvp.core.data.dataTypes.daos.TeamDao
 import com.razumly.mvp.core.data.dataTypes.daos.UserDataDao
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.AuthTokenStore
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.util.jsonMVP
@@ -148,6 +149,12 @@ private object BillingRepositoryHttp_UnusedEventRepository : IEventRepository {
         newEvent: Event,
         requiredTemplateIds: List<String>,
         leagueScoringConfig: com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO?,
+    ): Result<Event> = error("unused")
+    override suspend fun createWeeklySession(
+        parentEventId: String,
+        sessionStart: kotlin.time.Instant,
+        sessionEnd: kotlin.time.Instant,
+        slotId: String?,
     ): Result<Event> = error("unused")
     override suspend fun scheduleEvent(eventId: String, participantCount: Int?): Result<Event> = error("unused")
     override suspend fun updateEvent(newEvent: Event): Result<Event> = error("unused")
@@ -479,6 +486,76 @@ class BillingRepositoryHttpTest {
         assertTrue(capturedBody.contains("\"ownerType\":\"USER\""))
         assertTrue(capturedBody.contains("\"paymentPlanEnabled\":true"))
         assertTrue(capturedBody.contains("\"installmentAmounts\":[1500,1500,1500]"))
+    }
+
+    @Test
+    fun listSubscriptions_returns_empty_when_candidate_paths_404_with_api_exception() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+        val requestedUrls = mutableListOf<String>()
+
+        val engine = MockEngine { request ->
+            val encodedQuery = request.url.encodedQuery
+            requestedUrls += if (encodedQuery.isBlank()) {
+                request.url.encodedPath
+            } else {
+                "${request.url.encodedPath}?$encodedQuery"
+            }
+            throw ApiException(
+                statusCode = HttpStatusCode.NotFound.value,
+                url = request.url.toString(),
+                responseBody = """{"error":"Not found"}""",
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = BillingRepository(api, userRepo, BillingRepositoryHttp_UnusedEventRepository, db)
+
+        val result = repo.listSubscriptions(userId = "u1")
+
+        assertTrue(result.isSuccess)
+        assertTrue(result.getOrThrow().isEmpty())
+        assertEquals(
+            listOf(
+                "/api/subscriptions?userId=u1&limit=100",
+                "/api/users/u1/subscriptions?limit=100",
+            ),
+            requestedUrls,
+        )
+    }
+
+    @Test
+    fun listSubscriptions_fails_when_api_exception_is_not_404() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+        val requestedUrls = mutableListOf<String>()
+
+        val engine = MockEngine { request ->
+            requestedUrls += request.url.encodedPath
+            throw ApiException(
+                statusCode = HttpStatusCode.InternalServerError.value,
+                url = request.url.toString(),
+                responseBody = """{"error":"Server error"}""",
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = BillingRepository(api, userRepo, BillingRepositoryHttp_UnusedEventRepository, db)
+
+        val result = repo.listSubscriptions(userId = "u1")
+
+        assertTrue(result.isFailure)
+        assertEquals(listOf("/api/subscriptions"), requestedUrls)
     }
 
     @Test

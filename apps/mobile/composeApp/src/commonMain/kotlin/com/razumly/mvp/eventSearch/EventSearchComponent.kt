@@ -468,7 +468,7 @@ class DefaultEventSearchComponent(
                 .onSuccess { organizationEvents ->
                     val busyBlocks = organizationEvents.flatMap { event ->
                         when (event.eventType) {
-                            EventType.EVENT -> {
+                            EventType.EVENT, EventType.WEEKLY_EVENT -> {
                                 val eventFieldIds = event.fieldIds
                                     .map { id -> id.trim() }
                                     .filter(String::isNotBlank)

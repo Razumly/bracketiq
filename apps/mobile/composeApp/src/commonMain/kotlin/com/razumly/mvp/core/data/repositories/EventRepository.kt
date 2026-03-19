@@ -42,6 +42,7 @@ import com.razumly.mvp.core.network.dto.StandingsConfirmResponseDto
 import com.razumly.mvp.core.network.dto.StandingsDivisionDto
 import com.razumly.mvp.core.network.dto.StandingsResponseDto
 import com.razumly.mvp.core.network.dto.UpdateEventRequestDto
+import com.razumly.mvp.core.network.dto.WeeklySessionCreateRequestDto
 import com.razumly.mvp.core.network.dto.toUpdateDto
 import io.ktor.http.encodeURLQueryComponent
 import kotlinx.coroutines.CoroutineScope
@@ -68,6 +69,12 @@ interface IEventRepository : IMVPRepository {
         newEvent: Event,
         requiredTemplateIds: List<String> = emptyList(),
         leagueScoringConfig: LeagueScoringConfigDTO? = null,
+    ): Result<Event>
+    suspend fun createWeeklySession(
+        parentEventId: String,
+        sessionStart: Instant,
+        sessionEnd: Instant,
+        slotId: String? = null,
     ): Result<Event>
     suspend fun scheduleEvent(eventId: String, participantCount: Int? = null): Result<Event>
     suspend fun updateEvent(newEvent: Event): Result<Event>
@@ -96,6 +103,13 @@ interface IEventRepository : IMVPRepository {
         event: Event,
         preferredDivisionId: String? = null,
     ): Result<SelfRegistrationResult>
+    suspend fun requestCurrentUserRegistration(
+        event: Event,
+        preferredDivisionId: String? = null,
+    ): Result<SelfRegistrationResult> = addCurrentUserToEvent(
+        event = event,
+        preferredDivisionId = preferredDivisionId,
+    )
     suspend fun registerChildForEvent(
         eventId: String,
         childUserId: String,
@@ -368,6 +382,40 @@ class EventRepository(
             event
         })
 
+    override suspend fun createWeeklySession(
+        parentEventId: String,
+        sessionStart: Instant,
+        sessionEnd: Instant,
+        slotId: String?,
+    ): Result<Event> =
+        singleResponse(
+            networkCall = {
+                val normalizedParentEventId = parentEventId.trim()
+                if (normalizedParentEventId.isEmpty()) {
+                    error("Weekly session creation requires a parent event id")
+                }
+                if (sessionEnd <= sessionStart) {
+                    error("Weekly session end must be after session start")
+                }
+                val normalizedSlotId = slotId?.trim()?.takeIf(String::isNotBlank)
+                api.post<WeeklySessionCreateRequestDto, EventResponseDto>(
+                    path = "api/events/$normalizedParentEventId/weekly-sessions",
+                    body = WeeklySessionCreateRequestDto(
+                        sessionStart = sessionStart.toString(),
+                        sessionEnd = sessionEnd.toString(),
+                        slotId = normalizedSlotId,
+                    ),
+                ).event?.toEventOrNull() ?: error("Create weekly session response missing event")
+            },
+            saveCall = { event ->
+                databaseService.getEventDao.upsertEvent(event)
+                persistEventRelations(event)
+            },
+            onReturn = { event ->
+                event
+            },
+        )
+
     override suspend fun scheduleEvent(eventId: String, participantCount: Int?): Result<Event> =
         singleResponse(
             networkCall = {
@@ -619,6 +667,36 @@ class EventRepository(
             SelfRegistrationResult(
                 requiresParentApproval = response.requiresParentApproval == true,
                 joinedWaitlist = eventAtCapacity && response.requiresParentApproval != true,
+            )
+        }
+
+    override suspend fun requestCurrentUserRegistration(
+        event: Event,
+        preferredDivisionId: String?,
+    ): Result<SelfRegistrationResult> =
+        runCatching {
+            val currentUser = userRepository.currentUser.value.getOrThrow()
+            val divisionPayload = resolveRegistrationDivisionPayload(
+                event = event,
+                preferredDivisionId = preferredDivisionId,
+            )
+            val response = api.post<EventParticipantsRequestDto, EventChildRegistrationResponseDto>(
+                path = "api/events/${event.id}/registrations/self",
+                body = EventParticipantsRequestDto(
+                    userId = currentUser.id,
+                    divisionId = divisionPayload.divisionId,
+                    divisionTypeId = divisionPayload.divisionTypeId,
+                    divisionTypeKey = divisionPayload.divisionTypeKey,
+                ),
+            )
+            response.error?.takeIf(String::isNotBlank)?.let { error(it) }
+            val registrationStatus = response.registration?.status
+                ?.trim()
+                ?.uppercase()
+            SelfRegistrationResult(
+                requiresParentApproval = response.requiresParentApproval == true ||
+                    registrationStatus == "PENDINGCONSENT",
+                joinedWaitlist = registrationStatus == "WAITLISTED",
             )
         }
 

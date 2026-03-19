@@ -438,11 +438,12 @@ class DefaultOrganizationDetailComponent(
         eventRepository.getEventsByOrganization(organizationId, limit = 300)
             .onSuccess { organizationEvents ->
                 val busyBlocks = organizationEvents.flatMap { event ->
-                    when (event.eventType) {
-                        com.razumly.mvp.core.data.dataTypes.enums.EventType.EVENT -> {
-                            val eventFieldIds = event.fieldIds
-                                .map { id -> id.trim() }
-                                .filter(String::isNotBlank)
+                        when (event.eventType) {
+                            com.razumly.mvp.core.data.dataTypes.enums.EventType.EVENT,
+                            com.razumly.mvp.core.data.dataTypes.enums.EventType.WEEKLY_EVENT -> {
+                                val eventFieldIds = event.fieldIds
+                                    .map { id -> id.trim() }
+                                    .filter(String::isNotBlank)
                                 .distinct()
                             if (eventFieldIds.isEmpty()) {
                                 emptyList()

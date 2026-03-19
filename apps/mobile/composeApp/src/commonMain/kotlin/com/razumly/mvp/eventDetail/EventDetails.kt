@@ -82,7 +82,6 @@ import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
-import com.razumly.mvp.core.data.dataTypes.lifecycleStateLabel
 import com.razumly.mvp.core.data.dataTypes.toLeagueConfig
 import com.razumly.mvp.core.data.dataTypes.toTournamentConfig
 import com.razumly.mvp.core.data.dataTypes.withLeagueConfig
@@ -121,6 +120,7 @@ import com.razumly.mvp.core.presentation.util.getScreenHeight
 import com.razumly.mvp.core.presentation.util.getScreenWidth
 import com.razumly.mvp.core.presentation.util.moneyFormat
 import com.razumly.mvp.core.presentation.util.MoneyInputUtils
+import com.razumly.mvp.core.presentation.util.toEnumTitleCase
 import com.razumly.mvp.core.presentation.util.teamSizeFormat
 import com.razumly.mvp.core.presentation.util.timeFormat
 import com.razumly.mvp.core.presentation.util.toTitleCase
@@ -1350,7 +1350,7 @@ fun EventDetails(
     val summaryTags = remember(event.eventType, eventSportName, event.teamSizeLimit, event.singleDivision) {
         buildList {
             add(eventSportName)
-            add(event.eventType.name.toTitleCase())
+            add(event.eventType.name.toEnumTitleCase())
             add("Teams of ${event.teamSizeLimit}")
             add(if (event.singleDivision) "Single division" else "Multi division")
         }
@@ -1729,7 +1729,7 @@ fun EventDetails(
                                 DetailRowSpec(label = "Hosted by", value = hostDisplayName),
                                 DetailRowSpec(label = "Season dates", value = dateRangeText),
                                 DetailRowSpec(label = "Location", value = event.location),
-                                DetailRowSpec(label = "Type", value = event.eventType.name.toTitleCase()),
+                                DetailRowSpec(label = "Type", value = event.eventType.name.toEnumTitleCase()),
                                 DetailRowSpec(label = "Sport", value = eventSportName),
                             ),
                         )
@@ -1898,7 +1898,6 @@ fun EventDetails(
                                 priceSummary = priceSummary,
                                 registrationSummary = registrationSummary,
                                 refundSummary = refundSummary,
-                                includeLifecycleState = isMobileEventDetailsLayout,
                             ),
                         )
                         ReadOnlyDivisionsList(
@@ -1921,7 +1920,7 @@ fun EventDetails(
                             options = EventType.entries.map { eventType ->
                                 DropdownOption(
                                     value = eventType.name,
-                                    label = eventType.name,
+                                    label = eventType.name.toEnumTitleCase(),
                                 )
                             },
                             label = "Event Type",
@@ -2737,7 +2736,7 @@ fun EventDetails(
                                         }
                                     }
 
-                                    EventType.EVENT -> {
+                                    EventType.EVENT, EventType.WEEKLY_EVENT -> {
                                         // No additional event-only rows for now.
                                     }
                                 }
@@ -4186,7 +4185,6 @@ private fun buildEventDetailsRows(
     priceSummary: String,
     registrationSummary: String,
     refundSummary: String,
-    includeLifecycleState: Boolean = false,
 ): List<DetailRowSpec> {
     return buildList {
         add(DetailRowSpec("Entry fee", priceSummary))
@@ -4200,9 +4198,6 @@ private fun buildEventDetailsRows(
         add(DetailRowSpec("Registration closes", "$registrationSummary \u203A"))
         add(DetailRowSpec("Refunds", "$refundSummary \u203A"))
         add(DetailRowSpec("Waitlist", "${event.waitListIds.size}"))
-        if (includeLifecycleState) {
-            add(DetailRowSpec("Status", event.lifecycleStateLabel()))
-        }
     }
 }
 
@@ -4286,7 +4281,7 @@ private fun buildScheduleDetailsRows(
                 }
             }
 
-            EventType.EVENT -> Unit
+            EventType.EVENT, EventType.WEEKLY_EVENT -> Unit
         }
     }
 }

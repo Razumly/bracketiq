@@ -138,6 +138,20 @@ fun String.toTitleCase(): String {
         }
 }
 
+fun String.toEnumTitleCase(): String {
+    return this
+        .trim()
+        .replace('_', ' ')
+        .replace('-', ' ')
+        .split(Regex("\\s+"))
+        .filter { token -> token.isNotBlank() }
+        .joinToString(" ") { token ->
+            token.lowercase().replaceFirstChar { char ->
+                char.uppercase()
+            }
+        }
+}
+
 fun Double.moneyFormat(): String {
     val rounded = (this * 100).roundToInt()
     val whole = rounded / 100

@@ -86,6 +86,7 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.ExperimentalTime
+import kotlin.time.Instant
 
 interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val selectedEvent: StateFlow<Event>
@@ -151,6 +152,11 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun startEditingEvent()
     fun cancelEditingEvent()
     fun joinEvent()
+    fun selectWeeklySession(
+        sessionStart: Instant,
+        sessionEnd: Instant,
+        slotId: String? = null,
+    )
     fun joinEventAsTeam(team: TeamWithPlayers)
     fun confirmJoinAsSelf()
     fun showChildJoinSelection()
@@ -209,6 +215,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun deleteMatchFromDialog(matchId: String)
     fun dismissMatchEditDialog()
     fun updateMatchFromDialog(updatedMatch: MatchWithRelations)
+    fun refreshEventDetails()
     fun refreshLeagueStandings()
     fun confirmLeagueStandings(applyReassignment: Boolean = true)
     fun confirmTextSignature()
@@ -1126,8 +1133,13 @@ class DefaultEventDetailComponent(
     private fun hasEventStarted(event: Event = selectedEvent.value): Boolean =
         Clock.System.now() >= event.start
 
+    private fun isJoinBlockedByStart(event: Event = selectedEvent.value): Boolean {
+        if (!hasEventStarted(event)) return false
+        return event.eventType != EventType.WEEKLY_EVENT
+    }
+
     private fun ensureRegistrationOpen(): Boolean {
-        if (!hasEventStarted()) return true
+        if (!isJoinBlockedByStart()) return true
         _errorState.value = ErrorMessage("This event has already started. Registration is closed.")
         return false
     }
@@ -1151,6 +1163,47 @@ class DefaultEventDetailComponent(
                 }
             }
             runSelfJoinFlow()
+        }
+    }
+
+    override fun selectWeeklySession(
+        sessionStart: Instant,
+        sessionEnd: Instant,
+        slotId: String?,
+    ) {
+        scope.launch {
+            val parentEvent = selectedEvent.value
+            val isWeeklyParentEvent = parentEvent.eventType == EventType.WEEKLY_EVENT &&
+                parentEvent.timeSlotIds.any { slot -> slot.isNotBlank() }
+            if (!isWeeklyParentEvent) {
+                _errorState.value = ErrorMessage("Weekly sessions are only available from parent weekly events.")
+                return@launch
+            }
+            if (sessionEnd <= sessionStart) {
+                _errorState.value = ErrorMessage("Selected weekly session time is invalid.")
+                return@launch
+            }
+
+            val normalizedSlotId = slotId?.trim()?.takeIf(String::isNotBlank)
+            loadingHandler.showLoading("Preparing Session ...")
+            try {
+                eventRepository.createWeeklySession(
+                    parentEventId = parentEvent.id,
+                    sessionStart = sessionStart,
+                    sessionEnd = sessionEnd,
+                    slotId = normalizedSlotId,
+                ).onSuccess { childEvent ->
+                    val latestEvent = eventRepository.getEvent(childEvent.id).getOrElse { childEvent }
+                    _errorState.value = ErrorMessage("Session selected. Finish registration in the child event.")
+                    navigationHandler.navigateToEvent(latestEvent)
+                }.onFailure { throwable ->
+                    _errorState.value = ErrorMessage(
+                        throwable.message ?: "Failed to load weekly session."
+                    )
+                }
+            } finally {
+                loadingHandler.hideLoading()
+            }
         }
     }
 
@@ -1308,29 +1361,43 @@ class DefaultEventDetailComponent(
         }
     }
 
-    private suspend fun startPaymentPlanForOwner(
+    private enum class PaymentPlanBillStatus {
+        CREATED,
+        ALREADY_EXISTS,
+    }
+
+    private fun Throwable.isAlreadyRegisteredJoinError(): Boolean {
+        val normalized = message?.lowercase() ?: return false
+        return normalized.contains("already registered") ||
+            normalized.contains("already in event") ||
+            normalized.contains("already a participant")
+    }
+
+    private fun Throwable.isDuplicatePaymentPlanError(): Boolean {
+        val normalized = message?.lowercase() ?: return false
+        return normalized.contains("payment plan already exists")
+    }
+
+    private suspend fun createPaymentPlanBillForOwner(
         ownerType: String,
         ownerId: String,
         allowSplit: Boolean,
         preferredDivisionId: String?,
-    ) {
+    ): Result<PaymentPlanBillStatus> {
         val event = selectedEvent.value
         val paymentPlan = resolveEffectivePaymentPlan(event, preferredDivisionId)
         val normalizedOwnerId = ownerId.trim()
         if (normalizedOwnerId.isEmpty()) {
-            _errorState.value = ErrorMessage("Unable to start payment plan: owner id is missing.")
-            return
+            return Result.failure(IllegalArgumentException("Unable to start payment plan: owner id is missing."))
         }
         if (paymentPlan.priceCents <= 0) {
-            _errorState.value = ErrorMessage("This event does not have a price set for a payment plan.")
-            return
+            return Result.failure(IllegalArgumentException("This event does not have a price set for a payment plan."))
         }
 
         val installmentDueDates = paymentPlan.installmentDueDates
             .mapNotNull { dueDate -> dueDate.trim().takeIf(String::isNotBlank) }
 
-        loadingHandler.showLoading("Starting Payment Plan ...")
-        billingRepository.createBill(
+        return billingRepository.createBill(
             CreateBillRequest(
                 ownerType = ownerType,
                 ownerId = normalizedOwnerId,
@@ -1342,17 +1409,55 @@ class DefaultEventDetailComponent(
                 allowSplit = allowSplit,
                 paymentPlanEnabled = true,
             )
-        ).onSuccess {
+        ).fold(
+            onSuccess = { Result.success(PaymentPlanBillStatus.CREATED) },
+            onFailure = { throwable ->
+                if (throwable.isDuplicatePaymentPlanError()) {
+                    Result.success(PaymentPlanBillStatus.ALREADY_EXISTS)
+                } else {
+                    Result.failure(throwable)
+                }
+            },
+        )
+    }
+
+    private suspend fun rollbackUserJoinAfterBillingFailure(event: Event) {
+        eventRepository.removeCurrentUserFromEvent(
+            event = event,
+            targetUserId = currentUser.value.id,
+        ).onFailure { throwable ->
+            Napier.w("Failed to rollback user join after payment plan billing error.", throwable)
+        }
+    }
+
+    private suspend fun rollbackTeamJoinAfterBillingFailure(event: Event, team: TeamWithPlayers) {
+        eventRepository.removeTeamFromEvent(
+            event = event,
+            teamWithPlayers = team,
+        ).onFailure { throwable ->
+            Napier.w("Failed to rollback team join after payment plan billing error.", throwable)
+        }
+    }
+
+    private suspend fun submitMinorJoinRequestForParentApproval() {
+        loadingHandler.showLoading("Submitting Join Request ...")
+        eventRepository.requestCurrentUserRegistration(
+            event = selectedEvent.value,
+            preferredDivisionId = selectedDivision.value,
+        ).onSuccess { registration ->
             loadingHandler.showLoading("Reloading Event")
-            eventRepository.getEvent(event.id).onFailure { throwable ->
-                Napier.w("Failed to refresh event after starting payment plan.", throwable)
+            eventRepository.getEvent(selectedEvent.value.id).onFailure { throwable ->
+                Napier.w("Failed to refresh event after submitting child join request.", throwable)
             }
             _errorState.value = ErrorMessage(
-                if (ownerType.equals("TEAM", ignoreCase = true)) {
-                    "Payment plan started for your team. A bill was created. Manage installments from your Profile."
-                } else {
-                    "Payment plan started. A bill was created for you. Pay installments from your Profile."
-                }
+                when {
+                    registration.requiresParentApproval ->
+                        "Join request sent. A parent/guardian must approve before registration can continue."
+                    registration.joinedWaitlist ->
+                        "Added to event waitlist."
+                    else ->
+                        "Join request submitted."
+                },
             )
         }.onFailure { throwable ->
             _errorState.value = ErrorMessage(throwable.message ?: "")
@@ -1362,6 +1467,10 @@ class DefaultEventDetailComponent(
     private suspend fun executeJoinEvent() {
         if (!ensureRegistrationOpen()) return
         try {
+            if (currentUser.value.isMinor) {
+                submitMinorJoinRequestForParentApproval()
+                return
+            }
             val paymentPlan = resolveEffectivePaymentPlan(
                 event = selectedEvent.value,
                 preferredDivisionId = selectedDivision.value,
@@ -1372,12 +1481,59 @@ class DefaultEventDetailComponent(
                 && !isEventFull.value
                 && !selectedEvent.value.teamSignup
             ) {
-                startPaymentPlanForOwner(
+                var joinedByThisFlow = false
+                loadingHandler.showLoading("Joining Event ...")
+                val registrationResult = eventRepository.addCurrentUserToEvent(
+                    event = selectedEvent.value,
+                    preferredDivisionId = selectedDivision.value,
+                )
+                val registration = registrationResult.getOrNull()
+                if (registration != null) {
+                    joinedByThisFlow = !registration.requiresParentApproval && !registration.joinedWaitlist
+                    if (registration.requiresParentApproval) {
+                        _errorState.value = ErrorMessage(
+                            "Join request sent. A parent/guardian must approve before registration can continue."
+                        )
+                    } else if (registration.joinedWaitlist) {
+                        _errorState.value = ErrorMessage("Added to event waitlist.")
+                    }
+                }
+                val registrationFailure = registrationResult.exceptionOrNull()
+                if (registrationFailure != null && !registrationFailure.isAlreadyRegisteredJoinError()) {
+                    _errorState.value = ErrorMessage(registrationFailure.message ?: "")
+                    return
+                }
+                if (registration?.requiresParentApproval == true || registration?.joinedWaitlist == true) {
+                    loadingHandler.showLoading("Reloading Event")
+                    eventRepository.getEvent(selectedEvent.value.id)
+                    return
+                }
+
+                loadingHandler.showLoading("Starting Payment Plan ...")
+                val paymentPlanResult = createPaymentPlanBillForOwner(
                     ownerType = "USER",
                     ownerId = currentUser.value.id,
                     allowSplit = false,
                     preferredDivisionId = selectedDivision.value,
                 )
+                paymentPlanResult.onSuccess { status ->
+                    loadingHandler.showLoading("Reloading Event")
+                    eventRepository.getEvent(selectedEvent.value.id).onFailure { throwable ->
+                        Napier.w("Failed to refresh event after starting payment plan.", throwable)
+                    }
+                    _errorState.value = ErrorMessage(
+                        if (status == PaymentPlanBillStatus.ALREADY_EXISTS) {
+                            "Joined. Payment plan already exists. You can manage installments from your Profile."
+                        } else {
+                            "Joined. Payment plan started. A bill was created for you. Pay installments from your Profile."
+                        }
+                    )
+                }.onFailure { throwable ->
+                    if (joinedByThisFlow) {
+                        rollbackUserJoinAfterBillingFailure(selectedEvent.value)
+                    }
+                    _errorState.value = ErrorMessage(throwable.message ?: "")
+                }
                 return
             }
             if (paymentPlan.priceCents <= 0 || isEventFull.value || selectedEvent.value.teamSignup) {
@@ -1421,6 +1577,10 @@ class DefaultEventDetailComponent(
     private suspend fun executeJoinEventAsTeam(team: TeamWithPlayers) {
         if (!ensureRegistrationOpen()) return
         try {
+            if (currentUser.value.isMinor) {
+                submitMinorJoinRequestForParentApproval()
+                return
+            }
             val paymentPlan = resolveEffectivePaymentPlan(
                 event = selectedEvent.value,
                 preferredDivisionId = selectedDivision.value,
@@ -1430,12 +1590,47 @@ class DefaultEventDetailComponent(
                 && paymentPlan.priceCents > 0
                 && !isEventFull.value
             ) {
-                startPaymentPlanForOwner(
+                var joinedByThisFlow = false
+                loadingHandler.showLoading("Joining Event ...")
+                val joinResult = eventRepository.addTeamToEvent(
+                    event = selectedEvent.value,
+                    team = team.team,
+                    preferredDivisionId = selectedDivision.value,
+                )
+                if (joinResult.isSuccess) {
+                    joinedByThisFlow = true
+                }
+                val joinFailure = joinResult.exceptionOrNull()
+                if (joinFailure != null && !joinFailure.isAlreadyRegisteredJoinError()) {
+                    _errorState.value = ErrorMessage(joinFailure.message ?: "")
+                    return
+                }
+
+                loadingHandler.showLoading("Starting Payment Plan ...")
+                val paymentPlanResult = createPaymentPlanBillForOwner(
                     ownerType = "TEAM",
                     ownerId = team.team.id,
                     allowSplit = selectedEvent.value.allowTeamSplitDefault == true,
                     preferredDivisionId = selectedDivision.value,
                 )
+                paymentPlanResult.onSuccess { status ->
+                    loadingHandler.showLoading("Reloading Event")
+                    eventRepository.getEvent(selectedEvent.value.id).onFailure { throwable ->
+                        Napier.w("Failed to refresh event after starting team payment plan.", throwable)
+                    }
+                    _errorState.value = ErrorMessage(
+                        if (status == PaymentPlanBillStatus.ALREADY_EXISTS) {
+                            "Team joined. Payment plan already exists. Manage installments from your Profile."
+                        } else {
+                            "Team joined. Payment plan started. A bill was created. Manage installments from your Profile."
+                        }
+                    )
+                }.onFailure { throwable ->
+                    if (joinedByThisFlow) {
+                        rollbackTeamJoinAfterBillingFailure(selectedEvent.value, team)
+                    }
+                    _errorState.value = ErrorMessage(throwable.message ?: "")
+                }
                 return
             }
             if (paymentPlan.priceCents <= 0 || isEventFull.value) {
@@ -1811,7 +2006,7 @@ class DefaultEventDetailComponent(
     }
 
     override fun viewEvent() {
-        hydrateEventDetailForMobile()
+        hydrateEventDetailForMobile(showDetailsOnSuccess = true)
     }
 
     override fun toggleDetails() {
@@ -1822,10 +2017,16 @@ class DefaultEventDetailComponent(
         }
     }
 
-    private fun hydrateEventDetailForMobile() {
+    override fun refreshEventDetails() {
+        hydrateEventDetailForMobile(showDetailsOnSuccess = false)
+    }
+
+    private fun hydrateEventDetailForMobile(showDetailsOnSuccess: Boolean) {
         val eventId = selectedEvent.value.id.trim()
         if (eventId.isEmpty()) {
-            _showDetails.value = true
+            if (showDetailsOnSuccess) {
+                _showDetails.value = true
+            }
             return
         }
 
@@ -1854,7 +2055,7 @@ class DefaultEventDetailComponent(
                     )
                 }
 
-                if (requestToken == eventDetailHydrationToken) {
+                if (showDetailsOnSuccess && requestToken == eventDetailHydrationToken) {
                     _showDetails.value = true
                 }
             } finally {
@@ -2271,7 +2472,7 @@ class DefaultEventDetailComponent(
     private fun Event.withSportRules(): Event {
         val requiresSets = usesSetScoringForSport(sportId)
         return when (eventType) {
-            EventType.EVENT -> this
+            EventType.EVENT, EventType.WEEKLY_EVENT -> this
             EventType.LEAGUE -> applyLeagueSportRules(requiresSets)
             EventType.TOURNAMENT -> applyTournamentSportRules(requiresSets)
         }

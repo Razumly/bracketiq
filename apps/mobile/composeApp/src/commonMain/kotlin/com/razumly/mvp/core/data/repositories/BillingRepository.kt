@@ -10,6 +10,7 @@ import com.razumly.mvp.core.data.dataTypes.Product
 import com.razumly.mvp.core.data.dataTypes.RefundRequest
 import com.razumly.mvp.core.data.dataTypes.RefundRequestWithRelations
 import com.razumly.mvp.core.data.dataTypes.Subscription
+import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.apiBaseUrl
 import com.razumly.mvp.core.network.dto.BillingEventRefDto
@@ -912,7 +913,11 @@ private fun buildEmbeddedSigningRedirectUrl(eventId: String): String? {
 }
 
 private fun Throwable.isNotFound(): Boolean {
-    return this is ClientRequestException && this.response.status == HttpStatusCode.NotFound
+    return when (this) {
+        is ClientRequestException -> this.response.status == HttpStatusCode.NotFound
+        is ApiException -> this.statusCode == HttpStatusCode.NotFound.value
+        else -> false
+    }
 }
 
 @Serializable

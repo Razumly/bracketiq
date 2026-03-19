@@ -42,6 +42,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.presentation.util.toEnumTitleCase
 
 @Composable
 fun MapEventCard(
@@ -205,7 +206,7 @@ private fun EventCardContent(event: Event) {
         Spacer(modifier = Modifier.height(4.dp))
 
         Text(
-            text = event.eventType.name,
+            text = event.eventType.name.toEnumTitleCase(),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.fillMaxWidth()

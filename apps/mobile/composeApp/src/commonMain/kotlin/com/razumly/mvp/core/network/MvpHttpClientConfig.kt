@@ -13,6 +13,7 @@ import io.ktor.client.plugins.logging.Logging
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
@@ -55,10 +56,20 @@ internal fun HttpClientConfig<*>.configureMvpHttpClient() {
             }
         }
         handleResponseExceptionWithRequest { cause, request ->
-            Napier.e(
-                "HTTP request failed: ${request.method.value} ${request.url} -> ${cause::class.simpleName}: ${cause.message}",
-                cause
-            )
+            when (cause) {
+                is ApiException -> {
+                    val message = "HTTP request failed: ${request.method.value} ${request.url} -> HTTP ${cause.statusCode}"
+                    if (cause.statusCode == HttpStatusCode.NotFound.value) {
+                        Napier.i(message)
+                    } else {
+                        Napier.e(message, cause)
+                    }
+                }
+                else -> Napier.e(
+                    "HTTP request failed: ${request.method.value} ${request.url} -> ${cause::class.simpleName}: ${cause.message}",
+                    cause
+                )
+            }
         }
     }
 }

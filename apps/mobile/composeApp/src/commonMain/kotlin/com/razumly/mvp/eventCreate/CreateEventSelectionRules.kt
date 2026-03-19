@@ -6,9 +6,10 @@ import com.razumly.mvp.core.data.dataTypes.enums.EventType
 internal fun Event.applyCreateSelectionRules(isRentalFlow: Boolean): Event {
     val normalizedType = if (isRentalFlow) EventType.EVENT else eventType
     val typeNormalizedEvent = when (normalizedType) {
-        EventType.LEAGUE, EventType.TOURNAMENT -> copy(
+        EventType.LEAGUE, EventType.TOURNAMENT, EventType.WEEKLY_EVENT -> copy(
             eventType = normalizedType,
             teamSignup = true,
+            noFixedEndDateTime = true,
         )
 
         EventType.EVENT -> copy(

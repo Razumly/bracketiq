@@ -15,8 +15,26 @@ data class EventFilter(
     fun filter(event: Event, includePastEvents: Boolean = false): Boolean {
         if (eventType != null && event.eventType != eventType) return false
         if (price != null && (event.price < price.first || event.price > price.second)) return false
-        if (!includePastEvents && event.start < date.first) return false
-        if (date.second != null && event.start > date.second!!) return false
+        val usesWeeklyEndFiltering = event.eventType == EventType.WEEKLY_EVENT
+        val effectiveWeeklyEnd = if (usesWeeklyEndFiltering && event.noFixedEndDateTime && event.end <= event.start) {
+            Instant.DISTANT_FUTURE
+        } else {
+            event.end
+        }
+        if (!includePastEvents) {
+            if (usesWeeklyEndFiltering) {
+                if (effectiveWeeklyEnd < date.first) return false
+            } else if (event.start < date.first) {
+                return false
+            }
+        }
+        if (date.second != null) {
+            if (usesWeeklyEndFiltering) {
+                if (effectiveWeeklyEnd > date.second!!) return false
+            } else if (event.start > date.second!!) {
+                return false
+            }
+        }
         return true
     }
 }

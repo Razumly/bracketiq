@@ -166,6 +166,7 @@ private data class RentalBusyRange(
 
 private const val DISCOVER_ORGANIZATION_PLACEHOLDER_COUNT = 4
 private val DISCOVER_FIRST_ITEM_EXTRA_TOP_GAP = 4.dp
+private val DISCOVER_PULL_INDICATOR_TOP_OFFSET = 64.dp
 
 @OptIn(ExperimentalHazeMaterialsApi::class)
 @Composable
@@ -406,6 +407,9 @@ fun EventSearchScreen(
                 },
                 modifier = Modifier.fillMaxSize(),
                 enabled = !showMapCard,
+                shiftContentWithPull = true,
+                indicatorTopPadding = paddingValues.calculateTopPadding()
+                    .plus(DISCOVER_PULL_INDICATOR_TOP_OFFSET),
             ) {
                 Box(
                     Modifier

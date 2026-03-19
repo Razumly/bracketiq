@@ -664,7 +664,7 @@ class DefaultCreateEventComponent(
         _currentEventType.value = type
         updateEventField {
             when (type) {
-                EventType.LEAGUE, EventType.TOURNAMENT -> copy(
+                EventType.LEAGUE, EventType.TOURNAMENT, EventType.WEEKLY_EVENT -> copy(
                     eventType = type,
                     teamSignup = true,
                     singleDivision = true,
@@ -678,7 +678,7 @@ class DefaultCreateEventComponent(
                 )
             }
         }
-        if (type == EventType.LEAGUE || type == EventType.TOURNAMENT) {
+        if (type == EventType.LEAGUE || type == EventType.TOURNAMENT || type == EventType.WEEKLY_EVENT) {
             if (_fieldCount.value <= 0) {
                 val selectedCount = when {
                     _localFields.value.isNotEmpty() -> _localFields.value.size
@@ -688,7 +688,7 @@ class DefaultCreateEventComponent(
                 selectFieldCount(selectedCount)
             }
         }
-        if ((type == EventType.LEAGUE || type == EventType.TOURNAMENT) && _leagueSlots.value.isEmpty()) {
+        if ((type == EventType.LEAGUE || type == EventType.TOURNAMENT || type == EventType.WEEKLY_EVENT) && _leagueSlots.value.isEmpty()) {
             _leagueSlots.value = listOf(createDefaultLeagueSlot())
         }
     }
@@ -1283,7 +1283,7 @@ class DefaultCreateEventComponent(
     private fun Event.withSportRules(): Event {
         val requiresSets = usesSetScoringForSport(sportId)
         return when (eventType) {
-            EventType.EVENT -> this
+            EventType.EVENT, EventType.WEEKLY_EVENT -> this
             EventType.LEAGUE -> applyLeagueSportRules(requiresSets)
             EventType.TOURNAMENT -> applyTournamentSportRules(requiresSets)
         }
@@ -1519,7 +1519,7 @@ class DefaultCreateEventComponent(
         }
 
         return when (scheduledEvent.eventType) {
-            EventType.EVENT -> {
+            EventType.EVENT, EventType.WEEKLY_EVENT -> {
                 val eventFieldIds = scheduledEvent.fieldIds
                     .map { fieldId -> fieldId.trim() }
                     .filter(String::isNotBlank)

@@ -99,6 +99,7 @@ import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.ktx.DynamicScheme
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfig
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Organization
@@ -108,6 +109,8 @@ import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.FeeBreakdown
 import com.razumly.mvp.core.data.util.divisionsEquivalent
 import com.razumly.mvp.core.data.util.isPlaceholderSlot
+import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
+import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.data.util.resolveParticipantCapacity
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
@@ -141,8 +144,18 @@ import kotlin.math.absoluteValue
 import kotlin.math.round
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.hours
+import kotlin.time.Duration.Companion.minutes
 import kotlin.time.ExperimentalTime
+import kotlin.time.Instant
 import kotlinx.coroutines.launch
+import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.DayOfWeek
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atStartOfDayIn
+import kotlinx.datetime.minus
+import kotlinx.datetime.plus
+import kotlinx.datetime.toLocalDateTime
 
 val LocalTournamentComponent =
     compositionLocalOf<EventDetailComponent> { error("No tournament provided") }
@@ -161,6 +174,15 @@ private data class JoinOption(
     val label: String,
     val requiresPayment: Boolean,
     val onClick: () -> Unit
+)
+
+private data class WeeklySessionOption(
+    val id: String,
+    val slotId: String?,
+    val start: Instant,
+    val end: Instant,
+    val label: String,
+    val divisionLabel: String,
 )
 
 private data class BracketDivisionOption(
@@ -193,11 +215,151 @@ private fun List<BracketDivisionOption>.resolveSelectedDivisionId(preferredId: S
         ?: first().id
 }
 
+private fun buildWeeklySessionOptions(
+    event: Event,
+    timeSlots: List<TimeSlot>,
+    weeks: Int = 3,
+): List<WeeklySessionOption> {
+    if (event.eventType != EventType.WEEKLY_EVENT || timeSlots.isEmpty()) {
+        return emptyList()
+    }
+
+    val timeZone = TimeZone.currentSystemDefault()
+    val today = Clock.System.now().toLocalDateTime(timeZone).date
+    val fallbackDivisionIds = event.divisions
+        .map { divisionId -> divisionId.normalizeDivisionIdentifier() }
+        .filter(String::isNotBlank)
+        .distinct()
+    val sessions = mutableListOf<WeeklySessionOption>()
+    val safeWeekCount = weeks.coerceAtLeast(1)
+
+    timeSlots.forEach { slot ->
+        val normalizedDays = slot.normalizedDaysOfWeek()
+        val startMinutes = slot.startTimeMinutes
+        val endMinutes = slot.endTimeMinutes
+        if (normalizedDays.isEmpty() || startMinutes == null || endMinutes == null || endMinutes <= startMinutes) {
+            return@forEach
+        }
+
+        val slotStartDate = slot.startDate.toLocalDateTime(timeZone).date
+        val slotEndDate = slot.endDate?.toLocalDateTime(timeZone)?.date
+        val anchorDate = if (today > slotStartDate) today else slotStartDate
+        val anchorWeekStart = startOfWeekMonday(anchorDate)
+
+        val slotDivisionIds = slot.normalizedDivisionIds()
+            .map { divisionId -> divisionId.normalizeDivisionIdentifier() }
+            .filter(String::isNotBlank)
+            .distinct()
+        val effectiveDivisionIds = if (slotDivisionIds.isNotEmpty()) {
+            slotDivisionIds
+        } else {
+            fallbackDivisionIds
+        }
+        val divisionLabel = effectiveDivisionIds
+            .map { divisionId -> divisionId.toDivisionDisplayLabel(event.divisionDetails) }
+            .filter(String::isNotBlank)
+            .distinct()
+            .joinToString(", ")
+            .ifBlank { "All divisions" }
+
+        for (weekOffset in 0 until safeWeekCount) {
+            val weekStart = anchorWeekStart.plus(DatePeriod(days = weekOffset * 7))
+            normalizedDays.forEach { weekday ->
+                val occurrenceDate = weekStart.plus(DatePeriod(days = weekday))
+                if (occurrenceDate < anchorDate || occurrenceDate < slotStartDate) {
+                    return@forEach
+                }
+                if (slotEndDate != null && occurrenceDate > slotEndDate) {
+                    return@forEach
+                }
+
+                val baseInstant = occurrenceDate.atStartOfDayIn(timeZone)
+                val sessionStart = baseInstant + startMinutes.minutes
+                val sessionEnd = baseInstant + endMinutes.minutes
+                if (sessionEnd <= sessionStart) {
+                    return@forEach
+                }
+                val slotId = slot.id.trim().takeIf(String::isNotBlank)
+                sessions += WeeklySessionOption(
+                    id = "${slotId ?: "slot"}-${sessionStart}",
+                    slotId = slotId,
+                    start = sessionStart,
+                    end = sessionEnd,
+                    label = formatWeeklySessionLabel(sessionStart, sessionEnd, timeZone),
+                    divisionLabel = divisionLabel,
+                )
+            }
+        }
+    }
+
+    return sessions
+        .distinctBy { session -> session.id }
+        .sortedBy { session -> session.start }
+}
+
+private fun startOfWeekMonday(date: LocalDate): LocalDate {
+    val offsetFromMonday = date.dayOfWeek.toWeeklyDayIndex()
+    return date.minus(DatePeriod(days = offsetFromMonday))
+}
+
+private fun formatWeeklySessionLabel(
+    start: Instant,
+    end: Instant,
+    timeZone: TimeZone,
+): String {
+    val localStart = start.toLocalDateTime(timeZone)
+    val localEnd = end.toLocalDateTime(timeZone)
+    val weekdayLabel = weekdayShortLabel(localStart.date)
+    val yearSuffix = (localStart.year % 100).toString().padStart(2, '0')
+    val monthNumber = localStart.month.ordinal + 1
+    val dateLabel = "$monthNumber/${localStart.day}/$yearSuffix"
+    val startLabel = formatMinutesTo12Hour(localStart.hour * 60 + localStart.minute)
+    val endLabel = formatMinutesTo12Hour(localEnd.hour * 60 + localEnd.minute)
+    return "$weekdayLabel $dateLabel, $startLabel-$endLabel"
+}
+
+private fun weekdayShortLabel(date: LocalDate): String {
+    return when (date.dayOfWeek) {
+        DayOfWeek.MONDAY -> "Mon"
+        DayOfWeek.TUESDAY -> "Tue"
+        DayOfWeek.WEDNESDAY -> "Wed"
+        DayOfWeek.THURSDAY -> "Thu"
+        DayOfWeek.FRIDAY -> "Fri"
+        DayOfWeek.SATURDAY -> "Sat"
+        DayOfWeek.SUNDAY -> "Sun"
+    }
+}
+
+private fun DayOfWeek.toWeeklyDayIndex(): Int {
+    return when (this) {
+        DayOfWeek.MONDAY -> 0
+        DayOfWeek.TUESDAY -> 1
+        DayOfWeek.WEDNESDAY -> 2
+        DayOfWeek.THURSDAY -> 3
+        DayOfWeek.FRIDAY -> 4
+        DayOfWeek.SATURDAY -> 5
+        DayOfWeek.SUNDAY -> 6
+    }
+}
+
+private fun formatMinutesTo12Hour(totalMinutes: Int): String {
+    val normalizedMinutes = ((totalMinutes % 1440) + 1440) % 1440
+    val hour24 = normalizedMinutes / 60
+    val minute = normalizedMinutes % 60
+    val meridiem = if (hour24 >= 12) "PM" else "AM"
+    val hour12 = when (val normalizedHour = hour24 % 12) {
+        0 -> 12
+        else -> normalizedHour
+    }
+    return "$hour12:${minute.toString().padStart(2, '0')} $meridiem"
+}
+
 @Composable
 private fun EventOverviewSections(
     eventWithRelations: EventWithFullRelations,
     teamsAndParticipantsLoading: Boolean,
     matchesLoading: Boolean,
+    showFullnessSummary: Boolean,
     showOpenDetailsAction: Boolean,
     onOpenDetails: () -> Unit,
 ) {
@@ -247,6 +409,7 @@ private fun EventOverviewSections(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        if (showFullnessSummary) {
         HorizontalDivider()
         Surface(
             modifier = Modifier.fillMaxWidth(),
@@ -345,6 +508,7 @@ private fun EventOverviewSections(
                     )
                 }
             }
+        }
         }
         if (event.teamSignup) {
             if (teamsAndParticipantsLoading) {
@@ -1014,11 +1178,14 @@ private fun ParticipantsFloatingBar(
 private fun JoinOptionsSheet(
     options: List<JoinOption>,
     paymentProcessor: EventDetailComponent,
+    isWeeklyParentEvent: Boolean,
+    weeklySessionOptions: List<WeeklySessionOption>,
     selectedDivisionId: String?,
     divisionOptions: List<BracketDivisionOption>,
     onDivisionSelected: (String) -> Unit,
     onDismiss: () -> Unit,
     onSelectOption: (JoinOption) -> Unit,
+    onSelectWeeklySession: (WeeklySessionOption) -> Unit,
 ) {
     var isDivisionMenuExpanded by remember { mutableStateOf(false) }
     var divisionMenuAnchorSize by remember { mutableStateOf(IntSize.Zero) }
@@ -1045,76 +1212,144 @@ private fun JoinOptionsSheet(
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.SemiBold
         )
-        if (divisionOptions.isNotEmpty()) {
-            Box(modifier = Modifier.fillMaxWidth()) {
-                Button(
-                    onClick = { isDivisionMenuExpanded = true },
+        if (isWeeklyParentEvent) {
+            Text(
+                text = "Select a weekly session",
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = "Choose a session to create your registration event.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (weeklySessionOptions.isEmpty()) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                ) {
+                    Text(
+                        text = "No upcoming weekly sessions are available.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else {
+                val weeklySessionsListState = rememberLazyListState()
+                LazyColumn(
+                    state = weeklySessionsListState,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .onSizeChanged { size -> divisionMenuAnchorSize = size }
+                        .heightIn(max = 360.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    val label = if (selectedDivisionLabel.isNotBlank()) {
-                        "Division: $selectedDivisionLabel"
-                    } else {
-                        "select a division"
-                    }
-                    Text(label)
-                }
-                DropdownMenu(
-                    expanded = isDivisionMenuExpanded,
-                    onDismissRequest = { isDivisionMenuExpanded = false },
-                    modifier = if (divisionMenuAnchorSize.width > 0) {
-                        Modifier.width(with(density) { divisionMenuAnchorSize.width.toDp() })
-                    } else {
-                        Modifier
-                    }
-                ) {
-                    divisionOptions.forEach { option ->
-                        DropdownMenuItem(
-                            text = { Text(option.label) },
-                            onClick = {
-                                isDivisionMenuExpanded = false
-                                onDivisionSelected(option.id)
-                            },
-                            leadingIcon = {
-                                if (option.id == selectedDivisionId) {
-                                    Icon(
-                                        imageVector = Icons.Default.Check,
-                                        contentDescription = null
-                                    )
-                                }
+                    items(
+                        items = weeklySessionOptions,
+                        key = { session -> session.id },
+                    ) { session ->
+                        Button(
+                            onClick = { onSelectWeeklySession(session) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                                horizontalAlignment = Alignment.Start,
+                            ) {
+                                Text(
+                                    text = session.label,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                Text(
+                                    text = "Divisions: ${session.divisionLabel}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onPrimary,
+                                )
+                                Text(
+                                    text = "Tap to continue",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onPrimary,
+                                )
                             }
-                        )
+                        }
                     }
                 }
             }
-        }
-        options.forEach { option ->
-            if (option.requiresPayment) {
-                if (shouldEnableJoinActions) {
-                    StripeButton(
-                        onClick = { onSelectOption(option) },
-                        paymentProcessor = paymentProcessor,
-                        text = option.label,
-                        colors = ButtonDefaults.buttonColors(),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+        } else {
+            if (divisionOptions.isNotEmpty()) {
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    Button(
+                        onClick = { isDivisionMenuExpanded = true },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onSizeChanged { size -> divisionMenuAnchorSize = size }
+                    ) {
+                        val label = if (selectedDivisionLabel.isNotBlank()) {
+                            "Division: $selectedDivisionLabel"
+                        } else {
+                            "select a division"
+                        }
+                        Text(label)
+                    }
+                    DropdownMenu(
+                        expanded = isDivisionMenuExpanded,
+                        onDismissRequest = { isDivisionMenuExpanded = false },
+                        modifier = if (divisionMenuAnchorSize.width > 0) {
+                            Modifier.width(with(density) { divisionMenuAnchorSize.width.toDp() })
+                        } else {
+                            Modifier
+                        }
+                    ) {
+                        divisionOptions.forEach { option ->
+                            DropdownMenuItem(
+                                text = { Text(option.label) },
+                                onClick = {
+                                    isDivisionMenuExpanded = false
+                                    onDivisionSelected(option.id)
+                                },
+                                leadingIcon = {
+                                    if (option.id == selectedDivisionId) {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = null
+                                        )
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+            options.forEach { option ->
+                if (option.requiresPayment) {
+                    if (shouldEnableJoinActions) {
+                        StripeButton(
+                            onClick = { onSelectOption(option) },
+                            paymentProcessor = paymentProcessor,
+                            text = option.label,
+                            colors = ButtonDefaults.buttonColors(),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    } else {
+                        Button(
+                            onClick = {},
+                            enabled = false,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(option.label)
+                        }
+                    }
                 } else {
                     Button(
-                        onClick = {},
-                        enabled = false,
+                        onClick = { onSelectOption(option) },
+                        enabled = shouldEnableJoinActions,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(option.label)
                     }
-                }
-            } else {
-                Button(
-                    onClick = { onSelectOption(option) },
-                    enabled = shouldEnableJoinActions,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(option.label)
                 }
             }
         }
@@ -1351,6 +1586,29 @@ fun EventDetailScreen(
         else -> null
     }
     val eventHasStarted = Clock.System.now() >= selectedEvent.event.start
+    val isWeeklyEvent = selectedEvent.event.eventType == EventType.WEEKLY_EVENT
+    val joinBlockedByStart = eventHasStarted && !isWeeklyEvent
+    val hasWeeklyParentTimeSlots = remember(selectedEvent.event.timeSlotIds) {
+        selectedEvent.event.timeSlotIds.any { slotId -> slotId.isNotBlank() }
+    }
+    val isWeeklyParentEvent = isWeeklyEvent && hasWeeklyParentTimeSlots
+    val weeklySessionOptions = remember(
+        isWeeklyParentEvent,
+        selectedEvent.event.id,
+        selectedEvent.event.divisions,
+        selectedEvent.event.divisionDetails,
+        selectedEvent.timeSlots,
+    ) {
+        if (!isWeeklyParentEvent) {
+            emptyList()
+        } else {
+            buildWeeklySessionOptions(
+                event = selectedEvent.event,
+                timeSlots = selectedEvent.timeSlots,
+                weeks = 3,
+            )
+        }
+    }
     val timeDiff = selectedEvent.event.start.minus(Clock.System.now())
     isRefundAutomatic = (cutoffHours != null && timeDiff <= cutoffHours.hours)
     val teamSignup = selectedEvent.event.teamSignup
@@ -1449,9 +1707,10 @@ fun EventDetailScreen(
             }
         }
     }
-    val shouldShowViewSchedulePrimaryAction = isUserInEvent || isHost || isAssistantHost || isReferee
-    val showOverviewOpenDetailsAction = !shouldShowViewSchedulePrimaryAction
+    val shouldShowViewSchedulePrimaryAction = !isWeeklyParentEvent && (isUserInEvent || isHost || isAssistantHost || isReferee)
+    val showOverviewOpenDetailsAction = !isWeeklyParentEvent && !shouldShowViewSchedulePrimaryAction
     val showStickyActions = !showDetails && !isEditing && !showMap && showStickyDockByScroll
+    val isEventRefreshInProgress = eventTeamsAndParticipantsLoading || eventMatchesLoading
     val joinDivisionOptions = remember(
         selectedDivision,
         selectedEvent.event.divisions,
@@ -1560,11 +1819,12 @@ fun EventDetailScreen(
         isEventFull,
         teamSignup,
         selectedEvent.event.price,
-        eventHasStarted,
+        joinBlockedByStart,
+        isWeeklyParentEvent,
         selectedJoinOptionDivisionId,
         joinDivisionOptions,
     ) {
-        if (isUserInEvent || eventHasStarted) {
+        if (isUserInEvent || joinBlockedByStart || isWeeklyParentEvent) {
             emptyList()
         } else {
             buildList {
@@ -1649,11 +1909,17 @@ fun EventDetailScreen(
     }
 
     CompositionLocalProvider(LocalTournamentComponent provides component) {
-        Scaffold(Modifier.fillMaxSize()) { innerPadding ->
-            Box(
-                Modifier.background(MaterialTheme.colorScheme.background).fillMaxSize()
-            ) {
-                Column(Modifier.fillMaxSize()) {
+        PullToRefreshContainer(
+            isRefreshing = isEventRefreshInProgress,
+            onRefresh = component::refreshEventDetails,
+            enabled = !showMap,
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            Scaffold(Modifier.fillMaxSize()) { innerPadding ->
+                Box(
+                    Modifier.background(MaterialTheme.colorScheme.background).fillMaxSize()
+                ) {
+                    Column(Modifier.fillMaxSize()) {
                 AnimatedVisibility(
                     !showDetails, enter = expandVertically(), exit = shrinkVertically()
                 ) {
@@ -1828,6 +2094,7 @@ fun EventDetailScreen(
                                         eventWithRelations = selectedEvent,
                                         teamsAndParticipantsLoading = eventTeamsAndParticipantsLoading,
                                         matchesLoading = eventMatchesLoading,
+                                        showFullnessSummary = !isWeeklyParentEvent,
                                         showOpenDetailsAction = showOverviewOpenDetailsAction,
                                         onOpenDetails = component::viewEvent
                                     )
@@ -2188,7 +2455,6 @@ fun EventDetailScreen(
                                         isLoading = leagueDivisionStandingsLoading,
                                         isConfirming = leagueStandingsConfirming,
                                         canConfirmStandings = canManageLeagueStandings,
-                                        onRefresh = component::refreshLeagueStandings,
                                     )
                                 }
 
@@ -2334,15 +2600,15 @@ fun EventDetailScreen(
                 StickyActionBar(
                     primaryLabel = when {
                         shouldShowViewSchedulePrimaryAction -> "View Schedule and Participants"
-                        !isUserInEvent && !eventHasStarted -> "Join options"
-                        eventHasStarted -> "Event Started"
+                        !isUserInEvent && !joinBlockedByStart -> "Join options"
+                        joinBlockedByStart -> "Event Started"
                         else -> "Joined with Team"
                     },
-                    primaryEnabled = shouldShowViewSchedulePrimaryAction || (!isUserInEvent && !eventHasStarted),
+                    primaryEnabled = shouldShowViewSchedulePrimaryAction || (!isUserInEvent && !joinBlockedByStart),
                     onPrimaryClick = {
                         when {
                             shouldShowViewSchedulePrimaryAction -> component.viewEvent()
-                            !isUserInEvent && !eventHasStarted -> showJoinOptionsSheet = true
+                            !isUserInEvent && !joinBlockedByStart -> showJoinOptionsSheet = true
                         }
                     },
                     onMapClick = mapComponent::toggleMap,
@@ -2352,26 +2618,29 @@ fun EventDetailScreen(
                     onShareClick = component::shareEvent,
                 )
             }
-            }
+        }
 
-            if (showWithdrawTargetDialog && actionWithdrawTargets.isNotEmpty()) {
-                WithdrawTargetDialog(
-                    targets = actionWithdrawTargets,
-                    onDismiss = { showWithdrawTargetDialog = false },
-                    onTargetSelected = { target ->
-                        showWithdrawTargetDialog = false
-                        openLeaveOrRefundForTarget(target)
-                    },
-                )
-            }
+        if (showWithdrawTargetDialog && actionWithdrawTargets.isNotEmpty()) {
+            WithdrawTargetDialog(
+                targets = actionWithdrawTargets,
+                onDismiss = { showWithdrawTargetDialog = false },
+                onTargetSelected = { target ->
+                    showWithdrawTargetDialog = false
+                    openLeaveOrRefundForTarget(target)
+                },
+            )
+        }
 
-            if (showJoinOptionsSheet && joinOptions.isNotEmpty()) {
+            val canRenderJoinOptionsSheet = isWeeklyParentEvent || joinOptions.isNotEmpty()
+            if (showJoinOptionsSheet && canRenderJoinOptionsSheet) {
                 ModalBottomSheet(
                     onDismissRequest = { showJoinOptionsSheet = false }
                 ) {
                     JoinOptionsSheet(
                         options = joinOptions,
                         paymentProcessor = component,
+                        isWeeklyParentEvent = isWeeklyParentEvent,
+                        weeklySessionOptions = weeklySessionOptions,
                         selectedDivisionId = selectedJoinOptionDivisionId,
                         divisionOptions = if (teamSignup) {
                             joinDivisionOptions
@@ -2386,7 +2655,15 @@ fun EventDetailScreen(
                         onSelectOption = { action ->
                             showJoinOptionsSheet = false
                             action.onClick()
-                        }
+                        },
+                        onSelectWeeklySession = { session ->
+                            showJoinOptionsSheet = false
+                            component.selectWeeklySession(
+                                sessionStart = session.start,
+                                sessionEnd = session.end,
+                                slotId = session.slotId,
+                            )
+                        },
                     )
                 }
             }
@@ -2621,6 +2898,7 @@ fun EventDetailScreen(
         }
     }
 }
+}
 @Composable
 fun TeamSelectionDialog(
     eventSportLabel: String,
@@ -2751,77 +3029,70 @@ private fun LeagueStandingsTab(
     isLoading: Boolean,
     isConfirming: Boolean,
     canConfirmStandings: Boolean,
-    onRefresh: () -> Unit,
     showFab: (Boolean) -> Unit,
 ) {
     val standingsListState = rememberLazyListState()
     val isScrollingUp by standingsListState.isScrollingUp()
     showFab(if (standings.isEmpty()) true else isScrollingUp)
 
-    PullToRefreshContainer(
-        isRefreshing = isLoading,
-        onRefresh = onRefresh,
-        modifier = Modifier.fillMaxSize(),
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surface)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(MaterialTheme.colorScheme.surface)
-        ) {
-            if (canConfirmStandings && (validationMessages.isNotEmpty() || isLoading || isConfirming)) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    if (validationMessages.isNotEmpty()) {
-                        validationMessages.forEach { validationMessage ->
-                            Text(
-                                text = validationMessage,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error,
-                            )
-                        }
-                    }
-                    if (isLoading || isConfirming) {
-                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        if (canConfirmStandings && (validationMessages.isNotEmpty() || isLoading || isConfirming)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (validationMessages.isNotEmpty()) {
+                    validationMessages.forEach { validationMessage ->
+                        Text(
+                            text = validationMessage,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
                     }
                 }
-            } else if (isLoading) {
-                LinearProgressIndicator(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                if (isLoading || isConfirming) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+            }
+        } else if (isLoading) {
+            LinearProgressIndicator(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+            )
+        }
+
+        if (standings.isEmpty()) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "Standings will appear once scores are reported.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+            return@Column
+        }
 
-            if (standings.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        "Standings will appear once scores are reported.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                return@Column
-            }
-
-            LeagueStandingsHeader()
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize(),
-                state = standingsListState,
-            ) {
-                items(standings, key = { it.teamId }) { standing ->
-                    LeagueStandingRow(
-                        standing = standing,
-                        pointPrecision = pointPrecision
-                    )
-                }
+        LeagueStandingsHeader()
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize(),
+            state = standingsListState,
+        ) {
+            items(standings, key = { it.teamId }) { standing ->
+                LeagueStandingRow(
+                    standing = standing,
+                    pointPrecision = pointPrecision
+                )
             }
         }
     }

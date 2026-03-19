@@ -49,7 +49,7 @@ import com.razumly.mvp.core.data.util.toDivisionDisplayLabels
 import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.getImageUrl
 import com.razumly.mvp.core.presentation.util.moneyFormat
-import com.razumly.mvp.core.presentation.util.toTitleCase
+import com.razumly.mvp.core.presentation.util.toEnumTitleCase
 import com.razumly.mvp.eventSearch.composables.StylizedText
 import com.razumly.mvp.eventSearch.util.TextPatterns
 import dev.chrisbanes.haze.ExperimentalHazeApi
@@ -207,7 +207,7 @@ fun EventCard(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     StylizedText(
-                        text = event.eventType.name.toTitleCase(),
+                        text = event.eventType.name.toEnumTitleCase(),
                         patterns = patterns,
                         modifier = Modifier.weight(1f),
                         maxLines = 1,

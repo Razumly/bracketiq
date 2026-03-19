@@ -328,6 +328,13 @@ internal class CreateEvent_FakeEventRepository(
         newEvent
     }
 
+    override suspend fun createWeeklySession(
+        parentEventId: String,
+        sessionStart: Instant,
+        sessionEnd: Instant,
+        slotId: String?,
+    ): Result<Event> = Result.failure(IllegalStateException("unused"))
+
     override suspend fun scheduleEvent(eventId: String, participantCount: Int?): Result<Event> =
         Result.failure(IllegalStateException("unused"))
 
