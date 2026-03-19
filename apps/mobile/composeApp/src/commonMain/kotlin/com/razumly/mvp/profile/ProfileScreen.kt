@@ -4,9 +4,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import com.arkivanov.decompose.ExperimentalDecomposeApi
+import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.decompose.extensions.compose.experimental.stack.ChildStack
 import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
+import com.razumly.mvp.core.presentation.util.backAnimation
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
 import com.razumly.mvp.profile.profileDetails.ProfileDetailsScreen
@@ -32,8 +34,14 @@ fun ProfileScreen(component: ProfileComponent) {
         }
     }
 
+    val componentContext = component as ComponentContext
+
     ChildStack(
         stack = childStack,
+        animation = backAnimation(
+            backHandler = componentContext.backHandler,
+            onBack = component::onBackClicked,
+        ),
     ) { child ->
         when (val instance = child.instance) {
             is ProfileComponent.Child.ProfileHome -> {
