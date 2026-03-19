@@ -39,8 +39,23 @@ Pod::Spec.new do |spec|
                     exit 0
                 fi
                 set -ev
+                JAVA17_HOME="$(/usr/libexec/java_home -v 17 -a arm64 2>/dev/null || /usr/libexec/java_home -v 17 2>/dev/null || true)"
+                if [ -n "$JAVA17_HOME" ]; then
+                    export JAVA_HOME="$JAVA17_HOME"
+                    export PATH="$JAVA_HOME/bin:$PATH"
+                fi
+
+                if [ -n "$JAVA_HOME" ] && [ -x "$JAVA_HOME/bin/java" ]; then
+                    echo "Using JAVA_HOME=$JAVA_HOME"
+                    "$JAVA_HOME/bin/java" -version 2>&1 | head -n 1
+                else
+                    echo "JAVA_HOME is not set to a valid JDK; using java from PATH"
+                fi
+
                 REPO_ROOT="$PODS_TARGET_SRCROOT"
-                "$REPO_ROOT/../gradlew" -p "$REPO_ROOT" $KOTLIN_PROJECT_PATH:syncFramework \
+                "$REPO_ROOT/../gradlew" --no-daemon \
+                    -Dorg.gradle.jvmargs="-Xmx4g -Dfile.encoding=UTF-8 -Djava.awt.headless=true -XX:MaxMetaspaceSize=1g" \
+                    -p "$REPO_ROOT" $KOTLIN_PROJECT_PATH:syncFramework \
                     -Pkotlin.native.cocoapods.platform=$PLATFORM_NAME \
                     -Pkotlin.native.cocoapods.archs="$ARCHS" \
                     -Pkotlin.native.cocoapods.configuration="$CONFIGURATION"

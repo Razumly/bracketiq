@@ -138,7 +138,7 @@ class IOSNativeViewFactory: NativeViewFactory {
         STPAPIClient.shared.publishableKey = publishableKey
         
         var configuration = PaymentSheet.Configuration()
-        configuration.merchantDisplayName = "BracketIQ"
+        configuration.merchantDisplayName = "Sports Management Engine"
         if let customerId = customerId, let ephemeralKey = ephemeralKey {
             configuration.customer = .init(id: customerId, ephemeralKeySecret: ephemeralKey)
         }

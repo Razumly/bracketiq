@@ -23,3 +23,5 @@ composeApp/schemas
 composeApp/debug/
 composeApp/release/
 composeApp/google-services.json
+buildServer.json
+.compile
