@@ -42,13 +42,13 @@ val MVPRepositoryModule = module {
         MatchRepository(get(), get())
     } bind IMatchRepository::class
     single {
-        PushNotificationsRepository(get(), get())
+        PushNotificationsRepository(get(), get(), get())
     } bind IPushNotificationsRepository::class
     single {
         MessageRepository(get(), get())
     } bind IMessageRepository::class
     single {
-        ChatGroupRepository(get(), get(), get(), get())
+        ChatGroupRepository(get(), get(), get(), get(), get())
     } bind IChatGroupRepository::class
     single {
         BillingRepository(get(), get(), get(), get())

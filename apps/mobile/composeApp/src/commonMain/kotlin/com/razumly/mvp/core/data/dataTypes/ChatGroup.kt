@@ -1,6 +1,7 @@
 package com.razumly.mvp.core.data.dataTypes
 
 import androidx.room.Entity
+import androidx.room.Ignore
 import androidx.room.PrimaryKey
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
@@ -15,6 +16,7 @@ data class ChatGroup(
     val userIds: List<String>,
     val hostId: String,
 ) : MVPDocument, DisplayableEntity {
+    @Ignore @Transient var teamId: String? = null
     override var imageUrl: String? = null
     override var displayName: String = ""
     fun setDisplayName(name: String): ChatGroup {

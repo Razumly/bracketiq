@@ -19,6 +19,12 @@
             android:name="com.google.firebase.messaging.default_notification_channel_id"
             android:value="DEFAULT_NOTIFICATION_CHANNEL_ID" />
         <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_notification_logo" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/launcher_icon_background" />
+        <meta-data
             android:name="com.google.android.geo.API_KEY"
             android:value="${MAPS_API_KEY}" />
         <activity

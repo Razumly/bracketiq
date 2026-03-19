@@ -9,6 +9,7 @@ import com.arkivanov.decompose.router.stack.pushNew
 import com.arkivanov.decompose.router.stack.replaceAll
 import com.arkivanov.decompose.value.Value
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
+import com.razumly.mvp.chat.data.IChatGroupRepository
 import com.razumly.mvp.chat.ChatGroupComponent
 import com.razumly.mvp.chat.ChatListComponent
 import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
@@ -41,6 +42,7 @@ import io.github.aakira.napier.Napier
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -56,6 +58,7 @@ class RootComponent(
     val locationTracker: LocationTracker,
     private val userRepository: IUserRepository,
     private val pushNotificationsRepository: IPushNotificationsRepository,
+    private val chatGroupRepository: IChatGroupRepository,
 ) : ComponentContext by componentContext, INavigationHandler {
     companion object {
         private const val STARTUP_AUTH_TIMEOUT_MS = 3_000L
@@ -87,10 +90,14 @@ class RootComponent(
 
     private val deepLinkNav = MutableStateFlow(deepLinkNavStart)
     private var registeredPushUserId: String? = null
+    private var syncedChatUserId: String? = null
     private var startupDecisionMade = false
+    private var unreadCountJob: Job? = null
 
     private val _selectedPage = MutableStateFlow<AppConfig>(AppConfig.Search())
     val selectedPage: StateFlow<AppConfig> = _selectedPage.asStateFlow()
+    private val _unreadChatMessageCount = MutableStateFlow(0)
+    val unreadChatMessageCount: StateFlow<Int> = _unreadChatMessageCount.asStateFlow()
     private val _isStartupInProgress = MutableStateFlow(true)
     val isStartupInProgress: StateFlow<Boolean> = _isStartupInProgress.asStateFlow()
     private val _startupNotice = MutableStateFlow<String?>(null)
@@ -150,14 +157,34 @@ class RootComponent(
                     onSuccess = { userData ->
                         if (userData.id.isNotBlank()) {
                             registerPushTargetIfNeeded(userData.id)
+                            refreshChatsOnStartupIfNeeded(userData.id)
                         } else {
                             clearPushTargetIfNeeded()
+                            clearChatStartupSyncState()
                         }
                     },
                     onFailure = {
                         clearPushTargetIfNeeded()
+                        clearChatStartupSyncState()
                     }
                 )
+            }
+        }
+
+        scope.launch {
+            userRepository.currentUser.collect { userResult ->
+                val userId = userResult.getOrNull()?.id?.takeIf(String::isNotBlank)
+                unreadCountJob?.cancel()
+                if (userId == null) {
+                    _unreadChatMessageCount.value = 0
+                    return@collect
+                }
+
+                unreadCountJob = launch {
+                    chatGroupRepository.getUnreadMessageCountFlow(userId).collect { unreadCount ->
+                        _unreadChatMessageCount.value = unreadCount
+                    }
+                }
             }
         }
     }
@@ -218,6 +245,20 @@ class RootComponent(
                 Napier.w("Push target cleanup failed: ${it.message}")
             }
         }
+    }
+
+    private fun refreshChatsOnStartupIfNeeded(userId: String) {
+        if (syncedChatUserId == userId) return
+        syncedChatUserId = userId
+        scope.launch(Dispatchers.Default) {
+            chatGroupRepository.refreshChatGroupsAndMessages().onFailure {
+                Napier.w("Startup chat refresh failed: ${it.message}")
+            }
+        }
+    }
+
+    private fun clearChatStartupSyncState() {
+        syncedChatUserId = null
     }
 
     fun onBackClicked() {

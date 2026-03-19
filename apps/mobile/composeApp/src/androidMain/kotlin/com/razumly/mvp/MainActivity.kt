@@ -1,13 +1,19 @@
 package com.razumly.mvp
 
+import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.core.view.WindowCompat
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.ui.platform.LocalView
 import com.arkivanov.decompose.ExperimentalDecomposeApi
 import com.arkivanov.decompose.handleDeepLink
 import com.arkivanov.decompose.retainedComponent
@@ -55,7 +61,10 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            MVPTheme {
+            val darkTheme = isSystemInDarkTheme()
+            ApplyStatusBarContentStyle(darkTheme = darkTheme)
+
+            MVPTheme(darkTheme = darkTheme) {
                 CompositionLocalProvider(LocalRootComponent provides rootComponent) {
                     BindLocationTrackerEffect(rootComponent.locationTracker)
                     BindEffect(rootComponent.permissionsController)
@@ -83,6 +92,19 @@ class MainActivity : ComponentActivity() {
             }
         } ?: run {
             Napier.d(tag = "DeepLink", message = "No URI data in intent")
+        }
+    }
+
+    @Composable
+    private fun ApplyStatusBarContentStyle(darkTheme: Boolean) {
+        val view = LocalView.current
+        if (view.isInEditMode) return
+
+        SideEffect {
+            val activity = view.context as? Activity ?: return@SideEffect
+            val window = activity.window
+
+            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
         }
     }
 

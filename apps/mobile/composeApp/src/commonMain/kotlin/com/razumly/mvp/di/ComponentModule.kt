@@ -48,6 +48,7 @@ val componentModule = module {
             deepLinkNavStart = deepLinkNav,
             userRepository = get(),
             pushNotificationsRepository = get(),
+            chatGroupRepository = get(),
         )
     }
 

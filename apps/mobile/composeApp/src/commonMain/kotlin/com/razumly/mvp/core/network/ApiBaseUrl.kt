@@ -9,3 +9,12 @@ package com.razumly.mvp.core.network
  * running on a physical device.
  */
 expect val apiBaseUrl: String
+
+/**
+ * Base URL used for web redirects (Stripe return/refresh URLs).
+ *
+ * This may differ from [apiBaseUrl] in local mobile development where API traffic goes through
+ * emulator loopback (`10.0.2.2`) but browser redirects must target a public web origin (for
+ * example, an ngrok domain).
+ */
+expect val stripeRedirectBaseUrl: String

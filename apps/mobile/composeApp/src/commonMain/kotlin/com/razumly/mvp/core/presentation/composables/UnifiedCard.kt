@@ -22,6 +22,7 @@ fun UnifiedCard(
     entity: DisplayableEntity,
     modifier: Modifier = Modifier,
     subtitle: String? = null,
+    leadingContent: @Composable (() -> Unit)? = null,
     trailingContent: @Composable (() -> Unit)? = null,
     isPending: Boolean = false
 ) {
@@ -36,12 +37,16 @@ fun UnifiedCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            NetworkAvatar(
-                displayName = entity.displayName,
-                imageRef = entity.imageUrl,
-                size = UIConstants.PROFILE_PICTURE_HEIGHT.dp,
-                contentDescription = "${entity.displayName} Image",
-            )
+            if (leadingContent != null) {
+                leadingContent()
+            } else {
+                NetworkAvatar(
+                    displayName = entity.displayName,
+                    imageRef = entity.imageUrl,
+                    size = UIConstants.PROFILE_PICTURE_HEIGHT.dp,
+                    contentDescription = "${entity.displayName} Image",
+                )
+            }
 
             // Content
             Column(

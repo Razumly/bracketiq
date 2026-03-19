@@ -1,9 +1,15 @@
 package com.razumly.mvp.chat.composables
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.material3.Badge
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import com.razumly.mvp.chat.data.countUnreadMessages
 import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.presentation.composables.UnifiedCard
 import com.razumly.mvp.core.presentation.util.formatMessageTime
@@ -14,7 +20,12 @@ import kotlin.time.ExperimentalTime
 fun ChatListItem(
     modifier: Modifier = Modifier,
     chatGroup: ChatGroupWithRelations,
+    currentUserId: String,
 ) {
+    val avatarModel = resolveChatAvatarRenderModel(
+        chatGroup = chatGroup,
+        currentUserId = currentUserId,
+    )
     val participantNames = chatGroup.users
         .mapNotNull { user -> user.fullName.asMeaningfulText() }
         .distinct()
@@ -24,9 +35,10 @@ fun ChatListItem(
         ?: chatGroup.chatGroup.displayName.asMeaningfulText()
         ?: participantNames
         ?: "Unknown chat"
-    val imageUrl = chatGroup.chatGroup.imageUrl.asMeaningfulText()
-        ?: chatGroup.users.firstNotNullOfOrNull { user -> user.imageUrl.asMeaningfulText() }
+    val imageUrl = avatarModel.sources.firstOrNull()?.imageRef
     val subtitle = chatGroup.messages.lastOrNull()?.body.asMeaningfulText()
+    val unreadCount = countUnreadMessages(chatGroup.messages, currentUserId)
+    val unreadBadgeText = if (unreadCount > 99) "99+" else unreadCount.toString()
     val displayChat = chatGroup.chatGroup.copy()
         .setDisplayName(displayName)
         .setImageUrl(imageUrl)
@@ -34,12 +46,28 @@ fun ChatListItem(
     UnifiedCard(
         entity = displayChat,
         subtitle = subtitle,
+        leadingContent = {
+            ChatListAvatar(
+                chatGroup = chatGroup,
+                currentUserId = currentUserId,
+            )
+        },
         trailingContent = {
-            chatGroup.messages.lastOrNull()?.let { message ->
-                Text(
-                    text = formatMessageTime(message.sentTime),
-                    style = MaterialTheme.typography.bodySmall
-                )
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                chatGroup.messages.lastOrNull()?.let { message ->
+                    Text(
+                        text = formatMessageTime(message.sentTime),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                if (unreadCount > 0) {
+                    Badge {
+                        Text(unreadBadgeText)
+                    }
+                }
             }
         },
         modifier = modifier

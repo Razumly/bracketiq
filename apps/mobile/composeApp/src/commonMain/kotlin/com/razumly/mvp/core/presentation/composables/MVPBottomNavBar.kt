@@ -8,6 +8,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.MailOutline
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -34,6 +36,7 @@ data class NavigationItem(
 @Composable
 fun MVPBottomNavBar(
     selectedPage: AppConfig,
+    unreadChatMessageCount: Int,
     onPageSelected: (AppConfig) -> Unit,
     content: @Composable (PaddingValues) -> Unit
 ) {
@@ -46,6 +49,7 @@ fun MVPBottomNavBar(
 
     var navBarHeight by remember { mutableStateOf(0.dp) }
     val localDensity = LocalDensity.current
+    val unreadBadgeText = if (unreadChatMessageCount > 99) "99+" else unreadChatMessageCount.toString()
 
     Box(modifier = Modifier.fillMaxSize()) {
         // Main content
@@ -73,10 +77,18 @@ fun MVPBottomNavBar(
                                     Icons.Default.Search,
                                     contentDescription = item.titleResId
                                 )
-                                "messages" -> Icon(
-                                    Icons.Default.MailOutline,
-                                    contentDescription = item.titleResId
-                                )
+                                "messages" -> BadgedBox(
+                                    badge = {
+                                        if (unreadChatMessageCount > 0) {
+                                            Badge { Text(unreadBadgeText) }
+                                        }
+                                    }
+                                ) {
+                                    Icon(
+                                        Icons.Default.MailOutline,
+                                        contentDescription = item.titleResId
+                                    )
+                                }
                                 "add" -> Icon(
                                     Icons.Default.Add,
                                     contentDescription = item.titleResId
@@ -96,4 +108,3 @@ fun MVPBottomNavBar(
         }
     }
 }
-

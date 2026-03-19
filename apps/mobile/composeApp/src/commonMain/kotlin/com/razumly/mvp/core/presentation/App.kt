@@ -72,6 +72,7 @@ val localAllFocusManagers =
 fun App(root: RootComponent) {
     val childStack by root.childStack.subscribeAsState()
     val selectedPage by root.selectedPage.collectAsState()
+    val unreadChatMessageCount by root.unreadChatMessageCount.collectAsState()
 
     val popupHandler = remember { PopupHandlerImpl() }
     val loadingHandler = remember { LoadingHandlerImpl() }
@@ -129,6 +130,7 @@ fun App(root: RootComponent) {
                 if (currentChild !is RootComponent.Child.Login && currentChild !is RootComponent.Child.Splash) {
                     MVPBottomNavBar(
                         selectedPage = selectedPage,
+                        unreadChatMessageCount = unreadChatMessageCount,
                         onPageSelected = { root.onTabSelected(it) }) { paddingValues ->
                         Scaffold(
                             snackbarHost = {

@@ -185,7 +185,7 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
                 contentPadding = PaddingValues(
                     bottom = 8.dp
                 ),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.Bottom)
             ) {
                 itemsIndexed(
                     items = messages,

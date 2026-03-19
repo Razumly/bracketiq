@@ -52,6 +52,14 @@ object AppSecrets {
             fileType = "plist",
             valueKey = "mvpApiBaseUrlRemote"
         ) ?: ""
+
+    // Optional public web base URL used for browser redirects (for example, ngrok).
+    val mvpWebBaseUrl: String
+        get() = getStringResource(
+            filename = "Secrets",
+            fileType = "plist",
+            valueKey = "mvpWebBaseUrl"
+        ) ?: ""
 }
 
 internal fun getStringResource(

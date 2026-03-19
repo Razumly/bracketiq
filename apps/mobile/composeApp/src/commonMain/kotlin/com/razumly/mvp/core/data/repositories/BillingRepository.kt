@@ -12,7 +12,7 @@ import com.razumly.mvp.core.data.dataTypes.RefundRequestWithRelations
 import com.razumly.mvp.core.data.dataTypes.Subscription
 import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.MvpApiClient
-import com.razumly.mvp.core.network.apiBaseUrl
+import com.razumly.mvp.core.network.stripeRedirectBaseUrl
 import com.razumly.mvp.core.network.dto.BillingEventRefDto
 import com.razumly.mvp.core.network.dto.BillingRefundRequestDto
 import com.razumly.mvp.core.network.dto.BillingTeamRefDto
@@ -467,13 +467,13 @@ class BillingRepository(
     override suspend fun createAccount(): Result<String> = runCatching {
         val user = userRepository.currentUser.value.getOrThrow()
         val email = userRepository.currentAccount.value.getOrNull()?.email
-        val base = apiBaseUrl.trimEnd('/')
+        val redirectBase = stripeRedirectBaseUrl.trimEnd('/')
 
         val onboardingUrl = api.post<StripeHostLinkRequestDto, StripeOnboardingLinkResponseDto>(
             path = "api/billing/host/connect",
             body = StripeHostLinkRequestDto(
-                refreshUrl = base,
-                returnUrl = base,
+                refreshUrl = redirectBase,
+                returnUrl = redirectBase,
                 user = BillingUserRefDto(id = user.id, email = email),
             ),
         ).onboardingUrl
@@ -487,13 +487,13 @@ class BillingRepository(
     override suspend fun getOnboardingLink(): Result<String> = runCatching {
         val user = userRepository.currentUser.value.getOrThrow()
         val email = userRepository.currentAccount.value.getOrNull()?.email
-        val base = apiBaseUrl.trimEnd('/')
+        val redirectBase = stripeRedirectBaseUrl.trimEnd('/')
 
         api.post<StripeHostLinkRequestDto, StripeOnboardingLinkResponseDto>(
             path = "api/billing/host/onboarding-link",
             body = StripeHostLinkRequestDto(
-                refreshUrl = base,
-                returnUrl = base,
+                refreshUrl = redirectBase,
+                returnUrl = redirectBase,
                 user = BillingUserRefDto(id = user.id, email = email),
             ),
         ).onboardingUrl

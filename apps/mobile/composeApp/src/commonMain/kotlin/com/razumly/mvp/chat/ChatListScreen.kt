@@ -78,7 +78,8 @@ fun ChatListScreen(component: ChatListComponent) {
             items(chatList) {
                 ChatListItem(
                     modifier = Modifier.clickable { component.onChatSelected(it) },
-                    chatGroup = it
+                    chatGroup = it,
+                    currentUserId = component.currentUser.id,
                 )
             }
         }

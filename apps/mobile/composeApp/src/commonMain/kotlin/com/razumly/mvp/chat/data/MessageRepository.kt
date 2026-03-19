@@ -8,10 +8,12 @@ import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.dto.CreateMessageRequestDto
 import com.razumly.mvp.core.network.dto.MessageApiDto
 import com.razumly.mvp.core.network.dto.MessagesResponseDto
+import io.ktor.http.encodeURLPathPart
 
 interface IMessageRepository {
     suspend fun getMessagesInChatGroup(chatGroupId: String): Result<List<MessageMVP>>
     suspend fun createMessage(newMessage: MessageMVP): Result<Unit>
+    suspend fun markMessagesRead(chatGroupId: String, userId: String): Result<Unit>
 }
 
 class MessageRepository(
@@ -45,4 +47,23 @@ class MessageRepository(
         }, saveCall = {
             databaseService.getMessageDao.upsertMessages(listOf(it))
         }, onReturn = {})
+
+    override suspend fun markMessagesRead(chatGroupId: String, userId: String): Result<Unit> = runCatching {
+        val normalizedChatId = chatGroupId.trim().takeIf(String::isNotBlank)
+            ?: error("Chat group id cannot be blank.")
+        val normalizedUserId = userId.trim().takeIf(String::isNotBlank)
+            ?: error("User id cannot be blank.")
+
+        val unreadMessages = databaseService.getMessageDao.getMessagesInChatGroup(normalizedChatId)
+            .filter { message -> message.isUnreadFor(normalizedUserId) }
+
+        if (unreadMessages.isNotEmpty()) {
+            val readMessages = unreadMessages.map { message ->
+                message.copy(readByIds = (message.readByIds + normalizedUserId).distinct())
+            }
+            databaseService.getMessageDao.upsertMessages(readMessages)
+        }
+
+        api.postNoResponse("api/chat/groups/${normalizedChatId.encodeURLPathPart()}/messages/read")
+    }
 }

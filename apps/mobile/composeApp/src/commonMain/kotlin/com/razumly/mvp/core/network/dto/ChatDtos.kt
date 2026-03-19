@@ -12,6 +12,7 @@ data class ChatGroupApiDto(
     val id: String? = null,
     @SerialName("\$id") val legacyId: String? = null,
     val name: String? = null,
+    val teamId: String? = null,
     val userIds: List<String>? = null,
     val hostId: String? = null,
 ) {
@@ -24,7 +25,9 @@ data class ChatGroupApiDto(
             name = name ?: "",
             userIds = userIds ?: emptyList(),
             hostId = resolvedHostId,
-        )
+        ).apply {
+            this.teamId = teamId?.trim()?.takeIf(String::isNotBlank)
+        }
     }
 }
 

@@ -2,6 +2,7 @@ package com.razumly.mvp.core.data.repositories
 
 import com.mmk.kmpnotifier.notification.NotifierManager
 import com.mmk.kmpnotifier.notification.PayloadData
+import com.razumly.mvp.chat.data.IMessageRepository
 import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.Event
@@ -99,6 +100,7 @@ data class PushDeviceTargetDebugStatus(
 class PushNotificationsRepository(
     private val userDataSource: CurrentUserDataSource,
     private val api: MvpApiClient,
+    private val messageRepository: IMessageRepository,
 ) : IPushNotificationsRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val pushTokenState =
@@ -138,6 +140,10 @@ class PushNotificationsRepository(
             scope.launch {
                 val normalizedTopicId =
                     data["topicId"]?.toString()?.trim()?.takeIf(String::isNotBlank)
+                        ?: data["chatId"]?.toString()?.trim()?.takeIf(String::isNotBlank)
+
+                refreshChatMessagesFromPushIfNeeded(normalizedTopicId)
+
                 if (!isApplicationInForeground()) {
                     Napier.d(
                         tag = "PushNotificationsRepository",
@@ -555,6 +561,28 @@ class PushNotificationsRepository(
 
         val cachedTarget = userDataSource.getPushTarget().first().trim()
         return userIdFromTopicId(cachedTarget)
+    }
+
+    private suspend fun refreshChatMessagesFromPushIfNeeded(topicId: String?) {
+        val chatGroupId = topicId.toChatGroupTopicIdOrNull() ?: return
+        messageRepository.getMessagesInChatGroup(chatGroupId).onFailure { error ->
+            Napier.w(
+                tag = "PushNotificationsRepository",
+                message = "Failed to refresh messages from push for chatId=$chatGroupId: ${error.message}"
+            )
+        }
+    }
+
+    private fun String?.toChatGroupTopicIdOrNull(): String? {
+        val normalizedTopicId = this?.trim()?.takeIf(String::isNotBlank) ?: return null
+        return when {
+            normalizedTopicId.startsWith(USER_TOPIC_PREFIX) -> null
+            normalizedTopicId.startsWith(TEAM_TOPIC_PREFIX) -> null
+            normalizedTopicId.startsWith(EVENT_TOPIC_PREFIX) -> null
+            normalizedTopicId.startsWith(TOURNAMENT_TOPIC_PREFIX) -> null
+            normalizedTopicId.startsWith(MATCH_TOPIC_PREFIX) -> null
+            else -> normalizedTopicId
+        }
     }
 
     private fun userIdFromTopicId(topicId: String): String? {

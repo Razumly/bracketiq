@@ -8,6 +8,8 @@ import java.net.URI
 private const val EMULATOR_HOST_ALIAS = "10.0.2.2"
 private const val LOOPBACK_HOST = "127.0.0.1"
 private const val LOCALHOST_HOST = "localhost"
+private const val NGROK_HOST_TOKEN = "ngrok"
+private const val UNSET_WEB_BASE_URL = "__MVP_WEB_BASE_URL_UNSET__"
 
 private fun isEmulator(): Boolean {
     val fingerprint = Build.FINGERPRINT.lowercase()
@@ -50,7 +52,44 @@ private fun resolveApiBaseUrl(baseUrl: String, remoteBaseUrl: String): String {
     return normalized
 }
 
+private fun isLikelyNgrokUrl(url: String): Boolean {
+    if (url.isBlank()) return false
+    return runCatching { URI(url).host?.contains(NGROK_HOST_TOKEN, ignoreCase = true) == true }
+        .getOrDefault(false)
+}
+
+private fun resolveStripeRedirectBaseUrl(
+    baseUrl: String,
+    remoteBaseUrl: String,
+    webBaseUrl: String,
+): String {
+    val normalized = baseUrl.trim().trimEnd('/')
+    val normalizedRemote = remoteBaseUrl.trim().trimEnd('/')
+    val normalizedWeb = webBaseUrl.trim().trimEnd('/')
+        .takeUnless { it.equals(UNSET_WEB_BASE_URL, ignoreCase = true) }
+        .orEmpty()
+
+    if (normalizedWeb.isNotBlank()) {
+        Napier.i("stripeRedirectBaseUrl(android): using MVP_WEB_BASE_URL=$normalizedWeb")
+        return normalizedWeb
+    }
+
+    if (isLikelyNgrokUrl(normalizedRemote)) {
+        Napier.i("stripeRedirectBaseUrl(android): using ngrok remote endpoint $normalizedRemote")
+        return normalizedRemote
+    }
+
+    Napier.i("stripeRedirectBaseUrl(android): using api endpoint $normalized")
+    return normalized
+}
+
 actual val apiBaseUrl: String = resolveApiBaseUrl(
     BuildConfig.MVP_API_BASE_URL,
     BuildConfig.MVP_API_BASE_URL_REMOTE,
+)
+
+actual val stripeRedirectBaseUrl: String = resolveStripeRedirectBaseUrl(
+    BuildConfig.MVP_API_BASE_URL,
+    BuildConfig.MVP_API_BASE_URL_REMOTE,
+    BuildConfig.MVP_WEB_BASE_URL,
 )

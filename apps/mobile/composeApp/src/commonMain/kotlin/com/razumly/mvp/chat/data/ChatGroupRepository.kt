@@ -3,13 +3,14 @@ package com.razumly.mvp.chat.data
 import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
+import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.IMVPRepository
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.multiResponse
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
+import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.util.newId
-import io.github.aakira.napier.Napier
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.dto.ChatGroupApiDto
 import com.razumly.mvp.core.network.dto.ChatMuteRequestDto
@@ -17,11 +18,9 @@ import com.razumly.mvp.core.network.dto.ChatMuteResponseDto
 import com.razumly.mvp.core.network.dto.ChatGroupsResponseDto
 import com.razumly.mvp.core.network.dto.CreateChatGroupRequestDto
 import com.razumly.mvp.core.network.dto.UpdateChatGroupRequestDto
+import io.github.aakira.napier.Napier
 import io.ktor.http.encodeURLPathPart
 import io.ktor.http.encodeURLQueryComponent
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.IO
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -31,11 +30,13 @@ import kotlinx.coroutines.launch
 
 interface IChatGroupRepository : IMVPRepository {
     val chatGroupsFlow: Flow<Result<List<ChatGroupWithRelations>>>
+    fun getUnreadMessageCountFlow(userId: String): Flow<Int>
 
     fun getChatGroupFlow(
         user: UserData?, chatGroup: ChatGroupWithRelations?
     ): Flow<Result<ChatGroupWithRelations>>
 
+    suspend fun refreshChatGroupsAndMessages(): Result<Unit>
     suspend fun createChatGroup(newChatGroup: ChatGroupWithRelations): Result<Unit>
     suspend fun updateChatGroup(newChatGroup: ChatGroup): Result<ChatGroup>
     suspend fun deleteChatGroup(chatGroupId: String): Result<Unit>
@@ -50,8 +51,12 @@ class ChatGroupRepository(
     private val databaseService: DatabaseService,
     private val userRepository: IUserRepository,
     private val messageRepository: IMessageRepository,
+    private val teamRepository: ITeamRepository,
 ) : IChatGroupRepository {
     override val chatGroupsFlow = groupsFlow()
+    override fun getUnreadMessageCountFlow(userId: String): Flow<Int> =
+        databaseService.getChatGroupDao.getChatGroupsFlowByUserId(userId)
+            .map { chatGroups -> countUnreadMessages(chatGroups, userId) }
 
     override fun getChatGroupFlow(
         user: UserData?, chatGroup: ChatGroupWithRelations?
@@ -76,33 +81,7 @@ class ChatGroupRepository(
                 .collect { trySend(Result.success(it)) }
         }
         val remoteJob = launch {
-            multiResponse(getRemoteData = {
-                val encoded = userId.encodeURLQueryComponent()
-                val res = api.get<ChatGroupsResponseDto>("api/chat/groups?userId=$encoded")
-                res.groups.mapNotNull { it.toChatGroupOrNull() }
-            }, getLocalData = {
-                databaseService.getChatGroupDao.getChatGroupsByUserId(userId)
-            }, saveData = {
-                val currentUserId = userRepository.currentUser.value.getOrThrow().id
-                val allUserIds = it.flatMap { group -> group.userIds }.distinct().filter(String::isNotBlank)
-                val users = userRepository.getUsers(allUserIds).getOrThrow()
-
-                it.forEach { group ->
-                    val otherUsers = users.filter { user -> user.id != currentUserId && group.userIds.contains(user.id) }
-                    group.setDisplayName(resolveDisplayName(group, otherUsers))
-                        .setImageUrl(resolveImageUrl(group, otherUsers))
-                }
-
-                it.forEach { group ->
-                    messageRepository.getMessagesInChatGroup(group.id).onFailure { e ->
-                        Napier.e("Failed to get messages for chat group ${group.id}", e)
-                    }
-                }
-
-                databaseService.getChatGroupDao.upsertChatGroupsWithRelations(it)
-            }, deleteData = {
-                databaseService.getChatGroupDao.deleteChatGroupsByIds(it)
-            }).onFailure { trySend(Result.failure(it)) }
+            refreshChatGroupsAndMessagesForUser(userId).onFailure { trySend(Result.failure(it)) }
         }
 
         awaitClose {
@@ -110,6 +89,51 @@ class ChatGroupRepository(
             remoteJob.cancel()
         }
     }
+
+    override suspend fun refreshChatGroupsAndMessages(): Result<Unit> {
+        val userId = userRepository.currentUser.value.getOrThrow().id
+        return refreshChatGroupsAndMessagesForUser(userId).map {}
+    }
+
+    private suspend fun refreshChatGroupsAndMessagesForUser(userId: String): Result<List<ChatGroup>> =
+        multiResponse(
+            getRemoteData = {
+                val encoded = userId.encodeURLQueryComponent()
+                val res = api.get<ChatGroupsResponseDto>("api/chat/groups?userId=$encoded")
+                res.groups.mapNotNull { it.toChatGroupOrNull() }
+            },
+            getLocalData = {
+                databaseService.getChatGroupDao.getChatGroupsByUserId(userId)
+            },
+            saveData = { chatGroups ->
+                val allUserIds = chatGroups
+                    .flatMap { group -> group.userIds }
+                    .distinct()
+                    .filter(String::isNotBlank)
+                val users = userRepository.getUsers(allUserIds).getOrThrow()
+                val teamsById = loadTeamsById(
+                    chatGroups.mapNotNull(::resolveTeamId)
+                )
+
+                chatGroups.forEach { group ->
+                    val otherUsers = users.filter { user -> user.id != userId && group.userIds.contains(user.id) }
+                    val team = resolveTeamId(group)?.let(teamsById::get)
+                    group.setDisplayName(resolveDisplayName(group, otherUsers, team))
+                        .setImageUrl(resolveImageUrl(group, otherUsers, team))
+                }
+
+                chatGroups.forEach { group ->
+                    messageRepository.getMessagesInChatGroup(group.id).onFailure { e ->
+                        Napier.e("Failed to refresh messages for chat group ${group.id}", e)
+                    }
+                }
+
+                databaseService.getChatGroupDao.upsertChatGroupsWithRelations(chatGroups)
+            },
+            deleteData = {
+                databaseService.getChatGroupDao.deleteChatGroupsByIds(it)
+            },
+        )
 
     override suspend fun createChatGroup(newChatGroup: ChatGroupWithRelations): Result<Unit> =
         singleResponse(networkCall = {
@@ -125,8 +149,9 @@ class ChatGroupRepository(
         }, saveCall = { chatGroup ->
             val currentUserId = userRepository.currentUser.value.getOrThrow().id
             val otherUsers = newChatGroup.users.filter { user -> user.id != currentUserId && chatGroup.userIds.contains(user.id) }
-            chatGroup.setDisplayName(resolveDisplayName(chatGroup, otherUsers))
-                .setImageUrl(resolveImageUrl(chatGroup, otherUsers))
+            val team = loadTeamForChatGroup(chatGroup)
+            chatGroup.setDisplayName(resolveDisplayName(chatGroup, otherUsers, team))
+                .setImageUrl(resolveImageUrl(chatGroup, otherUsers, team))
             databaseService.getChatGroupDao.upsertChatGroupWithRelations(chatGroup)
         }, onReturn = { })
 
@@ -143,8 +168,9 @@ class ChatGroupRepository(
             val currentUserId = userRepository.currentUser.value.getOrThrow().id
             val users = userRepository.getUsers(chatGroup.userIds).getOrElse { emptyList() }
             val otherUsers = users.filter { user -> user.id != currentUserId && chatGroup.userIds.contains(user.id) }
-            chatGroup.setDisplayName(resolveDisplayName(chatGroup, otherUsers))
-                .setImageUrl(resolveImageUrl(chatGroup, otherUsers))
+            val team = loadTeamForChatGroup(chatGroup)
+            chatGroup.setDisplayName(resolveDisplayName(chatGroup, otherUsers, team))
+                .setImageUrl(resolveImageUrl(chatGroup, otherUsers, team))
 
             if (users.isNotEmpty()) {
                 databaseService.getUserDataDao.upsertUsersData(users)
@@ -185,24 +211,71 @@ class ChatGroupRepository(
         ).muted
     }
 
-    private fun resolveDisplayName(chatGroup: ChatGroup, otherUsers: List<UserData>): String {
+    private fun resolveDisplayName(
+        chatGroup: ChatGroup,
+        otherUsers: List<UserData>,
+        team: Team?,
+    ): String {
         val participantNames = otherUsers
             .mapNotNull { user -> user.fullName.asMeaningfulValue() }
             .distinct()
             .joinToString(", ")
             .asMeaningfulValue()
         return chatGroup.name.asMeaningfulValue()
+            ?: team?.displayName.asMeaningfulValue()
             ?: participantNames
             ?: chatGroup.displayName.asMeaningfulValue()
             ?: "Unknown chat"
     }
 
-    private fun resolveImageUrl(chatGroup: ChatGroup, otherUsers: List<UserData>): String? =
-        otherUsers
+    private fun resolveImageUrl(
+        chatGroup: ChatGroup,
+        otherUsers: List<UserData>,
+        team: Team?,
+    ): String? {
+        if (resolveTeamId(chatGroup) != null) {
+            return team?.imageUrl.asMeaningfulValue()
+                ?: chatGroup.imageUrl.asMeaningfulValue()
+        }
+
+        return otherUsers
             .asSequence()
             .mapNotNull { user -> user.imageUrl.asMeaningfulValue() }
             .firstOrNull()
             ?: chatGroup.imageUrl.asMeaningfulValue()
+    }
+
+    private suspend fun loadTeamForChatGroup(chatGroup: ChatGroup): Team? {
+        val teamId = resolveTeamId(chatGroup) ?: return null
+        return loadTeamsById(listOf(teamId))[teamId]
+    }
+
+    private suspend fun loadTeamsById(teamIds: List<String>): Map<String, Team> {
+        val normalizedIds = teamIds
+            .mapNotNull { teamId -> teamId.asMeaningfulValue() }
+            .distinct()
+        if (normalizedIds.isEmpty()) {
+            return emptyMap()
+        }
+
+        val teams = teamRepository.getTeams(normalizedIds)
+            .onFailure { error ->
+                Napier.w("Failed to load chat team metadata for ${normalizedIds.size} ids.", error)
+            }
+            .getOrElse { emptyList() }
+
+        return teams.associateBy { team -> team.id }
+    }
+
+    private fun resolveTeamId(chatGroup: ChatGroup): String? =
+        chatGroup.teamId.asMeaningfulValue()
+            ?: chatGroup.id.toTeamChatIdOrNull()
+
+    private fun String.toTeamChatIdOrNull(): String? =
+        this
+            .takeIf { value -> value.startsWith("team:", ignoreCase = true) }
+            ?.substringAfter("team:")
+            .asMeaningfulValue()
 
     private fun String?.asMeaningfulValue(): String? =
         this

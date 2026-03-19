@@ -4,6 +4,7 @@ import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.chat.data.IChatGroupRepository
 import com.razumly.mvp.chat.data.IMessageRepository
+import com.razumly.mvp.chat.data.countUnreadMessages
 import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.data.dataTypes.MessageMVP
 import com.razumly.mvp.core.data.dataTypes.UserData
@@ -11,6 +12,7 @@ import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.util.newId
+import io.github.aakira.napier.Napier
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -106,6 +108,23 @@ class DefaultChatGroupComponent(
                     }.onFailure {
                         _errorState.value = it.message
                         _isChatMuted.value = false
+                    }
+                }
+        }
+        scope.launch {
+            chatGroup
+                .map { group ->
+                    val chatId = group?.chatGroup?.id?.trim().orEmpty()
+                    val unreadCount = group?.messages?.let { messages ->
+                        countUnreadMessages(messages, currentUser.id)
+                    } ?: 0
+                    chatId to unreadCount
+                }
+                .distinctUntilChanged()
+                .collect { (chatId, unreadCount) ->
+                    if (chatId.isBlank() || unreadCount <= 0) return@collect
+                    messagesRepository.markMessagesRead(chatId, currentUser.id).onFailure { error ->
+                        Napier.w("Failed to mark messages as read for chat $chatId: ${error.message}")
                     }
                 }
         }
