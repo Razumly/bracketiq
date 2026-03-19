@@ -242,7 +242,10 @@ private fun buildWeeklySessionOptions(
         }
 
         val slotStartDate = slot.startDate.toLocalDateTime(timeZone).date
-        val slotEndDate = slot.endDate?.toLocalDateTime(timeZone)?.date
+        val rawSlotEndDate = slot.endDate?.toLocalDateTime(timeZone)?.date
+        val slotEndDate = rawSlotEndDate?.takeIf { endDate ->
+            endDate > slotStartDate
+        }
         val anchorDate = if (today > slotStartDate) today else slotStartDate
         val anchorWeekStart = startOfWeekMonday(anchorDate)
 

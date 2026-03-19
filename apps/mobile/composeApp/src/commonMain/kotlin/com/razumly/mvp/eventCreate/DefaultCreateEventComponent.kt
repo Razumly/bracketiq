@@ -1204,6 +1204,11 @@ class DefaultCreateEventComponent(
                 return@mapNotNull null
             }
             val slotStartDate = slot.startDate.takeUnless { it == Instant.DISTANT_PAST } ?: event.start
+            val repeatingEndDate = if (event.eventType == EventType.WEEKLY_EVENT) {
+                null
+            } else {
+                event.end.takeIf { it > event.start }
+            }
             slot.copy(
                 id = slot.id.ifBlank { newId() },
                 dayOfWeek = normalizedDays.first(),
@@ -1212,7 +1217,7 @@ class DefaultCreateEventComponent(
                 scheduledFieldId = mappedFieldIds.first(),
                 scheduledFieldIds = mappedFieldIds,
                 startDate = slotStartDate,
-                endDate = event.end.takeIf { it > event.start },
+                endDate = repeatingEndDate,
                 repeating = true,
             )
         }
@@ -1361,7 +1366,11 @@ class DefaultCreateEventComponent(
     private fun createDefaultLeagueSlot(): TimeSlot {
         val event = newEventState.value
         val startDate = if (event.start == Instant.DISTANT_PAST) Clock.System.now() else event.start
-        val endDate = event.end.takeIf { it > event.start }
+        val endDate = if (event.eventType == EventType.WEEKLY_EVENT) {
+            null
+        } else {
+            event.end.takeIf { it > event.start }
+        }
         return TimeSlot(
             id = newId(),
             dayOfWeek = null,

@@ -9,7 +9,6 @@ internal fun Event.applyCreateSelectionRules(isRentalFlow: Boolean): Event {
         EventType.LEAGUE, EventType.TOURNAMENT, EventType.WEEKLY_EVENT -> copy(
             eventType = normalizedType,
             teamSignup = true,
-            noFixedEndDateTime = true,
         )
 
         EventType.EVENT -> copy(

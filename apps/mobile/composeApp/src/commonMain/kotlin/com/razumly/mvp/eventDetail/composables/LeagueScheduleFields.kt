@@ -365,6 +365,25 @@ private fun TimeslotCard(
                     }
                 }
 
+                OptionalDatePickerField(
+                    label = "End Date (Optional)",
+                    value = slot.endDate,
+                    onDateSelected = { selected ->
+                        onUpdateSlot(index, slot.copy(endDate = selected))
+                    },
+                    supportingText = "Leave empty for no end date.",
+                )
+                if (slot.endDate != null) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(onClick = { onUpdateSlot(index, slot.copy(endDate = null)) }) {
+                            Text("Clear end date")
+                        }
+                    }
+                }
+
                 PlatformDropdown(
                     selectedValue = "",
                     onSelectionChange = {},
@@ -497,7 +516,7 @@ private fun TimeSlot.toRepeatingSlot(eventStart: Instant, eventEnd: Instant?): T
         dayOfWeek = day,
         daysOfWeek = listOf(day),
         startDate = effectiveStart,
-        endDate = eventEnd?.takeIf { it > effectiveStart },
+        endDate = null,
         startTimeMinutes = resolvedStartMinutes,
         endTimeMinutes = resolvedEndMinutes,
     )
@@ -633,6 +652,48 @@ private fun DatePickerField(
             getTime = false,
             canSelectPast = true,
             initialDate = value,
+        )
+    }
+}
+
+@OptIn(ExperimentalTime::class)
+@Composable
+private fun OptionalDatePickerField(
+    label: String,
+    value: Instant?,
+    onDateSelected: (Instant?) -> Unit,
+    modifier: Modifier = Modifier,
+    isError: Boolean = false,
+    supportingText: String = "",
+) {
+    var showPicker by remember { mutableStateOf(false) }
+    PlatformTextField(
+        value = value?.toDateLabel() ?: "",
+        onValueChange = {},
+        modifier = modifier,
+        label = label,
+        placeholder = "Optional",
+        readOnly = true,
+        isError = isError,
+        supportingText = supportingText,
+        trailingIcon = {
+            IconButton(onClick = { showPicker = true }) {
+                Icon(Icons.Default.DateRange, contentDescription = "Select date")
+            }
+        },
+        onTap = { showPicker = true },
+    )
+    if (showPicker) {
+        PlatformDateTimePicker(
+            onDateSelected = { selected ->
+                onDateSelected(selected)
+                showPicker = false
+            },
+            onDismissRequest = { showPicker = false },
+            showPicker = showPicker,
+            getTime = false,
+            canSelectPast = true,
+            initialDate = value ?: Clock.System.now(),
         )
     }
 }

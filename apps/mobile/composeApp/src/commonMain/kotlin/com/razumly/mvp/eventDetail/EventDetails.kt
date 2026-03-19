@@ -1009,7 +1009,14 @@ fun EventDetails(
         editEvent.divisions,
         isNewEvent,
     ) {
-        if (isNewEvent && (editEvent.eventType == EventType.LEAGUE || editEvent.eventType == EventType.TOURNAMENT)) {
+        if (
+            isNewEvent &&
+            (
+                editEvent.eventType == EventType.LEAGUE ||
+                    editEvent.eventType == EventType.TOURNAMENT ||
+                    editEvent.eventType == EventType.WEEKLY_EVENT
+                )
+        ) {
             computeLeagueSlotErrors(
                 slots = leagueTimeSlots,
                 singleDivision = editEvent.singleDivision,
@@ -1067,10 +1074,19 @@ fun EventDetails(
         isSkillLevelValid = editEvent.eventType == EventType.LEAGUE || editEvent.divisions.isNotEmpty()
         isSportValid = !isNewEvent || !editEvent.sportId.isNullOrBlank()
         val requiresFixedEndValidation = (
-            editEvent.eventType == EventType.LEAGUE || editEvent.eventType == EventType.TOURNAMENT
-        ) && !editEvent.noFixedEndDateTime
+            editEvent.eventType == EventType.LEAGUE ||
+                editEvent.eventType == EventType.TOURNAMENT ||
+                editEvent.eventType == EventType.WEEKLY_EVENT
+            ) && !editEvent.noFixedEndDateTime
         isFixedEndDateRangeValid = !requiresFixedEndValidation || editEvent.end > editEvent.start
-        isLeagueSlotsValid = if (isNewEvent && (editEvent.eventType == EventType.LEAGUE || editEvent.eventType == EventType.TOURNAMENT)) {
+        isLeagueSlotsValid = if (
+            isNewEvent &&
+            (
+                editEvent.eventType == EventType.LEAGUE ||
+                    editEvent.eventType == EventType.TOURNAMENT ||
+                    editEvent.eventType == EventType.WEEKLY_EVENT
+                )
+        ) {
             leagueTimeSlots.isNotEmpty() && leagueSlotErrors.isEmpty()
         } else {
             true
@@ -1094,7 +1110,14 @@ fun EventDetails(
             isLoserSetCountValid = true
             isLoserPointsValid = true
         }
-        isFieldCountValid = if (isNewEvent && (editEvent.eventType == EventType.LEAGUE || editEvent.eventType == EventType.TOURNAMENT)) {
+        isFieldCountValid = if (
+            isNewEvent &&
+            (
+                editEvent.eventType == EventType.LEAGUE ||
+                    editEvent.eventType == EventType.TOURNAMENT ||
+                    editEvent.eventType == EventType.WEEKLY_EVENT
+                )
+        ) {
             fieldCount > 0
         } else {
             true
@@ -1507,7 +1530,11 @@ fun EventDetails(
     val facilitiesFieldCount = if (editView) fieldCount else readOnlyFieldCount
     val facilitiesSummaryLine = remember(facilitiesFieldCount, eventWithRelations.timeSlots, editEvent.eventType) {
         val fieldSummary = "${facilitiesFieldCount.coerceAtLeast(0)} fields"
-        val slotSummary = if (editEvent.eventType == EventType.LEAGUE || editEvent.eventType == EventType.TOURNAMENT) {
+        val slotSummary = if (
+            editEvent.eventType == EventType.LEAGUE ||
+                editEvent.eventType == EventType.TOURNAMENT ||
+                editEvent.eventType == EventType.WEEKLY_EVENT
+        ) {
             "${eventWithRelations.timeSlots.size} weekly slots"
         } else {
             null
@@ -1779,7 +1806,9 @@ fun EventDetails(
                         }
 
                         val supportsNoFixedEndDateTime =
-                            editEvent.eventType == EventType.LEAGUE || editEvent.eventType == EventType.TOURNAMENT
+                            editEvent.eventType == EventType.LEAGUE ||
+                                editEvent.eventType == EventType.TOURNAMENT ||
+                                editEvent.eventType == EventType.WEEKLY_EVENT
 
                         if (editEvent.eventType == EventType.EVENT || supportsNoFixedEndDateTime) {
                             Row(
@@ -1801,9 +1830,13 @@ fun EventDetails(
                                     },
                                 )
                                 PlatformTextField(
-                                    value = editEvent.end.toLocalDateTime(
-                                        TimeZone.currentSystemDefault()
-                                    ).format(dateTimeFormat),
+                                    value = if (supportsNoFixedEndDateTime && editEvent.noFixedEndDateTime) {
+                                        ""
+                                    } else {
+                                        editEvent.end.toLocalDateTime(
+                                            TimeZone.currentSystemDefault()
+                                        ).format(dateTimeFormat)
+                                    },
                                     onValueChange = {},
                                     modifier = Modifier.weight(1f),
                                     label = "End Date & Time",
@@ -1917,12 +1950,16 @@ fun EventDetails(
                                 val selectedEventType = EventType.entries.find { it.name == selectedValue }
                                 selectedEventType?.let { onEventTypeSelected(it) }
                             },
-                            options = EventType.entries.map { eventType ->
-                                DropdownOption(
-                                    value = eventType.name,
-                                    label = eventType.name.toEnumTitleCase(),
-                                )
-                            },
+                            options = EventType.entries
+                                .filterNot { eventType ->
+                                    isNewEvent && rentalTimeLocked && eventType == EventType.WEEKLY_EVENT
+                                }
+                                .map { eventType ->
+                                    DropdownOption(
+                                        value = eventType.name,
+                                        label = eventType.name.toEnumTitleCase(),
+                                    )
+                                },
                             label = "Event Type",
                             modifier = Modifier.fillMaxWidth(),
                         )
@@ -3377,7 +3414,11 @@ fun EventDetails(
                     )
                 }
 
-                if (editEvent.eventType == EventType.LEAGUE || editEvent.eventType == EventType.TOURNAMENT) {
+                if (
+                    editEvent.eventType == EventType.LEAGUE ||
+                        editEvent.eventType == EventType.TOURNAMENT ||
+                        editEvent.eventType == EventType.WEEKLY_EVENT
+                ) {
                     animatedCardSection(
                         sectionId = "facility_schedule",
                         sectionTitle = if (editView) "Schedule Config" else "Schedule",
@@ -3802,7 +3843,11 @@ fun EventDetails(
                                 onUpdateSlot = onUpdateLeagueTimeSlot,
                                 onRemoveSlot = onRemoveLeagueTimeSlot,
                                 slotErrors = leagueSlotErrors,
-                                showSlotEditor = editEvent.eventType == EventType.LEAGUE || editEvent.eventType == EventType.TOURNAMENT,
+                                showSlotEditor = (
+                                    editEvent.eventType == EventType.LEAGUE ||
+                                        editEvent.eventType == EventType.TOURNAMENT ||
+                                        editEvent.eventType == EventType.WEEKLY_EVENT
+                                    ),
                                 slotDivisionOptions = slotDivisionOptions,
                                 lockSlotDivisions = editEvent.singleDivision,
                                 lockedDivisionIds = editEvent.divisions.normalizeDivisionIdentifiers(),
@@ -3821,8 +3866,13 @@ fun EventDetails(
                                     },
                                 )
                             }
-                            if (!isLeagueSlotsValid &&
-                                (editEvent.eventType == EventType.LEAGUE || editEvent.eventType == EventType.TOURNAMENT)
+                            if (
+                                !isLeagueSlotsValid &&
+                                (
+                                    editEvent.eventType == EventType.LEAGUE ||
+                                        editEvent.eventType == EventType.TOURNAMENT ||
+                                        editEvent.eventType == EventType.WEEKLY_EVENT
+                                    )
                             ) {
                                 Text(
                                     text = "Fix timeslot issues before continuing.",
@@ -5510,3 +5560,4 @@ fun BackgroundImage(
         }
     }
 }
+
