@@ -8,6 +8,11 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 
+enum class PlatformTextFieldStyle {
+    Default,
+    GlassPill,
+}
+
 @Composable
 expect fun PlatformTextField(
     value: String,
@@ -30,5 +35,6 @@ expect fun PlatformTextField(
     inputFilter: ((String) -> String)? = null,
     onTap: (() -> Unit)? = null,
     imeAction: ImeAction = ImeAction.Next,
-    externalFocusManager: PlatformFocusManager? = null
+    style: PlatformTextFieldStyle = PlatformTextFieldStyle.Default,
+    externalFocusManager: PlatformFocusManager? = null,
 )

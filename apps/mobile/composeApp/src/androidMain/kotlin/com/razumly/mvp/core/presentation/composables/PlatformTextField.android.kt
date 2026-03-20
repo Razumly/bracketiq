@@ -18,6 +18,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -25,6 +26,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.shape.RoundedCornerShape
 import com.razumly.mvp.core.presentation.localAllFocusManagers
 import com.razumly.mvp.core.util.CurrencyAmountInputVisualTransformation
 
@@ -50,6 +53,7 @@ actual fun PlatformTextField(
     inputFilter: ((String) -> String)?,
     onTap: (() -> Unit)?,
     imeAction: ImeAction,
+    style: PlatformTextFieldStyle,
     externalFocusManager: PlatformFocusManager?
 ) {
     val focusManager = externalFocusManager ?: rememberPlatformFocusManager()
@@ -82,6 +86,17 @@ actual fun PlatformTextField(
     } else {
         modifier
     }
+    val glassStyle = style == PlatformTextFieldStyle.GlassPill
+    val fieldShape = if (glassStyle) RoundedCornerShape(28.dp) else OutlinedTextFieldDefaults.shape
+    val glassColors = OutlinedTextFieldDefaults.colors(
+        focusedBorderColor = if (isError) MaterialTheme.colorScheme.error.copy(alpha = 0.55f) else Color.Transparent,
+        unfocusedBorderColor = if (isError) MaterialTheme.colorScheme.error.copy(alpha = 0.45f) else Color.Transparent,
+        disabledBorderColor = Color.Transparent,
+        focusedContainerColor = Color.Transparent,
+        unfocusedContainerColor = Color.Transparent,
+        disabledContainerColor = Color.Transparent,
+        errorContainerColor = Color.Transparent,
+    )
 
     if (readOnly && onTap != null) {
         Box(
@@ -141,27 +156,32 @@ actual fun PlatformTextField(
                 trailingIcon = trailingIcon,
                 leadingIcon = leadingIcon,
                 singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(
-                    disabledTextColor = MaterialTheme.colorScheme.onSurface,
-                    disabledBorderColor = if (isError) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.outline
-                    },
-                    disabledLabelColor = if (isError) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                    disabledPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    disabledSupportingTextColor = if (isError) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                    disabledTrailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    disabledLeadingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                ),
+                shape = fieldShape,
+                colors = if (glassStyle) {
+                    glassColors
+                } else {
+                    OutlinedTextFieldDefaults.colors(
+                        disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                        disabledBorderColor = if (isError) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.outline
+                        },
+                        disabledLabelColor = if (isError) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        disabledPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        disabledSupportingTextColor = if (isError) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        disabledTrailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        disabledLeadingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                },
             )
         }
     } else {
@@ -214,7 +234,9 @@ actual fun PlatformTextField(
             } else null,
             trailingIcon = trailingIcon,
             leadingIcon = leadingIcon,
-            singleLine = true
+            singleLine = true,
+            shape = fieldShape,
+            colors = if (glassStyle) glassColors else OutlinedTextFieldDefaults.colors(),
         )
     }
 }

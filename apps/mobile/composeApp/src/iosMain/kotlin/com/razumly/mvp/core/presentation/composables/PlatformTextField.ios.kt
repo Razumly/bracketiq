@@ -18,6 +18,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.Dp
@@ -54,6 +55,7 @@ actual fun PlatformTextField(
     inputFilter: ((String) -> String)?,
     onTap: (() -> Unit)?,
     imeAction: ImeAction,
+    style: PlatformTextFieldStyle,
     externalFocusManager: PlatformFocusManager?
 ) {
     val focusManager = externalFocusManager ?: rememberPlatformFocusManager()
@@ -69,6 +71,8 @@ actual fun PlatformTextField(
     val iosFocusManager = focusManager as IOSFocusManager
     val fieldHeight = height ?: 44.dp
     val actualFontSize = fontSize ?: textStyle?.fontSize ?: 16.sp
+    val glassStyle = style == PlatformTextFieldStyle.GlassPill
+    val cornerRadius = if (glassStyle) 28.dp else 8.dp
     val paddingModifier = if (contentPadding != null) {
         Modifier.padding(contentPadding)
     } else {
@@ -108,14 +112,15 @@ actual fun PlatformTextField(
                         .weight(1f)
                         .height(fieldHeight)
                         .background(
-                            MaterialTheme.colorScheme.surface,
-                            RoundedCornerShape(8.dp)
+                            if (glassStyle) Color.Transparent else MaterialTheme.colorScheme.surface,
+                            RoundedCornerShape(cornerRadius)
                         )
                         .border(
                             1.dp,
                             if (isError) MaterialTheme.colorScheme.error
+                            else if (glassStyle) Color.Transparent
                             else MaterialTheme.colorScheme.outline,
-                            RoundedCornerShape(8.dp)
+                            RoundedCornerShape(cornerRadius)
                         )
                         .clickable(enabled = enabled, onClick = onTap)
                         .padding(horizontal = 12.dp),
@@ -148,14 +153,15 @@ actual fun PlatformTextField(
                             enabled = enabled && !readOnly,
                             fontSize = actualFontSize,
                             focusManager = iosFocusManager,
-                            imeAction = imeAction
+                            imeAction = imeAction,
+                            style = style,
                         )
                     },
                     modifier = Modifier
                         .weight(1f)
                         .height(fieldHeight)
                         .platformFocusable(iosFocusManager, enabled)
-                        .clip(RoundedCornerShape(5.dp)),
+                        .clip(RoundedCornerShape(if (glassStyle) 28.dp else 5.dp)),
                     update = { textField ->
                         updateSimpleUITextField(
                             textField = textField,
@@ -165,7 +171,8 @@ actual fun PlatformTextField(
                             keyboardType = keyboardType,
                             enabled = enabled && !readOnly,
                             fontSize = actualFontSize,
-                            imeAction = imeAction
+                            imeAction = imeAction,
+                            style = style,
                         )
                     }
                 )
@@ -205,14 +212,19 @@ fun createSimpleUITextField(
     enabled: Boolean,
     fontSize: TextUnit = 16.sp,
     focusManager: IOSFocusManager,
-    imeAction: ImeAction = ImeAction.Next
+    imeAction: ImeAction = ImeAction.Next,
+    style: PlatformTextFieldStyle = PlatformTextFieldStyle.Default,
 ): UITextField {
     val textField = UITextField() // Just regular UITextField - no custom subclass!
 
     // Basic setup only
     textField.text = toDisplayText(text, keyboardType)
     textField.placeholder = placeholder
-    textField.borderStyle = UITextBorderStyle.UITextBorderStyleRoundedRect
+    textField.borderStyle = if (style == PlatformTextFieldStyle.GlassPill) {
+        UITextBorderStyle.UITextBorderStyleNone
+    } else {
+        UITextBorderStyle.UITextBorderStyleRoundedRect
+    }
     textField.secureTextEntry = isSecure
     textField.enabled = enabled
     textField.font = UIFont.systemFontOfSize(fontSize.value.toDouble())
@@ -266,7 +278,8 @@ fun updateSimpleUITextField(
     keyboardType: String,
     enabled: Boolean,
     fontSize: TextUnit = 16.sp,
-    imeAction: ImeAction = ImeAction.Next
+    imeAction: ImeAction = ImeAction.Next,
+    style: PlatformTextFieldStyle = PlatformTextFieldStyle.Default,
 ) {
     val displayText = toDisplayText(text, keyboardType)
     // Only update text if different to avoid cursor jumping
@@ -278,6 +291,11 @@ fun updateSimpleUITextField(
     textField.secureTextEntry = isSecure
     textField.enabled = enabled
     textField.font = UIFont.systemFontOfSize(fontSize.value.toDouble())
+    textField.borderStyle = if (style == PlatformTextFieldStyle.GlassPill) {
+        UITextBorderStyle.UITextBorderStyleNone
+    } else {
+        UITextBorderStyle.UITextBorderStyleRoundedRect
+    }
 
     // Update keyboard type
     when (keyboardType) {
