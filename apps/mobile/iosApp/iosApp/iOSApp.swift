@@ -5,9 +5,11 @@ import FirebaseMessaging
 import GoogleMaps
 import GoogleSignIn
 import IQKeyboardManagerSwift
+import UserNotifications
 
-class AppDelegate: NSObject, UIApplicationDelegate {
+class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate, MessagingDelegate {
     private static let appForegroundKey = "mvp_app_is_foreground"
+    private static let fcmTokenDefaultsKey = "mvp_ios_fcm_token"
     private let apiKey: String = {
         guard let filePath = Bundle.main.path(forResource: "Secrets", ofType: "plist") else {
             fatalError("Couldn't find file 'Secrets.plist'.")
@@ -26,25 +28,24 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         
         FirebaseApp.configure()
         GMSServices.provideAPIKey(apiKey)
+        Messaging.messaging().delegate = self
+        UNUserNotificationCenter.current().delegate = self
         
         // ADD: Configure IQKeyboardManager globally
         IQKeyboardManager.shared.isEnabled = true
-        IQKeyboardManager.shared.resignOnTouchOutside = true
+        IQKeyboardManager.shared.resignOnTouchOutside = false
         IQKeyboardManager.shared.keyboardDistance = 10
-        
+        if let hostingControllerClass = NSClassFromString("UIHostingController") as? UIViewController.Type,
+           !IQKeyboardManager.shared.disabledDistanceHandlingClasses.contains(where: { $0 == hostingControllerClass }) {
+            IQKeyboardManager.shared.disabledDistanceHandlingClasses.append(hostingControllerClass)
+        }
+
         NotifierManager.shared.initialize(configuration: NotificationPlatformConfigurationIos(
             showPushNotification: false,
             askNotificationPermissionOnStart: false,
             notificationSoundName: nil
         ))
-        
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
-            if granted {
-                DispatchQueue.main.async {
-                    application.registerForRemoteNotifications()
-                }
-            }
-        }
+        evaluateNotificationAuthorization(application: application)
         
         UserDefaults.standard.set(true, forKey: AppDelegate.appForegroundKey)
 
@@ -79,10 +80,44 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         Messaging.messaging().apnsToken = deviceToken
+        Messaging.messaging().token { token, error in
+            if let error {
+                print("Failed to fetch FCM token after APNs registration: \(error.localizedDescription)")
+                return
+            }
+            self.persistFcmToken(token)
+        }
+    }
+    
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        print("Failed to register for remote notifications: \(error.localizedDescription)")
+        persistFcmToken(nil)
+    }
+    
+    func messaging(_ messaging: Messaging, didReceiveRegistrationToken fcmToken: String?) {
+        persistFcmToken(fcmToken)
+    }
+    
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        // Foreground rendering is handled in shared code to suppress active-chat duplicates.
+        completionHandler([])
+    }
+    
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        completionHandler()
     }
 
     func applicationDidBecomeActive(_ application: UIApplication) {
         UserDefaults.standard.set(true, forKey: AppDelegate.appForegroundKey)
+        evaluateNotificationAuthorization(application: application)
     }
 
     func applicationWillResignActive(_ application: UIApplication) {
@@ -91,6 +126,66 @@ class AppDelegate: NSObject, UIApplicationDelegate {
 
     func applicationDidEnterBackground(_ application: UIApplication) {
         UserDefaults.standard.set(false, forKey: AppDelegate.appForegroundKey)
+    }
+    
+    private func persistFcmToken(_ token: String?) {
+        let normalized = token?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let normalized, !normalized.isEmpty {
+            UserDefaults.standard.set(normalized, forKey: AppDelegate.fcmTokenDefaultsKey)
+            return
+        }
+        UserDefaults.standard.removeObject(forKey: AppDelegate.fcmTokenDefaultsKey)
+    }
+
+    private func evaluateNotificationAuthorization(application: UIApplication) {
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationSettings { settings in
+            switch settings.authorizationStatus {
+            case .notDetermined:
+                center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
+                    if let error {
+                        print("Notification authorization request failed: \(error.localizedDescription)")
+                    } else {
+                        print("Notification authorization prompt result: granted=\(granted)")
+                    }
+                    DispatchQueue.main.async {
+                        application.registerForRemoteNotifications()
+                    }
+                }
+            case .authorized, .provisional, .ephemeral:
+                print("Notification authorization already granted: \(self.authorizationStatusName(settings.authorizationStatus))")
+                DispatchQueue.main.async {
+                    application.registerForRemoteNotifications()
+                }
+            case .denied:
+                print("Notification authorization denied. Prompt will not reappear until user enables it in Settings.")
+                DispatchQueue.main.async {
+                    application.registerForRemoteNotifications()
+                }
+            @unknown default:
+                print("Notification authorization status unknown: \(settings.authorizationStatus.rawValue)")
+                DispatchQueue.main.async {
+                    application.registerForRemoteNotifications()
+                }
+            }
+        }
+    }
+
+    private func authorizationStatusName(_ status: UNAuthorizationStatus) -> String {
+        switch status {
+        case .notDetermined:
+            return "notDetermined"
+        case .denied:
+            return "denied"
+        case .authorized:
+            return "authorized"
+        case .provisional:
+            return "provisional"
+        case .ephemeral:
+            return "ephemeral"
+        @unknown default:
+            return "unknown"
+        }
     }
 }
 
@@ -110,26 +205,31 @@ struct iOSApp: App {
     
     var body: some Scene {
         WindowGroup {
-            ComposeView(deepLinkUrl: deepLinkUrl)
-                .ignoresSafeArea(.keyboard)
-                .id(deepLinkId) // Use the ID instead of URL string
-                .onAppear {
-                    if let pendingUrl = AppDelegate.pendingDeepLink {
-                        updateDeepLink(pendingUrl)
-                        AppDelegate.pendingDeepLink = nil
+            ZStack {
+                Color(uiColor: .systemBackground)
+                    .ignoresSafeArea()
+
+                ComposeView(deepLinkUrl: deepLinkUrl)
+                    .ignoresSafeArea(.container, edges: [.top, .bottom])
+                    .id(deepLinkId) // Use the ID instead of URL string
+                    .onAppear {
+                        if let pendingUrl = AppDelegate.pendingDeepLink {
+                            updateDeepLink(pendingUrl)
+                            AppDelegate.pendingDeepLink = nil
+                        }
                     }
-                }
-                .onReceive(NotificationCenter.default.publisher(for: .deepLinkReceived)) { notification in
-                    if let url = notification.object as? URL {
+                    .onReceive(NotificationCenter.default.publisher(for: .deepLinkReceived)) { notification in
+                        if let url = notification.object as? URL {
+                            updateDeepLink(url)
+                        }
+                    }
+                    .onOpenURL { url in
+                        if GIDSignIn.sharedInstance.handle(url) {
+                            return
+                        }
                         updateDeepLink(url)
                     }
-                }
-                .onOpenURL { url in
-                    if GIDSignIn.sharedInstance.handle(url) {
-                        return
-                    }
-                    updateDeepLink(url)
-                }
+            }
         }
     }
     
@@ -139,4 +239,3 @@ struct iOSApp: App {
         print("Deep link updated: \(url.absoluteString) with ID: \(deepLinkId)")
     }
 }
-

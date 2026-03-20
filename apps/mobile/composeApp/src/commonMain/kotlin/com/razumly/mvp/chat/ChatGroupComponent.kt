@@ -155,8 +155,10 @@ class DefaultChatGroupComponent(
             )
 
             scope.launch {
-                messagesRepository.createMessage(message).onFailure {
-                    _errorState.value = it.message
+                val createResult = messagesRepository.createMessage(message)
+                if (createResult.isFailure) {
+                    _errorState.value = createResult.exceptionOrNull()?.message
+                    return@launch
                 }
                 pushNotificationsRepository.sendChatGroupNotification(
                     chatGroup.value!!.chatGroup.id, "New message from ${currentUser.fullName}", text

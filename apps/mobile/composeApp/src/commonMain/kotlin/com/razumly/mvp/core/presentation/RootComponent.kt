@@ -64,6 +64,8 @@ class RootComponent(
         private const val STARTUP_AUTH_TIMEOUT_MS = 3_000L
         private const val STARTUP_TIMEOUT_NOTICE =
             "We couldn't restore your session in time. Please log in."
+        private const val PUSH_TARGET_REGISTRATION_ATTEMPTS = 3
+        private const val PUSH_TARGET_REGISTRATION_RETRY_DELAY_MS = 2_000L
     }
 
     private val navigation = StackNavigation<AppConfig>()
@@ -93,9 +95,12 @@ class RootComponent(
     private var syncedChatUserId: String? = null
     private var startupDecisionMade = false
     private var unreadCountJob: Job? = null
+    private var pushRegistrationRetryJob: Job? = null
 
     private val _selectedPage = MutableStateFlow<AppConfig>(AppConfig.Search())
     val selectedPage: StateFlow<AppConfig> = _selectedPage.asStateFlow()
+    private val _navigationAnimationDirection = MutableStateFlow(1)
+    val navigationAnimationDirection: StateFlow<Int> = _navigationAnimationDirection.asStateFlow()
     private val _unreadChatMessageCount = MutableStateFlow(0)
     val unreadChatMessageCount: StateFlow<Int> = _unreadChatMessageCount.asStateFlow()
     private val _isStartupInProgress = MutableStateFlow(true)
@@ -134,6 +139,7 @@ class RootComponent(
                         startupDecisionMade = true
                         _isStartupInProgress.value = false
                         if (currentConfig != AppConfig.Login) {
+                            setDefaultNavigationDirection()
                             navigation.replaceAll(AppConfig.Login)
                         }
                     }
@@ -147,6 +153,7 @@ class RootComponent(
                 startupDecisionMade = true
                 _isStartupInProgress.value = false
                 _startupNotice.value = STARTUP_TIMEOUT_NOTICE
+                setDefaultNavigationDirection()
                 navigation.replaceAll(AppConfig.Login)
             }
         }
@@ -201,6 +208,7 @@ class RootComponent(
             is DeepLinkNav.Return -> AppConfig.ProfileHome
             else -> AppConfig.Search()
         }
+        setDefaultNavigationDirection()
         navigation.replaceAll(targetConfig)
         _selectedPage.value = targetConfig
         deepLinkNav.value = null
@@ -217,6 +225,7 @@ class RootComponent(
     }
 
     fun onTabSelected(page: AppConfig) {
+        setTabNavigationDirection(from = _selectedPage.value, to = page)
         _selectedPage.value = page
         when (page) {
             is AppConfig.Search -> navigation.replaceAll(AppConfig.Search())
@@ -229,15 +238,35 @@ class RootComponent(
 
     private fun registerPushTargetIfNeeded(userId: String) {
         if (registeredPushUserId == userId) return
-        registeredPushUserId = userId
-        scope.launch {
-            pushNotificationsRepository.addDeviceAsTarget().onFailure {
-                Napier.w("Push target registration failed: ${it.message}")
+        pushRegistrationRetryJob?.cancel()
+        pushRegistrationRetryJob = scope.launch {
+            repeat(PUSH_TARGET_REGISTRATION_ATTEMPTS) { attempt ->
+                val result = pushNotificationsRepository.addDeviceAsTarget()
+                if (result.isSuccess) {
+                    registeredPushUserId = userId
+                    pushRegistrationRetryJob = null
+                    return@launch
+                }
+
+                val failure = result.exceptionOrNull()
+                Napier.w("Push target registration failed (attempt ${attempt + 1}/$PUSH_TARGET_REGISTRATION_ATTEMPTS): ${failure?.message}")
+                registeredPushUserId = null
+
+                val isCurrentUser = userRepository.currentUser.value.getOrNull()?.id == userId
+                val isLastAttempt = attempt == PUSH_TARGET_REGISTRATION_ATTEMPTS - 1
+                if (!isCurrentUser || isLastAttempt) {
+                    pushRegistrationRetryJob = null
+                    return@launch
+                }
+
+                delay(PUSH_TARGET_REGISTRATION_RETRY_DELAY_MS * (attempt + 1))
             }
         }
     }
 
     private fun clearPushTargetIfNeeded() {
+        pushRegistrationRetryJob?.cancel()
+        pushRegistrationRetryJob = null
         if (registeredPushUserId == null) return
         registeredPushUserId = null
         scope.launch {
@@ -264,6 +293,7 @@ class RootComponent(
     fun onBackClicked() {
         val stack = childStack.value
         if (stack.backStack.isNotEmpty()) {
+            setDefaultNavigationDirection()
             navigation.pop()
         }
     }
@@ -293,6 +323,7 @@ class RootComponent(
     }
 
     override fun navigateToMatch(match: MatchWithRelations, event: Event) {
+        setDefaultNavigationDirection()
         navigation.pushNew(AppConfig.MatchDetail(match, event))
     }
 
@@ -301,51 +332,85 @@ class RootComponent(
         event: Event?,
         selectedFreeAgentId: String?,
     ) {
+        setDefaultNavigationDirection()
         navigation.pushNew(AppConfig.Teams(freeAgents, event, selectedFreeAgentId))
     }
 
     override fun navigateToChat(user: UserData?, chat: ChatGroupWithRelations?) {
+        setDefaultNavigationDirection()
         navigation.pushNew(AppConfig.Chat(user, chat))
     }
 
     override fun navigateToCreate(rentalContext: RentalCreateContext?) {
+        setDefaultNavigationDirection()
         navigation.pushNew(AppConfig.Create(rentalContext = rentalContext))
         _selectedPage.value = AppConfig.Create()
     }
 
     override fun navigateToEvent(event: Event) {
+        setDefaultNavigationDirection()
         navigation.pushNew(AppConfig.EventDetail(event))
     }
 
     override fun navigateToOrganization(organizationId: String, initialTab: OrganizationDetailTab) {
+        setDefaultNavigationDirection()
         navigation.pushNew(AppConfig.OrganizationDetail(organizationId, initialTab))
     }
 
     override fun navigateToEvents() {
+        setDefaultNavigationDirection()
         navigation.pushNew(AppConfig.Events)
     }
 
     override fun navigateToRefunds() {
+        setDefaultNavigationDirection()
         navigation.pushNew(AppConfig.RefundManager)
     }
 
     override fun navigateToLogin() {
+        setDefaultNavigationDirection()
         navigation.replaceAll(AppConfig.Login)
     }
 
     override fun navigateToSearch() {
+        setDefaultNavigationDirection()
         navigation.replaceAll(AppConfig.Search())
         _selectedPage.value = AppConfig.Search()
     }
 
     override fun navigateBack() {
+        setDefaultNavigationDirection()
         navigation.pop()
     }
 
     private fun onEventCreated(createdEvent: Event) {
+        setDefaultNavigationDirection()
         navigation.replaceAll(AppConfig.Search())
         _selectedPage.value = AppConfig.Search()
         navigation.pushNew(AppConfig.EventDetail(createdEvent))
+    }
+
+    private fun setDefaultNavigationDirection() {
+        _navigationAnimationDirection.value = 1
+    }
+
+    private fun setTabNavigationDirection(from: AppConfig, to: AppConfig) {
+        val fromIndex = bottomTabIndex(from)
+        val toIndex = bottomTabIndex(to)
+        _navigationAnimationDirection.value = when {
+            fromIndex == null || toIndex == null -> 1
+            toIndex > fromIndex -> 1
+            toIndex < fromIndex -> -1
+            else -> 1
+        }
+    }
+
+    private fun bottomTabIndex(config: AppConfig): Int? = when (config) {
+        is AppConfig.Search -> 0
+        AppConfig.ChatList -> 1
+        is AppConfig.Create -> 2
+        AppConfig.ProfileHome -> 3
+        else -> null
     }
 
     private fun createChild(

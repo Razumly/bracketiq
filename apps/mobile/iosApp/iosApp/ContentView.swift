@@ -1,6 +1,7 @@
 import UIKit
 import SwiftUI
 import ComposeApp
+import IQKeyboardManagerSwift
 
 struct ComposeView: UIViewControllerRepresentable {
     let deepLinkUrl: URL?
@@ -11,10 +12,18 @@ struct ComposeView: UIViewControllerRepresentable {
     
     func makeUIViewController(context: Context) -> UIViewController {
         let deepLinkNav = deepLinkUrl?.extractDeepLinkNav()
-        return MainViewControllerKt.MainViewController(
+        let composeController = MainViewControllerKt.MainViewController(
             nativeViewFactory: IOSNativeViewFactory.shared,
             deepLinkNav: deepLinkNav
         )
+
+        let composeControllerType = type(of: composeController)
+        if !IQKeyboardManager.shared.disabledDistanceHandlingClasses.contains(where: { $0 == composeControllerType }) {
+            IQKeyboardManager.shared.disabledDistanceHandlingClasses.append(composeControllerType)
+        }
+
+        composeController.view.backgroundColor = UIColor.systemBackground
+        return composeController
     }
     
     func updateUIViewController(_ uiViewController: UIViewController, context: Context) {

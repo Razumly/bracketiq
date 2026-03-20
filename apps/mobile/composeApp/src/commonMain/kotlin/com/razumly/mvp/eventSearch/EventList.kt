@@ -132,7 +132,12 @@ fun EventList(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(16.dp),
+                        .padding(
+                            start = 16.dp,
+                            top = 36.dp,
+                            end = 16.dp,
+                            bottom = 16.dp
+                        ),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(

@@ -16,6 +16,7 @@ import com.razumly.mvp.core.network.dto.MessagingTopicUpsertRequestDto
 import io.ktor.http.encodeURLPathPart
 import io.ktor.http.encodeURLQueryComponent
 import io.github.aakira.napier.Napier
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -111,16 +112,20 @@ class PushNotificationsRepository(
     private val managerListener = object : NotifierManager.Listener {
         override fun onNewToken(token: String) {
             scope.launch {
+                var resolvedUserId: String? = null
                 runCatching {
                     deferredTokenSyncJob?.cancel()
                     deferredTokenSyncJob = null
                     userDataSource.savePushToken(token)
-                    val userId = resolveCurrentOrCachedPushUserId()
-                    if (!userId.isNullOrBlank()) {
-                        syncDeviceTargetWithBackend(userId, token)
+                    resolvedUserId = resolveCurrentOrCachedPushUserId()
+                    resolvedUserId?.takeIf { it.isNotBlank() }?.let { userId ->
+                        syncDeviceTargetWithBackendWithRetries(userId, token)
                     }
                 }.onFailure { e ->
                     Napier.e("Failed handling push token refresh", e)
+                    resolvedUserId?.takeIf { it.isNotBlank() }?.let { userId ->
+                        scheduleDeferredDeviceTargetSync(userId)
+                    }
                 }
             }
         }
@@ -313,7 +318,7 @@ class PushNotificationsRepository(
             scheduleDeferredDeviceTargetSync(userId)
         }
 
-        syncDeviceTargetWithBackend(userId, token)
+        syncDeviceTargetWithBackendWithRetries(userId, token)
     }
 
     override suspend fun removeDeviceAsTarget(): Result<Unit> = runCatching {
@@ -497,8 +502,7 @@ class PushNotificationsRepository(
 
     private suspend fun syncDeviceTargetWithBackend(userId: String, pushToken: String?) {
         if (!ensureAuthTokenAvailableForPushSync()) {
-            Napier.w("Skipping push target sync because auth token is missing.")
-            return
+            error("Auth token is missing for push target sync.")
         }
 
         val normalizedUserId = normalizeId(userId, "User id")
@@ -513,6 +517,23 @@ class PushNotificationsRepository(
             ),
         )
         userDataSource.savePushTarget(topicId)
+    }
+
+    private suspend fun syncDeviceTargetWithBackendWithRetries(userId: String, pushToken: String?) {
+        var lastError: Throwable? = null
+        repeat(DEVICE_TARGET_SYNC_ATTEMPTS) { attempt ->
+            try {
+                syncDeviceTargetWithBackend(userId, pushToken)
+                return
+            } catch (error: Throwable) {
+                if (error is CancellationException) throw error
+                lastError = error
+                val isLastAttempt = attempt == DEVICE_TARGET_SYNC_ATTEMPTS - 1
+                if (isLastAttempt) return@repeat
+                delay(DEVICE_TARGET_SYNC_BASE_DELAY_MS * (attempt + 1))
+            }
+        }
+        throw lastError ?: IllegalStateException("Push target sync failed without an explicit cause.")
     }
 
     private suspend fun ensureAuthTokenAvailableForPushSync(): Boolean {
@@ -536,6 +557,7 @@ class PushNotificationsRepository(
 
         deferredTokenSyncJob = scope.launch {
             val normalizedUserId = normalizeId(userId, "User id")
+            var synced = false
             repeat(DEFERRED_TOKEN_SYNC_ATTEMPTS) { attempt ->
                 delay(DEFERRED_TOKEN_SYNC_INTERVAL_MS * (attempt + 1))
                 val token = currentCachedPushTokenOrNull()
@@ -544,14 +566,18 @@ class PushNotificationsRepository(
                 }
 
                 runCatching {
-                    syncDeviceTargetWithBackend(normalizedUserId, token)
+                    syncDeviceTargetWithBackendWithRetries(normalizedUserId, token)
                 }.onFailure { error ->
                     Napier.w("Deferred push target sync attempt failed: ${error.message}")
+                }.onSuccess {
+                    synced = true
+                    return@launch
                 }
-                return@launch
             }
 
-            Napier.w("Push token still unavailable after deferred sync attempts.")
+            if (!synced) {
+                Napier.w("Push token sync unavailable after deferred retry attempts.")
+            }
         }
     }
 
@@ -611,5 +637,7 @@ class PushNotificationsRepository(
         const val MATCH_TOPIC_PREFIX = "match_"
         const val DEFERRED_TOKEN_SYNC_ATTEMPTS = 6
         const val DEFERRED_TOKEN_SYNC_INTERVAL_MS = 2_000L
+        const val DEVICE_TARGET_SYNC_ATTEMPTS = 3
+        const val DEVICE_TARGET_SYNC_BASE_DELAY_MS = 1_500L
     }
 }

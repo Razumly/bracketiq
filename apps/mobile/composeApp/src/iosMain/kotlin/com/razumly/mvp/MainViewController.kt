@@ -1,6 +1,7 @@
 package com.razumly.mvp
 
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -32,6 +33,7 @@ import com.arkivanov.essenty.backhandler.BackDispatcher
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.presentation.composables.NativeViewFactory
+import com.razumly.mvp.chat.data.IChatGroupRepository
 
 val LocalNativeViewFactory = staticCompositionLocalOf<NativeViewFactory> {
     error("NativeViewFactory not provided")
@@ -76,6 +78,7 @@ fun MainViewController(
                         deepLinkNavStart = deepLinkNav,
                         userRepository = getKoin().get<IUserRepository>(),
                         pushNotificationsRepository = getKoin().get<IPushNotificationsRepository>(),
+                        chatGroupRepository = getKoin().get<IChatGroupRepository>(),
                     )
                 } catch (e: Exception) {
                     Napier.e(tag = "Root", throwable = e) { "Component creation failed" }
@@ -87,7 +90,9 @@ fun MainViewController(
                 backDispatcher = backDispatcher,
                 backIcon = { progress, _ ->
                 },
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(androidx.compose.material3.MaterialTheme.colorScheme.background),
                 endEdgeEnabled = false,
                 onClose = { }
             ) {

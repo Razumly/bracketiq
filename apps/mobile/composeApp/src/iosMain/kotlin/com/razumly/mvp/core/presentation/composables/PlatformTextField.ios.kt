@@ -56,7 +56,8 @@ actual fun PlatformTextField(
     onTap: (() -> Unit)?,
     imeAction: ImeAction,
     style: PlatformTextFieldStyle,
-    externalFocusManager: PlatformFocusManager?
+    externalFocusManager: PlatformFocusManager?,
+    onImeAction: (() -> Unit)?,
 ) {
     val focusManager = externalFocusManager ?: rememberPlatformFocusManager()
     val allFocusManagers = localAllFocusManagers.current
@@ -155,6 +156,7 @@ actual fun PlatformTextField(
                             focusManager = iosFocusManager,
                             imeAction = imeAction,
                             style = style,
+                            onImeAction = onImeAction,
                         )
                     },
                     modifier = Modifier
@@ -213,6 +215,7 @@ fun createSimpleUITextField(
     fontSize: TextUnit = 16.sp,
     focusManager: IOSFocusManager,
     imeAction: ImeAction = ImeAction.Next,
+    onImeAction: (() -> Unit)? = null,
     style: PlatformTextFieldStyle = PlatformTextFieldStyle.Default,
 ): UITextField {
     val textField = UITextField() // Just regular UITextField - no custom subclass!
@@ -256,6 +259,7 @@ fun createSimpleUITextField(
         onTextChanged = onTextChanged,
         focusManager = focusManager,
         keyboardType = keyboardType,
+        onImeAction = onImeAction,
     )
 
     textField.delegate = delegate
@@ -342,6 +346,7 @@ class SimpleTextFieldDelegate(
     private val onTextChanged: (String) -> Unit,
     private val focusManager: IOSFocusManager,
     private val keyboardType: String,
+    private val onImeAction: (() -> Unit)?,
 ) : NSObject(), UITextFieldDelegateProtocol {
 
     @OptIn(ExperimentalForeignApi::class)
@@ -382,6 +387,10 @@ class SimpleTextFieldDelegate(
                 return false // Keep keyboard open for next field
             }
             UIReturnKeyType.UIReturnKeyDone, UIReturnKeyType.UIReturnKeyGo, UIReturnKeyType.UIReturnKeySend -> {
+                if (onImeAction != null) {
+                    onImeAction.invoke()
+                    return false
+                }
                 textField.resignFirstResponder()
                 focusManager.handleDoneAction()
                 return true

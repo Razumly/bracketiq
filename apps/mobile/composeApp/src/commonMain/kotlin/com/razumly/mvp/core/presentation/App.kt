@@ -123,11 +123,19 @@ fun App(root: RootComponent) {
         CompositionLocalProvider(
             LocalPopupHandler provides popupHandler, LocalLoadingHandler provides loadingHandler
         ) {
-            Box(modifier = Modifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.background)
+            ) {
                 val currentChild = childStack.active.instance
 
-                // Show bottom nav for main app screens (not login/startup splash)
-                if (currentChild !is RootComponent.Child.Login && currentChild !is RootComponent.Child.Splash) {
+                val shouldShowBottomNav = currentChild !is RootComponent.Child.Login &&
+                    currentChild !is RootComponent.Child.Splash &&
+                    currentChild !is RootComponent.Child.Chat
+
+                // Show bottom nav for main app screens (not login/startup splash or chat)
+                if (shouldShowBottomNav) {
                     MVPBottomNavBar(
                         selectedPage = selectedPage,
                         unreadChatMessageCount = unreadChatMessageCount,
@@ -172,12 +180,15 @@ private fun AppContent(
     childStack: ChildStack<*, RootComponent.Child>,
     paddingValues: PaddingValues?
 ) {
+    val navigationDirection by root.navigationAnimationDirection.collectAsState()
     CompositionLocalProvider(
         LocalNavBarPadding provides (paddingValues ?: PaddingValues())
     ) {
         ChildStack(
             stack = childStack, animation = backAnimation(
-                backHandler = root.backHandler, onBack = root::onBackClicked
+                backHandler = root.backHandler,
+                onBack = root::onBackClicked,
+                horizontalDirectionProvider = { navigationDirection }
             )
         ) { child ->
             when (val instance = child.instance) {

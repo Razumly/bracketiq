@@ -19,9 +19,10 @@ import com.arkivanov.essenty.backhandler.BackHandler
 actual fun <C : Any, T : Any> backAnimation(
     backHandler: BackHandler,
     onBack: () -> Unit,
+    horizontalDirectionProvider: () -> Int,
 ): StackAnimation<C, T> =
     stackAnimation(
-        animator = iosLikeSlide(),
+        animator = iosLikeSlide(horizontalDirectionProvider = horizontalDirectionProvider),
         predictiveBackParams = {
             PredictiveBackParams(
                 backHandler = backHandler,
@@ -31,11 +32,21 @@ actual fun <C : Any, T : Any> backAnimation(
     )
 
 @OptIn(ExperimentalDecomposeApi::class)
-private fun iosLikeSlide(animationSpec: FiniteAnimationSpec<Float> = tween()): StackAnimator =
+private fun iosLikeSlide(
+    animationSpec: FiniteAnimationSpec<Float> = tween(),
+    horizontalDirectionProvider: () -> Int,
+): StackAnimator =
     stackAnimator(animationSpec = animationSpec) { factor, direction ->
+        val horizontalDirection = horizontalDirectionProvider().normalizedHorizontalDirection()
         Modifier
             .then(if (direction.isFront) Modifier else Modifier.fade(factor + 1F))
-            .offsetXFactor(factor = if (direction.isFront) factor else factor * 0.5F)
+            .offsetXFactor(
+                factor = if (direction.isFront) {
+                    factor * horizontalDirection
+                } else {
+                    factor * 0.5F * horizontalDirection
+                }
+            )
     }
 
 private fun Modifier.fade(factor: Float) =
@@ -52,3 +63,9 @@ private fun Modifier.offsetXFactor(factor: Float): Modifier =
             placeable.placeRelative(x = (placeable.width.toFloat() * factor).toInt(), y = 0)
         }
     }
+
+private fun Int.normalizedHorizontalDirection(): Int = when {
+    this > 0 -> 1
+    this < 0 -> -1
+    else -> 1
+}

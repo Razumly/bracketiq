@@ -54,7 +54,8 @@ actual fun PlatformTextField(
     onTap: (() -> Unit)?,
     imeAction: ImeAction,
     style: PlatformTextFieldStyle,
-    externalFocusManager: PlatformFocusManager?
+    externalFocusManager: PlatformFocusManager?,
+    onImeAction: (() -> Unit)?,
 ) {
     val focusManager = externalFocusManager ?: rememberPlatformFocusManager()
     val allFocusManagers = localAllFocusManagers.current
@@ -140,9 +141,9 @@ actual fun PlatformTextField(
                 ),
                 keyboardActions = KeyboardActions(
                     onNext = { androidManager.handleNextAction() },
-                    onDone = { androidManager.handleDoneAction() },
-                    onGo = { androidManager.handleDoneAction() },
-                    onSend = { androidManager.handleDoneAction() },
+                    onDone = { onImeAction?.invoke() ?: androidManager.handleDoneAction() },
+                    onGo = { onImeAction?.invoke() ?: androidManager.handleDoneAction() },
+                    onSend = { onImeAction?.invoke() ?: androidManager.handleDoneAction() },
                 ),
                 isError = isError,
                 supportingText = if (supportingText.isNotEmpty()) {
@@ -219,9 +220,9 @@ actual fun PlatformTextField(
             ),
             keyboardActions = KeyboardActions(
                 onNext = { androidManager.handleNextAction() },
-                onDone = { androidManager.handleDoneAction() },
-                onGo = { androidManager.handleDoneAction() },
-                onSend = { androidManager.handleDoneAction() }
+                onDone = { onImeAction?.invoke() ?: androidManager.handleDoneAction() },
+                onGo = { onImeAction?.invoke() ?: androidManager.handleDoneAction() },
+                onSend = { onImeAction?.invoke() ?: androidManager.handleDoneAction() }
             ),
             isError = isError,
             supportingText = if (supportingText.isNotEmpty()) {

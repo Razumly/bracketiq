@@ -9,4 +9,5 @@ import com.arkivanov.essenty.backhandler.BackHandler
 expect  fun <C : Any, T : Any> backAnimation(
     backHandler: BackHandler,
     onBack: () -> Unit,
+    horizontalDirectionProvider: () -> Int = { 1 },
 ): StackAnimation<C, T>

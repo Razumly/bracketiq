@@ -2,7 +2,12 @@ package com.razumly.mvp.core.presentation.composables
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.MailOutline
@@ -12,7 +17,9 @@ import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarDefaults
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -24,8 +31,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.razumly.mvp.core.presentation.AppConfig
+import com.razumly.mvp.core.util.Platform
 
 data class NavigationItem(
     val page: AppConfig,
@@ -40,6 +49,7 @@ fun MVPBottomNavBar(
     onPageSelected: (AppConfig) -> Unit,
     content: @Composable (PaddingValues) -> Unit
 ) {
+    val isIos = Platform.isIOS
     val items = listOf(
         NavigationItem(AppConfig.Search(),"search","Discover"),
         NavigationItem(AppConfig.ChatList,"messages", "Messages"),
@@ -50,6 +60,17 @@ fun MVPBottomNavBar(
     var navBarHeight by remember { mutableStateOf(0.dp) }
     val localDensity = LocalDensity.current
     val unreadBadgeText = if (unreadChatMessageCount > 99) "99+" else unreadChatMessageCount.toString()
+    val iconSize = if (isIos) 22.dp else 24.dp
+    val labelStyle = if (isIos) {
+        MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp)
+    } else {
+        MaterialTheme.typography.labelMedium
+    }
+    val navBarInsets = if (isIos) {
+        WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)
+    } else {
+        NavigationBarDefaults.windowInsets
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         // Main content
@@ -68,6 +89,7 @@ fun MVPBottomNavBar(
             NavigationBar(
                 modifier = Modifier
                     .zIndex(1f),
+                windowInsets = navBarInsets,
             ) {
                 items.forEach { item ->
                     NavigationBarItem(
@@ -75,7 +97,8 @@ fun MVPBottomNavBar(
                             when (item.icon) {
                                 "search" -> Icon(
                                     Icons.Default.Search,
-                                    contentDescription = item.titleResId
+                                    contentDescription = item.titleResId,
+                                    modifier = Modifier.size(iconSize),
                                 )
                                 "messages" -> BadgedBox(
                                     badge = {
@@ -86,20 +109,30 @@ fun MVPBottomNavBar(
                                 ) {
                                     Icon(
                                         Icons.Default.MailOutline,
-                                        contentDescription = item.titleResId
+                                        contentDescription = item.titleResId,
+                                        modifier = Modifier.size(iconSize),
                                     )
                                 }
                                 "add" -> Icon(
                                     Icons.Default.Add,
-                                    contentDescription = item.titleResId
+                                    contentDescription = item.titleResId,
+                                    modifier = Modifier.size(iconSize),
                                 )
                                 "person" -> Icon(
                                     Icons.Default.Person,
-                                    contentDescription = item.titleResId
+                                    contentDescription = item.titleResId,
+                                    modifier = Modifier.size(iconSize),
                                 )
                             }
                         },
-                        label = { Text(item.titleResId) },
+                        label = {
+                            Text(
+                                text = item.titleResId,
+                                style = labelStyle,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                        },
                         selected = selectedPage == item.page,
                         onClick = { onPageSelected(item.page) }
                     )

@@ -37,4 +37,5 @@ expect fun PlatformTextField(
     imeAction: ImeAction = ImeAction.Next,
     style: PlatformTextFieldStyle = PlatformTextFieldStyle.Default,
     externalFocusManager: PlatformFocusManager? = null,
+    onImeAction: (() -> Unit)? = null,
 )
