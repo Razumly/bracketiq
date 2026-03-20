@@ -34,10 +34,14 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         // ADD: Configure IQKeyboardManager globally
         IQKeyboardManager.shared.isEnabled = true
         IQKeyboardManager.shared.resignOnTouchOutside = false
-        IQKeyboardManager.shared.keyboardDistance = 10
+        IQKeyboardManager.shared.keyboardDistance = 0
         if let hostingControllerClass = NSClassFromString("UIHostingController") as? UIViewController.Type,
            !IQKeyboardManager.shared.disabledDistanceHandlingClasses.contains(where: { $0 == hostingControllerClass }) {
             IQKeyboardManager.shared.disabledDistanceHandlingClasses.append(hostingControllerClass)
+        }
+        if let hostingControllerClass = NSClassFromString("UIHostingController") as? UIViewController.Type,
+           !IQKeyboardManager.shared.disabledToolbarClasses.contains(where: { $0 == hostingControllerClass }) {
+            IQKeyboardManager.shared.disabledToolbarClasses.append(hostingControllerClass)
         }
 
         NotifierManager.shared.initialize(configuration: NotificationPlatformConfigurationIos(

@@ -21,6 +21,9 @@ struct ComposeView: UIViewControllerRepresentable {
         if !IQKeyboardManager.shared.disabledDistanceHandlingClasses.contains(where: { $0 == composeControllerType }) {
             IQKeyboardManager.shared.disabledDistanceHandlingClasses.append(composeControllerType)
         }
+        if !IQKeyboardManager.shared.disabledToolbarClasses.contains(where: { $0 == composeControllerType }) {
+            IQKeyboardManager.shared.disabledToolbarClasses.append(composeControllerType)
+        }
 
         composeController.view.backgroundColor = UIColor.systemBackground
         return composeController

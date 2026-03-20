@@ -53,7 +53,7 @@ Pod::Spec.new do |spec|
                 fi
 
                 REPO_ROOT="$PODS_TARGET_SRCROOT"
-                "$REPO_ROOT/../gradlew" --no-daemon \
+                "$REPO_ROOT/../gradlew" --build-cache --configuration-cache \
                     -Dorg.gradle.jvmargs="-Xmx4g -Dfile.encoding=UTF-8 -Djava.awt.headless=true -XX:MaxMetaspaceSize=1g" \
                     -p "$REPO_ROOT" $KOTLIN_PROJECT_PATH:syncFramework \
                     -Pkotlin.native.cocoapods.platform=$PLATFORM_NAME \

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -36,8 +37,8 @@ import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
 import dev.chrisbanes.haze.materials.HazeMaterials
 
 // Telegram chat edge blur uses an 80pt feather; iMessage appears slightly shorter in practice.
-private val CHAT_HEADER_FEATHER_HEIGHT = 76.dp
-private val CHAT_HEADER_FEATHER_OFFSET = 20.dp
+private val CHAT_HEADER_FEATHER_HEIGHT = 82.dp
+private val CHAT_HEADER_FEATHER_OFFSET = 24.dp
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalHazeMaterialsApi::class)
 @Composable
@@ -60,10 +61,11 @@ fun ChatHeader(
             .background(
                 Brush.verticalGradient(
                     colorStops = arrayOf(
-                        0.0f to MaterialTheme.colorScheme.surface.copy(alpha = 0.30f),
-                        0.26f to MaterialTheme.colorScheme.surface.copy(alpha = 0.22f),
-                        0.58f to MaterialTheme.colorScheme.surface.copy(alpha = 0.11f),
-                        1.0f to MaterialTheme.colorScheme.surface.copy(alpha = 0.03f),
+                        0.0f to MaterialTheme.colorScheme.surface.copy(alpha = 0.34f),
+                        0.18f to MaterialTheme.colorScheme.surface.copy(alpha = 0.26f),
+                        0.46f to MaterialTheme.colorScheme.surface.copy(alpha = 0.14f),
+                        0.72f to MaterialTheme.colorScheme.surface.copy(alpha = 0.06f),
+                        1.0f to Color.Transparent,
                     ),
                 )
             ),
@@ -87,8 +89,8 @@ fun ChatHeader(
 
             Surface(
                 modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(28.dp),
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.78f),
+                shape = RoundedCornerShape(30.dp),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.70f),
                 tonalElevation = 2.dp,
             ) {
                 Column(
@@ -116,9 +118,9 @@ fun ChatHeader(
             }
 
             Surface(
-                modifier = Modifier.size(52.dp),
+                modifier = Modifier.size(50.dp),
                 shape = CircleShape,
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.78f),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.70f),
                 tonalElevation = 2.dp,
             ) {
                 Box(
@@ -139,9 +141,9 @@ fun ChatHeader(
                 .background(
                     Brush.verticalGradient(
                         colorStops = arrayOf(
-                            0.0f to MaterialTheme.colorScheme.surface.copy(alpha = 0.14f),
-                            0.36f to MaterialTheme.colorScheme.surface.copy(alpha = 0.09f),
-                            0.74f to MaterialTheme.colorScheme.surface.copy(alpha = 0.03f),
+                            0.0f to MaterialTheme.colorScheme.surface.copy(alpha = 0.16f),
+                            0.26f to MaterialTheme.colorScheme.surface.copy(alpha = 0.10f),
+                            0.62f to MaterialTheme.colorScheme.surface.copy(alpha = 0.04f),
                             1.0f to Color.Transparent,
                         ),
                     ),
@@ -156,14 +158,20 @@ private fun HeaderActionButton(
     content: @Composable () -> Unit,
 ) {
     Surface(
-        modifier = Modifier.size(52.dp),
+        modifier = Modifier
+            .size(50.dp)
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f),
+                shape = CircleShape,
+            ),
         shape = CircleShape,
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.78f),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.70f),
         tonalElevation = 2.dp,
     ) {
         IconButton(
             onClick = onClick,
-            modifier = Modifier.size(52.dp),
+            modifier = Modifier.size(50.dp),
         ) {
             content()
         }

@@ -8,7 +8,9 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,15 +20,18 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MoreVert
@@ -41,7 +46,6 @@ import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -55,11 +59,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.razumly.mvp.chat.composables.ChatHeader
 import com.razumly.mvp.chat.composables.ChatMessageBubble
@@ -89,6 +99,10 @@ import kotlin.time.Instant
 
 private const val CHAT_MOTION_DURATION_MS = 220
 private const val CHAT_NEAR_BOTTOM_THRESHOLD = 1
+private val CHAT_COMPOSER_SHELL_SHAPE = RoundedCornerShape(34.dp)
+private val CHAT_INPUT_PILL_SHAPE = RoundedCornerShape(24.dp)
+private val CHAT_COMPOSER_FEATHER_HEIGHT = 74.dp
+private val CHAT_COMPOSER_FEATHER_OFFSET = (-30).dp
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalHazeMaterialsApi::class)
 @Composable
@@ -120,6 +134,8 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
     val hazeState = rememberHazeState()
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     val latestMessageKey = messages
         .lastOrNull()
         ?.let { message -> messageKey(message, messages.lastIndex) }
@@ -300,8 +316,8 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .imePadding()
-                .navigationBarsPadding()
-                .padding(bottom = composerHeight + 12.dp),
+                .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
+                .padding(bottom = composerHeight + 10.dp),
             enter = slideInVertically(
                 initialOffsetY = { it / 2 },
                 animationSpec = tween(CHAT_MOTION_DURATION_MS),
@@ -331,43 +347,90 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .imePadding()
-                .navigationBarsPadding(),
+                .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
+                .padding(horizontal = 14.dp, vertical = 10.dp)
+                .onSizeChanged { composerHeightPx = it.height },
             contentAlignment = Alignment.BottomCenter,
         ) {
-            Row(
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .height(CHAT_COMPOSER_FEATHER_HEIGHT)
+                    .align(Alignment.TopCenter)
+                    .offset(y = CHAT_COMPOSER_FEATHER_OFFSET)
                     .hazeEffect(
                         state = hazeState,
                         style = HazeMaterials.ultraThin(MaterialTheme.colorScheme.surface),
                     )
-                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.78f))
-                    .onSizeChanged { composerHeightPx = it.height }
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                    .background(
+                        Brush.verticalGradient(
+                            colorStops = arrayOf(
+                                0.0f to Color.Transparent,
+                                0.28f to MaterialTheme.colorScheme.surface.copy(alpha = 0.05f),
+                                0.58f to MaterialTheme.colorScheme.surface.copy(alpha = 0.11f),
+                                1.0f to MaterialTheme.colorScheme.surface.copy(alpha = 0.03f),
+                            ),
+                        ),
+                    ),
+            )
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(CHAT_COMPOSER_SHELL_SHAPE)
+                    .hazeEffect(
+                        state = hazeState,
+                        style = HazeMaterials.regular(MaterialTheme.colorScheme.surface),
+                    )
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.14f))
+                    .border(
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.11f)),
+                        shape = CHAT_COMPOSER_SHELL_SHAPE,
+                    )
+                    .padding(horizontal = 8.dp, vertical = 7.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                PlatformTextField(
-                    value = input,
-                    onValueChange = component::onMessageInputChange,
-                    modifier = Modifier.weight(1f),
-                    placeholder = "Type a message...",
-                    height = 44.dp,
-                    imeAction = androidx.compose.ui.text.input.ImeAction.Send,
-                    style = PlatformTextFieldStyle.GlassPill,
-                    onImeAction = component::sendMessage,
-                )
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(CHAT_INPUT_PILL_SHAPE)
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.16f))
+                        .border(
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)),
+                            shape = CHAT_INPUT_PILL_SHAPE,
+                        )
+                        .padding(horizontal = 6.dp),
+                ) {
+                    PlatformTextField(
+                        value = input,
+                        onValueChange = component::onMessageInputChange,
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = "Message",
+                        fontSize = 17.sp,
+                        height = 36.dp,
+                        imeAction = ImeAction.Send,
+                        style = PlatformTextFieldStyle.GlassPill,
+                        onImeAction = component::sendMessage,
+                    )
+                }
 
                 Button(
-                    onClick = component::sendMessage,
+                    onClick = {
+                        component.sendMessage()
+                        focusManager.clearFocus()
+                        keyboardController?.hide()
+                    },
                     enabled = input.isNotBlank(),
-                    shape = RoundedCornerShape(28.dp),
+                    shape = RoundedCornerShape(22.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.10f),
+                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.16f),
                         contentColor = MaterialTheme.colorScheme.onSurface,
-                        disabledContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.06f),
+                        disabledContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.08f),
                         disabledContentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
                     ),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
                 ) {
                     Text("Send")
                 }
