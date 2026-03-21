@@ -42,19 +42,38 @@ struct ComposeView: UIViewControllerRepresentable {
 // Extension to convert iOS URL to your DeepLinkNav object
 extension URL {
     func extractDeepLinkNav() -> RootComponent.DeepLinkNav? {
-        let pathSegments = self.pathComponents.filter { $0 != "/" }
-        
-        let effectiveSegments = if pathSegments.first == "mvp" {
-            Array(pathSegments.dropFirst())
+        let pathSegments = self.pathComponents.filter { $0 != "/" && !$0.isEmpty }
+        let normalizedScheme = self.scheme?.lowercased() ?? ""
+        let normalizedHost = self.host?.lowercased() ?? ""
+
+        let segmentsWithHost: [String]
+        if (normalizedScheme == "mvp" || normalizedScheme == "razumly")
+            && !normalizedHost.isEmpty
+            && !normalizedHost.contains(".") {
+            segmentsWithHost = [normalizedHost] + pathSegments
         } else {
-            pathSegments
+            segmentsWithHost = pathSegments
         }
-        
+
+        let effectiveSegments: [String]
+        if segmentsWithHost.first?.lowercased() == "mvp" {
+            effectiveSegments = Array(segmentsWithHost.dropFirst())
+        } else {
+            effectiveSegments = segmentsWithHost
+        }
+
+        if effectiveSegments.count >= 2 {
+            let route = effectiveSegments[0].lowercased()
+            let eventId = effectiveSegments[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            if route == "event" || route == "events" || route == "tournament" || route == "tournaments" {
+                if !eventId.isEmpty {
+                    return RootComponent.DeepLinkNavEvent.init(eventId: eventId)
+                }
+            }
+        }
+
         switch effectiveSegments.count {
-        case 2 where effectiveSegments[0] == "event":
-            return RootComponent.DeepLinkNavEvent.init(eventId: effectiveSegments[1])
-            
-        case 2 where effectiveSegments[0] == "host" && effectiveSegments[1] == "onboarding":
+        case 2 where effectiveSegments[0].lowercased() == "host" && effectiveSegments[1].lowercased() == "onboarding":
             let queryItems = URLComponents(url: self, resolvingAgainstBaseURL: false)?.queryItems
             let isRefresh = queryItems?.first(where: { $0.name == "refresh" })?.value == "true"
             let isReturn = queryItems?.first(where: { $0.name == "success" })?.value == "true"

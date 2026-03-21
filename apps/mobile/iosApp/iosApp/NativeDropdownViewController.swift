@@ -26,21 +26,22 @@ class NativeDropdownViewController: UIViewController {
     
     private func setupButton(placeholder: String) {
         // Style button to look like a text field
-        button.backgroundColor = UIColor.systemBackground
         button.layer.cornerRadius = 8.0
         button.layer.borderWidth = 1.0
-        button.layer.borderColor = UIColor.separator.cgColor
         button.contentHorizontalAlignment = .left
+        button.contentEdgeInsets = UIEdgeInsets(top: 0, left: 12, bottom: 0, right: 32)
+        button.titleLabel?.font = UIFont.systemFont(ofSize: 16)
         
         // Set title
         let displayText = selectedValue.isEmpty ? placeholder : selectedValue
         button.setTitle(displayText, for: .normal)
-        button.setTitleColor(selectedValue.isEmpty ? .placeholderText : .label, for: .normal)
         
         // Add dropdown arrow
         let arrowImage = UIImage(systemName: "chevron.down")
         button.setImage(arrowImage, for: .normal)
         button.semanticContentAttribute = .forceRightToLeft
+        button.tintColor = placeholderColor
+        applyButtonTheme()
         
         button.addTarget(self, action: #selector(showActionSheet), for: .touchUpInside)
         
@@ -80,7 +81,7 @@ class NativeDropdownViewController: UIViewController {
     private func selectOption(_ option: String) {
         selectedValue = option
         button.setTitle(option, for: .normal)
-        button.setTitleColor(.label, for: .normal)
+        applyButtonTheme()
         onSelectionChange?(option)
     }
     
@@ -91,11 +92,57 @@ class NativeDropdownViewController: UIViewController {
         
         let displayText = selectedValue.isEmpty ? placeholder : selectedValue
         button.setTitle(displayText, for: .normal)
-        button.setTitleColor(selectedValue.isEmpty ? .placeholderText : .label, for: .normal)
+        applyButtonTheme()
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        applyButtonTheme()
+    }
+
+    private func applyButtonTheme() {
+        button.backgroundColor = fieldBackgroundColor
+        button.layer.borderColor = fieldBorderColor.cgColor
+        button.setTitleColor(selectedValue.isEmpty ? placeholderColor : fieldTextColor, for: .normal)
+        button.tintColor = selectedValue.isEmpty ? placeholderColor : fieldTextColor
+    }
+
+    private var isDarkMode: Bool {
+        traitCollection.userInterfaceStyle == .dark
+    }
+
+    private var fieldBackgroundColor: UIColor {
+        if button.isEnabled {
+            return isDarkMode ? UIColor(hex: 0x172131) : UIColor(hex: 0xF8FAFC)
+        }
+        return isDarkMode ? UIColor(hex: 0x1C2738) : UIColor(hex: 0xE7EDF3)
+    }
+
+    private var fieldBorderColor: UIColor {
+        isDarkMode ? UIColor(hex: 0x344255) : UIColor(hex: 0xD3DCE6)
+    }
+
+    private var fieldTextColor: UIColor {
+        isDarkMode ? UIColor(hex: 0xEDF3FA) : UIColor(hex: 0x1E2633)
+    }
+
+    private var placeholderColor: UIColor {
+        isDarkMode ? UIColor(hex: 0xAEB9C7) : UIColor(hex: 0x6B7785)
     }
     
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+}
+
+private extension UIColor {
+    convenience init(hex: UInt32) {
+        self.init(
+            red: CGFloat((hex >> 16) & 0xFF) / 255.0,
+            green: CGFloat((hex >> 8) & 0xFF) / 255.0,
+            blue: CGFloat(hex & 0xFF) / 255.0,
+            alpha: 1.0
+        )
     }
 }
 

@@ -60,11 +60,15 @@ fun ChatListItem(
                 chatGroup.messages.lastOrNull()?.let { message ->
                     Text(
                         text = formatMessageTime(message.sentTime),
-                        style = MaterialTheme.typography.bodySmall
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 if (unreadCount > 0) {
-                    Badge {
+                    Badge(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                    ) {
                         Text(unreadBadgeText)
                     }
                 }

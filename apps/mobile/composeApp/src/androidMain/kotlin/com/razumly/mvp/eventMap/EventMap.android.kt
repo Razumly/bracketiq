@@ -1,5 +1,6 @@
 package com.razumly.mvp.eventMap
 
+import android.location.Location
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
@@ -26,10 +27,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
-import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.LatLngBounds
 import com.google.android.gms.maps.model.PointOfInterest
@@ -67,13 +71,33 @@ actual fun EventMap(
 ) {
     val scope = rememberCoroutineScope()
     val showMap by component.showMap.collectAsState()
-    val trackedLocation by component.currentLocation.collectAsState()
+    val trackedLocation = if (showMap) {
+        component.currentLocation.collectAsState().value
+    } else {
+        null
+    }
     var searchedPlaces by remember { mutableStateOf<List<Place>>(emptyList()) }
-    val events by component.events.collectAsState()
-    val places by component.places.collectAsState()
+    val events = if (showMap) {
+        component.events.collectAsState().value
+    } else {
+        emptyList()
+    }
+    val places = if (showMap) {
+        component.places.collectAsState().value
+    } else {
+        emptyList()
+    }
     val defaultZoom = 12f
     val defaultDurationMs = 1000
-    val initCameraState = focusedLocation.toGoogle()
+    val trackedLatLng = trackedLocation?.toGoogle()
+    val requestedCameraState = focusedLocation.toGoogle()
+    val hasExplicitFocusedLocation = focusedEvent != null ||
+        distanceBetweenMeters(requestedCameraState, LatLng(0.0, 0.0)) > 1f
+    val initCameraState = if (hasExplicitFocusedLocation) {
+        requestedCameraState
+    } else {
+        trackedLatLng ?: requestedCameraState
+    }
     val cameraPositionState = rememberCameraPositionState()
     val eventMarkerStates = remember { mutableMapOf<String, MarkerState>() }
     var selectedPOI by remember { mutableStateOf<PointOfInterest?>(null) }
@@ -82,12 +106,51 @@ actual fun EventMap(
     var armedPlaceId by remember { mutableStateOf<String?>(null) }
     var armedSearchedPlaceId by remember { mutableStateOf<String?>(null) }
     var armedPoiPlaceId by remember { mutableStateOf<String?>(null) }
+    var lastUserCameraLocation by remember { mutableStateOf<LatLng?>(null) }
+    var mapTopLeftInWindow by remember { mutableStateOf(Offset.Zero) }
+    var mapContainerSize by remember { mutableStateOf(Size.Zero) }
+    val density = LocalDensity.current
+    val revealInsetPx = with(density) { 32.dp.toPx() }
+    val localRevealCenter = remember(revealCenter, mapTopLeftInWindow, mapContainerSize, revealInsetPx) {
+        if (mapContainerSize.width <= 0f || mapContainerSize.height <= 0f) {
+            if (revealCenter == Offset.Zero) Offset.Zero else revealCenter
+        } else {
+            val rawLocalX = revealCenter.x - mapTopLeftInWindow.x
+            val rawLocalY = revealCenter.y - mapTopLeftInWindow.y
+            val revealPointOutsideMap = rawLocalX < 0f ||
+                rawLocalX > mapContainerSize.width ||
+                rawLocalY < 0f ||
+                rawLocalY > mapContainerSize.height
+
+            if (revealCenter == Offset.Zero || revealPointOutsideMap) {
+                Offset(mapContainerSize.width / 2f, mapContainerSize.height / 2f)
+            } else {
+                val safeInset = minOf(
+                    revealInsetPx,
+                    mapContainerSize.width / 2f,
+                    mapContainerSize.height / 2f
+                )
+                Offset(
+                    x = rawLocalX.coerceIn(safeInset, mapContainerSize.width - safeInset),
+                    y = rawLocalY.coerceIn(safeInset, mapContainerSize.height - safeInset)
+                )
+            }
+        }
+    }
     val placeSelectionHint = "Click to select"
+    val userLocationMatchThresholdMeters = 10f
+    val userRecenterThresholdMeters = 1000f
+    val focusedIsCurrentUserLocation = trackedLatLng?.let { tracked ->
+        distanceBetweenMeters(tracked, initCameraState) <= userLocationMatchThresholdMeters
+    } == true && focusedEvent == null
     fun updateRevealCenterFor(latLng: LatLng) {
         cameraPositionState.projection
             ?.toScreenLocation(latLng)
             ?.let { point ->
-                onPlaceSelectionPoint(point.x.toFloat(), point.y.toFloat())
+                onPlaceSelectionPoint(
+                    point.x.toFloat() + mapTopLeftInWindow.x,
+                    point.y.toFloat() + mapTopLeftInWindow.y
+                )
             }
     }
 
@@ -177,16 +240,39 @@ actual fun EventMap(
     BindLocationTrackerEffect(component.locationTracker)
 
     if (animationProgress > 0f) {
-        LaunchedEffect(initCameraState) {
-            cameraPositionState.move(
-                CameraUpdateFactory.newLatLngZoom(initCameraState, defaultZoom)
-            )
+        LaunchedEffect(showMap, initCameraState, focusedIsCurrentUserLocation) {
+            if (!showMap) return@LaunchedEffect
+
+            if (focusedIsCurrentUserLocation) {
+                val shouldRecenterOnUser = lastUserCameraLocation?.let { lastLocation ->
+                    distanceBetweenMeters(lastLocation, initCameraState) >= userRecenterThresholdMeters
+                } ?: true
+
+                if (shouldRecenterOnUser) {
+                    val update = if (cameraPositionState.position.zoom > 0f) {
+                        CameraUpdateFactory.newLatLng(initCameraState)
+                    } else {
+                        CameraUpdateFactory.newLatLngZoom(initCameraState, defaultZoom)
+                    }
+                    cameraPositionState.move(update)
+                    lastUserCameraLocation = initCameraState
+                }
+            } else {
+                cameraPositionState.move(
+                    CameraUpdateFactory.newLatLngZoom(initCameraState, defaultZoom)
+                )
+            }
         }
 
         Box(
             modifier = modifier
                 .fillMaxSize()
-                .clip(CircularRevealShape(animationProgress, revealCenter)),
+                .onGloballyPositioned { coordinates ->
+                    val bounds = coordinates.boundsInWindow()
+                    mapTopLeftInWindow = bounds.topLeft
+                    mapContainerSize = bounds.size
+                }
+                .clip(CircularRevealShape(animationProgress, localRevealCenter)),
         ) {
             GoogleMap(
                 modifier = Modifier.fillMaxSize(),
@@ -203,9 +289,8 @@ actual fun EventMap(
                         isAnimating = true
                         scope.launch {
                             cameraPositionState.animate(
-                                CameraUpdateFactory.newCameraPosition(
-                                    CameraPosition.fromLatLngZoom(poi.latLng, defaultZoom)
-                                ), durationMs = 500
+                                CameraUpdateFactory.newLatLng(poi.latLng),
+                                durationMs = 500
                             )
                             delay(300)
                             isAnimating = false
@@ -397,7 +482,7 @@ actual fun EventMap(
                         scope.launch {
                             val location = newPlaces.first().location
                             cameraPositionState.animate(
-                                CameraUpdateFactory.newLatLngZoom(location!!, defaultZoom),
+                                CameraUpdateFactory.newLatLng(location!!),
                                 defaultDurationMs
                             )
                         }
@@ -415,6 +500,18 @@ actual fun EventMap(
             }
         }
     }
+}
+
+private fun distanceBetweenMeters(start: LatLng, end: LatLng): Float {
+    val results = FloatArray(1)
+    Location.distanceBetween(
+        start.latitude,
+        start.longitude,
+        end.latitude,
+        end.longitude,
+        results
+    )
+    return results[0]
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

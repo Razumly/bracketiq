@@ -1,5 +1,8 @@
+@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
+
 package com.razumly.mvp.core.presentation.composables
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -11,10 +14,17 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.UIKitView
-import kotlinx.cinterop.*
+import kotlinx.cinterop.BetaInteropApi
+import kotlinx.cinterop.CValuesRef
+import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.ObjCAction
+import kotlinx.cinterop.ObjCSignatureOverride
+import kotlinx.cinterop.StableRef
+import kotlinx.cinterop.cstr
 import platform.CoreGraphics.CGRectMake
 import platform.Foundation.*
 import platform.UIKit.*
@@ -23,6 +33,9 @@ import platform.darwin.NSObject
 import platform.objc.OBJC_ASSOCIATION_RETAIN_NONATOMIC
 import platform.objc.objc_setAssociatedObject
 import platform.objc.sel_registerName
+
+private val LightReadablePlaceholder = Color(0xFF6B7785)
+private val LightReadableDisabled = Color(0xFF5E6B78)
 
 @Composable
 actual fun PlatformDropdown(
@@ -43,6 +56,29 @@ actual fun PlatformDropdown(
     contentPadding: PaddingValues?
 ) {
     val fieldHeight = height ?: 44.dp
+    val readablePlaceholder = if (isSystemInDarkTheme()) {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    } else {
+        LightReadablePlaceholder
+    }
+    val readableDisabled = if (isSystemInDarkTheme()) {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    } else {
+        LightReadableDisabled
+    }
+    val fillColor = MaterialTheme.colorScheme.surface
+    val disabledFillColor = MaterialTheme.colorScheme.surfaceContainerLow
+    val borderColor = if (isError) {
+        MaterialTheme.colorScheme.error
+    } else {
+        MaterialTheme.colorScheme.outline
+    }
+    val textUIColor = MaterialTheme.colorScheme.onSurface.toUIColor()
+    val placeholderUIColor = readablePlaceholder.toUIColor()
+    val disabledTextUIColor = readableDisabled.toUIColor()
+    val fillUIColor = fillColor.toUIColor()
+    val disabledFillUIColor = disabledFillColor.toUIColor()
+    val borderUIColor = borderColor.toUIColor()
     val paddingModifier = if (contentPadding != null) {
         Modifier.padding(contentPadding)
     } else {
@@ -71,7 +107,13 @@ actual fun PlatformDropdown(
                     multiSelect = multiSelect,
                     selectedValues = selectedValues,
                     onSingleSelectionChange = onSelectionChange,
-                    onMultiSelectionChange = onMultiSelectionChange
+                    onMultiSelectionChange = onMultiSelectionChange,
+                    textColor = textUIColor,
+                    placeholderColor = placeholderUIColor,
+                    disabledTextColor = disabledTextUIColor,
+                    fillColor = fillUIColor,
+                    disabledFillColor = disabledFillUIColor,
+                    borderColor = borderUIColor,
                 )
             },
             modifier = Modifier
@@ -88,7 +130,13 @@ actual fun PlatformDropdown(
                     multiSelect = multiSelect,
                     selectedValues = selectedValues,
                     onSingleSelectionChange = onSelectionChange,
-                    onMultiSelectionChange = onMultiSelectionChange
+                    onMultiSelectionChange = onMultiSelectionChange,
+                    textColor = textUIColor,
+                    placeholderColor = placeholderUIColor,
+                    disabledTextColor = disabledTextUIColor,
+                    fillColor = fillUIColor,
+                    disabledFillColor = disabledFillUIColor,
+                    borderColor = borderUIColor,
                 )
             }
         )
@@ -113,7 +161,6 @@ data class DropdownCallbacks(
     val selectedValues: List<String>
 )
 
-@OptIn(ExperimentalForeignApi::class)
 fun createNativeDropdownButton(
     selectedValue: String,
     placeholder: String,
@@ -122,7 +169,13 @@ fun createNativeDropdownButton(
     multiSelect: Boolean,
     selectedValues: List<String>,
     onSingleSelectionChange: (String) -> Unit,
-    onMultiSelectionChange: (List<String>) -> Unit
+    onMultiSelectionChange: (List<String>) -> Unit,
+    textColor: UIColor,
+    placeholderColor: UIColor,
+    disabledTextColor: UIColor,
+    fillColor: UIColor,
+    disabledFillColor: UIColor,
+    borderColor: UIColor,
 ): UIButton {
     // Create the button
     val button = UIButton.buttonWithType(UIButtonTypeSystem)
@@ -132,21 +185,28 @@ fun createNativeDropdownButton(
     button.setTitle(displayText, forState = UIControlStateNormal)
 
     // Style the button to look like a dropdown field
-    button.backgroundColor = UIColor.clearColor
+    button.backgroundColor = if (enabled) fillColor else disabledFillColor
     button.layer.borderWidth = 1.0
-    button.layer.borderColor = UIColor.systemGray4Color.CGColor
+    button.layer.borderColor = borderColor.CGColor
     button.layer.cornerRadius = 8.0
     button.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft
     button.contentEdgeInsets = UIEdgeInsetsMake(0.0, 12.0, 0.0, 32.0)
     button.titleLabel?.font = UIFont.systemFontOfSize(16.0)
-    button.setTitleColor(UIColor.labelColor, forState = UIControlStateNormal)
+    button.setTitleColor(
+        when {
+            !enabled -> disabledTextColor
+            selectedValue.isEmpty() -> placeholderColor
+            else -> textColor
+        },
+        forState = UIControlStateNormal
+    )
     button.enabled = enabled
 
     // Add dropdown arrow
     val arrowImageView = UIImageView()
     val arrowImage = UIImage.systemImageNamed("chevron.down")
     arrowImageView.image = arrowImage
-    arrowImageView.tintColor = UIColor.systemGrayColor
+    arrowImageView.tintColor = if (enabled) placeholderColor else disabledTextColor
     arrowImageView.translatesAutoresizingMaskIntoConstraints = false
     button.addSubview(arrowImageView)
 
@@ -179,7 +239,7 @@ fun createNativeDropdownButton(
     return button
 }
 
-@OptIn(ExperimentalForeignApi::class, BetaInteropApi::class)
+@OptIn(BetaInteropApi::class)
 fun updateButtonMenu(
     button: UIButton,
     options: List<DropdownOption>,
@@ -466,7 +526,13 @@ fun updateNativeDropdownButton(
     multiSelect: Boolean,
     selectedValues: List<String>,
     onSingleSelectionChange: (String) -> Unit,
-    onMultiSelectionChange: (List<String>) -> Unit
+    onMultiSelectionChange: (List<String>) -> Unit,
+    textColor: UIColor,
+    placeholderColor: UIColor,
+    disabledTextColor: UIColor,
+    fillColor: UIColor,
+    disabledFillColor: UIColor,
+    borderColor: UIColor,
 ) {
     // Update button title
     val displayText = selectedValue.ifEmpty { placeholder }
@@ -475,7 +541,16 @@ fun updateNativeDropdownButton(
     }
 
     button.enabled = enabled
-    button.backgroundColor = UIColor.clearColor
+    button.backgroundColor = if (enabled) fillColor else disabledFillColor
+    button.layer.borderColor = borderColor.CGColor
+    button.setTitleColor(
+        when {
+            !enabled -> disabledTextColor
+            selectedValue.isEmpty() -> placeholderColor
+            else -> textColor
+        },
+        forState = UIControlStateNormal
+    )
 
     // Update stored callbacks
     val callbacks = DropdownCallbacks(
@@ -495,3 +570,11 @@ fun updateNativeDropdownButton(
     // Update the menu with current callbacks
     updateButtonMenu(button, options, callbacks)
 }
+
+private fun Color.toUIColor(): UIColor =
+    UIColor.colorWithRed(
+        red = red.toDouble(),
+        green = green.toDouble(),
+        blue = blue.toDouble(),
+        alpha = alpha.toDouble(),
+    )

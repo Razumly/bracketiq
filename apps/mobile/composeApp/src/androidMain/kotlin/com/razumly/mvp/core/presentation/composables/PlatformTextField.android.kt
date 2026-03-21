@@ -1,5 +1,6 @@
 package com.razumly.mvp.core.presentation.composables
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
@@ -30,6 +31,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.shape.RoundedCornerShape
 import com.razumly.mvp.core.presentation.localAllFocusManagers
 import com.razumly.mvp.core.util.CurrencyAmountInputVisualTransformation
+
+private val LightReadablePlaceholder = Color(0xFF6B7785)
+private val LightReadableDisabled = Color(0xFF5E6B78)
 
 @Composable
 actual fun PlatformTextField(
@@ -89,14 +93,79 @@ actual fun PlatformTextField(
     }
     val glassStyle = style == PlatformTextFieldStyle.GlassPill
     val fieldShape = if (glassStyle) RoundedCornerShape(28.dp) else OutlinedTextFieldDefaults.shape
+    val readablePlaceholder = if (isSystemInDarkTheme()) {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    } else {
+        LightReadablePlaceholder
+    }
+    val readableDisabled = if (isSystemInDarkTheme()) {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    } else {
+        LightReadableDisabled
+    }
+    val defaultColors = OutlinedTextFieldDefaults.colors(
+        focusedTextColor = MaterialTheme.colorScheme.onSurface,
+        unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+        disabledTextColor = readableDisabled,
+        focusedContainerColor = MaterialTheme.colorScheme.surface,
+        unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+        disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        errorContainerColor = MaterialTheme.colorScheme.surface,
+        focusedBorderColor = MaterialTheme.colorScheme.primary,
+        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+        disabledBorderColor = MaterialTheme.colorScheme.outlineVariant,
+        errorBorderColor = MaterialTheme.colorScheme.error,
+        focusedLabelColor = MaterialTheme.colorScheme.primary,
+        unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        disabledLabelColor = readableDisabled,
+        errorLabelColor = MaterialTheme.colorScheme.error,
+        focusedPlaceholderColor = readablePlaceholder,
+        unfocusedPlaceholderColor = readablePlaceholder,
+        disabledPlaceholderColor = readableDisabled,
+        errorPlaceholderColor = readablePlaceholder,
+        focusedSupportingTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        unfocusedSupportingTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        disabledSupportingTextColor = readableDisabled,
+        errorSupportingTextColor = MaterialTheme.colorScheme.error,
+        focusedLeadingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        unfocusedLeadingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        disabledLeadingIconColor = readableDisabled,
+        errorLeadingIconColor = MaterialTheme.colorScheme.error,
+        focusedTrailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        unfocusedTrailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        disabledTrailingIconColor = readableDisabled,
+        errorTrailingIconColor = MaterialTheme.colorScheme.error,
+        cursorColor = MaterialTheme.colorScheme.primary,
+        errorCursorColor = MaterialTheme.colorScheme.error,
+    )
     val glassColors = OutlinedTextFieldDefaults.colors(
         focusedBorderColor = if (isError) MaterialTheme.colorScheme.error.copy(alpha = 0.55f) else Color.Transparent,
         unfocusedBorderColor = if (isError) MaterialTheme.colorScheme.error.copy(alpha = 0.45f) else Color.Transparent,
         disabledBorderColor = Color.Transparent,
+        focusedTextColor = MaterialTheme.colorScheme.onSurface,
+        unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+        disabledTextColor = readableDisabled,
         focusedContainerColor = Color.Transparent,
         unfocusedContainerColor = Color.Transparent,
         disabledContainerColor = Color.Transparent,
         errorContainerColor = Color.Transparent,
+        focusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        disabledLabelColor = readableDisabled,
+        focusedPlaceholderColor = readablePlaceholder,
+        unfocusedPlaceholderColor = readablePlaceholder,
+        disabledPlaceholderColor = readableDisabled,
+        focusedSupportingTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        unfocusedSupportingTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        disabledSupportingTextColor = readableDisabled,
+        focusedLeadingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        unfocusedLeadingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        disabledLeadingIconColor = readableDisabled,
+        focusedTrailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        unfocusedTrailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        disabledTrailingIconColor = readableDisabled,
+        cursorColor = MaterialTheme.colorScheme.primary,
+        errorCursorColor = MaterialTheme.colorScheme.error,
     )
 
     if (readOnly && onTap != null) {
@@ -161,27 +230,7 @@ actual fun PlatformTextField(
                 colors = if (glassStyle) {
                     glassColors
                 } else {
-                    OutlinedTextFieldDefaults.colors(
-                        disabledTextColor = MaterialTheme.colorScheme.onSurface,
-                        disabledBorderColor = if (isError) {
-                            MaterialTheme.colorScheme.error
-                        } else {
-                            MaterialTheme.colorScheme.outline
-                        },
-                        disabledLabelColor = if (isError) {
-                            MaterialTheme.colorScheme.error
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                        disabledPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        disabledSupportingTextColor = if (isError) {
-                            MaterialTheme.colorScheme.error
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                        disabledTrailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        disabledLeadingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    defaultColors
                 },
             )
         }
@@ -237,7 +286,7 @@ actual fun PlatformTextField(
             leadingIcon = leadingIcon,
             singleLine = true,
             shape = fieldShape,
-            colors = if (glassStyle) glassColors else OutlinedTextFieldDefaults.colors(),
+            colors = if (glassStyle) glassColors else defaultColors,
         )
     }
 }

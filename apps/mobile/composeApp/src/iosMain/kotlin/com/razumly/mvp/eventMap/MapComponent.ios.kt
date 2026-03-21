@@ -97,11 +97,11 @@ actual class MapComponent(
         }
     }
 
-    fun showMap() {
+    internal fun revealMap() {
         _isMapVisible.value = true
     }
 
-    fun hideMap() {
+    internal fun hideMap() {
         _isMapVisible.value = false
     }
 

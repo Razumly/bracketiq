@@ -32,6 +32,7 @@ import com.arkivanov.decompose.extensions.compose.stack.animation.predictiveback
 import com.arkivanov.essenty.backhandler.BackDispatcher
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.presentation.composables.NativeViewFactory
 import com.razumly.mvp.chat.data.IChatGroupRepository
 
@@ -77,6 +78,7 @@ fun MainViewController(
                         locationTracker = getKoin().get<LocationTracker>(),
                         deepLinkNavStart = deepLinkNav,
                         userRepository = getKoin().get<IUserRepository>(),
+                        eventRepository = getKoin().get<IEventRepository>(),
                         pushNotificationsRepository = getKoin().get<IPushNotificationsRepository>(),
                         chatGroupRepository = getKoin().get<IChatGroupRepository>(),
                     )

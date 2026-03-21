@@ -9,6 +9,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -24,7 +25,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -62,10 +65,8 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -189,6 +190,158 @@ private data class BracketDivisionOption(
     val id: String,
     val label: String,
 )
+
+private data class EventDetailTabVisuals(
+    val badgeContainer: Color,
+    val badgeContent: Color,
+    val labelColor: Color,
+    val borderColor: Color,
+)
+
+private data class EventDetailTabIconStyle(
+    val size: androidx.compose.ui.unit.Dp,
+    val xOffset: androidx.compose.ui.unit.Dp = 0.dp,
+    val yOffset: androidx.compose.ui.unit.Dp = 0.dp,
+)
+
+@Composable
+private fun eventDetailTabVisuals(selected: Boolean): EventDetailTabVisuals {
+    val colorScheme = MaterialTheme.colorScheme
+    return if (selected) {
+        EventDetailTabVisuals(
+            badgeContainer = colorScheme.primary,
+            badgeContent = colorScheme.onPrimary,
+            labelColor = colorScheme.onSurface,
+            borderColor = colorScheme.primary.copy(alpha = 0.2f),
+        )
+    } else {
+        EventDetailTabVisuals(
+            badgeContainer = colorScheme.surfaceContainerHigh,
+            badgeContent = colorScheme.primary.copy(alpha = 0.88f),
+            labelColor = colorScheme.onSurfaceVariant,
+            borderColor = colorScheme.outlineVariant,
+        )
+    }
+}
+
+@Composable
+private fun eventDetailTabIconStyle(tab: DetailTab): EventDetailTabIconStyle =
+    when (tab) {
+        DetailTab.BRACKET -> EventDetailTabIconStyle(size = 18.dp, xOffset = (-1).dp)
+        DetailTab.PARTICIPANTS -> EventDetailTabIconStyle(size = 20.dp)
+        DetailTab.SCHEDULE -> EventDetailTabIconStyle(size = 20.dp)
+        DetailTab.LEAGUES -> EventDetailTabIconStyle(size = 20.dp)
+    }
+
+@Composable
+private fun EventDetailTabIcon(
+    tab: DetailTab,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val visuals = eventDetailTabVisuals(selected)
+    val iconStyle = eventDetailTabIconStyle(tab)
+    Surface(
+        modifier = modifier,
+        shape = CircleShape,
+        color = visuals.badgeContainer,
+        contentColor = visuals.badgeContent,
+        shadowElevation = if (selected) 2.dp else 0.dp,
+        tonalElevation = if (selected) 2.dp else 0.dp,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .border(
+                    width = 1.dp,
+                    color = visuals.borderColor,
+                    shape = CircleShape,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = tab.icon,
+                contentDescription = null,
+                modifier = Modifier
+                    .offset(x = iconStyle.xOffset, y = iconStyle.yOffset)
+                    .size(iconStyle.size),
+            )
+        }
+    }
+}
+
+@Composable
+private fun RowScope.EventDetailTabButton(
+    tab: DetailTab,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val visuals = eventDetailTabVisuals(selected)
+    Column(
+        modifier = Modifier
+            .weight(1f)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        EventDetailTabIcon(
+            tab = tab,
+            selected = selected,
+        )
+        Text(
+            text = tab.label,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+            color = visuals.labelColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Box(
+            modifier = Modifier
+                .width(if (selected) 28.dp else 18.dp)
+                .height(3.dp)
+                .background(
+                    color = if (selected) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f)
+                    },
+                    shape = RoundedCornerShape(999.dp),
+                )
+        )
+    }
+}
+
+@Composable
+private fun EventDetailTabStrip(
+    availableTabs: List<DetailTab>,
+    selectedTab: DetailTab,
+    onTabSelected: (DetailTab) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLowest,
+        tonalElevation = 1.dp,
+        shadowElevation = 4.dp,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            availableTabs.forEach { tab ->
+                EventDetailTabButton(
+                    tab = tab,
+                    selected = selectedTab == tab,
+                    onClick = { onTabSelected(tab) },
+                )
+            }
+        }
+    }
+}
 
 internal fun canViewRefereesSection(
     currentUserId: String,
@@ -2356,33 +2509,14 @@ fun EventDetailScreen(
                                 selectedParticipantsSection = participantSections.first()
                             }
                         }
-                        val selectedTabIndex =
-                            availableTabs.indexOf(selectedTab).takeIf { it >= 0 } ?: 0
-                        PrimaryTabRow(
-                            selectedTabIndex = selectedTabIndex,
-                            modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
-                        ) {
-                            availableTabs.forEachIndexed { index, tab ->
-                                Tab(
-                                    selected = index == selectedTabIndex,
-                                    onClick = { selectedTab = tab },
-                                    text = {
-                                        Text(
-                                            text = tab.label,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                    },
-                                    icon = {
-                                        Icon(
-                                            imageVector = tab.icon,
-                                            contentDescription = null,
-                                        )
-                                    },
-                                )
-                            }
-                        }
+                        EventDetailTabStrip(
+                            availableTabs = availableTabs,
+                            selectedTab = selectedTab,
+                            onTabSelected = { selectedTab = it },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 16.dp, start = 12.dp, end = 12.dp, bottom = 10.dp),
+                        )
                         Box(Modifier.fillMaxSize()) {
                             when (selectedTab) {
                                 DetailTab.BRACKET -> {

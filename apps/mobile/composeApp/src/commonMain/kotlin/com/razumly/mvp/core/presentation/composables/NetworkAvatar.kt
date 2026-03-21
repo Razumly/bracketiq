@@ -35,14 +35,10 @@ import io.ktor.http.encodeURLQueryComponent
 private data class AvatarColorScheme(val background: Color, val text: Color)
 
 private val avatarPalette = listOf(
-    AvatarColorScheme(background = Color(0xFFFDE68A), text = Color(0xFF92400E)),
-    AvatarColorScheme(background = Color(0xFFBFDBFE), text = Color(0xFF1D4ED8)),
-    AvatarColorScheme(background = Color(0xFFBBF7D0), text = Color(0xFF166534)),
-    AvatarColorScheme(background = Color(0xFFFED7AA), text = Color(0xFF9A3412)),
-    AvatarColorScheme(background = Color(0xFFE9D5FF), text = Color(0xFF6B21A8)),
-    AvatarColorScheme(background = Color(0xFFFBCFE8), text = Color(0xFF9D174D)),
-    AvatarColorScheme(background = Color(0xFFBAE6FD), text = Color(0xFF0C4A6E)),
-    AvatarColorScheme(background = Color(0xFFC7D2FE), text = Color(0xFF3730A3)),
+    AvatarColorScheme(background = Color(0xFFDCEAF7), text = Color(0xFF19497A)),
+    AvatarColorScheme(background = Color(0xFFE7EDF3), text = Color(0xFF1E2633)),
+    AvatarColorScheme(background = Color(0xFFEFE7D1), text = Color(0xFF5B4B1F)),
+    AvatarColorScheme(background = Color(0xFFE2EAEC), text = Color(0xFF5E6B78)),
 )
 
 @Composable

@@ -23,6 +23,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.arkivanov.decompose.ExperimentalDecomposeApi
@@ -57,6 +58,7 @@ fun CreateEventScreen(
 ) {
     var canProceed by remember { mutableStateOf(false) }
     var validationErrors by remember { mutableStateOf<List<String>>(emptyList()) }
+    var mapRevealCenter by remember { mutableStateOf(Offset.Zero) }
     val defaultEvent by component.defaultEvent.collectAsState()
     val newEventState by component.newEventState.collectAsState()
     val childStack by component.childStack.subscribeAsState()
@@ -294,6 +296,10 @@ fun CreateEventScreen(
                         onRemoveInstallmentRow = onRemoveInstallmentRow,
                         onUploadSelected = component::onUploadSelected,
                         onDeleteImage = component::deleteImage,
+                        mapRevealCenter = mapRevealCenter,
+                        onMapRevealCenterChange = { center ->
+                            mapRevealCenter = center
+                        },
                         onValidationChange = { isValid, errors ->
                             canProceed = isValid
                             validationErrors = errors

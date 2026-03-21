@@ -49,6 +49,7 @@ fun ChatMessageBubble(
             Text(
                 text = senderName,
                 style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
             if (isEmojiOnly) {
@@ -68,7 +69,7 @@ fun ChatMessageBubble(
                 Card(
                     colors = CardDefaults.cardColors(
                         containerColor = if (isCurrentUser) {
-                            MaterialTheme.colorScheme.primary
+                            MaterialTheme.colorScheme.primaryContainer
                         } else {
                             MaterialTheme.colorScheme.surfaceVariant
                         }
@@ -77,11 +78,7 @@ fun ChatMessageBubble(
                     Text(
                         text = message.body,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = if (isCurrentUser) {
-                            MaterialTheme.colorScheme.onPrimary
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
+                        color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.padding(12.dp)
                     )
                 }

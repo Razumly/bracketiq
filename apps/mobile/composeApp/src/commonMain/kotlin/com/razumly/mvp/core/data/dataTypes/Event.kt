@@ -1,3 +1,5 @@
+@file:OptIn(kotlin.experimental.ExperimentalObjCName::class)
+
 package com.razumly.mvp.core.data.dataTypes
 
 import androidx.compose.ui.graphics.toArgb
@@ -15,6 +17,7 @@ import com.razumly.mvp.core.util.newId
 import kotlinx.serialization.Contextual
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
+import kotlin.native.ObjCName
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
@@ -31,6 +34,7 @@ data class Event(
     val prize: String = "",
     @PrimaryKey override val id: String = newId(),
     val name: String = "",
+    @property:ObjCName(swiftName = "eventDescription")
     val description: String = "",
     @field:TypeConverters(DivisionConverters::class)
     val divisions: List<String> = emptyList(),

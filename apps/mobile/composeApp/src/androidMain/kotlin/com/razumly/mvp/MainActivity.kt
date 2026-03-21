@@ -109,33 +109,60 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun Uri.extractDeepLinkNav(): DeepLinkNav? {
-        val pathSegments = pathSegments
+        val pathSegments = pathSegments.filter { it.isNotBlank() }
         Napier.d(tag = "DeepLink", message = "Received URI: $this")
-        Napier.d(tag = "DeepLink", message = "Path segments: $pathSegments")
+        Napier.d(tag = "DeepLink", message = "Raw path segments: $pathSegments")
 
-        val effectiveSegments = if (pathSegments.isNotEmpty() && pathSegments[0] == "mvp") {
-            pathSegments.drop(1)
+        val normalizedScheme = scheme.orEmpty().lowercase()
+        val normalizedHost = host.orEmpty().lowercase()
+        val segmentsWithHost = if (
+            (normalizedScheme == "mvp" || normalizedScheme == "razumly") &&
+            normalizedHost.isNotBlank() &&
+            !normalizedHost.contains('.')
+        ) {
+            listOf(normalizedHost) + pathSegments
         } else {
             pathSegments
         }
+        val effectiveSegments = if (segmentsWithHost.firstOrNull() == "mvp") {
+            segmentsWithHost.drop(1)
+        } else {
+            segmentsWithHost
+        }
+        Napier.d(tag = "DeepLink", message = "Effective segments: $effectiveSegments")
 
         return when {
-            effectiveSegments.size >= 2 && effectiveSegments[0] == "event" -> {
-                Napier.d(tag = "DeepLink", message = "Navigating to Event: ${effectiveSegments[1]}")
-                DeepLinkNav.Event(effectiveSegments[1])
-            }
-
-            effectiveSegments.size >= 2 && effectiveSegments[0] == "host" && effectiveSegments[1] == "onboarding" -> {
-                val isRefresh = getQueryParameter("refresh")?.toBoolean() == true
-                val isReturn = getQueryParameter("success")?.toBoolean() == true
-                Napier.d(
-                    tag = "DeepLink",
-                    message = "Host Onboarding - Refresh: $isRefresh, Return: $isReturn"
-                )
-                when {
-                    isRefresh -> DeepLinkNav.Refresh
-                    isReturn -> DeepLinkNav.Return
-                    else -> null
+            effectiveSegments.size >= 2 -> {
+                val route = effectiveSegments[0].lowercase()
+                val eventId = effectiveSegments[1].trim()
+                if (
+                    route == "event" ||
+                    route == "events" ||
+                    route == "tournament" ||
+                    route == "tournaments"
+                ) {
+                    if (eventId.isEmpty()) {
+                        Napier.w(tag = "DeepLink", message = "Deep link event id was blank")
+                        null
+                    } else {
+                        Napier.d(tag = "DeepLink", message = "Navigating to Event: $eventId")
+                        DeepLinkNav.Event(eventId)
+                    }
+                } else if (route == "host" && effectiveSegments[1].lowercase() == "onboarding") {
+                    val isRefresh = getQueryParameter("refresh")?.toBoolean() == true
+                    val isReturn = getQueryParameter("success")?.toBoolean() == true
+                    Napier.d(
+                        tag = "DeepLink",
+                        message = "Host Onboarding - Refresh: $isRefresh, Return: $isReturn"
+                    )
+                    when {
+                        isRefresh -> DeepLinkNav.Refresh
+                        isReturn -> DeepLinkNav.Return
+                        else -> null
+                    }
+                } else {
+                    Napier.d(tag = "DeepLink", message = "No matching deep link pattern found")
+                    null
                 }
             }
 

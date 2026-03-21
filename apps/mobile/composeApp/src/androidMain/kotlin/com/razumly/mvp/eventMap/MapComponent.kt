@@ -3,6 +3,7 @@ package com.razumly.mvp.eventMap
 import android.content.Context
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.backhandler.BackCallback
+import com.arkivanov.essenty.instancekeeper.InstanceKeeper
 import com.google.android.gms.common.ConnectionResult
 import com.google.android.gms.common.GoogleApiAvailability
 import com.google.android.gms.common.api.ApiException
@@ -33,6 +34,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resumeWithException
@@ -45,6 +47,7 @@ actual class MapComponent(
 ) : ComponentContext by componentContext {
 
     private val logTag = "MapComponent"
+    private val cleanupKey = "Cleanup_Map"
     private val scopeExceptionHandler = CoroutineExceptionHandler { _, throwable ->
         when (throwable) {
             is DeniedAlwaysException -> {
@@ -121,58 +124,73 @@ actual class MapComponent(
         logMapsDiagnostics(context)
         backHandler.register(_backCallback)
         _backCallback.priority = BackCallback.PRIORITY_MAX
+        instanceKeeper.put(cleanupKey, Cleanup(locationTracker))
         scope.launch {
             _showMap.collect {
                 _backCallback.isEnabled = it
             }
         }
         scope.launch {
-            try {
-                locationTracker.startTracking()
-            } catch (deniedAlwaysException: DeniedAlwaysException) {
-                Napier.w(
-                    message = "Location tracking disabled (always denied)",
-                    tag = logTag,
-                )
-                return@launch
-            } catch (deniedException: DeniedException) {
-                Napier.w(
-                    message = "Location tracking disabled (denied)",
-                    tag = logTag,
-                )
-                return@launch
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (e: Exception) {
-                Napier.w(
-                    message = "Location tracking disabled: ${e.message}",
-                    tag = logTag,
-                )
-                return@launch
-            }
+            _showMap
+                .collectLatest { visible ->
+                    if (!visible) {
+                        runCatching { locationTracker.stopTracking() }
+                            .onFailure { throwable ->
+                                Napier.w(
+                                    message = "Failed to stop location tracking: ${throwable.message}",
+                                    tag = logTag,
+                                )
+                            }
+                        return@collectLatest
+                    }
 
-            try {
-                locationTracker.getLocationsFlow().collect { trackedLocation ->
-                    _currentLocation.value = trackedLocation
+                    try {
+                        locationTracker.startTracking()
+                    } catch (deniedAlwaysException: DeniedAlwaysException) {
+                        Napier.w(
+                            message = "Location tracking disabled (always denied)",
+                            tag = logTag,
+                        )
+                        return@collectLatest
+                    } catch (deniedException: DeniedException) {
+                        Napier.w(
+                            message = "Location tracking disabled (denied)",
+                            tag = logTag,
+                        )
+                        return@collectLatest
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (e: Exception) {
+                        Napier.w(
+                            message = "Location tracking disabled: ${e.message}",
+                            tag = logTag,
+                        )
+                        return@collectLatest
+                    }
+
+                    try {
+                        locationTracker.getLocationsFlow().collect { trackedLocation ->
+                            _currentLocation.value = trackedLocation
+                        }
+                    } catch (deniedAlwaysException: DeniedAlwaysException) {
+                        Napier.w(
+                            message = "Location updates unavailable (always denied)",
+                            tag = logTag,
+                        )
+                    } catch (deniedException: DeniedException) {
+                        Napier.w(
+                            message = "Location updates unavailable (denied)",
+                            tag = logTag,
+                        )
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (e: Exception) {
+                        Napier.w(
+                            message = "Location updates unavailable: ${e.message}",
+                            tag = logTag,
+                        )
+                    }
                 }
-            } catch (deniedAlwaysException: DeniedAlwaysException) {
-                Napier.w(
-                    message = "Location updates unavailable (always denied)",
-                    tag = logTag,
-                )
-            } catch (deniedException: DeniedException) {
-                Napier.w(
-                    message = "Location updates unavailable (denied)",
-                    tag = logTag,
-                )
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (e: Exception) {
-                Napier.w(
-                    message = "Location updates unavailable: ${e.message}",
-                    tag = logTag,
-                )
-            }
         }
     }
 
@@ -200,6 +218,12 @@ actual class MapComponent(
 
     actual fun toggleMap() {
         _showMap.value = !_showMap.value
+    }
+
+    private class Cleanup(private val locationTracker: LocationTracker) : InstanceKeeper.Instance {
+        override fun onDestroy() {
+            runCatching { locationTracker.stopTracking() }
+        }
     }
 
     suspend fun getPlace(placeId: String): MVPPlace =

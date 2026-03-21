@@ -1,3 +1,5 @@
+@file:OptIn(kotlin.experimental.ExperimentalObjCName::class)
+
 package com.razumly.mvp.profile
 
 import com.arkivanov.decompose.ComponentContext
@@ -54,6 +56,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import org.koin.core.parameter.parametersOf
 import org.koin.mp.KoinPlatform.getKoin
+import kotlin.native.ObjCName
 import kotlin.time.Clock
 
 data class ProfilePaymentPlan(
@@ -217,6 +220,7 @@ data class ProfileWebDocumentPromptState(
     val title: String,
     val url: String,
     val mode: ProfileWebDocumentPromptMode,
+    @property:ObjCName(swiftName = "promptDescription")
     val description: String? = null,
 )
 

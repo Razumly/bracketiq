@@ -39,7 +39,7 @@ actual fun EventMap(
     val showMap by component.showMap.collectAsState()
     LaunchedEffect(showMap) {
         if (showMap) {
-            component.showMap()
+            component.revealMap()
         } else {
             component.hideMap()
         }

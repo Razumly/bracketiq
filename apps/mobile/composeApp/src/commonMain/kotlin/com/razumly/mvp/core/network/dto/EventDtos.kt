@@ -1,3 +1,5 @@
+@file:OptIn(kotlin.experimental.ExperimentalObjCName::class)
+
 package com.razumly.mvp.core.network.dto
 
 import androidx.compose.ui.graphics.toArgb
@@ -13,6 +15,7 @@ import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.presentation.Primary
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlin.native.ObjCName
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
@@ -23,6 +26,7 @@ data class EventApiDto(
     @SerialName("\$id") val legacyId: String? = null,
 
     val name: String? = null,
+    @property:ObjCName(swiftName = "eventDescription")
     val description: String? = null,
 
     val divisions: List<String>? = null,
@@ -396,6 +400,7 @@ data class EventUpdateDto(
     val name: String? = null,
     val start: String? = null,
     val end: String? = null,
+    @property:ObjCName(swiftName = "eventDescription")
     val description: String? = null,
     val divisions: List<String>? = null,
     val divisionDetails: List<DivisionDetail> = emptyList(),

@@ -1,12 +1,16 @@
+@file:OptIn(kotlin.experimental.ExperimentalObjCName::class)
+
 package com.razumly.mvp.core.data.dataTypes
 
 import kotlinx.serialization.Serializable
+import kotlin.native.ObjCName
 
 @Serializable
 data class Organization(
     val id: String,
     val name: String,
     val location: String?,
+    @property:ObjCName(swiftName = "organizationDescription")
     val description: String?,
     val logoId: String?,
     val ownerId: String,
@@ -24,6 +28,7 @@ data class Organization(
 data class OrganizationDTO(
     val name: String,
     val location: String? = null,
+    @property:ObjCName(swiftName = "organizationDescription")
     val description: String? = null,
     val logoId: String? = null,
     val ownerId: String,

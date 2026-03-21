@@ -19,6 +19,7 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.IPushNotificationsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.StartupAuthState
+import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.eventCreate.CreateEventComponent
 import com.razumly.mvp.eventDetail.EventDetailComponent
 import com.razumly.mvp.eventManagement.EventManagementComponent
@@ -57,6 +58,7 @@ class RootComponent(
     val permissionsController: PermissionsController,
     val locationTracker: LocationTracker,
     private val userRepository: IUserRepository,
+    private val eventRepository: IEventRepository,
     private val pushNotificationsRepository: IPushNotificationsRepository,
     private val chatGroupRepository: IChatGroupRepository,
 ) : ComponentContext by componentContext, INavigationHandler {
@@ -96,6 +98,7 @@ class RootComponent(
     private var startupDecisionMade = false
     private var unreadCountJob: Job? = null
     private var pushRegistrationRetryJob: Job? = null
+    private var deepLinkNavigationJob: Job? = null
 
     private val _selectedPage = MutableStateFlow<AppConfig>(AppConfig.Search())
     val selectedPage: StateFlow<AppConfig> = _selectedPage.asStateFlow()
@@ -202,16 +205,55 @@ class RootComponent(
 
     private fun handleDeepLinkOrDefault() {
         val deepLinkNavVal = deepLinkNav.value
-        val targetConfig = when (deepLinkNavVal) {
-            is DeepLinkNav.Event -> AppConfig.Search(eventId = deepLinkNavVal.eventId)
-            is DeepLinkNav.Refresh -> AppConfig.ProfileHome
-            is DeepLinkNav.Return -> AppConfig.ProfileHome
-            else -> AppConfig.Search()
-        }
-        setDefaultNavigationDirection()
-        navigation.replaceAll(targetConfig)
-        _selectedPage.value = targetConfig
         deepLinkNav.value = null
+        when (deepLinkNavVal) {
+            is DeepLinkNav.Event -> navigateToDeepLinkedEvent(deepLinkNavVal.eventId)
+            is DeepLinkNav.Refresh -> {
+                setDefaultNavigationDirection()
+                navigation.replaceAll(AppConfig.ProfileHome)
+                _selectedPage.value = AppConfig.ProfileHome
+            }
+
+            is DeepLinkNav.Return -> {
+                setDefaultNavigationDirection()
+                navigation.replaceAll(AppConfig.ProfileHome)
+                _selectedPage.value = AppConfig.ProfileHome
+            }
+
+            else -> {
+                setDefaultNavigationDirection()
+                navigation.replaceAll(AppConfig.Search())
+                _selectedPage.value = AppConfig.Search()
+            }
+        }
+    }
+
+    private fun navigateToDeepLinkedEvent(rawEventId: String) {
+        val eventId = rawEventId.trim()
+        if (eventId.isEmpty()) {
+            setDefaultNavigationDirection()
+            navigation.replaceAll(AppConfig.Search())
+            _selectedPage.value = AppConfig.Search()
+            return
+        }
+
+        deepLinkNavigationJob?.cancel()
+        deepLinkNavigationJob = scope.launch {
+            eventRepository.getEvent(eventId)
+                .onSuccess { event ->
+                    setDefaultNavigationDirection()
+                    // Keep Discover in the stack so back returns there from Event Detail.
+                    navigation.replaceAll(AppConfig.Search(), AppConfig.EventDetail(event))
+                    _selectedPage.value = AppConfig.Search()
+                }
+                .onFailure { throwable ->
+                    Napier.w("Failed to resolve deep-linked event $eventId: ${throwable.message}")
+                    _startupNotice.value = throwable.message ?: "Couldn't open that event link."
+                    setDefaultNavigationDirection()
+                    navigation.replaceAll(AppConfig.Search())
+                    _selectedPage.value = AppConfig.Search()
+                }
+        }
     }
 
     fun handleDeepLink(deepLinkNav: DeepLinkNav?) {

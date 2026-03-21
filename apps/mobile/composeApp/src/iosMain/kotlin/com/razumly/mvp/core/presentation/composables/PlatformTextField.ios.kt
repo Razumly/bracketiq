@@ -1,5 +1,8 @@
+@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
+
 package com.razumly.mvp.core.presentation.composables
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -27,11 +30,19 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.UIKitView
 import com.razumly.mvp.core.presentation.localAllFocusManagers
-import kotlinx.cinterop.*
+import kotlinx.cinterop.CValue
+import kotlinx.cinterop.CValuesRef
+import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.StableRef
+import kotlinx.cinterop.cstr
+import platform.CoreGraphics.CGRectMake
 import platform.Foundation.*
 import platform.UIKit.*
 import platform.darwin.NSObject
 import platform.objc.*
+
+private val LightReadablePlaceholder = Color(0xFF6B7785)
+private val LightReadableDisabled = Color(0xFF5E6B78)
 
 @Composable
 actual fun PlatformTextField(
@@ -74,6 +85,31 @@ actual fun PlatformTextField(
     val actualFontSize = fontSize ?: textStyle?.fontSize ?: 16.sp
     val glassStyle = style == PlatformTextFieldStyle.GlassPill
     val cornerRadius = if (glassStyle) 28.dp else 8.dp
+    val readablePlaceholder = if (isSystemInDarkTheme()) {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    } else {
+        LightReadablePlaceholder
+    }
+    val readableDisabled = if (isSystemInDarkTheme()) {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    } else {
+        LightReadableDisabled
+    }
+    val fillColor = if (glassStyle) Color.Transparent else MaterialTheme.colorScheme.surface
+    val disabledFillColor = if (glassStyle) Color.Transparent else MaterialTheme.colorScheme.surfaceContainerLow
+    val borderColor = if (glassStyle) {
+        Color.Transparent
+    } else if (isError) {
+        MaterialTheme.colorScheme.error
+    } else {
+        MaterialTheme.colorScheme.outline
+    }
+    val textUIColor = MaterialTheme.colorScheme.onSurface.toUIColor()
+    val disabledTextUIColor = readableDisabled.toUIColor()
+    val placeholderUIColor = readablePlaceholder.toUIColor()
+    val fillUIColor = fillColor.toUIColor()
+    val disabledFillUIColor = disabledFillColor.toUIColor()
+    val borderUIColor = borderColor.toUIColor()
     val paddingModifier = if (contentPadding != null) {
         Modifier.padding(contentPadding)
     } else {
@@ -113,14 +149,12 @@ actual fun PlatformTextField(
                         .weight(1f)
                         .height(fieldHeight)
                         .background(
-                            if (glassStyle) Color.Transparent else MaterialTheme.colorScheme.surface,
+                            fillColor,
                             RoundedCornerShape(cornerRadius)
                         )
                         .border(
                             1.dp,
-                            if (isError) MaterialTheme.colorScheme.error
-                            else if (glassStyle) Color.Transparent
-                            else MaterialTheme.colorScheme.outline,
+                            borderColor,
                             RoundedCornerShape(cornerRadius)
                         )
                         .clickable(enabled = enabled, onClick = onTap)
@@ -131,10 +165,12 @@ actual fun PlatformTextField(
                         text = value.ifEmpty { placeholder },
                         style = MaterialTheme.typography.bodyMedium.copy(
                             fontSize = actualFontSize,
-                            color = if (value.isEmpty())
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            else
+                            color = when {
+                                !enabled -> readableDisabled
+                                value.isEmpty() -> readablePlaceholder
+                                else ->
                                 MaterialTheme.colorScheme.onSurface
+                            }
                         )
                     )
                 }
@@ -156,6 +192,13 @@ actual fun PlatformTextField(
                             focusManager = iosFocusManager,
                             imeAction = imeAction,
                             style = style,
+                            textColor = textUIColor,
+                            disabledTextColor = disabledTextUIColor,
+                            placeholderColor = placeholderUIColor,
+                            fillColor = fillUIColor,
+                            disabledFillColor = disabledFillUIColor,
+                            borderColor = borderUIColor,
+                            cornerRadius = cornerRadius.value.toDouble(),
                             onImeAction = onImeAction,
                         )
                     },
@@ -175,6 +218,13 @@ actual fun PlatformTextField(
                             fontSize = actualFontSize,
                             imeAction = imeAction,
                             style = style,
+                            textColor = textUIColor,
+                            disabledTextColor = disabledTextUIColor,
+                            placeholderColor = placeholderUIColor,
+                            fillColor = fillUIColor,
+                            disabledFillColor = disabledFillUIColor,
+                            borderColor = borderUIColor,
+                            cornerRadius = cornerRadius.value.toDouble(),
                         )
                     }
                 )
@@ -204,7 +254,6 @@ actual fun PlatformTextField(
 }
 
 // SIMPLIFIED: No keyboard handling needed!
-@OptIn(ExperimentalForeignApi::class)
 fun createSimpleUITextField(
     placeholder: String,
     text: String,
@@ -217,20 +266,32 @@ fun createSimpleUITextField(
     imeAction: ImeAction = ImeAction.Next,
     onImeAction: (() -> Unit)? = null,
     style: PlatformTextFieldStyle = PlatformTextFieldStyle.Default,
+    textColor: UIColor,
+    disabledTextColor: UIColor,
+    placeholderColor: UIColor,
+    fillColor: UIColor,
+    disabledFillColor: UIColor,
+    borderColor: UIColor,
+    cornerRadius: Double,
 ): UITextField {
     val textField = UITextField() // Just regular UITextField - no custom subclass!
 
     // Basic setup only
     textField.text = toDisplayText(text, keyboardType)
-    textField.placeholder = placeholder
-    textField.borderStyle = if (style == PlatformTextFieldStyle.GlassPill) {
-        UITextBorderStyle.UITextBorderStyleNone
-    } else {
-        UITextBorderStyle.UITextBorderStyleRoundedRect
-    }
+    textField.borderStyle = UITextBorderStyle.UITextBorderStyleNone
     textField.secureTextEntry = isSecure
     textField.enabled = enabled
     textField.font = UIFont.systemFontOfSize(fontSize.value.toDouble())
+    textField.layer.cornerRadius = cornerRadius
+    textField.layer.borderWidth = if (style == PlatformTextFieldStyle.GlassPill) 0.0 else 1.0
+    textField.layer.borderColor = borderColor.CGColor
+    textField.backgroundColor = if (enabled) fillColor else disabledFillColor
+    textField.textColor = if (enabled) textColor else disabledTextColor
+    textField.attributedPlaceholder = placeholder.toAttributedPlaceholder(placeholderColor)
+    textField.leftView = UIView(frame = CGRectMake(0.0, 0.0, 12.0, 0.0))
+    textField.leftViewMode = UITextFieldViewMode.UITextFieldViewModeAlways
+    textField.rightView = UIView(frame = CGRectMake(0.0, 0.0, 12.0, 0.0))
+    textField.rightViewMode = UITextFieldViewMode.UITextFieldViewModeAlways
 
     // Set keyboard type
     when (keyboardType) {
@@ -274,6 +335,7 @@ fun createSimpleUITextField(
     return textField
 }
 
+@OptIn(ExperimentalForeignApi::class)
 fun updateSimpleUITextField(
     textField: UITextField,
     text: String,
@@ -284,6 +346,13 @@ fun updateSimpleUITextField(
     fontSize: TextUnit = 16.sp,
     imeAction: ImeAction = ImeAction.Next,
     style: PlatformTextFieldStyle = PlatformTextFieldStyle.Default,
+    textColor: UIColor,
+    disabledTextColor: UIColor,
+    placeholderColor: UIColor,
+    fillColor: UIColor,
+    disabledFillColor: UIColor,
+    borderColor: UIColor,
+    cornerRadius: Double,
 ) {
     val displayText = toDisplayText(text, keyboardType)
     // Only update text if different to avoid cursor jumping
@@ -291,15 +360,16 @@ fun updateSimpleUITextField(
         textField.text = displayText
     }
 
-    textField.placeholder = placeholder
     textField.secureTextEntry = isSecure
     textField.enabled = enabled
     textField.font = UIFont.systemFontOfSize(fontSize.value.toDouble())
-    textField.borderStyle = if (style == PlatformTextFieldStyle.GlassPill) {
-        UITextBorderStyle.UITextBorderStyleNone
-    } else {
-        UITextBorderStyle.UITextBorderStyleRoundedRect
-    }
+    textField.borderStyle = UITextBorderStyle.UITextBorderStyleNone
+    textField.layer.cornerRadius = cornerRadius
+    textField.layer.borderWidth = if (style == PlatformTextFieldStyle.GlassPill) 0.0 else 1.0
+    textField.layer.borderColor = borderColor.CGColor
+    textField.backgroundColor = if (enabled) fillColor else disabledFillColor
+    textField.textColor = if (enabled) textColor else disabledTextColor
+    textField.attributedPlaceholder = placeholder.toAttributedPlaceholder(placeholderColor)
 
     // Update keyboard type
     when (keyboardType) {
@@ -340,6 +410,20 @@ private fun formatMoneyDisplay(rawValue: String): String {
     val fractional = padded.takeLast(2)
     return "$whole.$fractional"
 }
+
+private fun String.toAttributedPlaceholder(color: UIColor): NSAttributedString =
+    NSAttributedString.create(
+        string = this,
+        attributes = mapOf(NSForegroundColorAttributeName to color)
+    )
+
+private fun Color.toUIColor(): UIColor =
+    UIColor.colorWithRed(
+        red = red.toDouble(),
+        green = green.toDouble(),
+        blue = blue.toDouble(),
+        alpha = alpha.toDouble(),
+    )
 
 // Simplified delegate - only handles text changes and focus
 class SimpleTextFieldDelegate(

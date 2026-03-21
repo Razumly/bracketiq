@@ -909,7 +909,7 @@ class BillingRepository(
 
 private fun buildEmbeddedSigningRedirectUrl(eventId: String): String? {
     val normalizedEventId = eventId.trim().takeIf(String::isNotBlank) ?: return null
-    return "https://bracket-iq.com/event/$normalizedEventId"
+    return "https://bracket-iq.com/events/$normalizedEventId"
 }
 
 private fun Throwable.isNotFound(): Boolean {

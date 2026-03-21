@@ -1,12 +1,16 @@
+@file:OptIn(kotlin.experimental.ExperimentalObjCName::class)
+
 package com.razumly.mvp.core.data.dataTypes.dtos
 
 import com.razumly.mvp.core.data.dataTypes.Product
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
+import kotlin.native.ObjCName
 
 @Serializable
 data class ProductDTO(
     val name: String,
+    @property:ObjCName(swiftName = "productDescription")
     val description: String? = null,
     val priceCents: Int,
     val period: String,

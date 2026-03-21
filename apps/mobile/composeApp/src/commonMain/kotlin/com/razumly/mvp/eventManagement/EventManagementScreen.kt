@@ -16,7 +16,7 @@ import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.composables.PlatformBackButton
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
-import com.razumly.mvp.eventSearch.EventList
+import com.razumly.mvp.eventSearch.tabs.events.EventList
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

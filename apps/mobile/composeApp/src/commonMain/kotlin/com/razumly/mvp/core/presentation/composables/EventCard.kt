@@ -160,7 +160,8 @@ fun EventCard(
                     },
                         onClick = { onMapClick(mapButtonOffset) },
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color.Black, contentColor = Color.White
+                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
                         )
                     ) {
                         Text("View on Map")

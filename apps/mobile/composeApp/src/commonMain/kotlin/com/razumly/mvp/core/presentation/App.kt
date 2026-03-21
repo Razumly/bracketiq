@@ -30,7 +30,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.arkivanov.decompose.ExperimentalDecomposeApi
@@ -134,29 +133,25 @@ fun App(root: RootComponent) {
                     currentChild !is RootComponent.Child.Splash &&
                     currentChild !is RootComponent.Child.Chat
 
-                // Show bottom nav for main app screens (not login/startup splash or chat)
-                if (shouldShowBottomNav) {
-                    MVPBottomNavBar(
-                        selectedPage = selectedPage,
-                        unreadChatMessageCount = unreadChatMessageCount,
-                        onPageSelected = { root.onTabSelected(it) }) { paddingValues ->
-                        Scaffold(
-                            snackbarHost = {
-                                SnackbarHost(
-                                    hostState = snackbarHostState,
-                                    modifier = Modifier.padding(paddingValues)
-                                )
-                            }) { innerPadding ->
-                            AppContent(root, childStack, paddingValues)
-                        }
-                    }
-                } else {
+                MVPBottomNavBar(
+                    selectedPage = selectedPage,
+                    unreadChatMessageCount = unreadChatMessageCount,
+                    onPageSelected = { root.onTabSelected(it) },
+                    showNavBar = shouldShowBottomNav
+                ) { paddingValues ->
                     Scaffold(
                         snackbarHost = {
-                            SnackbarHost(hostState = snackbarHostState)
+                            SnackbarHost(
+                                hostState = snackbarHostState,
+                                modifier = if (shouldShowBottomNav) {
+                                    Modifier.padding(paddingValues)
+                                } else {
+                                    Modifier
+                                }
+                            )
                         }
                     ) { _ ->
-                        AppContent(root, childStack, null)
+                        AppContent(root, childStack, if (shouldShowBottomNav) paddingValues else null)
                     }
                 }
 
@@ -279,7 +274,7 @@ fun LoadingOverlay(
     message: String, progress: Float? = null, modifier: Modifier = Modifier
 ) {
     Box(
-        modifier = modifier.background(Color.Black.copy(alpha = 0.6f))
+        modifier = modifier.background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.42f))
             .clickable(enabled = false) { }, // Prevent interaction
         contentAlignment = Alignment.Center
     ) {

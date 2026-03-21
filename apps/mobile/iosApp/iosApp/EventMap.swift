@@ -9,6 +9,18 @@
 import SwiftUI
 import ComposeApp
 import GoogleMaps
+import CoreLocation
+
+private func focusedLocationMatchesUser(
+    focusedLocation: LatLng?,
+    userLocation: LatLng?,
+    thresholdMeters: CLLocationDistance = 10
+) -> Bool {
+    guard let focusedLocation, let userLocation else { return false }
+    let focused = CLLocation(latitude: focusedLocation.latitude, longitude: focusedLocation.longitude)
+    let user = CLLocation(latitude: userLocation.latitude, longitude: userLocation.longitude)
+    return focused.distance(from: user) <= thresholdMeters
+}
 
 struct EventMap: View {
     var component: MapComponent
@@ -62,6 +74,10 @@ struct EventMap: View {
                     events: ev,
                     canClickPOI: canClickPOI,
                     focusedLocation: focusedLocation,
+                    isFocusedOnUserLocation: focusedLocationMatchesUser(
+                        focusedLocation: focusedLocation,
+                        userLocation: loc
+                    ),
                     focusedEvent: focusedEvent,
                     onEventSelected: onEventSelected,
                     onPlaceSelected: onPlaceSelected,
@@ -160,6 +176,7 @@ struct GoogleMapView: UIViewRepresentable {
     let events: [Event]
     let canClickPOI: Bool
     let focusedLocation: LatLng?
+    let isFocusedOnUserLocation: Bool
     let focusedEvent: Event?
     let onEventSelected: (Event) -> Void
     let onPlaceSelected: (MVPPlace) -> Void
@@ -183,23 +200,38 @@ struct GoogleMapView: UIViewRepresentable {
         mapView.isMyLocationEnabled = true
         mapView.delegate = context.coordinator
         mapView.mapType = .normal
-        // Keep taps inside the map so marker/info-window presses are not passed through.
-        mapView.settings.consumesGesturesInView = true
+        mapView.settings.consumesGesturesInView = false
         mapView.settings.scrollGestures = true
         mapView.settings.zoomGestures = true
+
+        if isFocusedOnUserLocation, let focusedLocation {
+            context.coordinator.lastUserCameraLocation = CLLocation(
+                latitude: focusedLocation.latitude,
+                longitude: focusedLocation.longitude
+            )
+        }
         
         return mapView
     }
     
     func updateUIView(_ mapView: GMSMapView, context: Context) {
-        context.coordinator.parent = self
-        context.coordinator.onEventSelected = onEventSelected
-        context.coordinator.onPlaceSelected = onPlaceSelected
-        context.coordinator.onPlaceSelectionPoint = onPlaceSelectionPoint
-
         // Clear existing markers
         mapView.clear()
         context.coordinator.clearAllMarkers()
+
+        if isFocusedOnUserLocation, let focusedLocation {
+            let focusedCoordinate = CLLocationCoordinate2D(
+                latitude: focusedLocation.latitude,
+                longitude: focusedLocation.longitude
+            )
+            if context.coordinator.shouldRecenterOnUserLocation(
+                focusedCoordinate,
+                thresholdMeters: 1000
+            ) {
+                mapView.animate(with: GMSCameraUpdate.setTarget(focusedCoordinate))
+                context.coordinator.recordUserCameraLocation(focusedCoordinate)
+            }
+        }
         
         // Add focused event marker
         if let fe = focusedEvent {
@@ -240,8 +272,7 @@ struct GoogleMapView: UIViewRepresentable {
             context.coordinator.placeMarkers.append(marker)
             
             if places.count == 1 {
-                let camera = GMSCameraPosition.camera(withTarget: coord, zoom: 15)
-                mapView.animate(to: camera)
+                mapView.animate(with: GMSCameraUpdate.setTarget(coord))
                 // Show info window automatically
                 mapView.selectedMarker = marker
             }
@@ -263,13 +294,14 @@ struct GoogleMapView: UIViewRepresentable {
 }
 
 class Coordinator: NSObject, GMSMapViewDelegate {
-    var parent: GoogleMapView
-    var onEventSelected: (Event) -> Void
-    var onPlaceSelected: (MVPPlace) -> Void
-    var onPlaceSelectionPoint: (KotlinFloat, KotlinFloat) -> Void
+    let parent: GoogleMapView
+    let onEventSelected: (Event) -> Void
+    let onPlaceSelected: (MVPPlace) -> Void
+    let onPlaceSelectionPoint: (KotlinFloat, KotlinFloat) -> Void
     
     var placeMarkers: [GMSMarker] = []
     var currentPOIMarker: GMSMarker?
+    var lastUserCameraLocation: CLLocation?
     
     init(parent: GoogleMapView,
          onEventSelected: @escaping (Event) -> Void,
@@ -284,6 +316,19 @@ class Coordinator: NSObject, GMSMapViewDelegate {
     func clearAllMarkers() {
         placeMarkers.removeAll()
         currentPOIMarker = nil
+    }
+
+    func shouldRecenterOnUserLocation(
+        _ coordinate: CLLocationCoordinate2D,
+        thresholdMeters: CLLocationDistance
+    ) -> Bool {
+        guard let lastUserCameraLocation else { return true }
+        let nextLocation = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        return nextLocation.distance(from: lastUserCameraLocation) >= thresholdMeters
+    }
+
+    func recordUserCameraLocation(_ coordinate: CLLocationCoordinate2D) {
+        lastUserCameraLocation = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
     }
     
     // MARK: - Custom Info Windows
@@ -348,8 +393,7 @@ class Coordinator: NSObject, GMSMapViewDelegate {
         mapView.selectedMarker = marker
         
         // Animate to POI location
-        let camera = GMSCameraPosition.camera(withTarget: location, zoom: 12)
-        mapView.animate(to: camera)
+        mapView.animate(with: GMSCameraUpdate.setTarget(location))
     }
     
     // MARK: - Custom Info Window Creation
@@ -471,23 +515,16 @@ class Coordinator: NSObject, GMSMapViewDelegate {
             onPlaceSelected(placeData.place)
             return true
         } else if let poiData = marker.userData as? POIMarkerData {
-            let fallbackPlace = parent.component.buildFallbackPlace(
-                name: poiData.name,
-                placeId: poiData.placeId,
-                latitude: marker.position.latitude,
-                longitude: marker.position.longitude
-            )
             Task {
                 do {
                     let place = try await parent.component.getPlace(placeId: poiData.placeId)
-                    let resolvedPlace = place ?? fallbackPlace
-                    await MainActor.run {
-                        self.onPlaceSelected(resolvedPlace)
+                    if let place = place {
+                        await MainActor.run {
+                            self.onPlaceSelected(place)
+                        }
                     }
                 } catch {
-                    await MainActor.run {
-                        self.onPlaceSelected(fallbackPlace)
-                    }
+                    print("Error getting place details: \(error)")
                 }
             }
             return true

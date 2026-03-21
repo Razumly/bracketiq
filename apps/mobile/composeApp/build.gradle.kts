@@ -1,4 +1,5 @@
 
+import co.touchlab.skie.configuration.SuppressSkieWarning
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.plugin.mpp.NativeBuildType
 import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
@@ -275,6 +276,18 @@ room {
 skie {
     features {
         enableSwiftUIObservingPreview = true
+        group("androidx.compose.ui.unit") {
+            SuppressSkieWarning.NameCollision(true)
+        }
+        group("androidx.collection") {
+            SuppressSkieWarning.NameCollision(true)
+        }
+        group("io.ktor.http") {
+            SuppressSkieWarning.NameCollision(true)
+        }
+        group("com.mmk.kmpnotifier.notification.configuration") {
+            SuppressSkieWarning.NameCollision(true)
+        }
     }
 }
 

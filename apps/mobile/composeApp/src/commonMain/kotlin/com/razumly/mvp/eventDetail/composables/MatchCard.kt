@@ -57,6 +57,12 @@ data class ColorPallete(
     val primaryContainer: Color,
     val onPrimaryContainer: Color,
 )
+
+private val AlternateBracketPrimary = Color(0xFF0F5C5A)
+private val AlternateBracketOnPrimary = Color(0xFFFFFFFF)
+private val AlternateBracketContainer = Color(0xFFD9F4EF)
+private val AlternateBracketOnContainer = Color(0xFF123B39)
+
 @Composable
 fun MatchCard(
     match: MatchWithRelations?,
@@ -73,16 +79,18 @@ fun MatchCard(
         eventWithRelations.players.associateBy(UserData::id)
     }
     val matchCardColorPallet = if (match != null && match.match.losersBracket) {
-        ColorPallete(MaterialTheme.colorScheme.tertiary,
-            MaterialTheme.colorScheme.onTertiary,
-            MaterialTheme.colorScheme.tertiaryContainer,
-            MaterialTheme.colorScheme.onTertiaryContainer
+        ColorPallete(
+            AlternateBracketPrimary,
+            AlternateBracketOnPrimary,
+            AlternateBracketContainer,
+            AlternateBracketOnContainer,
         )
     } else {
-        ColorPallete(MaterialTheme.colorScheme.primary,
+        ColorPallete(
+            MaterialTheme.colorScheme.primary,
             MaterialTheme.colorScheme.onPrimary,
             MaterialTheme.colorScheme.primaryContainer,
-            MaterialTheme.colorScheme.onPrimaryContainer
+            MaterialTheme.colorScheme.onPrimaryContainer,
         )
     }
     CompositionLocalProvider(localColors provides matchCardColorPallet) {
@@ -304,6 +312,7 @@ private fun TeamRow(
     isLosersBracket: Boolean,
     playoffPlaceholder: String?,
 ) {
+    val usesReferenceLabel = team == null
     val label = when {
         team != null -> resolveTeamLabel(team)
         previousMatch?.match?.matchId != null -> {
@@ -321,6 +330,11 @@ private fun TeamRow(
         Text(
             text = label,
             modifier = Modifier.weight(1f),
+            style = if (usesReferenceLabel) {
+                MaterialTheme.typography.bodyMedium
+            } else {
+                MaterialTheme.typography.bodyLarge
+            },
             overflow = TextOverflow.Ellipsis,
             maxLines = 1,
             color = localColors.current.onPrimary

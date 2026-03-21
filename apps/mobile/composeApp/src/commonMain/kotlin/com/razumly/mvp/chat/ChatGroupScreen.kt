@@ -3,108 +3,70 @@
 package com.razumly.mvp.chat
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.only
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import com.razumly.mvp.chat.composables.ChatHeader
-import com.razumly.mvp.chat.composables.ChatMessageBubble
-import com.razumly.mvp.chat.composables.shouldAutoScrollToLatest
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.MessageMVP
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.composables.InvitePlayerCard
+import com.razumly.mvp.core.presentation.composables.PlatformBackButton
 import com.razumly.mvp.core.presentation.composables.PlatformTextField
-import com.razumly.mvp.core.presentation.composables.PlatformTextFieldStyle
 import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.SearchPlayerDialog
 import com.razumly.mvp.core.presentation.util.timeFormat
-import dev.chrisbanes.haze.hazeEffect
-import dev.chrisbanes.haze.hazeSource
-import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
-import dev.chrisbanes.haze.materials.HazeMaterials
-import dev.chrisbanes.haze.rememberHazeState
-import kotlinx.coroutines.launch
 import kotlinx.datetime.DayOfWeek
 import kotlinx.datetime.Month
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
-import kotlin.math.max
+import androidx.compose.ui.window.Dialog
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
-private const val CHAT_MOTION_DURATION_MS = 220
-private const val CHAT_NEAR_BOTTOM_THRESHOLD = 1
-private val CHAT_COMPOSER_SHELL_SHAPE = RoundedCornerShape(34.dp)
-private val CHAT_INPUT_PILL_SHAPE = RoundedCornerShape(24.dp)
-private val CHAT_COMPOSER_FEATHER_HEIGHT = 74.dp
-private val CHAT_COMPOSER_FEATHER_OFFSET = (-30).dp
-
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalHazeMaterialsApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatGroupScreen(component: ChatGroupComponent) {
     val input by component.messageInput.collectAsState()
@@ -114,11 +76,11 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
     val isChatMuted by component.isChatMuted.collectAsState()
     val currentUserId = component.currentUser.id
     val chatGroup = chatGroupWithRelations?.chatGroup ?: ChatGroup.empty()
-    val messages = chatGroupWithRelations?.messages ?: emptyList()
-    val users = chatGroupWithRelations?.users ?: emptyList()
+    val messages = chatGroupWithRelations?.messages ?: listOf()
+    val users = chatGroupWithRelations?.users ?: listOf()
     val isHost = chatGroup.hostId == currentUserId
     val participantNames = users
-        .mapNotNull { user -> user.fullName.asMeaningfulText() ?: user.userName.asMeaningfulText() }
+        .mapNotNull { user -> user.fullName.asMeaningfulText() }
         .distinct()
         .joinToString(", ")
         .asMeaningfulText()
@@ -126,14 +88,7 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
         ?: chatGroup.displayName.asMeaningfulText()
         ?: participantNames
         ?: "Chat"
-    val chatSubtitle = when {
-        users.size > 2 -> "${users.size} members"
-        participantNames != null && participantNames != chatTitle -> participantNames
-        else -> null
-    }
     val listState = rememberLazyListState()
-    val coroutineScope = rememberCoroutineScope()
-    val hazeState = rememberHazeState()
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val latestMessageKey = messages
@@ -149,290 +104,143 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
     var showDeleteChatDialog by remember { mutableStateOf(false) }
     var showLeaveChatDialog by remember { mutableStateOf(false) }
     var showManagePeopleDialog by remember { mutableStateOf(false) }
-    var showJumpToLatest by remember { mutableStateOf(false) }
-    var previousMessageCount by remember { mutableIntStateOf(0) }
-    var lastProcessedMessageKey by remember { mutableStateOf<String?>(null) }
-    var headerHeightPx by remember { mutableIntStateOf(0) }
-    var composerHeightPx by remember { mutableIntStateOf(0) }
-    val density = LocalDensity.current
 
-    val headerHeight = with(density) { headerHeightPx.toDp() }
-    val composerHeight = with(density) { composerHeightPx.toDp() }
-    val isNearBottom by remember(messages.size, listState) {
-        derivedStateOf {
-            isNearBottom(
-                lastVisibleItemIndex = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1,
-                lastMessageIndex = messages.lastIndex,
-                threshold = CHAT_NEAR_BOTTOM_THRESHOLD,
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) {
+            listState.animateScrollToItem(messages.size - 1)
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(chatTitle) },
+                navigationIcon = {
+                    PlatformBackButton(
+                        onBack = component::onBack,
+                        arrow = true,
+                    )
+                },
+                actions = {
+                    IconButton(
+                        onClick = { showOptionsMenu = true }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MoreVert,
+                            contentDescription = "Chat options"
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = showOptionsMenu,
+                        onDismissRequest = { showOptionsMenu = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Manage People") },
+                            onClick = {
+                                showManagePeopleDialog = true
+                                showOptionsMenu = false
+                            }
+                        )
+                        if (isHost) {
+                            DropdownMenuItem(
+                                text = { Text("Delete Chat") },
+                                onClick = {
+                                    showDeleteChatDialog = true
+                                    showOptionsMenu = false
+                                }
+                            )
+                        } else {
+                            DropdownMenuItem(
+                                text = { Text("Leave Chat") },
+                                onClick = {
+                                    showLeaveChatDialog = true
+                                    showOptionsMenu = false
+                                }
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text(if (isChatMuted) "Unmute" else "Mute") },
+                            onClick = {
+                                component.toggleChatMute()
+                                showOptionsMenu = false
+                            }
+                        )
+                    }
+                }
             )
-        }
-    }
-
-    LaunchedEffect(isNearBottom) {
-        if (isNearBottom) {
-            showJumpToLatest = false
-        }
-    }
-
-    LaunchedEffect(latestMessageKey, messages.size, isNearBottom) {
-        if (messages.isEmpty() || latestMessageKey.isBlank()) {
-            previousMessageCount = 0
-            lastProcessedMessageKey = null
-            showJumpToLatest = false
-            return@LaunchedEffect
-        }
-
-        if (latestMessageKey == lastProcessedMessageKey) {
-            previousMessageCount = messages.size
-            return@LaunchedEffect
-        }
-
-        val latestMessageUserId = messages.lastOrNull()?.userId
-        val shouldScroll = shouldAutoScrollToLatest(
-            isNearBottom = isNearBottom,
-            latestMessageUserId = latestMessageUserId,
-            currentUserId = currentUserId,
-            previousMessageCount = previousMessageCount,
-        )
-
-        if (shouldScroll) {
-            listState.animateScrollToItem(messages.lastIndex)
-            showJumpToLatest = false
-        } else {
-            showJumpToLatest = true
-        }
-
-        lastProcessedMessageKey = latestMessageKey
-        previousMessageCount = messages.size
-    }
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-    ) {
-        LazyColumn(
-            state = listState,
+        },
+        contentWindowInsets = WindowInsets(0)
+    ) { paddingValues ->
+        Column(
             modifier = Modifier
                 .fillMaxSize()
-                .hazeSource(hazeState)
-                .padding(horizontal = 16.dp),
-            contentPadding = PaddingValues(
-                top = headerHeight + 16.dp,
-                bottom = composerHeight + 16.dp,
-            ),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+                .padding(paddingValues)
         ) {
-            itemsIndexed(
-                items = messages,
-                key = { index, message -> messageKey(message, index) },
-            ) { index, message ->
-                val isCurrentUser = message.userId == currentUserId
-                val messageId = messageKey(message, index)
-                val senderName = users
-                    .firstOrNull { it.id == message.userId }
-                    ?.fullName
-                    ?.asMeaningfulText()
-                    ?: users
-                        .firstOrNull { it.id == message.userId }
-                        ?.userName
-                        ?.asMeaningfulText()
-                    ?: "Unknown User"
-
-                ChatMessageBubble(
-                    message = message,
-                    isCurrentUser = isCurrentUser,
-                    senderName = senderName,
-                    timestampText = message.sentTime.toTimestampLabel(),
-                    isTimestampExpanded = messageId in expandedMessageIds,
-                    onToggleTimestamp = {
-                        expandedMessageIds = if (messageId in expandedMessageIds) {
-                            expandedMessageIds - messageId
-                        } else {
-                            expandedMessageIds + messageId
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                contentPadding = PaddingValues(
+                    bottom = 8.dp
+                ),
+                verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.Bottom)
+            ) {
+                itemsIndexed(
+                    items = messages,
+                    key = { index, message -> messageKey(message, index) }
+                ) { index, message ->
+                    val isCurrentUser = message.userId == currentUserId
+                    val messageId = messageKey(message, index)
+                    MessageCard(
+                        message = message,
+                        user = users.find { it.id == message.userId },
+                        isCurrentUser = isCurrentUser,
+                        isTimestampExpanded = messageId in expandedMessageIds,
+                        onToggleTimestamp = {
+                            expandedMessageIds = if (messageId in expandedMessageIds) {
+                                expandedMessageIds - messageId
+                            } else {
+                                expandedMessageIds + messageId
+                            }
                         }
-                    },
-                )
-            }
-        }
-
-        ChatHeader(
-            title = chatTitle,
-            subtitle = chatSubtitle,
-            hazeState = hazeState,
-            onBack = component::onBack,
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .fillMaxWidth(),
-            trailingContent = {
-                IconButton(onClick = { showOptionsMenu = true }) {
-                    Icon(
-                        imageVector = Icons.Default.MoreVert,
-                        contentDescription = "Chat options",
                     )
                 }
-                DropdownMenu(
-                    expanded = showOptionsMenu,
-                    onDismissRequest = { showOptionsMenu = false },
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("Manage People") },
-                        onClick = {
-                            showManagePeopleDialog = true
-                            showOptionsMenu = false
-                        },
-                    )
-                    if (isHost) {
-                        DropdownMenuItem(
-                            text = { Text("Delete Chat") },
-                            onClick = {
-                                showDeleteChatDialog = true
-                                showOptionsMenu = false
-                            },
-                        )
-                    } else {
-                        DropdownMenuItem(
-                            text = { Text("Leave Chat") },
-                            onClick = {
-                                showLeaveChatDialog = true
-                                showOptionsMenu = false
-                            },
-                        )
-                    }
-                    DropdownMenuItem(
-                        text = { Text(if (isChatMuted) "Unmute" else "Mute") },
-                        onClick = {
-                            component.toggleChatMute()
-                            showOptionsMenu = false
-                        },
-                    )
-                }
-            },
-            onHeightMeasured = { headerHeightPx = it },
-        )
-
-        AnimatedVisibility(
-            visible = showJumpToLatest,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .imePadding()
-                .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
-                .padding(bottom = composerHeight + 10.dp),
-            enter = slideInVertically(
-                initialOffsetY = { it / 2 },
-                animationSpec = tween(CHAT_MOTION_DURATION_MS),
-            ) + fadeIn(animationSpec = tween(CHAT_MOTION_DURATION_MS)),
-            exit = slideOutVertically(
-                targetOffsetY = { it / 2 },
-                animationSpec = tween(CHAT_MOTION_DURATION_MS),
-            ) + fadeOut(animationSpec = tween(CHAT_MOTION_DURATION_MS)),
-        ) {
-            FilledIconButton(
-                onClick = {
-                    coroutineScope.launch {
-                        listState.animateScrollToItem(max(messages.lastIndex, 0))
-                    }
-                },
-                modifier = Modifier.size(48.dp),
-            ) {
-                Icon(
-                    imageVector = Icons.Default.KeyboardArrowDown,
-                    contentDescription = "Jump to latest",
-                )
             }
-        }
 
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .imePadding()
-                .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
-                .padding(horizontal = 14.dp, vertical = 10.dp)
-                .onSizeChanged { composerHeightPx = it.height },
-            contentAlignment = Alignment.BottomCenter,
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(CHAT_COMPOSER_FEATHER_HEIGHT)
-                    .align(Alignment.TopCenter)
-                    .offset(y = CHAT_COMPOSER_FEATHER_OFFSET)
-                    .hazeEffect(
-                        state = hazeState,
-                        style = HazeMaterials.ultraThin(MaterialTheme.colorScheme.surface),
-                    )
-                    .background(
-                        Brush.verticalGradient(
-                            colorStops = arrayOf(
-                                0.0f to Color.Transparent,
-                                0.28f to MaterialTheme.colorScheme.surface.copy(alpha = 0.05f),
-                                0.58f to MaterialTheme.colorScheme.surface.copy(alpha = 0.11f),
-                                1.0f to MaterialTheme.colorScheme.surface.copy(alpha = 0.03f),
-                            ),
-                        ),
-                    ),
-            )
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(CHAT_COMPOSER_SHELL_SHAPE)
-                    .hazeEffect(
-                        state = hazeState,
-                        style = HazeMaterials.regular(MaterialTheme.colorScheme.surface),
-                    )
-                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.14f))
-                    .border(
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.11f)),
-                        shape = CHAT_COMPOSER_SHELL_SHAPE,
-                    )
-                    .padding(horizontal = 8.dp, vertical = 7.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            // Input area - fixed at bottom
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shadowElevation = 8.dp,
+                color = MaterialTheme.colorScheme.surface
             ) {
-                Box(
+                Row(
                     modifier = Modifier
-                        .weight(1f)
-                        .clip(CHAT_INPUT_PILL_SHAPE)
-                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.16f))
-                        .border(
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)),
-                            shape = CHAT_INPUT_PILL_SHAPE,
-                        )
-                        .padding(horizontal = 6.dp),
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                        .padding(LocalNavBarPadding.current)
+                        .padding(bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     PlatformTextField(
                         value = input,
                         onValueChange = component::onMessageInputChange,
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = "Message",
-                        fontSize = 17.sp,
-                        height = 36.dp,
-                        imeAction = ImeAction.Send,
-                        style = PlatformTextFieldStyle.GlassPill,
-                        onImeAction = component::sendMessage,
+                        modifier = Modifier.weight(1f),
+                        placeholder = "Type a message..."
                     )
-                }
 
-                Button(
-                    onClick = {
-                        component.sendMessage()
-                        focusManager.clearFocus()
-                        keyboardController?.hide()
-                    },
-                    enabled = input.isNotBlank(),
-                    shape = RoundedCornerShape(22.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.16f),
-                        contentColor = MaterialTheme.colorScheme.onSurface,
-                        disabledContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.08f),
-                        disabledContentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
-                    ),
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
-                ) {
-                    Text("Send")
+                    Button(
+                        onClick = {
+                            component.sendMessage()
+                            focusManager.clearFocus()
+                            keyboardController?.hide()
+                        },
+                        enabled = input.isNotBlank()
+                    ) {
+                        Text("Send")
+                    }
                 }
             }
         }
@@ -448,7 +256,7 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
             onSearch = component::searchPlayers,
             onAddUser = component::addUserToChat,
             onRemoveUser = component::removeUserFromChat,
-            onDismiss = { showManagePeopleDialog = false },
+            onDismiss = { showManagePeopleDialog = false }
         )
     }
 
@@ -462,12 +270,12 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
                     onClick = {
                         component.deleteChat()
                         showDeleteChatDialog = false
-                    },
+                    }
                 ) { Text("Delete") }
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteChatDialog = false }) { Text("Cancel") }
-            },
+            }
         )
     }
 
@@ -481,14 +289,15 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
                     onClick = {
                         component.leaveChat()
                         showLeaveChatDialog = false
-                    },
+                    }
                 ) { Text("Leave") }
             },
             dismissButton = {
                 TextButton(onClick = { showLeaveChatDialog = false }) { Text("Cancel") }
-            },
+            }
         )
     }
+
 }
 
 private fun String?.asMeaningfulText(): String? =
@@ -496,17 +305,67 @@ private fun String?.asMeaningfulText(): String? =
         ?.trim()
         ?.takeIf { value -> value.isNotEmpty() && !value.equals("null", ignoreCase = true) }
 
+@Composable
+fun MessageCard(
+    message: MessageMVP,
+    user: UserData?,
+    isCurrentUser: Boolean = false,
+    isTimestampExpanded: Boolean,
+    onToggleTimestamp: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = if (isCurrentUser) Arrangement.End else Arrangement.Start
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth(0.75f)
+                .clickable(onClick = onToggleTimestamp),
+            horizontalAlignment = if (isCurrentUser) Alignment.End else Alignment.Start
+        ) {
+            Text(
+                user?.fullName ?: "Unknown User",
+                style = MaterialTheme.typography.labelSmall
+            )
+
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isCurrentUser) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.surfaceVariant
+                    }
+                )
+            ) {
+                Text(
+                    text = message.body,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (isCurrentUser) {
+                        MaterialTheme.colorScheme.onPrimary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    modifier = Modifier.padding(12.dp)
+                )
+            }
+
+            AnimatedVisibility(
+                visible = isTimestampExpanded,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                Text(
+                    text = message.sentTime.toTimestampLabel(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
 private fun messageKey(message: MessageMVP, index: Int): String =
     message.id.ifBlank { "message-$index-${message.sentTime}" }
-
-private fun isNearBottom(
-    lastVisibleItemIndex: Int,
-    lastMessageIndex: Int,
-    threshold: Int,
-): Boolean {
-    if (lastMessageIndex < 0) return true
-    return lastVisibleItemIndex >= max(lastMessageIndex - threshold, 0)
-}
 
 @Composable
 private fun ManagePeopleDialog(
@@ -528,28 +387,28 @@ private fun ManagePeopleDialog(
             Column(
                 modifier = Modifier.padding(16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Text(
                     text = if (canEdit) "Manage People" else "People",
-                    style = MaterialTheme.typography.titleLarge,
+                    style = MaterialTheme.typography.titleLarge
                 )
                 LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     itemsIndexed(users, key = { _, user -> user.id }) { _, user ->
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             PlayerCard(
                                 player = user,
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier.weight(1f)
                             )
                             if (canEdit && user.id != currentUserId) {
                                 Button(
-                                    onClick = { onRemoveUser(user) },
+                                    onClick = { onRemoveUser(user) }
                                 ) {
                                     Text("Remove")
                                 }
@@ -587,7 +446,7 @@ private fun ManagePeopleDialog(
                 user.id != currentUserId && !selectedUserIds.contains(user.id)
             },
             eventName = "",
-            entryLabel = "Person",
+            entryLabel = "Person"
         )
     }
 }

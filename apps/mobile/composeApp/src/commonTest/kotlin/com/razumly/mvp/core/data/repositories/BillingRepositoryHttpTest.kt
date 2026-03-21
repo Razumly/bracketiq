@@ -709,7 +709,7 @@ class BillingRepositoryHttpTest {
         assertTrue(signLinks[0].isTextStep())
         assertEquals("https://app.boldsign.com/sign/doc_123", signLinks[1].resolvedSigningUrl())
         assertEquals("doc_123", signLinks[1].resolvedDocumentId())
-        assertTrue(capturedBody.contains("\"redirectUrl\":\"https://bracket-iq.com/event/event_1\""))
+        assertTrue(capturedBody.contains("\"redirectUrl\":\"https://bracket-iq.com/events/event_1\""))
     }
 
     @Test
@@ -752,7 +752,7 @@ class BillingRepositoryHttpTest {
         assertTrue(capturedBody.contains("\"signerContext\":\"parent_guardian\""))
         assertTrue(capturedBody.contains("\"childUserId\":\"child_1\""))
         assertTrue(capturedBody.contains("\"childEmail\":\"child@example.test\""))
-        assertTrue(capturedBody.contains("\"redirectUrl\":\"https://bracket-iq.com/event/event_1\""))
+        assertTrue(capturedBody.contains("\"redirectUrl\":\"https://bracket-iq.com/events/event_1\""))
     }
 
     @Test

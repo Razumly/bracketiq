@@ -50,20 +50,28 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="http"/>
-                <data android:scheme="https"/>
-                <data android:host="bracket-iq.com"/>
-                <data android:pathPrefix="/"/>
+                <data
+                    android:scheme="https"
+                    android:host="bracket-iq.com"
+                    android:pathPrefix="/" />
+                <data
+                    android:scheme="http"
+                    android:host="bracket-iq.com"
+                    android:pathPrefix="/" />
             </intent-filter>
 
             <intent-filter android:label="@string/app_deep_links" android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="http"/>
-                <data android:scheme="https"/>
-                <data android:host="www.bracket-iq.com"/>
-                <data android:pathPrefix="/"/>
+                <data
+                    android:scheme="https"
+                    android:host="www.bracket-iq.com"
+                    android:pathPrefix="/" />
+                <data
+                    android:scheme="http"
+                    android:host="www.bracket-iq.com"
+                    android:pathPrefix="/" />
             </intent-filter>
         </activity>
     </application>

@@ -145,7 +145,10 @@ import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
 import io.github.ismoy.imagepickerkmp.domain.models.MimeType
 import io.github.ismoy.imagepickerkmp.presentation.ui.components.GalleryPickerLauncher
 import io.ktor.http.Url
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atStartOfDayIn
@@ -274,6 +277,7 @@ fun EventDetails(
     var isPaymentPlansValid by remember { mutableStateOf(true) }
     var isColorLoaded by remember { mutableStateOf(editEvent.imageId.isNotBlank()) }
     var paymentPlanValidationErrors by remember { mutableStateOf<List<String>>(emptyList()) }
+    var validationErrors by remember { mutableStateOf<List<String>>(emptyList()) }
 
     val coroutineScope = rememberCoroutineScope()
     val selectedUsersById = remember { mutableStateMapOf<String, UserData>() }
@@ -292,6 +296,7 @@ fun EventDetails(
     var fieldCount by remember {
         mutableStateOf(resolveReadOnlyFieldCount(event = editEvent, editableFields = editableFields))
     }
+    var eventNameInput by rememberSaveable(editEvent.id, editView) { mutableStateOf(editEvent.name) }
     val selectedDivisions = remember(editEvent.divisions) {
         editEvent.divisions.normalizeDivisionIdentifiers()
     }
@@ -1028,7 +1033,22 @@ fun EventDetails(
     }
 
     val roundedCornerSize = 32.dp
-    val currentLocation by mapComponent.currentLocation.collectAsState()
+
+    LaunchedEffect(editView, editEvent.id) {
+        eventNameInput = editEvent.name
+    }
+
+    LaunchedEffect(eventNameInput, editView, editEvent.id) {
+        if (!editView) return@LaunchedEffect
+        if (eventNameInput == editEvent.name) return@LaunchedEffect
+        // Keep typing local and sync to shared draft in short bursts.
+        delay(120)
+        if (eventNameInput != editEvent.name) {
+            onEditEvent {
+                if (name == eventNameInput) this else copy(name = eventNameInput)
+            }
+        }
+    }
 
     LaunchedEffect(
         isNewEvent,
@@ -1064,255 +1084,51 @@ fun EventDetails(
         }
     }
 
-    LaunchedEffect(editEvent, fieldCount, leagueSlotErrors) {
-        isNameValid = editEvent.name.isNotBlank()
-        isPriceValid = editEvent.priceCents >= 0
-        isMaxParticipantsValid = editEvent.maxParticipants > 1
-        isTeamSizeValid = editEvent.teamSizeLimit >= 1
-        isLocationValid =
-            editEvent.location.isNotBlank() && editEvent.lat != 0.0 && editEvent.long != 0.0
-        isSkillLevelValid = editEvent.eventType == EventType.LEAGUE || editEvent.divisions.isNotEmpty()
-        isSportValid = !isNewEvent || !editEvent.sportId.isNullOrBlank()
-        val requiresFixedEndValidation = (
-            editEvent.eventType == EventType.LEAGUE ||
-                editEvent.eventType == EventType.TOURNAMENT ||
-                editEvent.eventType == EventType.WEEKLY_EVENT
-            ) && !editEvent.noFixedEndDateTime
-        isFixedEndDateRangeValid = !requiresFixedEndValidation || editEvent.end > editEvent.start
-        isLeagueSlotsValid = if (
-            isNewEvent &&
-            (
-                editEvent.eventType == EventType.LEAGUE ||
-                    editEvent.eventType == EventType.TOURNAMENT ||
-                    editEvent.eventType == EventType.WEEKLY_EVENT
-                )
-        ) {
-            leagueTimeSlots.isNotEmpty() && leagueSlotErrors.isEmpty()
-        } else {
-            true
-        }
-
-        if (editEvent.eventType == EventType.TOURNAMENT) {
-            isWinnerSetCountValid = editEvent.winnerSetCount in setOf(1, 3, 5)
-            isWinnerPointsValid = editEvent.winnerBracketPointsToVictory.size >= editEvent.winnerSetCount &&
-                editEvent.winnerBracketPointsToVictory.take(editEvent.winnerSetCount).all { it > 0 }
-            if (editEvent.doubleElimination) {
-                isLoserSetCountValid = editEvent.loserSetCount in setOf(1, 3, 5)
-                isLoserPointsValid = editEvent.loserBracketPointsToVictory.size >= editEvent.loserSetCount &&
-                    editEvent.loserBracketPointsToVictory.take(editEvent.loserSetCount).all { it > 0 }
-            } else {
-                isLoserSetCountValid = true
-                isLoserPointsValid = true
-            }
-        } else {
-            isWinnerSetCountValid = true
-            isWinnerPointsValid = true
-            isLoserSetCountValid = true
-            isLoserPointsValid = true
-        }
-        isFieldCountValid = if (
-            isNewEvent &&
-            (
-                editEvent.eventType == EventType.LEAGUE ||
-                    editEvent.eventType == EventType.TOURNAMENT ||
-                    editEvent.eventType == EventType.WEEKLY_EVENT
-                )
-        ) {
-            fieldCount > 0
-        } else {
-            true
-        }
-
-        if (editEvent.eventType == EventType.LEAGUE) {
-            val setCount = when (editEvent.setsPerMatch) {
-                1, 3, 5 -> editEvent.setsPerMatch
-                else -> null
-            }
-            isLeagueGamesValid = (editEvent.gamesPerOpponent ?: 1) >= 1
-            isLeaguePlayoffTeamsValid = if (!editEvent.includePlayoffs) {
-                true
-            } else if (editEvent.singleDivision) {
-                (editEvent.playoffTeamCount ?: 0) >= 2
-            } else {
-                val details = mergeDivisionDetailsForDivisions(
-                    divisions = editEvent.divisions,
-                    existingDetails = editEvent.divisionDetails,
-                    eventId = editEvent.id,
-                )
-                details.isNotEmpty() && details.all { detail -> (detail.playoffTeamCount ?: 0) >= 2 }
-            }
-            if (editEvent.usesSets) {
-                isLeagueDurationValid = setCount != null && (editEvent.setDurationMinutes ?: 0) >= 5
-                isLeaguePointsValid = setCount != null &&
-                    editEvent.pointsToVictory.size >= setCount &&
-                    editEvent.pointsToVictory.take(setCount).all { it > 0 }
-            } else {
-                isLeagueDurationValid = (editEvent.matchDurationMinutes ?: 0) >= 15
-                isLeaguePointsValid = true
-            }
-        } else if (editEvent.eventType == EventType.TOURNAMENT) {
-            isLeagueGamesValid = true
-            isLeaguePlayoffTeamsValid = true
-            isLeaguePointsValid = true
-            isLeagueDurationValid = if (editEvent.usesSets) {
-                (editEvent.setDurationMinutes ?: 0) >= 5
-            } else {
-                (editEvent.matchDurationMinutes ?: 0) >= 15
-            }
-        } else {
-            isLeagueGamesValid = true
-            isLeagueDurationValid = true
-            isLeaguePointsValid = true
-            isLeaguePlayoffTeamsValid = true
-        }
-
-        paymentPlanValidationErrors = validatePaymentPlans(
-            event = editEvent,
-            divisionDetails = divisionDetailsForSettings,
-        )
-        isPaymentPlansValid = paymentPlanValidationErrors.isEmpty()
-
-        isValid =
-            isPriceValid &&
-                isMaxParticipantsValid &&
-                isTeamSizeValid &&
-                isWinnerSetCountValid &&
-                isWinnerPointsValid &&
-                isLoserSetCountValid &&
-                isLoserPointsValid &&
-                isLocationValid &&
-                isSkillLevelValid &&
-                isFieldCountValid &&
-                isLeagueGamesValid &&
-                isLeagueDurationValid &&
-                isLeaguePointsValid &&
-                isLeaguePlayoffTeamsValid &&
-                isLeagueSlotsValid &&
-                isFixedEndDateRangeValid &&
-                isSportValid &&
-                isPaymentPlansValid &&
-                isColorLoaded
-    }
-
-    val validationErrors = remember(
-        isNameValid,
-        isSportValid,
-        isPriceValid,
-        isMaxParticipantsValid,
-        isTeamSizeValid,
-        isSkillLevelValid,
-        isLocationValid,
-        isFieldCountValid,
-        isWinnerSetCountValid,
-        isWinnerPointsValid,
-        isLoserSetCountValid,
-        isLoserPointsValid,
-        isLeagueGamesValid,
-        isLeagueDurationValid,
-        isLeaguePointsValid,
-        isLeaguePlayoffTeamsValid,
-        isLeagueSlotsValid,
-        isFixedEndDateRangeValid,
-        isPaymentPlansValid,
-        paymentPlanValidationErrors,
+    LaunchedEffect(
+        editEvent,
+        fieldCount,
+        leagueSlotErrors,
+        divisionDetailsForSettings,
         leagueTimeSlots,
-        editEvent.imageId,
-        editEvent.doubleElimination,
-        editEvent.usesSets,
-        editEvent.teamSignup,
         isColorLoaded,
+        isNewEvent,
     ) {
-        buildList {
-            if (!isNameValid) {
-                add("Event name is required.")
-            }
-            if (!isSportValid) {
-                add("Select a sport to continue.")
-            }
-            if (!isFixedEndDateRangeValid) {
-                add("End date/time must be after start date/time when no fixed end date/time is disabled.")
-            }
-            if (!isPriceValid) {
-                add("Price must be 0 or higher.")
-            }
-            if (!isMaxParticipantsValid) {
-                add(
-                    if (editEvent.teamSignup) {
-                        "Max teams must be at least 2."
-                    } else {
-                        "Max participants must be at least 2."
-                    },
-                )
-            }
-            if (!isTeamSizeValid) {
-                add("Team size must be at least 1.")
-            }
-            if (!isSkillLevelValid) {
-                add("Add at least one division.")
-            }
-            if (!isLocationValid) {
-                add("Select a location.")
-            }
-            if (!isFieldCountValid) {
-                add("Field count must be at least 1.")
-            }
-            if (!isWinnerSetCountValid) {
-                add("Winner set count must be 1, 3, or 5.")
-            }
-            if (!isWinnerPointsValid) {
-                add("Winner points must be greater than 0 for every set.")
-            }
-            if (editEvent.doubleElimination && !isLoserSetCountValid) {
-                add("Loser set count must be 1, 3, or 5.")
-            }
-            if (editEvent.doubleElimination && !isLoserPointsValid) {
-                add("Loser points must be greater than 0 for every set.")
-            }
-            if (!isLeagueGamesValid) {
-                add("Games per opponent must be at least 1.")
-            }
-            if (!isLeagueDurationValid) {
-                add(
-                    if (editEvent.usesSets) {
-                        "Set duration must be at least 5 minutes and sets must be Best of 1, 3, or 5."
-                    } else {
-                        "Match duration must be at least 15 minutes."
-                    }
-                )
-            }
-            if (!isLeaguePointsValid) {
-                add("Points to victory must be greater than 0 for every configured set.")
-            }
-            if (!isLeaguePlayoffTeamsValid) {
-                add(
-                    if (editEvent.singleDivision) {
-                        "Playoff team count must be at least 2 when playoffs are enabled."
-                    } else {
-                        "Each division must have a playoff team count of at least 2 when playoffs are enabled."
-                    }
-                )
-            }
-            if (!isLeagueSlotsValid) {
-                add(
-                    if (leagueTimeSlots.isEmpty()) {
-                        "Add at least one timeslot for scheduling."
-                    } else {
-                        "Fix timeslot issues before continuing."
-                    }
-                )
-            }
-            if (!isPaymentPlansValid) {
-                addAll(paymentPlanValidationErrors)
-            }
-            val imageError = when {
-                editEvent.imageId.isBlank() -> "Select an image for the event."
-                !isColorLoaded -> "Image is still loading."
-                else -> null
-            }
-            if (imageError != null) {
-                add(imageError)
-            }
+        // Coalesce rapid keystrokes so validation work does not contend with typing.
+        delay(80)
+        val result = withContext(Dispatchers.Default) {
+            computeEventValidationResult(
+                editEvent = editEvent,
+                isNewEvent = isNewEvent,
+                fieldCount = fieldCount,
+                leagueTimeSlots = leagueTimeSlots,
+                leagueSlotErrors = leagueSlotErrors,
+                divisionDetailsForSettings = divisionDetailsForSettings,
+                isColorLoaded = isColorLoaded,
+            )
         }
+
+        isNameValid = result.isNameValid
+        isPriceValid = result.isPriceValid
+        isMaxParticipantsValid = result.isMaxParticipantsValid
+        isTeamSizeValid = result.isTeamSizeValid
+        isWinnerSetCountValid = result.isWinnerSetCountValid
+        isLoserSetCountValid = result.isLoserSetCountValid
+        isWinnerPointsValid = result.isWinnerPointsValid
+        isLoserPointsValid = result.isLoserPointsValid
+        isLocationValid = result.isLocationValid
+        isFieldCountValid = result.isFieldCountValid
+        isLeagueGamesValid = result.isLeagueGamesValid
+        isLeagueDurationValid = result.isLeagueDurationValid
+        isLeaguePointsValid = result.isLeaguePointsValid
+        isLeaguePlayoffTeamsValid = result.isLeaguePlayoffTeamsValid
+        isLeagueSlotsValid = result.isLeagueSlotsValid
+        isSkillLevelValid = result.isSkillLevelValid
+        isSportValid = result.isSportValid
+        isFixedEndDateRangeValid = result.isFixedEndDateRangeValid
+        isPaymentPlansValid = result.isPaymentPlansValid
+        paymentPlanValidationErrors = result.paymentPlanValidationErrors
+        validationErrors = result.validationErrors
+        isValid = result.isValid
     }
 
     LaunchedEffect(isValid, validationErrors) {
@@ -1672,12 +1488,13 @@ fun EventDetails(
                                 label = "titleTransition"
                             ) { editMode ->
                                 if (editMode) {
+                                    val hasNameError = eventNameInput.isBlank()
                                     PlatformTextField(
-                                        value = editEvent.name,
-                                        onValueChange = { onEditEvent { copy(name = it) } },
+                                        value = eventNameInput,
+                                        onValueChange = { eventNameInput = it },
                                         label = "Event Name",
-                                        isError = !isNameValid,
-                                        supportingText = if (!isNameValid) {
+                                        isError = hasNameError,
+                                        supportingText = if (hasNameError) {
                                             stringResource(Res.string.enter_value)
                                         } else {
                                             ""
@@ -4004,7 +3821,7 @@ fun EventDetails(
         } else if (previousSelection != null) {
             previousSelection!!
         } else {
-            currentLocation ?: LatLng(0.0, 0.0)
+            mapComponent.currentLocation.value ?: LatLng(0.0, 0.0)
         },
         focusedEvent = if (!editView && event.location.isNotBlank()) {
             event
@@ -5421,6 +5238,293 @@ private fun validatePaymentPlans(
     return errors.distinct()
 }
 
+private data class EventValidationResult(
+    val isNameValid: Boolean,
+    val isPriceValid: Boolean,
+    val isMaxParticipantsValid: Boolean,
+    val isTeamSizeValid: Boolean,
+    val isWinnerSetCountValid: Boolean,
+    val isLoserSetCountValid: Boolean,
+    val isWinnerPointsValid: Boolean,
+    val isLoserPointsValid: Boolean,
+    val isLocationValid: Boolean,
+    val isFieldCountValid: Boolean,
+    val isLeagueGamesValid: Boolean,
+    val isLeagueDurationValid: Boolean,
+    val isLeaguePointsValid: Boolean,
+    val isLeaguePlayoffTeamsValid: Boolean,
+    val isLeagueSlotsValid: Boolean,
+    val isSkillLevelValid: Boolean,
+    val isSportValid: Boolean,
+    val isFixedEndDateRangeValid: Boolean,
+    val isPaymentPlansValid: Boolean,
+    val paymentPlanValidationErrors: List<String>,
+    val validationErrors: List<String>,
+    val isValid: Boolean,
+)
+
+private fun computeEventValidationResult(
+    editEvent: Event,
+    isNewEvent: Boolean,
+    fieldCount: Int,
+    leagueTimeSlots: List<TimeSlot>,
+    leagueSlotErrors: Map<Int, String>,
+    divisionDetailsForSettings: List<DivisionDetail>,
+    isColorLoaded: Boolean,
+): EventValidationResult {
+    val isNameValid = editEvent.name.isNotBlank()
+    val isPriceValid = editEvent.priceCents >= 0
+    val isMaxParticipantsValid = editEvent.maxParticipants > 1
+    val isTeamSizeValid = editEvent.teamSizeLimit >= 1
+    val isLocationValid = editEvent.location.isNotBlank() && editEvent.lat != 0.0 && editEvent.long != 0.0
+    val isSkillLevelValid = editEvent.eventType == EventType.LEAGUE || editEvent.divisions.isNotEmpty()
+    val isSportValid = !isNewEvent || !editEvent.sportId.isNullOrBlank()
+    val requiresFixedEndValidation = (
+        editEvent.eventType == EventType.LEAGUE ||
+            editEvent.eventType == EventType.TOURNAMENT ||
+            editEvent.eventType == EventType.WEEKLY_EVENT
+        ) && !editEvent.noFixedEndDateTime
+    val isFixedEndDateRangeValid = !requiresFixedEndValidation || editEvent.end > editEvent.start
+    val isLeagueSlotsValid = if (
+        isNewEvent &&
+        (
+            editEvent.eventType == EventType.LEAGUE ||
+                editEvent.eventType == EventType.TOURNAMENT ||
+                editEvent.eventType == EventType.WEEKLY_EVENT
+            )
+    ) {
+        leagueTimeSlots.isNotEmpty() && leagueSlotErrors.isEmpty()
+    } else {
+        true
+    }
+
+    val isFieldCountValid = if (
+        isNewEvent &&
+        (
+            editEvent.eventType == EventType.LEAGUE ||
+                editEvent.eventType == EventType.TOURNAMENT ||
+                editEvent.eventType == EventType.WEEKLY_EVENT
+            )
+    ) {
+        fieldCount > 0
+    } else {
+        true
+    }
+
+    val isWinnerSetCountValid: Boolean
+    val isLoserSetCountValid: Boolean
+    val isWinnerPointsValid: Boolean
+    val isLoserPointsValid: Boolean
+    if (editEvent.eventType == EventType.TOURNAMENT) {
+        isWinnerSetCountValid = editEvent.winnerSetCount in setOf(1, 3, 5)
+        isWinnerPointsValid = editEvent.winnerBracketPointsToVictory.size >= editEvent.winnerSetCount &&
+            editEvent.winnerBracketPointsToVictory.take(editEvent.winnerSetCount).all { it > 0 }
+        if (editEvent.doubleElimination) {
+            isLoserSetCountValid = editEvent.loserSetCount in setOf(1, 3, 5)
+            isLoserPointsValid = editEvent.loserBracketPointsToVictory.size >= editEvent.loserSetCount &&
+                editEvent.loserBracketPointsToVictory.take(editEvent.loserSetCount).all { it > 0 }
+        } else {
+            isLoserSetCountValid = true
+            isLoserPointsValid = true
+        }
+    } else {
+        isWinnerSetCountValid = true
+        isWinnerPointsValid = true
+        isLoserSetCountValid = true
+        isLoserPointsValid = true
+    }
+
+    val isLeagueGamesValid: Boolean
+    val isLeaguePlayoffTeamsValid: Boolean
+    val isLeaguePointsValid: Boolean
+    val isLeagueDurationValid: Boolean
+    if (editEvent.eventType == EventType.LEAGUE) {
+        val setCount = when (editEvent.setsPerMatch) {
+            1, 3, 5 -> editEvent.setsPerMatch
+            else -> null
+        }
+        isLeagueGamesValid = (editEvent.gamesPerOpponent ?: 1) >= 1
+        isLeaguePlayoffTeamsValid = if (!editEvent.includePlayoffs) {
+            true
+        } else if (editEvent.singleDivision) {
+            (editEvent.playoffTeamCount ?: 0) >= 2
+        } else {
+            val details = mergeDivisionDetailsForDivisions(
+                divisions = editEvent.divisions,
+                existingDetails = editEvent.divisionDetails,
+                eventId = editEvent.id,
+            )
+            details.isNotEmpty() && details.all { detail -> (detail.playoffTeamCount ?: 0) >= 2 }
+        }
+        if (editEvent.usesSets) {
+            isLeagueDurationValid = setCount != null && (editEvent.setDurationMinutes ?: 0) >= 5
+            isLeaguePointsValid = setCount != null &&
+                editEvent.pointsToVictory.size >= setCount &&
+                editEvent.pointsToVictory.take(setCount).all { it > 0 }
+        } else {
+            isLeagueDurationValid = (editEvent.matchDurationMinutes ?: 0) >= 15
+            isLeaguePointsValid = true
+        }
+    } else if (editEvent.eventType == EventType.TOURNAMENT) {
+        isLeagueGamesValid = true
+        isLeaguePlayoffTeamsValid = true
+        isLeaguePointsValid = true
+        isLeagueDurationValid = if (editEvent.usesSets) {
+            (editEvent.setDurationMinutes ?: 0) >= 5
+        } else {
+            (editEvent.matchDurationMinutes ?: 0) >= 15
+        }
+    } else {
+        isLeagueGamesValid = true
+        isLeagueDurationValid = true
+        isLeaguePointsValid = true
+        isLeaguePlayoffTeamsValid = true
+    }
+
+    val paymentPlanValidationErrors = validatePaymentPlans(
+        event = editEvent,
+        divisionDetails = divisionDetailsForSettings,
+    )
+    val isPaymentPlansValid = paymentPlanValidationErrors.isEmpty()
+
+    val isValid = isPriceValid &&
+        isMaxParticipantsValid &&
+        isTeamSizeValid &&
+        isWinnerSetCountValid &&
+        isWinnerPointsValid &&
+        isLoserSetCountValid &&
+        isLoserPointsValid &&
+        isLocationValid &&
+        isSkillLevelValid &&
+        isFieldCountValid &&
+        isLeagueGamesValid &&
+        isLeagueDurationValid &&
+        isLeaguePointsValid &&
+        isLeaguePlayoffTeamsValid &&
+        isLeagueSlotsValid &&
+        isFixedEndDateRangeValid &&
+        isSportValid &&
+        isPaymentPlansValid &&
+        isColorLoaded
+
+    val validationErrors = buildList {
+        if (!isNameValid) {
+            add("Event name is required.")
+        }
+        if (!isSportValid) {
+            add("Select a sport to continue.")
+        }
+        if (!isFixedEndDateRangeValid) {
+            add("End date/time must be after start date/time when no fixed end date/time is disabled.")
+        }
+        if (!isPriceValid) {
+            add("Price must be 0 or higher.")
+        }
+        if (!isMaxParticipantsValid) {
+            add(
+                if (editEvent.teamSignup) {
+                    "Max teams must be at least 2."
+                } else {
+                    "Max participants must be at least 2."
+                },
+            )
+        }
+        if (!isTeamSizeValid) {
+            add("Team size must be at least 1.")
+        }
+        if (!isSkillLevelValid) {
+            add("Add at least one division.")
+        }
+        if (!isLocationValid) {
+            add("Select a location.")
+        }
+        if (!isFieldCountValid) {
+            add("Field count must be at least 1.")
+        }
+        if (!isWinnerSetCountValid) {
+            add("Winner set count must be 1, 3, or 5.")
+        }
+        if (!isWinnerPointsValid) {
+            add("Winner points must be greater than 0 for every set.")
+        }
+        if (editEvent.doubleElimination && !isLoserSetCountValid) {
+            add("Loser set count must be 1, 3, or 5.")
+        }
+        if (editEvent.doubleElimination && !isLoserPointsValid) {
+            add("Loser points must be greater than 0 for every set.")
+        }
+        if (!isLeagueGamesValid) {
+            add("Games per opponent must be at least 1.")
+        }
+        if (!isLeagueDurationValid) {
+            add(
+                if (editEvent.usesSets) {
+                    "Set duration must be at least 5 minutes and sets must be Best of 1, 3, or 5."
+                } else {
+                    "Match duration must be at least 15 minutes."
+                },
+            )
+        }
+        if (!isLeaguePointsValid) {
+            add("Points to victory must be greater than 0 for every configured set.")
+        }
+        if (!isLeaguePlayoffTeamsValid) {
+            add(
+                if (editEvent.singleDivision) {
+                    "Playoff team count must be at least 2 when playoffs are enabled."
+                } else {
+                    "Each division must have a playoff team count of at least 2 when playoffs are enabled."
+                },
+            )
+        }
+        if (!isLeagueSlotsValid) {
+            add(
+                if (leagueTimeSlots.isEmpty()) {
+                    "Add at least one timeslot for scheduling."
+                } else {
+                    "Fix timeslot issues before continuing."
+                },
+            )
+        }
+        if (!isPaymentPlansValid) {
+            addAll(paymentPlanValidationErrors)
+        }
+        val imageError = when {
+            editEvent.imageId.isBlank() -> "Select an image for the event."
+            !isColorLoaded -> "Image is still loading."
+            else -> null
+        }
+        if (imageError != null) {
+            add(imageError)
+        }
+    }
+
+    return EventValidationResult(
+        isNameValid = isNameValid,
+        isPriceValid = isPriceValid,
+        isMaxParticipantsValid = isMaxParticipantsValid,
+        isTeamSizeValid = isTeamSizeValid,
+        isWinnerSetCountValid = isWinnerSetCountValid,
+        isLoserSetCountValid = isLoserSetCountValid,
+        isWinnerPointsValid = isWinnerPointsValid,
+        isLoserPointsValid = isLoserPointsValid,
+        isLocationValid = isLocationValid,
+        isFieldCountValid = isFieldCountValid,
+        isLeagueGamesValid = isLeagueGamesValid,
+        isLeagueDurationValid = isLeagueDurationValid,
+        isLeaguePointsValid = isLeaguePointsValid,
+        isLeaguePlayoffTeamsValid = isLeaguePlayoffTeamsValid,
+        isLeagueSlotsValid = isLeagueSlotsValid,
+        isSkillLevelValid = isSkillLevelValid,
+        isSportValid = isSportValid,
+        isFixedEndDateRangeValid = isFixedEndDateRangeValid,
+        isPaymentPlansValid = isPaymentPlansValid,
+        paymentPlanValidationErrors = paymentPlanValidationErrors,
+        validationErrors = validationErrors,
+        isValid = isValid,
+    )
+}
+
 @Composable
 private fun LabeledCheckboxRow(
     checked: Boolean,
@@ -5560,4 +5664,3 @@ fun BackgroundImage(
         }
     }
 }
-

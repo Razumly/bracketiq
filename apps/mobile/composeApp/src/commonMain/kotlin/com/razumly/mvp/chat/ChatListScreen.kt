@@ -16,11 +16,13 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FabPosition
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -54,7 +56,12 @@ fun ChatListScreen(component: ChatListComponent) {
     Scaffold(
         topBar = {
             TopAppBar(
-                { Text("Chats") }, scrollBehavior = scrollBehavior
+                title = { Text("Chats") },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                ),
+                scrollBehavior = scrollBehavior,
             )
         },
         modifier = Modifier.padding(LocalNavBarPadding.current)
@@ -63,6 +70,8 @@ fun ChatListScreen(component: ChatListComponent) {
             if (!showNewChatDialog) {
                 FloatingActionButton(
                     onClick = { showNewChatDialog = true },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
                 ) {
                     Icon(Icons.Default.Add, contentDescription = "Create Chat")
                 }
@@ -105,7 +114,10 @@ fun NewChatDialog(component: ChatListComponent, onDismiss: () -> Unit) {
     }
 
     Dialog(onDismissRequest = { onDismiss() }) {
-        Card(Modifier.fillMaxWidth()) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        ) {
             Column(
                 modifier = Modifier.padding(16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,

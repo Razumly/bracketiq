@@ -47,6 +47,7 @@ val componentModule = module {
             locationTracker = get(),
             deepLinkNavStart = deepLinkNav,
             userRepository = get(),
+            eventRepository = get(),
             pushNotificationsRepository = get(),
             chatGroupRepository = get(),
         )

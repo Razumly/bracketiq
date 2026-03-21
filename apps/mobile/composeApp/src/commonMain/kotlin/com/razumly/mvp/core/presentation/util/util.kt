@@ -22,7 +22,6 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.snapshotFlow
 import com.razumly.mvp.core.data.dataTypes.Event
-import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.network.apiBaseUrl
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
@@ -221,7 +220,7 @@ fun AnimatedContentTransitionScope<Boolean>.buttonTransitionSpec() =
     }.using(SizeTransform(clip = false))
 
 fun createEventUrl(event: Event): String {
-    return "https://bracket-iq.com/${if (event.eventType == EventType.TOURNAMENT) "tournament/" else "event/"}${event.id}"
+    return "https://bracket-iq.com/events/${event.id}"
 }
 fun getImageUrl(fileId: String, width: Int? = null, height: Int? = null): String =
     buildString {

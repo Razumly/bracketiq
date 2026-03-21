@@ -1,3 +1,5 @@
+@file:OptIn(kotlin.experimental.ExperimentalObjCName::class)
+
 package com.razumly.mvp.core.data.dataTypes.dtos
 
 import com.razumly.mvp.core.data.dataTypes.Event
@@ -7,6 +9,7 @@ import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
+import kotlin.native.ObjCName
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
@@ -15,6 +18,7 @@ import kotlin.time.Instant
 @OptIn(ExperimentalTime::class)
 data class EventDTO(
     val name: String,
+    @property:ObjCName(swiftName = "eventDescription")
     val description: String = "",
     val doubleElimination: Boolean = false,
     val divisions: List<String> = emptyList(),
