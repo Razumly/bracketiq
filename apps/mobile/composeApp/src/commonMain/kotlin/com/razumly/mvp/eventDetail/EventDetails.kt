@@ -113,6 +113,7 @@ import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
 import com.razumly.mvp.core.presentation.composables.PlatformDropdown
 import com.razumly.mvp.core.presentation.composables.PlatformTextField
 import com.razumly.mvp.core.presentation.composables.StripeButton
+import com.razumly.mvp.core.presentation.util.CircularRevealUnderlay
 import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
 import com.razumly.mvp.core.presentation.util.getImageUrl
@@ -180,6 +181,7 @@ fun EventDetails(
     hostHasAccount: Boolean,
     imageScheme: DynamicScheme,
     imageIds: List<String>,
+    showMapUnderlay: Boolean = true,
     mapRevealCenter: Offset = Offset.Zero,
     eventWithRelations: EventWithFullRelations,
     editEvent: Event,
@@ -254,6 +256,7 @@ fun EventDetails(
     var showImageSelector by rememberSaveable { mutableStateOf(false) }
     var showUploadImagePicker by rememberSaveable { mutableStateOf(false) }
     var previousSelection by remember { mutableStateOf<LatLng?>(null) }
+    val showMap by mapComponent.showMap.collectAsState()
 
     // Validation states
     var isNameValid by remember { mutableStateOf(editEvent.name.isNotBlank()) }
@@ -1375,7 +1378,8 @@ fun EventDetails(
     }
 
     CompositionLocalProvider(localImageScheme provides imageScheme) {
-        Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
+        val foregroundLayer: @Composable () -> Unit = {
+            Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
             BackgroundImage(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -3701,6 +3705,55 @@ fun EventDetails(
                 }
             }
         }
+        }
+
+        if (showMapUnderlay) {
+            CircularRevealUnderlay(
+                isRevealed = showMap,
+                revealCenterInWindow = mapRevealCenter,
+                modifier = Modifier.fillMaxSize(),
+                backgroundContent = {
+                    EventMap(
+                        component = mapComponent,
+                        onEventSelected = { _ ->
+                            mapComponent.toggleMap()
+                        },
+                        onPlaceSelected = { place ->
+                            if (editView) {
+                                onPlaceSelected(place)
+                                previousSelection = LatLng(place.latitude, place.longitude)
+                                mapComponent.toggleMap()
+                            }
+                        },
+                        onPlaceSelectionPoint = { x, y ->
+                            onMapRevealCenterChange(Offset(x, y))
+                        },
+                        canClickPOI = editView,
+                        focusedLocation = if (editEvent.location.isNotBlank()) {
+                            editEvent.let { LatLng(it.lat, it.long) }
+                        } else if (previousSelection != null) {
+                            previousSelection!!
+                        } else {
+                            mapComponent.currentLocation.value ?: LatLng(0.0, 0.0)
+                        },
+                        focusedEvent = if (!editView && event.location.isNotBlank()) {
+                            event
+                        } else {
+                            null
+                        },
+                        modifier = Modifier.fillMaxSize(),
+                        onBackPressed = { mapComponent.toggleMap() },
+                    )
+                },
+                foregroundContent = {
+                    foregroundLayer()
+                },
+            )
+        } else {
+            Box(modifier = Modifier.fillMaxSize()) {
+                foregroundLayer()
+            }
+        }
     }
     PlatformDateTimePicker(
         onDateSelected = { selectedInstant ->
@@ -3798,38 +3851,6 @@ fun EventDetails(
         getTime = false,
         canSelectPast = false,
         initialDate = divisionInstallmentInitialDate,
-    )
-
-    EventMap(
-        component = mapComponent,
-        onEventSelected = { _ ->
-            mapComponent.toggleMap()
-        },
-        onPlaceSelected = { place ->
-            if (editView) {
-                onPlaceSelected(place)
-                previousSelection = LatLng(place.latitude, place.longitude)
-                mapComponent.toggleMap()
-            }
-        },
-        onPlaceSelectionPoint = { x, y ->
-            onMapRevealCenterChange(Offset(x, y))
-        },
-        canClickPOI = editView,
-        focusedLocation = if (editEvent.location.isNotBlank()) {
-            editEvent.let { LatLng(it.lat, it.long) }
-        } else if (previousSelection != null) {
-            previousSelection!!
-        } else {
-            mapComponent.currentLocation.value ?: LatLng(0.0, 0.0)
-        },
-        focusedEvent = if (!editView && event.location.isNotBlank()) {
-            event
-        } else {
-            null
-        },
-        revealCenter = mapRevealCenter,
-        onBackPressed = { mapComponent.toggleMap() },
     )
 
     // ImagePickerKMP Integration
@@ -4046,7 +4067,6 @@ fun LazyListScope.animatedCardSection(
         }
     }
 }
-
 private fun buildEventDetailsRows(
     event: Event,
     priceSummary: String,
@@ -5524,7 +5544,6 @@ private fun computeEventValidationResult(
         isValid = isValid,
     )
 }
-
 @Composable
 private fun LabeledCheckboxRow(
     checked: Boolean,
@@ -5664,4 +5683,3 @@ fun BackgroundImage(
         }
     }
 }
-

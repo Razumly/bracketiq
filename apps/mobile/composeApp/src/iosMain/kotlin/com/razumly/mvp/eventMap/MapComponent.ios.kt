@@ -58,9 +58,6 @@ actual class MapComponent(
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
-    private val _isMapVisible = MutableStateFlow(false)
-    val isMapVisible = _isMapVisible.asStateFlow()
-
     private val _currentRadiusMeters = MutableStateFlow(50.0)
 
     private val _showMap = MutableStateFlow(false)
@@ -95,14 +92,6 @@ actual class MapComponent(
                 Napier.w("Location updates unavailable: ${error.message}")
             }
         }
-    }
-
-    internal fun revealMap() {
-        _isMapVisible.value = true
-    }
-
-    internal fun hideMap() {
-        _isMapVisible.value = false
     }
 
     fun setRadius(radius: Double) {

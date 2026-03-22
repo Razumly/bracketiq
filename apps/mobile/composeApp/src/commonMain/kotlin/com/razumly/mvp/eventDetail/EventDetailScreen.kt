@@ -122,6 +122,7 @@ import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
 import com.razumly.mvp.core.presentation.composables.PullToRefreshContainer
 import com.razumly.mvp.core.presentation.composables.StripeButton
 import com.razumly.mvp.core.presentation.composables.TeamCard
+import com.razumly.mvp.core.presentation.util.CircularRevealUnderlay
 import com.razumly.mvp.core.presentation.util.buttonTransitionSpec
 import com.razumly.mvp.core.presentation.util.isScrollingUp
 import com.razumly.mvp.core.presentation.util.toTitleCase
@@ -135,12 +136,14 @@ import com.razumly.mvp.eventDetail.composables.ScheduleView
 import com.razumly.mvp.eventDetail.composables.SendNotificationDialog
 import com.razumly.mvp.eventDetail.composables.TeamSelectionDialog
 import com.razumly.mvp.eventDetail.composables.TournamentBracketView
+import com.razumly.mvp.eventMap.EventMap
 import com.razumly.mvp.eventMap.MapComponent
 import com.razumly.mvp.icons.Groups
 import com.razumly.mvp.icons.MVPIcons
 import com.razumly.mvp.icons.ProfileActionEvents
 import com.razumly.mvp.icons.TournamentBracket
 import com.razumly.mvp.icons.Trophy
+import dev.icerock.moko.geo.LatLng
 import kotlin.math.absoluteValue
 import kotlin.math.round
 import kotlin.time.Clock
@@ -1713,6 +1716,7 @@ fun EventDetailScreen(
     var showBuildBracketConfirmDialog by remember { mutableStateOf(false) }
     var showStickyDockByScroll by remember { mutableStateOf(true) }
     var mapRevealCenter by remember { mutableStateOf(Offset.Zero) }
+    var previousMapSelection by remember { mutableStateOf<LatLng?>(null) }
     var isManagingParticipants by rememberSaveable { mutableStateOf(false) }
 
     var imageScheme by remember {
@@ -1863,7 +1867,7 @@ fun EventDetailScreen(
             }
         }
     }
-    val shouldShowViewSchedulePrimaryAction = !isWeeklyParentEvent && (isUserInEvent || isHost || isAssistantHost || isOfficial)
+    val shouldShowViewSchedulePrimaryAction = !isWeeklyParentEvent && (isUserInEvent || isHost || isAssistantHost || isEventOfficial)
     val showOverviewOpenDetailsAction = !isWeeklyParentEvent && !shouldShowViewSchedulePrimaryAction
     val showStickyActions = !showDetails && !isEditing && !showMap && showStickyDockByScroll
     val isEventRefreshInProgress = eventTeamsAndParticipantsLoading || eventMatchesLoading
@@ -2065,13 +2069,51 @@ fun EventDetailScreen(
     }
 
     CompositionLocalProvider(LocalTournamentComponent provides component) {
-        PullToRefreshContainer(
-            isRefreshing = isEventRefreshInProgress,
-            onRefresh = component::refreshEventDetails,
-            enabled = !showMap,
+        CircularRevealUnderlay(
+            isRevealed = showMap,
+            revealCenterInWindow = mapRevealCenter,
             modifier = Modifier.fillMaxSize(),
-        ) {
-            Scaffold(Modifier.fillMaxSize()) { innerPadding ->
+            backgroundContent = {
+                EventMap(
+                    component = mapComponent,
+                    onEventSelected = { _ ->
+                        mapComponent.toggleMap()
+                    },
+                    onPlaceSelected = { place ->
+                        if (isEditing) {
+                            component.selectPlace(place)
+                            previousMapSelection = LatLng(place.latitude, place.longitude)
+                            mapComponent.toggleMap()
+                        }
+                    },
+                    onPlaceSelectionPoint = { x, y ->
+                        mapRevealCenter = Offset(x, y)
+                    },
+                    canClickPOI = isEditing,
+                    focusedLocation = if (editedEvent.location.isNotBlank()) {
+                        LatLng(editedEvent.lat, editedEvent.long)
+                    } else if (previousMapSelection != null) {
+                        previousMapSelection!!
+                    } else {
+                        mapComponent.currentLocation.value ?: LatLng(0.0, 0.0)
+                    },
+                    focusedEvent = if (!isEditing && selectedEvent.event.location.isNotBlank()) {
+                        selectedEvent.event
+                    } else {
+                        null
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                    onBackPressed = mapComponent::toggleMap,
+                )
+            },
+            foregroundContent = {
+                PullToRefreshContainer(
+                    isRefreshing = isEventRefreshInProgress,
+                    onRefresh = component::refreshEventDetails,
+                    enabled = !showMap,
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    Scaffold(Modifier.fillMaxSize()) { innerPadding ->
                 Box(
                     Modifier.background(MaterialTheme.colorScheme.background).fillMaxSize()
                 ) {
@@ -2093,6 +2135,7 @@ fun EventDetailScreen(
                             onAddCurrentUser = {},
                             imageScheme = imageScheme,
                             imageIds = eventImageIds,
+                            showMapUnderlay = false,
                             mapRevealCenter = mapRevealCenter,
                             onHostCreateAccount = component::onHostCreateAccount,
                             onPlaceSelected = component::selectPlace,
@@ -3033,8 +3076,10 @@ fun EventDetailScreen(
                     onCancel = { component.dismissFeeBreakdown() })
             }
         }
+        }
+            },
+        )
     }
-}
 }
 @Composable
 fun TeamSelectionDialog(
@@ -3655,5 +3700,3 @@ private fun FeeRow(
         )
     }
 }
-
-

@@ -1,8 +1,6 @@
 package com.razumly.mvp.eventMap
 
 import android.location.Location
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,12 +23,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
@@ -46,7 +41,6 @@ import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
-import com.razumly.mvp.core.presentation.util.CircularRevealShape
 import com.razumly.mvp.core.util.toGoogle
 import com.razumly.mvp.eventMap.composables.MapEventCard
 import com.razumly.mvp.eventMap.composables.MapPOICard
@@ -66,27 +60,13 @@ actual fun EventMap(
     modifier: Modifier,
     focusedLocation: dev.icerock.moko.geo.LatLng,
     focusedEvent: Event?,
-    revealCenter: Offset,
     onBackPressed: (() -> Unit)?
 ) {
     val scope = rememberCoroutineScope()
-    val showMap by component.showMap.collectAsState()
-    val trackedLocation = if (showMap) {
-        component.currentLocation.collectAsState().value
-    } else {
-        null
-    }
+    val trackedLocation by component.currentLocation.collectAsState()
+    val events by component.events.collectAsState()
+    val places by component.places.collectAsState()
     var searchedPlaces by remember { mutableStateOf<List<Place>>(emptyList()) }
-    val events = if (showMap) {
-        component.events.collectAsState().value
-    } else {
-        emptyList()
-    }
-    val places = if (showMap) {
-        component.places.collectAsState().value
-    } else {
-        emptyList()
-    }
     val defaultZoom = 12f
     val defaultDurationMs = 1000
     val trackedLatLng = trackedLocation?.toGoogle()
@@ -108,48 +88,20 @@ actual fun EventMap(
     var armedPoiPlaceId by remember { mutableStateOf<String?>(null) }
     var lastUserCameraLocation by remember { mutableStateOf<LatLng?>(null) }
     var mapTopLeftInWindow by remember { mutableStateOf(Offset.Zero) }
-    var mapContainerSize by remember { mutableStateOf(Size.Zero) }
-    val density = LocalDensity.current
-    val revealInsetPx = with(density) { 32.dp.toPx() }
-    val localRevealCenter = remember(revealCenter, mapTopLeftInWindow, mapContainerSize, revealInsetPx) {
-        if (mapContainerSize.width <= 0f || mapContainerSize.height <= 0f) {
-            if (revealCenter == Offset.Zero) Offset.Zero else revealCenter
-        } else {
-            val rawLocalX = revealCenter.x - mapTopLeftInWindow.x
-            val rawLocalY = revealCenter.y - mapTopLeftInWindow.y
-            val revealPointOutsideMap = rawLocalX < 0f ||
-                rawLocalX > mapContainerSize.width ||
-                rawLocalY < 0f ||
-                rawLocalY > mapContainerSize.height
-
-            if (revealCenter == Offset.Zero || revealPointOutsideMap) {
-                Offset(mapContainerSize.width / 2f, mapContainerSize.height / 2f)
-            } else {
-                val safeInset = minOf(
-                    revealInsetPx,
-                    mapContainerSize.width / 2f,
-                    mapContainerSize.height / 2f
-                )
-                Offset(
-                    x = rawLocalX.coerceIn(safeInset, mapContainerSize.width - safeInset),
-                    y = rawLocalY.coerceIn(safeInset, mapContainerSize.height - safeInset)
-                )
-            }
-        }
-    }
     val placeSelectionHint = "Click to select"
     val userLocationMatchThresholdMeters = 10f
     val userRecenterThresholdMeters = 1000f
     val focusedIsCurrentUserLocation = trackedLatLng?.let { tracked ->
         distanceBetweenMeters(tracked, initCameraState) <= userLocationMatchThresholdMeters
     } == true && focusedEvent == null
+
     fun updateRevealCenterFor(latLng: LatLng) {
         cameraPositionState.projection
             ?.toScreenLocation(latLng)
             ?.let { point ->
                 onPlaceSelectionPoint(
                     point.x.toFloat() + mapTopLeftInWindow.x,
-                    point.y.toFloat() + mapTopLeftInWindow.y
+                    point.y.toFloat() + mapTopLeftInWindow.y,
                 )
             }
     }
@@ -161,13 +113,13 @@ actual fun EventMap(
         }.getOrElse { throwable ->
             Napier.e(
                 message = "Failed to resolve searched place details. Falling back to marker data.",
-                throwable = throwable
+                throwable = throwable,
             )
             val fallbackLatLng = markerLatLng ?: LatLng(0.0, 0.0)
             MVPPlace(
                 name = searchResult.displayName ?: "Selected location",
                 id = searchResult.id ?: "",
-                coordinates = listOf(fallbackLatLng.longitude, fallbackLatLng.latitude)
+                coordinates = listOf(fallbackLatLng.longitude, fallbackLatLng.latitude),
             )
         }
 
@@ -181,12 +133,12 @@ actual fun EventMap(
         }.getOrElse { throwable ->
             Napier.e(
                 message = "Failed to fetch POI details. Falling back to marker coordinates.",
-                throwable = throwable
+                throwable = throwable,
             )
             MVPPlace(
                 name = poi.name,
                 id = poi.placeId,
-                coordinates = listOf(poi.latLng.longitude, poi.latLng.latitude)
+                coordinates = listOf(poi.latLng.longitude, poi.latLng.latitude),
             )
         }
 
@@ -233,271 +185,263 @@ actual fun EventMap(
         }
     }
 
-    val animationProgress by animateFloatAsState(
-        targetValue = if (showMap) 1f else 0f, animationSpec = tween(durationMillis = 1000)
-    )
+    LaunchedEffect(initCameraState, focusedIsCurrentUserLocation) {
+        if (focusedIsCurrentUserLocation) {
+            val shouldRecenterOnUser = lastUserCameraLocation?.let { lastLocation ->
+                distanceBetweenMeters(lastLocation, initCameraState) >= userRecenterThresholdMeters
+            } ?: true
+
+            if (shouldRecenterOnUser) {
+                val update = if (cameraPositionState.position.zoom > 0f) {
+                    CameraUpdateFactory.newLatLng(initCameraState)
+                } else {
+                    CameraUpdateFactory.newLatLngZoom(initCameraState, defaultZoom)
+                }
+                cameraPositionState.move(update)
+                lastUserCameraLocation = initCameraState
+            }
+        } else {
+            cameraPositionState.move(
+                CameraUpdateFactory.newLatLngZoom(initCameraState, defaultZoom),
+            )
+        }
+    }
 
     BindLocationTrackerEffect(component.locationTracker)
 
-    if (animationProgress > 0f) {
-        LaunchedEffect(showMap, initCameraState, focusedIsCurrentUserLocation) {
-            if (!showMap) return@LaunchedEffect
-
-            if (focusedIsCurrentUserLocation) {
-                val shouldRecenterOnUser = lastUserCameraLocation?.let { lastLocation ->
-                    distanceBetweenMeters(lastLocation, initCameraState) >= userRecenterThresholdMeters
-                } ?: true
-
-                if (shouldRecenterOnUser) {
-                    val update = if (cameraPositionState.position.zoom > 0f) {
-                        CameraUpdateFactory.newLatLng(initCameraState)
-                    } else {
-                        CameraUpdateFactory.newLatLngZoom(initCameraState, defaultZoom)
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .onGloballyPositioned { coordinates ->
+                val bounds = coordinates.boundsInWindow()
+                mapTopLeftInWindow = bounds.topLeft
+            },
+    ) {
+        GoogleMap(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(top = 160.dp),
+            cameraPositionState = cameraPositionState,
+            properties = MapProperties(isMyLocationEnabled = trackedLocation != null),
+            uiSettings = MapUiSettings(zoomControlsEnabled = false),
+            onPOIClick = { poi ->
+                if (canClickPOI && !isAnimating) {
+                    selectedPOI = poi
+                    armedPlaceId = null
+                    armedSearchedPlaceId = null
+                    armedPoiPlaceId = null
+                    isAnimating = true
+                    scope.launch {
+                        cameraPositionState.animate(
+                            CameraUpdateFactory.newLatLng(poi.latLng),
+                            durationMs = 500,
+                        )
+                        delay(300)
+                        isAnimating = false
                     }
-                    cameraPositionState.move(update)
-                    lastUserCameraLocation = initCameraState
                 }
-            } else {
-                cameraPositionState.move(
-                    CameraUpdateFactory.newLatLngZoom(initCameraState, defaultZoom)
-                )
-            }
-        }
-
-        Box(
-            modifier = modifier
-                .fillMaxSize()
-                .onGloballyPositioned { coordinates ->
-                    val bounds = coordinates.boundsInWindow()
-                    mapTopLeftInWindow = bounds.topLeft
-                    mapContainerSize = bounds.size
-                }
-                .clip(CircularRevealShape(animationProgress, localRevealCenter)),
+            },
         ) {
-            GoogleMap(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(top = 160.dp),
-                cameraPositionState = cameraPositionState,
-                properties = MapProperties(isMyLocationEnabled = trackedLocation != null),
-                uiSettings = MapUiSettings(zoomControlsEnabled = false),
-                onPOIClick = { poi ->
-                    if (canClickPOI && !isAnimating) {
-                        selectedPOI = poi
+            if (!canClickPOI) {
+                events.forEach { event ->
+                    val markerState = eventMarkerStates[event.id]
+                    markerState?.let {
+                        MarkerInfoWindow(
+                            state = it,
+                            icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE),
+                            onClick = { false },
+                            onInfoWindowClick = { onEventSelected(event) },
+                        ) {
+                            MapEventCard(
+                                event = event,
+                                modifier = Modifier.wrapContentSize(),
+                            )
+                        }
+                    }
+                }
+            }
+
+            places.forEach { place ->
+                val markerState = remember(place.id) {
+                    MarkerState(position = LatLng(place.latitude, place.longitude))
+                }
+                val newPosition = LatLng(place.latitude, place.longitude)
+                if (markerState.position != newPosition) {
+                    markerState.position = newPosition
+                }
+
+                MarkerInfoWindow(
+                    state = markerState,
+                    icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_ORANGE),
+                    onClick = {
+                        if (!canClickPOI) {
+                            false
+                        } else {
+                            val isSecondTap = armedPlaceId == place.id
+                            armedPlaceId = if (isSecondTap) null else place.id
+                            armedSearchedPlaceId = null
+                            armedPoiPlaceId = null
+                            if (isSecondTap) {
+                                updateRevealCenterFor(newPosition)
+                                onPlaceSelected(place)
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                    },
+                    onInfoWindowClick = {
                         armedPlaceId = null
                         armedSearchedPlaceId = null
                         armedPoiPlaceId = null
-                        isAnimating = true
+                        updateRevealCenterFor(newPosition)
+                        onPlaceSelected(place)
+                    },
+                ) {
+                    MapPOICard(
+                        name = place.name,
+                        callToAction = if (canClickPOI) placeSelectionHint else null,
+                        modifier = Modifier.wrapContentSize(),
+                    )
+                }
+            }
+
+            searchedPlaces.forEach { place ->
+                val markerState = remember(place.id) {
+                    MarkerState(position = place.location!!)
+                }
+
+                MarkerInfoWindow(
+                    state = markerState,
+                    icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE),
+                    onClick = {
+                        if (!canClickPOI) {
+                            false
+                        } else {
+                            val isSecondTap = armedSearchedPlaceId == place.id
+                            armedPlaceId = null
+                            armedPoiPlaceId = null
+                            armedSearchedPlaceId = if (isSecondTap) null else place.id
+                            if (isSecondTap) {
+                                scope.launch {
+                                    selectSearchedPlace(place)
+                                }
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                    },
+                    onInfoWindowClick = {
+                        armedPlaceId = null
+                        armedSearchedPlaceId = null
+                        armedPoiPlaceId = null
                         scope.launch {
-                            cameraPositionState.animate(
-                                CameraUpdateFactory.newLatLng(poi.latLng),
-                                durationMs = 500
-                            )
-                            delay(300)
-                            isAnimating = false
+                            selectSearchedPlace(place)
                         }
-                    }
-                }) {
+                    },
+                ) {
+                    MapPOICard(
+                        name = place.displayName ?: "Unknown Place",
+                        callToAction = placeSelectionHint,
+                        modifier = Modifier.wrapContentSize(),
+                    )
+                }
+            }
 
-                if (!canClickPOI) {
-                    events.forEach { event ->
-                        val markerState = eventMarkerStates[event.id]
-                        markerState?.let {
-                            MarkerInfoWindow(
-                                state = it,
-                                icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE),
-                                onClick = { marker -> false },
-                                onInfoWindowClick = { marker -> onEventSelected(event) }) { marker ->
-                                MapEventCard(
-                                    event = event, modifier = Modifier.wrapContentSize()
-                                )
+            selectedPOI?.let { poi ->
+                MarkerInfoWindow(
+                    state = poiMarkerState,
+                    icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE),
+                    onClick = {
+                        if (!canClickPOI) {
+                            false
+                        } else {
+                            val isSecondTap = armedPoiPlaceId == poi.placeId
+                            armedPlaceId = null
+                            armedSearchedPlaceId = null
+                            armedPoiPlaceId = if (isSecondTap) null else poi.placeId
+                            if (isSecondTap) {
+                                scope.launch {
+                                    selectPoiPlace(poi)
+                                }
+                                true
+                            } else {
+                                false
                             }
                         }
-                    }
+                    },
+                    onInfoWindowClick = {
+                        armedPlaceId = null
+                        armedSearchedPlaceId = null
+                        armedPoiPlaceId = null
+                        scope.launch {
+                            selectPoiPlace(poi)
+                        }
+                    },
+                ) {
+                    MapPOICard(
+                        name = poi.name,
+                        callToAction = placeSelectionHint,
+                        modifier = Modifier.wrapContentSize(),
+                    )
                 }
+            }
 
-                places.forEach { place ->
-                    val markerState = remember(place.id) {
-                        MarkerState(position = LatLng(place.latitude, place.longitude))
-                    }
-                    val newPosition = LatLng(place.latitude, place.longitude)
-                    if (markerState.position != newPosition) {
-                        markerState.position = newPosition
-                    }
+            focusedEvent?.let { event ->
+                val focusedMarkerState = remember(event.id) {
+                    MarkerState(position = LatLng(event.latitude, event.longitude))
+                }
+                MarkerInfoWindow(
+                    state = focusedMarkerState,
+                    icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED),
+                    onClick = { false },
+                    onInfoWindowClick = { onEventSelected(event) },
+                ) {
+                    MapEventCard(
+                        event = event,
+                        modifier = Modifier.wrapContentSize(),
+                    )
+                }
+            }
+        }
 
-                    MarkerInfoWindow(
-                        state = markerState,
-                        icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_ORANGE),
-                        onClick = {
-                            if (!canClickPOI) {
-                                false
-                            } else {
-                                val isSecondTap = armedPlaceId == place.id
-                                armedPlaceId = if (isSecondTap) null else place.id
-                                armedSearchedPlaceId = null
-                                armedPoiPlaceId = null
-                                if (isSecondTap) {
-                                    updateRevealCenterFor(newPosition)
-                                    onPlaceSelected(place)
-                                    true
-                                } else {
-                                    false
-                                }
-                            }
-                        },
-                        onInfoWindowClick = {
-                            armedPlaceId = null
-                            armedSearchedPlaceId = null
-                            armedPoiPlaceId = null
-                            updateRevealCenterFor(newPosition)
-                            onPlaceSelected(place)
-                        },
-                    ) { marker ->
-                        MapPOICard(
-                            name = place.name,
-                            callToAction = if (canClickPOI) placeSelectionHint else null,
-                            modifier = Modifier.wrapContentSize()
+        if (canClickPOI) {
+            MapSearchBar(
+                modifier = Modifier.fillMaxWidth(),
+                component = component,
+            ) { newPlaces ->
+                selectedPOI = null
+                searchedPlaces = newPlaces
+                if (newPlaces.size > 1) {
+                    val bounds = LatLngBounds.builder()
+                    newPlaces.forEach { place ->
+                        bounds.include(place.location!!)
+                    }
+                    scope.launch {
+                        cameraPositionState.animate(
+                            CameraUpdateFactory.newLatLngBounds(bounds.build(), 100),
+                            defaultDurationMs,
                         )
                     }
-                }
-
-                searchedPlaces.forEach { place ->
-                    val markerState = remember(place.id) {
-                        MarkerState(position = place.location!!)
-                    }
-
-                    MarkerInfoWindow(
-                        state = markerState,
-                        icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE),
-                        onClick = {
-                            if (!canClickPOI) {
-                                false
-                            } else {
-                                val isSecondTap = armedSearchedPlaceId == place.id
-                                armedPlaceId = null
-                                armedPoiPlaceId = null
-                                armedSearchedPlaceId = if (isSecondTap) null else place.id
-                                if (isSecondTap) {
-                                    scope.launch {
-                                        selectSearchedPlace(place)
-                                    }
-                                    true
-                                } else {
-                                    false
-                                }
-                            }
-                        },
-                        onInfoWindowClick = {
-                            armedPlaceId = null
-                            armedSearchedPlaceId = null
-                            armedPoiPlaceId = null
-                            scope.launch {
-                                selectSearchedPlace(place)
-                            }
-                        },
-                    ) { marker ->
-                        // Info window content for searched places
-                        MapPOICard(
-                            name = place.displayName ?: "Unknown Place",
-                            callToAction = placeSelectionHint,
-                            modifier = Modifier.wrapContentSize()
-                        )
-                    }
-                }
-
-                selectedPOI?.let { poi ->
-                    MarkerInfoWindow(
-                        state = poiMarkerState,
-                        icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE),
-                        onClick = {
-                            if (!canClickPOI) {
-                                false
-                            } else {
-                                val isSecondTap = armedPoiPlaceId == poi.placeId
-                                armedPlaceId = null
-                                armedSearchedPlaceId = null
-                                armedPoiPlaceId = if (isSecondTap) null else poi.placeId
-                                if (isSecondTap) {
-                                    scope.launch {
-                                        selectPoiPlace(poi)
-                                    }
-                                    true
-                                } else {
-                                    false
-                                }
-                            }
-                        },
-                        onInfoWindowClick = {
-                            armedPlaceId = null
-                            armedSearchedPlaceId = null
-                            armedPoiPlaceId = null
-                            scope.launch {
-                                selectPoiPlace(poi)
-                            }
-                        },
-                    ) { marker ->
-                        MapPOICard(
-                            name = poi.name,
-                            callToAction = placeSelectionHint,
-                            modifier = Modifier.wrapContentSize()
-                        )
-                    }
-                }
-
-                focusedEvent?.let { event ->
-                    val focusedMarkerState = remember(event.id) {
-                        MarkerState(position = LatLng(event.latitude, event.longitude))
-                    }
-                    MarkerInfoWindow(
-                        state = focusedMarkerState,
-                        icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED),
-                        onClick = { marker -> false },
-                        onInfoWindowClick = { onEventSelected(event) },
-                    ) { marker ->
-                        MapEventCard(
-                            event = event, modifier = Modifier.wrapContentSize()
+                } else if (newPlaces.isNotEmpty()) {
+                    scope.launch {
+                        val location = newPlaces.first().location
+                        cameraPositionState.animate(
+                            CameraUpdateFactory.newLatLng(location!!),
+                            defaultDurationMs,
                         )
                     }
                 }
             }
+        }
 
-            if (canClickPOI) {
-                MapSearchBar(
-                    modifier = Modifier.fillMaxWidth(),
-                    component = component,
-                ) { newPlaces ->
-                    selectedPOI = null // Clear POI selection when searching
-                    searchedPlaces = newPlaces
-                    if (newPlaces.size > 1) {
-                        val bounds = LatLngBounds.builder()
-                        newPlaces.forEach { place ->
-                            bounds.include(place.location!!)
-                        }
-                        scope.launch {
-                            cameraPositionState.animate(
-                                CameraUpdateFactory.newLatLngBounds(bounds.build(), 100),
-                                defaultDurationMs
-                            )
-                        }
-                    } else if (newPlaces.isNotEmpty()) {
-                        scope.launch {
-                            val location = newPlaces.first().location
-                            cameraPositionState.animate(
-                                CameraUpdateFactory.newLatLng(location!!),
-                                defaultDurationMs
-                            )
-                        }
-                    }
-                }
-            }
-
-            if (onBackPressed != null) {
-                MapFloatingActionButton(
-                    onCloseMap = onBackPressed,
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 128.dp)
-                )
-            }
+        if (onBackPressed != null) {
+            MapFloatingActionButton(
+                onCloseMap = onBackPressed,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 128.dp),
+            )
         }
     }
 }
@@ -509,7 +453,7 @@ private fun distanceBetweenMeters(start: LatLng, end: LatLng): Float {
         start.longitude,
         end.latitude,
         end.longitude,
-        results
+        results,
     )
     return results[0]
 }
@@ -580,10 +524,13 @@ fun MapSearchBar(
     ) {
         suggestions.forEach { suggestion ->
             suggestion.displayName?.let { name ->
-                DropdownMenuItem(text = { Text(name) }, onClick = {
-                    searchInput = name
-                    onSearch(searchInput)
-                })
+                DropdownMenuItem(
+                    text = { Text(name) },
+                    onClick = {
+                        searchInput = name
+                        onSearch(searchInput)
+                    },
+                )
             }
         }
     }

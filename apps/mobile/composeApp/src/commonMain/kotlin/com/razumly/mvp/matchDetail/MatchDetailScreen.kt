@@ -45,6 +45,7 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
+import com.razumly.mvp.core.presentation.util.CircularRevealUnderlay
 import com.razumly.mvp.core.presentation.util.getScreenWidth
 import com.razumly.mvp.eventMap.EventMap
 import com.razumly.mvp.eventMap.MapComponent
@@ -197,6 +198,26 @@ fun MatchDetailScreen(
                 )
             ),
     ) {
+        CircularRevealUnderlay(
+            isRevealed = showMap && !isWebLayout,
+            revealCenterInWindow = mapRevealCenter,
+            modifier = Modifier.fillMaxSize(),
+            backgroundContent = {
+                if (!isWebLayout) {
+                    EventMap(
+                        component = mapComponent,
+                        onEventSelected = { },
+                        onPlaceSelected = { },
+                        canClickPOI = false,
+                        focusedLocation = locationTarget.focusedLocation,
+                        focusedEvent = null,
+                        modifier = Modifier.fillMaxSize(),
+                        onBackPressed = mapComponent::toggleMap,
+                    )
+                }
+            },
+            foregroundContent = {
+                Box(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -295,7 +316,6 @@ fun MatchDetailScreen(
                             canClickPOI = false,
                             focusedLocation = locationTarget.focusedLocation,
                             focusedEvent = null,
-                            revealCenter = mapRevealCenter,
                             modifier = Modifier.fillMaxSize(),
                             onBackPressed = null,
                         )
@@ -351,20 +371,9 @@ fun MatchDetailScreen(
                 }
             }
         }
-
-        if (!isWebLayout) {
-            EventMap(
-                component = mapComponent,
-                onEventSelected = { },
-                onPlaceSelected = { },
-                canClickPOI = false,
-                focusedLocation = locationTarget.focusedLocation,
-                focusedEvent = null,
-                revealCenter = mapRevealCenter,
-                modifier = Modifier.fillMaxSize(),
-                onBackPressed = mapComponent::toggleMap,
-            )
-        }
+                }
+            },
+        )
     }
 }
 

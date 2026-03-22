@@ -35,9 +35,6 @@ data class MatchApiDto(
     val officialCheckedIn: Boolean? = null,
     val teamOfficialId: String? = null,
     val locked: Boolean? = null,
-
-    // Legacy/alternate field; ignore if present.
-    val officialCheckedIn: Boolean? = null,
 ) {
     @OptIn(ExperimentalTime::class)
     fun toMatchOrNull(): MatchMVP? {
@@ -69,7 +66,7 @@ data class MatchApiDto(
             loserNextMatchId = loserNextMatchId,
             previousLeftId = previousLeftId,
             previousRightId = previousRightId,
-            officialCheckedIn = officialCheckedIn ?: officialCheckedIn,
+            officialCheckedIn = officialCheckedIn,
             teamOfficialId = teamOfficialId,
             locked = locked ?: false,
         )

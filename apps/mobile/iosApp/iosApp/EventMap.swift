@@ -30,14 +30,10 @@ struct EventMap: View {
     var canClickPOI: Bool
     var focusedEvent: Event?
     var focusedLocation: LatLng?
-    var revealCenter: CGPoint
     
-    @State private var currentLocation: LatLng? = nil
-    @State private var events: [Event] = []
     @State private var suggestions: [MVPPlace] = []
     @State private var searchText: String = ""
     @State private var searchPlaces: [MVPPlace] = []
-    @State private var reveal: Bool = false
     @State private var searchTask: Task<Void, Never>? = nil
     
     init(
@@ -47,8 +43,7 @@ struct EventMap: View {
         onPlaceSelectionPoint: @escaping (KotlinFloat, KotlinFloat) -> Void,
         canClickPOI: Bool,
         focusedLocation: LatLng?,
-        focusedEvent: Event?,
-        revealCenter: CGPoint
+        focusedEvent: Event?
     ) {
         self.component = component
         self.onEventSelected = onEventSelected
@@ -57,16 +52,14 @@ struct EventMap: View {
         self.canClickPOI = canClickPOI
         self.focusedLocation = focusedLocation
         self.focusedEvent = focusedEvent
-        self.revealCenter = revealCenter
     }
     
     var body: some View {
         Observing(
             component.currentLocation,
             component.events,
-            component.isMapVisible,
             component.places
-        ) { (loc: LatLng?, ev: [Event], reveal: KotlinBoolean, componentPlaces: [MVPPlace]) in
+        ) { (loc: LatLng?, ev: [Event], componentPlaces: [MVPPlace]) in
             ZStack(alignment: .top) {
                 let mergedPlaces = (searchPlaces + componentPlaces)
                 GoogleMapView(
@@ -82,15 +75,11 @@ struct EventMap: View {
                     onEventSelected: onEventSelected,
                     onPlaceSelected: onPlaceSelected,
                     onPlaceSelectionPoint: onPlaceSelectionPoint,
-                    places: mergedPlaces,
-                    revealCenter: revealCenter
+                    places: mergedPlaces
                 )
                 .edgesIgnoringSafeArea(.all)
-                .opacity(reveal.boolValue ? 1.0 : 0.0)
-                .allowsHitTesting(reveal.boolValue)
-                .animation(.easeInOut(duration: 0.5), value: reveal.boolValue)
                 
-                if canClickPOI && reveal.boolValue {
+                if canClickPOI {
                     MapSearchBar(
                         text: $searchText,
                         suggestions: suggestions,
@@ -182,7 +171,6 @@ struct GoogleMapView: UIViewRepresentable {
     let onPlaceSelected: (MVPPlace) -> Void
     let onPlaceSelectionPoint: (KotlinFloat, KotlinFloat) -> Void
     let places: [MVPPlace]
-    let revealCenter: CGPoint
     
     func makeUIView(context: Context) -> GMSMapView {
         let camera: GMSCameraPosition
@@ -623,30 +611,5 @@ struct MapSearchBar: View {
             }
         }
         .padding(.horizontal)
-    }
-}
-
-
-
-// Custom circular reveal transition
-extension AnyTransition {
-    static func circularReveal(center: CGPoint) -> AnyTransition {
-        .modifier(
-            active: CircularRevealModifier(center: center, scale: 0),
-            identity: CircularRevealModifier(center: center, scale: 1)
-        )
-    }
-}
-
-struct CircularRevealModifier: ViewModifier {
-    let center: CGPoint
-    let scale: CGFloat
-    
-    func body(content: Content) -> some View {
-        content
-            .clipShape(Circle()
-                .scale(scale)
-                .offset(x: center.x - UIScreen.main.bounds.width/2,
-                       y: center.y - UIScreen.main.bounds.height/2))
     }
 }

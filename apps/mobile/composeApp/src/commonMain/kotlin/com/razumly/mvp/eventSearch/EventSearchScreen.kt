@@ -93,6 +93,7 @@ import com.razumly.mvp.core.presentation.composables.NetworkAvatar
 import com.razumly.mvp.core.presentation.composables.PullToRefreshContainer
 import com.razumly.mvp.core.presentation.composables.SearchBox
 import com.razumly.mvp.core.presentation.composables.SearchOverlay
+import com.razumly.mvp.core.presentation.util.CircularRevealUnderlay
 import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
 import com.razumly.mvp.core.presentation.util.getImageUrl
@@ -339,6 +340,50 @@ fun EventSearchScreen(
 
     Box {
         BindLocationTrackerEffect(component.locationTracker)
+        CircularRevealUnderlay(
+            isRevealed = isMapVisible,
+            revealCenterInWindow = revealCenter,
+            modifier = Modifier.fillMaxSize(),
+            backgroundContent = {
+                EventMap(
+                    component = mapComponent,
+                    onEventSelected = { event ->
+                        if (selectedTab == DiscoverTab.EVENTS) {
+                            component.viewEvent(event)
+                        }
+                    },
+                    onPlaceSelected = { place ->
+                        val organization = organizationLookup[place.id]
+                        when (selectedTab) {
+                            DiscoverTab.ORGANIZATIONS -> {
+                                if (organization != null) {
+                                    component.viewOrganization(organization)
+                                }
+                            }
+
+                            DiscoverTab.RENTALS -> {
+                                if (organization != null) {
+                                    component.viewOrganization(
+                                        organization,
+                                        com.razumly.mvp.core.presentation.OrganizationDetailTab.RENTALS
+                                    )
+                                }
+                            }
+
+                            else -> {}
+                        }
+                    },
+                    canClickPOI = false,
+                    focusedLocation = selectedEvent?.takeIf { selectedTab == DiscoverTab.EVENTS }?.let {
+                        LatLng(it.latitude, it.longitude)
+                    } ?: currentLocation ?: LatLng(0.0, 0.0),
+                    focusedEvent = selectedEvent?.takeIf { selectedTab == DiscoverTab.EVENTS },
+                    modifier = Modifier.fillMaxSize(),
+                    onBackPressed = mapComponent::toggleMap,
+                )
+            },
+            foregroundContent = {
+                Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
             topBar = {
                 Column(
@@ -478,41 +523,6 @@ fun EventSearchScreen(
                         }
                     }
 
-                    EventMap(
-                        component = mapComponent,
-                        onEventSelected = { event ->
-                            if (selectedTab == DiscoverTab.EVENTS) {
-                                component.viewEvent(event)
-                            }
-                        },
-                        onPlaceSelected = { place ->
-                            val organization = organizationLookup[place.id]
-                            when (selectedTab) {
-                                DiscoverTab.ORGANIZATIONS -> {
-                                    if (organization != null) {
-                                        component.viewOrganization(organization)
-                                    }
-                                }
-
-                                DiscoverTab.RENTALS -> {
-                                    if (organization != null) {
-                                        component.viewOrganization(
-                                            organization,
-                                            com.razumly.mvp.core.presentation.OrganizationDetailTab.RENTALS
-                                        )
-                                    }
-                                }
-
-                                else -> {}
-                            }
-                        },
-                        canClickPOI = false,
-                        focusedLocation = selectedEvent?.takeIf { selectedTab == DiscoverTab.EVENTS }?.let {
-                            LatLng(it.latitude, it.longitude)
-                        } ?: currentLocation ?: LatLng(0.0, 0.0),
-                        focusedEvent = selectedEvent?.takeIf { selectedTab == DiscoverTab.EVENTS },
-                        revealCenter = revealCenter,
-                    )
                 }
             }
         }
@@ -675,6 +685,9 @@ fun EventSearchScreen(
                 }
                 EmptyDiscoverListItem(message = message)
             }
+        )
+                }
+            },
         )
     }
 

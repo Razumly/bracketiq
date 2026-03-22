@@ -22,12 +22,8 @@ class IOSNativeViewFactory: NativeViewFactory {
         onPlaceSelectionPoint: @escaping (KotlinFloat, KotlinFloat) -> Void,
         canClickPOI: Bool,
         focusedLocation: LatLng?,
-        focusedEvent: (Event)?,
-        revealCenterX: Double,
-        revealCenterY: Double
+        focusedEvent: (Event)?
     ) -> UIViewController {
-        
-        let centerPoint = CGPoint(x: revealCenterX, y: revealCenterY)
         let view = EventMap(
             component: component,
             onEventSelected: onEventSelected,
@@ -35,8 +31,7 @@ class IOSNativeViewFactory: NativeViewFactory {
             onPlaceSelectionPoint: onPlaceSelectionPoint,
             canClickPOI: canClickPOI,
             focusedLocation: focusedLocation,
-            focusedEvent: focusedEvent,
-            revealCenter: centerPoint
+            focusedEvent: focusedEvent
         )
         
         let hostingController = UIHostingController(rootView: view)
@@ -55,17 +50,12 @@ class IOSNativeViewFactory: NativeViewFactory {
             onPlaceSelectionPoint: @escaping (KotlinFloat, KotlinFloat) -> Void,
             canClickPOI: Bool,
             focusedLocation: LatLng?,
-            focusedEvent: (Event)?,
-            revealCenterX: Double,
-            revealCenterY: Double
+            focusedEvent: (Event)?
         ) {
             guard let hostingController = viewController as? UIHostingController<EventMap> else {
                 return
             }
-            
-            let centerPoint = CGPoint(x: revealCenterX, y: revealCenterY)
-            
-            // Update the SwiftUI view with new parameters
+
             let updatedView = EventMap(
                 component: component,
                 onEventSelected: onEventSelected,
@@ -73,10 +63,9 @@ class IOSNativeViewFactory: NativeViewFactory {
                 onPlaceSelectionPoint: onPlaceSelectionPoint,
                 canClickPOI: canClickPOI,
                 focusedLocation: focusedLocation,
-                focusedEvent: focusedEvent,
-                revealCenter: centerPoint
+                focusedEvent: focusedEvent
             )
-            
+
             hostingController.rootView = updatedView
         }
     
