@@ -121,7 +121,7 @@ private const val UNASSIGNED_FIELD_KEY = "__unassigned_field__"
 private const val ALL_FIELDS_KEY = "__all_fields__"
 private const val BRACKET_CARD_HEIGHT_DP = 90
 private const val BRACKET_CARD_VERTICAL_PADDING_DP = 20
-private const val BRACKET_CARD_VERTICAL_PADDING_WITH_REF_DP = 28
+private const val BRACKET_CARD_VERTICAL_PADDING_WITH_OFFICIAL_DP = 28
 private const val EVENT_CARD_IMAGE_WIDTH_DP = 96
 
 @Composable
@@ -706,12 +706,12 @@ private fun ScheduleMatchCard(
     match: MatchWithRelations,
     onClick: () -> Unit,
 ) {
-    val hasAssignedReferee =
-        !match.match.refereeId.isNullOrBlank() ||
-            !match.match.teamRefereeId.isNullOrBlank() ||
-            match.teamReferee != null
-    val verticalPadding = if (hasAssignedReferee) {
-        BRACKET_CARD_VERTICAL_PADDING_WITH_REF_DP.dp
+    val hasAssignedMatchOfficial =
+        !match.match.officialId.isNullOrBlank() ||
+            !match.match.teamOfficialId.isNullOrBlank() ||
+            match.teamOfficial != null
+    val verticalPadding = if (hasAssignedMatchOfficial) {
+        BRACKET_CARD_VERTICAL_PADDING_WITH_OFFICIAL_DP.dp
     } else {
         BRACKET_CARD_VERTICAL_PADDING_DP.dp
     }
@@ -827,7 +827,7 @@ private fun formatScheduleDateTimeWindow(
     val startTimeLabel = localStart.time.format(timeFormat)
     val endTimeLabel = localEnd.time.format(timeFormat)
     return if (localStart.date == localEnd.date) {
-        "${formatDate(localStart.date)} • $startTimeLabel - $endTimeLabel"
+        "${formatDate(localStart.date)} â€¢ $startTimeLabel - $endTimeLabel"
     } else {
         "${formatDate(localStart.date)} $startTimeLabel - ${formatDate(localEnd.date)} $endTimeLabel"
     }
@@ -839,11 +839,11 @@ private fun matchIncludesTrackedUsers(
 ): Boolean {
     if (trackedUserIds.isEmpty()) return false
 
-    if (!match.match.refereeId.isNullOrBlank() && trackedUserIds.contains(match.match.refereeId)) {
+    if (!match.match.officialId.isNullOrBlank() && trackedUserIds.contains(match.match.officialId)) {
         return true
     }
 
-    val teams = listOfNotNull(match.team1, match.team2, match.teamReferee)
+    val teams = listOfNotNull(match.team1, match.team2, match.teamOfficial)
     return teams.any { team ->
         trackedUserIds.contains(team.captainId) ||
             (!team.managerId.isNullOrBlank() && trackedUserIds.contains(team.managerId)) ||
@@ -941,3 +941,6 @@ private fun CalendarNavigationIcon(
         contentDescription = contentDescription,
     )
 }
+
+
+

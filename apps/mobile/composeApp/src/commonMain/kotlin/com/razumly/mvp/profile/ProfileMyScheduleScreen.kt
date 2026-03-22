@@ -519,7 +519,7 @@ private fun buildScheduleItems(
                 field = match.fieldId?.let { fieldId -> fieldsById[fieldId] },
                 team1 = match.team1Id?.let { teamId -> teamsById[teamId] },
                 team2 = match.team2Id?.let { teamId -> teamsById[teamId] },
-                teamReferee = match.teamRefereeId?.let { teamId -> teamsById[teamId] },
+                teamOfficial = match.teamOfficialId?.let { teamId -> teamsById[teamId] },
                 winnerNextMatch = null,
                 loserNextMatch = null,
                 previousLeftMatch = null,

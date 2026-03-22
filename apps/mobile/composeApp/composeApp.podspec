@@ -39,18 +39,13 @@ Pod::Spec.new do |spec|
                     exit 0
                 fi
                 set -ev
-                JAVA17_HOME="$(/usr/libexec/java_home -v 17 2>/dev/null || true)"
-                if [ -n "$JAVA17_HOME" ]; then
-                    export JAVA_HOME="$JAVA17_HOME"
-                    export PATH="$JAVA_HOME/bin:$PATH"
-                fi
                 REPO_ROOT="$PODS_TARGET_SRCROOT"
-                "$REPO_ROOT/../gradlew" -Dorg.gradle.console=plain -p "$REPO_ROOT" $KOTLIN_PROJECT_PATH:syncFramework \
+                "$REPO_ROOT/../gradlew" -p "$REPO_ROOT" $KOTLIN_PROJECT_PATH:syncFramework \
                     -Pkotlin.native.cocoapods.platform=$PLATFORM_NAME \
                     -Pkotlin.native.cocoapods.archs="$ARCHS" \
                     -Pkotlin.native.cocoapods.configuration="$CONFIGURATION"
             SCRIPT
         }
     ]
-    spec.resources = ['build/compose/cocoapods/compose-resources']
+    spec.resources = ['build\compose\cocoapods\compose-resources']
 end

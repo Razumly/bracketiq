@@ -172,7 +172,7 @@ class UserRepositoryHttpTest {
                         {
                           "type": "STAFF",
                           "email": "ref@example.com",
-                          "staffTypes": ["REFEREE"],
+                          "staffTypes": ["OFFICIAL"],
                           "eventId": "event_1",
                           "userId": "user_1",
                           "id": "invite_1"
@@ -202,7 +202,7 @@ class UserRepositoryHttpTest {
                     email = " Ref@example.com ",
                     eventId = "event_1",
                     userId = "user_1",
-                    staffTypes = listOf("referee"),
+                    staffTypes = listOf("official"),
                     replaceStaffTypes = true,
                 ),
             ),
@@ -210,7 +210,7 @@ class UserRepositoryHttpTest {
 
         assertEquals(1, invites.size)
         assertTrue(requestBody.contains("\"replaceStaffTypes\":true"))
-        assertTrue(requestBody.contains("\"staffTypes\":[\"REFEREE\"]"))
+        assertTrue(requestBody.contains("\"staffTypes\":[\"OFFICIAL\"]"))
         assertTrue(requestBody.contains("\"email\":\"ref@example.com\""))
     }
 

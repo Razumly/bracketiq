@@ -343,7 +343,7 @@ private fun EventDetailTabStrip(
     }
 }
 
-internal fun canViewRefereesSection(
+internal fun canViewOfficialsPanel(
     currentUserId: String,
     event: Event,
     organization: Organization?,
@@ -354,7 +354,7 @@ internal fun canViewRefereesSection(
     }
     return event.hostId == normalizedCurrentUserId ||
         event.assistantHostIds.any { assistantHostId -> assistantHostId == normalizedCurrentUserId } ||
-        event.refereeIds.any { refereeId -> refereeId == normalizedCurrentUserId } ||
+        event.officialIds.any { officialId -> officialId == normalizedCurrentUserId } ||
         organization?.ownerId == normalizedCurrentUserId ||
         organization?.hostIds?.any { hostId -> hostId == normalizedCurrentUserId } == true
 }
@@ -595,7 +595,7 @@ private fun EventOverviewSections(
                     color = MaterialTheme.colorScheme.primary
                 )
                 Text(
-                    text = "${(progress * 100).toInt()}% full • $spotsLeft left",
+                    text = "${(progress * 100).toInt()}% full â€¢ $spotsLeft left",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -826,7 +826,7 @@ private fun DivisionCapacityRow(
             )
             Text(
                 text = if (summary.capacity > 0) {
-                    "${(summary.progress * 100).toInt()}% full • ${summary.left} left"
+                    "${(summary.progress * 100).toInt()}% full â€¢ ${summary.left} left"
                 } else {
                     "No capacity configured"
                 },
@@ -1583,10 +1583,10 @@ fun EventDetailScreen(
             assistantHostId.trim() == currentUserId
         }
     }
-    val isReferee = remember(currentUser.id, selectedEvent.event.refereeIds) {
+    val isEventOfficial = remember(currentUser.id, selectedEvent.event.officialIds) {
         val currentUserId = currentUser.id.trim()
-        currentUserId.isNotBlank() && selectedEvent.event.refereeIds.any { refereeId ->
-            refereeId.trim() == currentUserId
+        currentUserId.isNotBlank() && selectedEvent.event.officialIds.any { officialId ->
+            officialId.trim() == currentUserId
         }
     }
     val isOrganizationManager = remember(
@@ -1635,12 +1635,12 @@ fun EventDetailScreen(
                 }
             )
     }
-    val showRefereesSection = remember(
+    val showOfficialsPanel = remember(
         currentUser.id,
         selectedEvent.event,
         selectedEvent.organization,
     ) {
-        canViewRefereesSection(
+        canViewOfficialsPanel(
             currentUserId = currentUser.id,
             event = selectedEvent.event,
             organization = selectedEvent.organization,
@@ -1863,7 +1863,7 @@ fun EventDetailScreen(
             }
         }
     }
-    val shouldShowViewSchedulePrimaryAction = !isWeeklyParentEvent && (isUserInEvent || isHost || isAssistantHost || isReferee)
+    val shouldShowViewSchedulePrimaryAction = !isWeeklyParentEvent && (isUserInEvent || isHost || isAssistantHost || isOfficial)
     val showOverviewOpenDetailsAction = !isWeeklyParentEvent && !shouldShowViewSchedulePrimaryAction
     val showStickyActions = !showDetails && !isEditing && !showMap && showStickyDockByScroll
     val isEventRefreshInProgress = eventTeamsAndParticipantsLoading || eventMatchesLoading
@@ -2088,7 +2088,7 @@ fun EventDetailScreen(
                             editEvent = editedEvent,
                             navPadding = LocalNavBarPadding.current,
                             editView = isEditing,
-                            showRefereesSection = showRefereesSection,
+                            showOfficialsPanel = showOfficialsPanel,
                             isNewEvent = false,
                             onAddCurrentUser = {},
                             imageScheme = imageScheme,
@@ -2105,18 +2105,18 @@ fun EventDetailScreen(
                                 }
                             },
                             sports = sports,
-                            onUpdateDoTeamsRef = { doTeamsRef ->
+                            onUpdateDoTeamsOfficiate = { doTeamsOfficiate ->
                                 component.editEventField {
                                     copy(
-                                        doTeamsRef = doTeamsRef,
-                                        teamRefsMaySwap = if (doTeamsRef) teamRefsMaySwap else false,
+                                        doTeamsOfficiate = doTeamsOfficiate,
+                                        teamOfficialsMaySwap = if (doTeamsOfficiate) teamOfficialsMaySwap else false,
                                     )
                                 }
                             },
-                            onUpdateTeamRefsMaySwap = { teamRefsMaySwap ->
+                            onUpdateTeamOfficialsMaySwap = { teamOfficialsMaySwap ->
                                 component.editEventField {
                                     copy(
-                                        teamRefsMaySwap = if (doTeamsRef == true) teamRefsMaySwap else false,
+                                        teamOfficialsMaySwap = if (doTeamsOfficiate == true) teamOfficialsMaySwap else false,
                                     )
                                 }
                             },
@@ -2152,19 +2152,19 @@ fun EventDetailScreen(
                                     )
                                 }
                             },
-                            onAddRefereeId = { refereeId ->
+                            onAddOfficialId = { officialId ->
                                 component.editEventField {
                                     copy(
-                                        refereeIds = (refereeIds + refereeId)
+                                        officialIds = (officialIds + officialId)
                                             .map(String::trim)
                                             .filter(String::isNotBlank)
                                             .distinct(),
                                     )
                                 }
                             },
-                            onRemoveRefereeId = { refereeId ->
+                            onRemoveOfficialId = { officialId ->
                                 component.editEventField {
-                                    copy(refereeIds = refereeIds.filterNot { existingId -> existingId == refereeId })
+                                    copy(officialIds = officialIds.filterNot { existingId -> existingId == officialId })
                                 }
                             },
                         ) { isValid ->
@@ -3016,7 +3016,7 @@ fun EventDetailScreen(
                 } else {
                     null
                 }
-                val description = listOfNotNull(progressLabel, signerLabel).joinToString(" • ")
+                val description = listOfNotNull(progressLabel, signerLabel).joinToString(" â€¢ ")
 
                 EmbeddedWebModal(
                     title = prompt.step?.title ?: "Sign required document",
@@ -3655,3 +3655,5 @@ private fun FeeRow(
         )
     }
 }
+
+

@@ -54,9 +54,9 @@ import dev.icerock.moko.geo.LatLng
 import mvp.composeapp.generated.resources.Res
 import mvp.composeapp.generated.resources.confirm_set_result_message
 import mvp.composeapp.generated.resources.confirm_set_result_title
-import mvp.composeapp.generated.resources.not_referee_check_in_message
-import mvp.composeapp.generated.resources.referee_check_in_title
-import mvp.composeapp.generated.resources.referee_checkin_message
+import mvp.composeapp.generated.resources.not_official_check_in_message
+import mvp.composeapp.generated.resources.official_check_in_title
+import mvp.composeapp.generated.resources.official_checkin_message
 import mvp.composeapp.generated.resources.set_number
 import org.jetbrains.compose.resources.stringResource
 import kotlin.math.PI
@@ -83,9 +83,9 @@ fun MatchDetailScreen(
 ) {
     val match by component.matchWithTeams.collectAsState()
     val event by component.event.collectAsState()
-    val isRef by component.isRef.collectAsState()
-    val refCheckedIn by component.refCheckedIn.collectAsState()
-    val showRefCheckInDialog by component.showRefCheckInDialog.collectAsState()
+    val isOfficial by component.isOfficial.collectAsState()
+    val officialCheckedIn by component.officialCheckedIn.collectAsState()
+    val showOfficialCheckInDialog by component.showOfficialCheckInDialog.collectAsState()
     val showSetConfirmDialog by component.showSetConfirmDialog.collectAsState()
     val currentSet by component.currentSet.collectAsState()
     val matchFinished by component.matchFinished.collectAsState()
@@ -93,7 +93,7 @@ fun MatchDetailScreen(
     val currentLocation by mapComponent.currentLocation.collectAsState()
     val isWebLayout = getScreenWidth() >= WEB_LAYOUT_BREAKPOINT_DP
     val showScoreControls = !isWebLayout
-    val showRefScoreControls = showScoreControls && isRef
+    val showOfficialScoreControls = showScoreControls && isOfficial
     val navBottomPadding = LocalNavBarPadding.current.calculateBottomPadding()
     val team1 = match.team1
     val team2 = match.team2
@@ -113,7 +113,7 @@ fun MatchDetailScreen(
         mapComponent.setPlaces(locationTarget.place?.let(::listOf) ?: emptyList())
     }
 
-    val canIncrement = showRefScoreControls && !matchFinished && refCheckedIn
+    val canIncrement = showOfficialScoreControls && !matchFinished && officialCheckedIn
     val isTimedMatch = event?.usesSets == false
     val team1Score = match.match.team1Points.getOrElse(currentSet) { 0 }
     val team2Score = match.match.team2Points.getOrElse(currentSet) { 0 }
@@ -144,23 +144,23 @@ fun MatchDetailScreen(
         }
     }.value
 
-    if (showRefCheckInDialog) {
-        val message = if (isRef) {
-            stringResource(Res.string.referee_checkin_message)
+    if (showOfficialCheckInDialog) {
+        val message = if (isOfficial) {
+            stringResource(Res.string.official_checkin_message)
         } else {
-            stringResource(Res.string.not_referee_check_in_message)
+            stringResource(Res.string.not_official_check_in_message)
         }
         AlertDialog(
             onDismissRequest = { },
-            title = { Text(stringResource(Res.string.referee_check_in_title)) },
+            title = { Text(stringResource(Res.string.official_check_in_title)) },
             text = { Text(message) },
             confirmButton = {
-                Button(onClick = { component.confirmRefCheckIn() }) {
+                Button(onClick = { component.confirmOfficialCheckIn() }) {
                     Text("Yes")
                 }
             },
             dismissButton = {
-                Button(onClick = { component.dismissRefDialog() }) {
+                Button(onClick = { component.dismissOfficialDialog() }) {
                     Text("No")
                 }
             }
@@ -214,7 +214,7 @@ fun MatchDetailScreen(
                     component.updateScore(isTeam1 = true, increment = false)
                 },
                 enabled = canIncrement,
-                showControls = showRefScoreControls,
+                showControls = showOfficialScoreControls,
                 modifier = Modifier.weight(1f),
             )
 
@@ -243,7 +243,7 @@ fun MatchDetailScreen(
                 )
             }
 
-            if (isTimedMatch && showRefScoreControls) {
+            if (isTimedMatch && showOfficialScoreControls) {
                 Button(
                     onClick = { component.requestSetConfirmation() },
                     enabled = canIncrement && team1Score != team2Score,
@@ -264,7 +264,7 @@ fun MatchDetailScreen(
                     component.updateScore(isTeam1 = false, increment = false)
                 },
                 enabled = canIncrement,
-                showControls = showRefScoreControls,
+                showControls = showOfficialScoreControls,
             )
         }
 
@@ -540,3 +540,4 @@ private fun calculateDistanceMiles(start: LatLng, end: LatLng): Double {
 private fun roundMiles(distanceMiles: Double): Double {
     return (distanceMiles * 10.0).roundToInt() / 10.0
 }
+

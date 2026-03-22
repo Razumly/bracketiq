@@ -305,7 +305,7 @@ private fun FamilyChild.toJoinChildOption(): JoinChildOption {
     )
 }
 
-enum class TeamPosition { TEAM1, TEAM2, REF }
+enum class TeamPosition { TEAM1, TEAM2, OFFICIAL }
 
 enum class MatchCreateContext {
     SCHEDULE,
@@ -2313,7 +2313,7 @@ class DefaultEventDetailComponent(
                 teamIds = emptyList(),
                 waitListIds = emptyList(),
                 freeAgentIds = emptyList(),
-                refereeIds = emptyList(),
+                officialIds = emptyList(),
             )
 
             eventRepository.createEvent(templateEvent)
@@ -3152,7 +3152,7 @@ class DefaultEventDetailComponent(
             team1Seed = seed?.team1Seed,
             team2Seed = seed?.team2Seed,
             eventId = event.id,
-            refereeId = null,
+            officialId = null,
             fieldId = if (creationContext == MatchCreateContext.SCHEDULE) normalizeToken(seed?.fieldId) else null,
             start = if (creationContext == MatchCreateContext.SCHEDULE) (seed?.start ?: now) else null,
             end = if (creationContext == MatchCreateContext.SCHEDULE) {
@@ -3170,8 +3170,8 @@ class DefaultEventDetailComponent(
             loserNextMatchId = normalizeToken(seed?.loserNextMatchId),
             previousLeftId = normalizeToken(seed?.previousLeftId),
             previousRightId = normalizeToken(seed?.previousRightId),
-            refereeCheckedIn = false,
-            teamRefereeId = null,
+            officialCheckedIn = false,
+            teamOfficialId = null,
             locked = false,
         )
         val relation = MatchWithRelations(
@@ -3179,7 +3179,7 @@ class DefaultEventDetailComponent(
             field = null,
             team1 = null,
             team2 = null,
-            teamReferee = null,
+            teamOfficial = null,
             winnerNextMatch = null,
             loserNextMatch = null,
             previousLeftMatch = null,
@@ -3376,7 +3376,7 @@ class DefaultEventDetailComponent(
             when (position) {
                 TeamPosition.TEAM1 -> match.copy(team1Id = teamId)
                 TeamPosition.TEAM2 -> match.copy(team2Id = teamId)
-                TeamPosition.REF -> match.copy(teamRefereeId = teamId)
+                TeamPosition.OFFICIAL -> match.copy(teamOfficialId = teamId)
             }
         }
         _showTeamSelectionDialog.value = null
@@ -3400,8 +3400,8 @@ class DefaultEventDetailComponent(
                         )
                     }
 
-                    val match1Teams = setOfNotNull(match1.team1Id, match1.team2Id, match1.teamRefereeId)
-                    val match2Teams = setOfNotNull(match2.team1Id, match2.team2Id, match2.teamRefereeId)
+                    val match1Teams = setOfNotNull(match1.team1Id, match1.team2Id, match1.teamOfficialId)
+                    val match2Teams = setOfNotNull(match2.team1Id, match2.team2Id, match2.teamOfficialId)
                     val sharedTeams = match1Teams.intersect(match2Teams)
 
                     if (sharedTeams.isNotEmpty()) {
@@ -3599,8 +3599,8 @@ class DefaultEventDetailComponent(
     }
 
     private fun MatchMVP.toEmptyBracketMatch(): MatchMVP = copy(
-        refereeId = null,
-        teamRefereeId = null,
+        officialId = null,
+        teamOfficialId = null,
         team1Points = emptyList(),
         team2Points = emptyList(),
         setResults = emptyList(),

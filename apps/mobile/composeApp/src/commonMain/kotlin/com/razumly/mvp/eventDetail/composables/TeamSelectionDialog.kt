@@ -27,7 +27,7 @@ fun TeamSelectionDialog(
                 text = when (dialogState.position) {
                     TeamPosition.TEAM1 -> "Select Team 1"
                     TeamPosition.TEAM2 -> "Select Team 2"
-                    TeamPosition.REF -> "Select Referee"
+                    TeamPosition.OFFICIAL -> "Select Team Official"
                 }
             )
         },
@@ -67,3 +67,5 @@ fun TeamSelectionDialog(
         }
     )
 }
+
+

@@ -216,7 +216,7 @@ private val migrationSql87To88 = listOf(
 )
 
 private val migrationSql88To89 = listOf(
-    "ALTER TABLE `Event` ADD COLUMN `teamRefsMaySwap` INTEGER",
+    "ALTER TABLE `Event` ADD COLUMN `teamOfficialsMaySwap` INTEGER",
 )
 
 private val migrationSql2To3 = listOf(
@@ -228,7 +228,7 @@ private val migrationSql2To3 = listOf(
         `team1Seed` INTEGER,
         `team2Seed` INTEGER,
         `eventId` TEXT NOT NULL,
-        `refereeId` TEXT,
+        `officialId` TEXT,
         `fieldId` TEXT,
         `start` INTEGER,
         `end` INTEGER,
@@ -242,8 +242,8 @@ private val migrationSql2To3 = listOf(
         `loserNextMatchId` TEXT,
         `previousLeftId` TEXT,
         `previousRightId` TEXT,
-        `refereeCheckedIn` INTEGER,
-        `teamRefereeId` TEXT,
+        `officialCheckedIn` INTEGER,
+        `teamOfficialId` TEXT,
         `locked` INTEGER NOT NULL,
         `id` TEXT NOT NULL,
         PRIMARY KEY(`id`)
@@ -257,7 +257,7 @@ private val migrationSql2To3 = listOf(
         `team1Seed`,
         `team2Seed`,
         `eventId`,
-        `refereeId`,
+        `officialId`,
         `fieldId`,
         `start`,
         `end`,
@@ -271,8 +271,8 @@ private val migrationSql2To3 = listOf(
         `loserNextMatchId`,
         `previousLeftId`,
         `previousRightId`,
-        `refereeCheckedIn`,
-        `teamRefereeId`,
+        `officialCheckedIn`,
+        `teamOfficialId`,
         `locked`,
         `id`
     )
@@ -283,7 +283,7 @@ private val migrationSql2To3 = listOf(
         `team1Seed`,
         `team2Seed`,
         `eventId`,
-        `refereeId`,
+        `officialId`,
         `fieldId`,
         `start`,
         `end`,
@@ -297,8 +297,8 @@ private val migrationSql2To3 = listOf(
         `loserNextMatchId`,
         `previousLeftId`,
         `previousRightId`,
-        `refereeCheckedIn`,
-        `teamRefereeId`,
+        `officialCheckedIn`,
+        `teamOfficialId`,
         `locked`,
         `id`
     FROM `MatchMVP`

@@ -39,24 +39,24 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun updating_referee_state_supports_toggle_and_add_remove_operations() = runTest(testDispatcher) {
+    fun updating_official_state_supports_toggle_and_add_remove_operations() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         advance()
 
-        harness.component.updateDoTeamsRef(true)
-        harness.component.updateTeamRefsMaySwap(true)
-        harness.component.addRefereeId(" ref-1 ")
-        harness.component.addRefereeId("ref-1")
-        harness.component.addRefereeId("ref-2")
+        harness.component.updateDoTeamsOfficiate(true)
+        harness.component.updateTeamOfficialsMaySwap(true)
+        harness.component.addOfficialId(" official-1 ")
+        harness.component.addOfficialId("official-1")
+        harness.component.addOfficialId("official-2")
         advance()
 
-        harness.component.removeRefereeId("ref-1")
+        harness.component.removeOfficialId("official-1")
         advance()
 
         val updatedEvent = harness.component.newEventState.value
-        assertEquals(true, updatedEvent.doTeamsRef)
-        assertEquals(true, updatedEvent.teamRefsMaySwap)
-        assertEquals(listOf("ref-2"), updatedEvent.refereeIds)
+        assertEquals(true, updatedEvent.doTeamsOfficiate)
+        assertEquals(true, updatedEvent.teamOfficialsMaySwap)
+        assertEquals(listOf("official-2"), updatedEvent.officialIds)
     }
 
     @Test
@@ -66,13 +66,13 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
 
         harness.component.addPendingStaffInvite(
             firstName = "Taylor",
-            lastName = "Ref",
+            lastName = "Official",
             email = " Taylor@example.com ",
-            roles = setOf(EventStaffRole.REFEREE),
+            roles = setOf(EventStaffRole.OFFICIAL),
         ).getOrThrow()
         harness.component.addPendingStaffInvite(
             firstName = "Taylor",
-            lastName = "Ref",
+            lastName = "Official",
             email = "taylor@example.com",
             roles = setOf(EventStaffRole.ASSISTANT_HOST),
         ).getOrThrow()
@@ -81,15 +81,15 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         assertEquals(1, pending.size)
         assertEquals("taylor@example.com", pending.single().email)
         assertEquals(
-            setOf(EventStaffRole.REFEREE, EventStaffRole.ASSISTANT_HOST),
+            setOf(EventStaffRole.OFFICIAL, EventStaffRole.ASSISTANT_HOST),
             pending.single().roles,
         )
 
         val duplicate = harness.component.addPendingStaffInvite(
             firstName = "Taylor",
-            lastName = "Ref",
+            lastName = "Official",
             email = "taylor@example.com",
-            roles = setOf(EventStaffRole.REFEREE),
+            roles = setOf(EventStaffRole.OFFICIAL),
         )
         assertTrue(duplicate.isFailure)
     }
@@ -125,7 +125,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         advance()
 
         harness.component.updateAssistantHostIds(listOf("assistant-1"))
-        harness.component.addRefereeId("ref-1")
+        harness.component.addOfficialId("official-1")
         advance()
         harness.userRepository.createdInvitesResult = listOf(
             Invite(
@@ -138,11 +138,11 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
             ),
             Invite(
                 type = "STAFF",
-                email = "ref@example.com",
+                email = "official@example.com",
                 eventId = harness.component.newEventState.value.id,
-                userId = "ref-1",
-                staffTypes = listOf("REFEREE"),
-                id = "invite-ref",
+                userId = "official-1",
+                staffTypes = listOf("OFFICIAL"),
+                id = "invite-official",
             ),
         )
 
@@ -154,24 +154,24 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         assertEquals(2, invitePayloads.size)
         assertTrue(invitePayloads.all { it.replaceStaffTypes == true })
         assertTrue(invitePayloads.any { it.userId == "assistant-1" && it.staffTypes == listOf("HOST") })
-        assertTrue(invitePayloads.any { it.userId == "ref-1" && it.staffTypes == listOf("REFEREE") })
+        assertTrue(invitePayloads.any { it.userId == "official-1" && it.staffTypes == listOf("OFFICIAL") })
     }
 
     @Test
-    fun disabling_team_refs_clears_team_ref_swap_permission() = runTest(testDispatcher) {
+    fun disabling_team_officials_clears_team_official_swap_permission() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         advance()
 
-        harness.component.updateDoTeamsRef(true)
-        harness.component.updateTeamRefsMaySwap(true)
+        harness.component.updateDoTeamsOfficiate(true)
+        harness.component.updateTeamOfficialsMaySwap(true)
         advance()
 
-        harness.component.updateDoTeamsRef(false)
+        harness.component.updateDoTeamsOfficiate(false)
         advance()
 
         val updatedEvent = harness.component.newEventState.value
-        assertEquals(false, updatedEvent.doTeamsRef)
-        assertEquals(false, updatedEvent.teamRefsMaySwap)
+        assertEquals(false, updatedEvent.doTeamsOfficiate)
+        assertEquals(false, updatedEvent.teamOfficialsMaySwap)
     }
 
     @Test
@@ -677,3 +677,5 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         assertNull(createCall.leagueScoringConfig)
     }
 }
+
+

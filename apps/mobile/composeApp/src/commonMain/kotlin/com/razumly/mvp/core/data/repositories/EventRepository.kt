@@ -903,7 +903,7 @@ class EventRepository(
                 event.freeAgentIds +
                 event.waitListIds +
                 event.assistantHostIds +
-                event.refereeIds +
+                event.officialIds +
                 event.hostId +
                 teamPlayerIds
             )

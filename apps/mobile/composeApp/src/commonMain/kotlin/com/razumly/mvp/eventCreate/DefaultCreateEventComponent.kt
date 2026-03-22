@@ -90,10 +90,10 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     fun updateTournamentField(update: Event.() -> Event)
     fun updateHostId(hostId: String)
     fun updateAssistantHostIds(assistantHostIds: List<String>)
-    fun updateDoTeamsRef(doTeamsRef: Boolean)
-    fun updateTeamRefsMaySwap(teamRefsMaySwap: Boolean)
-    fun addRefereeId(refereeId: String)
-    fun removeRefereeId(refereeId: String)
+    fun updateDoTeamsOfficiate(doTeamsOfficiate: Boolean)
+    fun updateTeamOfficialsMaySwap(teamOfficialsMaySwap: Boolean)
+    fun addOfficialId(officialId: String)
+    fun removeOfficialId(officialId: String)
     fun setPaymentPlansEnabled(enabled: Boolean)
     fun setInstallmentCount(count: Int)
     fun updateInstallmentAmount(index: Int, amountCents: Int)
@@ -415,36 +415,36 @@ class DefaultCreateEventComponent(
         }
     }
 
-    override fun updateDoTeamsRef(doTeamsRef: Boolean) {
+    override fun updateDoTeamsOfficiate(doTeamsOfficiate: Boolean) {
         updateEventField {
             copy(
-                doTeamsRef = doTeamsRef,
-                teamRefsMaySwap = if (doTeamsRef) teamRefsMaySwap else false,
+                doTeamsOfficiate = doTeamsOfficiate,
+                teamOfficialsMaySwap = if (doTeamsOfficiate) teamOfficialsMaySwap else false,
             )
         }
     }
 
-    override fun updateTeamRefsMaySwap(teamRefsMaySwap: Boolean) {
+    override fun updateTeamOfficialsMaySwap(teamOfficialsMaySwap: Boolean) {
         updateEventField {
             copy(
-                teamRefsMaySwap = if (doTeamsRef == true) teamRefsMaySwap else false,
+                teamOfficialsMaySwap = if (doTeamsOfficiate == true) teamOfficialsMaySwap else false,
             )
         }
     }
 
-    override fun addRefereeId(refereeId: String) {
-        val normalizedRefereeId = refereeId.trim()
-        if (normalizedRefereeId.isEmpty()) return
+    override fun addOfficialId(officialId: String) {
+        val normalizedOfficialId = officialId.trim()
+        if (normalizedOfficialId.isEmpty()) return
         updateEventField {
-            copy(refereeIds = (refereeIds + normalizedRefereeId).normalizeDistinctIds())
+            copy(officialIds = (officialIds + normalizedOfficialId).normalizeDistinctIds())
         }
     }
 
-    override fun removeRefereeId(refereeId: String) {
-        val normalizedRefereeId = refereeId.trim()
-        if (normalizedRefereeId.isEmpty()) return
+    override fun removeOfficialId(officialId: String) {
+        val normalizedOfficialId = officialId.trim()
+        if (normalizedOfficialId.isEmpty()) return
         updateEventField {
-            copy(refereeIds = refereeIds.filterNot { existingId -> existingId == normalizedRefereeId })
+            copy(officialIds = officialIds.filterNot { existingId -> existingId == normalizedOfficialId })
         }
     }
 
@@ -1035,7 +1035,7 @@ class DefaultCreateEventComponent(
 
     private suspend fun syncEventStaffAssignments(createdEvent: Event): Result<Event> = runCatching {
         val shouldSyncStaff = createdEvent.assistantHostIds.isNotEmpty() ||
-            createdEvent.refereeIds.isNotEmpty() ||
+            createdEvent.officialIds.isNotEmpty() ||
             _pendingStaffInvites.value.isNotEmpty()
         if (!shouldSyncStaff) {
             return@runCatching createdEvent
@@ -1630,3 +1630,5 @@ class DefaultCreateEventComponent(
         private val rentalCheckoutLocks = mutableMapOf<String, Instant>()
     }
 }
+
+

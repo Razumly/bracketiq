@@ -13,7 +13,7 @@ data class LeagueConfig(
     val setDurationMinutes: Int? = null,
     val setsPerMatch: Int? = null,
     val pointsToVictory: List<Int> = emptyList(),
-    val doTeamsRef: Boolean = false,
+    val doTeamsOfficiate: Boolean = false,
 )
 
 @Serializable
@@ -41,7 +41,7 @@ fun Event.toLeagueConfig(): LeagueConfig = LeagueConfig(
     setDurationMinutes = setDurationMinutes,
     setsPerMatch = setsPerMatch,
     pointsToVictory = pointsToVictory,
-    doTeamsRef = doTeamsRef ?: false,
+    doTeamsOfficiate = doTeamsOfficiate ?: false,
 )
 
 fun Event.withLeagueConfig(config: LeagueConfig): Event {
@@ -68,8 +68,8 @@ fun Event.withLeagueConfig(config: LeagueConfig): Event {
             loserBracketPointsToVictory
         },
         restTimeMinutes = config.restTimeMinutes,
-        doTeamsRef = config.doTeamsRef,
-        teamRefsMaySwap = if (config.doTeamsRef) teamRefsMaySwap else false,
+        doTeamsOfficiate = config.doTeamsOfficiate,
+        teamOfficialsMaySwap = if (config.doTeamsOfficiate) teamOfficialsMaySwap else false,
     )
 }
 

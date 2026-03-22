@@ -550,7 +550,7 @@ class UserRepositoryAuthTest {
                                   "type":"STAFF",
                                   "email":"host@example.com",
                                   "status":"PENDING",
-                                  "staffTypes":["HOST","REFEREE"],
+                                  "staffTypes":["HOST","OFFICIAL"],
                                   "organizationId":"org_1",
                                   "userId":"u1"
                                 }
@@ -590,7 +590,7 @@ class UserRepositoryAuthTest {
 
         assertEquals(1, invites.size)
         assertEquals("invite_1", invites.first().id)
-        assertEquals(listOf("HOST", "REFEREE"), invites.first().staffTypes)
+        assertEquals(listOf("HOST", "OFFICIAL"), invites.first().staffTypes)
     }
 
     @Test

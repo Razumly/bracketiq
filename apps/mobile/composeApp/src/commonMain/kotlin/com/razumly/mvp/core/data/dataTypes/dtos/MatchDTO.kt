@@ -19,7 +19,7 @@ data class MatchDTO(
     val team1Seed: Int? = null,
     val team2Seed: Int? = null,
     val eventId: String,
-    val refereeId: String?,
+    val officialId: String?,
     val fieldId: String?,
     val start: String?,
     val end: String?,
@@ -33,8 +33,8 @@ data class MatchDTO(
     val loserNextMatchId: String?,
     val previousLeftId: String?,
     val previousRightId: String?,
-    val refereeCheckedIn: Boolean?,
-    val teamRefereeId: String? = null,
+    val officialCheckedIn: Boolean?,
+    val teamOfficialId: String? = null,
     val locked: Boolean = false,
 )
 
@@ -47,7 +47,7 @@ fun MatchDTO.toMatch(id: String): MatchMVP {
         team1Seed = team1Seed,
         team2Seed = team2Seed,
         matchId = matchId,
-        refereeId = refereeId,
+        officialId = officialId,
         fieldId = fieldId,
         start = start?.let { Instant.parse(it) },
         end = end?.let { Instant.parse(it) },
@@ -57,12 +57,12 @@ fun MatchDTO.toMatch(id: String): MatchMVP {
         setResults = setResults,
         side = side,
         losersBracket = losersBracket,
-        refereeCheckedIn = refereeCheckedIn,
+        officialCheckedIn = officialCheckedIn,
         winnerNextMatchId = winnerNextMatchId,
         loserNextMatchId = loserNextMatchId,
         previousLeftId = previousLeftId,
         previousRightId = previousRightId,
-        teamRefereeId = teamRefereeId,
+        teamOfficialId = teamOfficialId,
         locked = locked,
     )
 }

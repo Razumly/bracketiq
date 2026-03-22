@@ -4,7 +4,7 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Invite
 
 enum class EventStaffRole {
-    REFEREE,
+    OFFICIAL,
     ASSISTANT_HOST,
 }
 
@@ -32,17 +32,17 @@ fun PendingStaffInviteDraft.normalized(): PendingStaffInviteDraft = copy(
 )
 
 fun EventStaffRole.toInviteStaffType(): String = when (this) {
-    EventStaffRole.REFEREE -> "REFEREE"
+    EventStaffRole.OFFICIAL -> "OFFICIAL"
     EventStaffRole.ASSISTANT_HOST -> "HOST"
 }
 
 fun EventStaffRole.label(): String = when (this) {
-    EventStaffRole.REFEREE -> "Referee"
+    EventStaffRole.OFFICIAL -> "Official"
     EventStaffRole.ASSISTANT_HOST -> "Assistant Host"
 }
 
 fun EventStaffRole.conflictListLabel(): String = when (this) {
-    EventStaffRole.REFEREE -> "referee list"
+    EventStaffRole.OFFICIAL -> "official list"
     EventStaffRole.ASSISTANT_HOST -> "host list"
 }
 
@@ -96,7 +96,7 @@ fun Invite.normalizedStatusOrNull(): String? =
     status?.trim()?.uppercase()?.takeIf(String::isNotBlank)
 
 fun Event.assignedUserIdsForRole(role: EventStaffRole): Set<String> = when (role) {
-    EventStaffRole.REFEREE -> refereeIds
+    EventStaffRole.OFFICIAL -> officialIds
     EventStaffRole.ASSISTANT_HOST -> listOf(hostId) + assistantHostIds
 }.map { userId -> userId.trim() }
     .filter(String::isNotBlank)

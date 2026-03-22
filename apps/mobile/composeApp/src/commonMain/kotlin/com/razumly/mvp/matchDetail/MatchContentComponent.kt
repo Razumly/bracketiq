@@ -37,17 +37,17 @@ interface MatchContentComponent {
     val matchWithTeams: StateFlow<MatchWithTeams>
     val event: StateFlow<Event?>
     val matchFinished: StateFlow<Boolean>
-    val refCheckedIn: StateFlow<Boolean>
+    val officialCheckedIn: StateFlow<Boolean>
     val currentSet: StateFlow<Int>
-    val isRef: StateFlow<Boolean>
-    val showRefCheckInDialog: StateFlow<Boolean>
+    val isOfficial: StateFlow<Boolean>
+    val showOfficialCheckInDialog: StateFlow<Boolean>
     val showSetConfirmDialog: StateFlow<Boolean>
     val errorState: StateFlow<String?>
 
     fun dismissSetDialog()
-    fun dismissRefDialog()
-    fun checkRefStatus()
-    fun confirmRefCheckIn()
+    fun dismissOfficialDialog()
+    fun checkOfficialStatus()
+    fun confirmOfficialCheckIn()
     fun updateScore(isTeam1: Boolean, increment: Boolean)
     fun requestSetConfirmation()
     fun confirmSet()
@@ -64,11 +64,11 @@ data class MatchWithTeams(
     val previousRightMatch: MatchMVP?,
     val team1: TeamWithRelations?,
     val team2: TeamWithRelations?,
-    val ref: TeamWithRelations?
+    val teamOfficial: TeamWithRelations?
 )
 
 fun MatchWithRelations.toMatchWithTeams(
-    team1: TeamWithRelations?, team2: TeamWithRelations?, ref: TeamWithRelations?
+    team1: TeamWithRelations?, team2: TeamWithRelations?, teamOfficial: TeamWithRelations?
 ) = MatchWithTeams(
     match = this.match,
     field = this.field,
@@ -78,7 +78,7 @@ fun MatchWithRelations.toMatchWithTeams(
     previousRightMatch = this.previousRightMatch,
     team1 = team1,
     team2 = team2,
-    ref = ref
+    teamOfficial = teamOfficial
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -128,15 +128,15 @@ class DefaultMatchContentComponent(
                         teamRepository.getTeamWithPlayersFlow(it)
                     } ?: flowOf(Result.success(null))
 
-                    val refFlow = baseMatch.match.teamRefereeId?.let {
+                    val teamOfficialFlow = baseMatch.match.teamOfficialId?.let {
                         teamRepository.getTeamWithPlayersFlow(it)
                     } ?: flowOf(Result.success(null))
 
-                    combine(team1Flow, team2Flow, refFlow) { team1Result, team2Result, refResult ->
+                    combine(team1Flow, team2Flow, teamOfficialFlow) { team1Result, team2Result, teamOfficialResult ->
                         baseMatch.toMatchWithTeams(
                             team1 = team1Result.getOrNull(),
                             team2 = team2Result.getOrNull(),
-                            ref = refResult.getOrNull()
+                            teamOfficial = teamOfficialResult.getOrNull()
                         )
                     }
                 }
@@ -151,17 +151,17 @@ class DefaultMatchContentComponent(
     private val _matchFinished = MutableStateFlow(false)
     override val matchFinished = _matchFinished.asStateFlow()
 
-    private val _refCheckedIn = MutableStateFlow(selectedMatch.match.refereeCheckedIn ?: false)
-    override val refCheckedIn: StateFlow<Boolean> = _refCheckedIn.asStateFlow()
+    private val _officialCheckedIn = MutableStateFlow(selectedMatch.match.officialCheckedIn ?: false)
+    override val officialCheckedIn: StateFlow<Boolean> = _officialCheckedIn.asStateFlow()
 
     private val _currentSet = MutableStateFlow(0)
     override val currentSet = _currentSet.asStateFlow()
 
-    private val _isRef = MutableStateFlow(false)
-    override val isRef = _isRef.asStateFlow()
+    private val _isOfficial = MutableStateFlow(false)
+    override val isOfficial = _isOfficial.asStateFlow()
 
-    private val _showRefCheckInDialog = MutableStateFlow(false)
-    override val showRefCheckInDialog = _showRefCheckInDialog.asStateFlow()
+    private val _showOfficialCheckInDialog = MutableStateFlow(false)
+    override val showOfficialCheckInDialog = _showOfficialCheckInDialog.asStateFlow()
 
     private val _showSetConfirmDialog = MutableStateFlow(false)
     override val showSetConfirmDialog = _showSetConfirmDialog.asStateFlow()
@@ -188,7 +188,7 @@ class DefaultMatchContentComponent(
                 if (!_matchFinished.value) {
                     _currentSet.value = resolveCurrentSetIndex(normalizedMatch.setResults)
                 }
-                checkRefStatus()
+                checkOfficialStatus()
             }
         }
         scope.launch {
@@ -199,12 +199,12 @@ class DefaultMatchContentComponent(
                 if (!_matchFinished.value) {
                     _currentSet.value = resolveCurrentSetIndex(normalizedMatch.setResults)
                 }
-                checkRefStatus()
+                checkOfficialStatus()
             }
         }
         scope.launch {
             _currentUserTeams.collect {
-                checkRefStatus()
+                checkOfficialStatus()
             }
         }
     }
@@ -213,55 +213,55 @@ class DefaultMatchContentComponent(
         _showSetConfirmDialog.value = false
     }
 
-    override fun dismissRefDialog() {
-        _showRefCheckInDialog.value = false
+    override fun dismissOfficialDialog() {
+        _showOfficialCheckInDialog.value = false
     }
 
-    override fun checkRefStatus() {
+    override fun checkOfficialStatus() {
         val currentMatch = matchWithTeams.value.match
-        val teamRefereeId = normalizeOptionalId(currentMatch.teamRefereeId)
+        val teamOfficialId = normalizeOptionalId(currentMatch.teamOfficialId)
         val teamIds = currentUserTeamIds().toSet()
-        val isAssignedTeamRef = teamRefereeId != null && teamIds.contains(teamRefereeId)
-        val isAssignedUserRef = normalizeOptionalId(currentMatch.refereeId) == _currentUser.id
-        val checkedIn = currentMatch.refereeCheckedIn == true
-        val canSwapIntoRef = !checkedIn && canCurrentUserSwapIntoRef(currentMatch)
+        val isAssignedTeamOfficial = teamOfficialId != null && teamIds.contains(teamOfficialId)
+        val isAssignedUserOfficial = normalizeOptionalId(currentMatch.officialId) == _currentUser.id
+        val checkedIn = currentMatch.officialCheckedIn == true
+        val canSwapIntoOfficial = !checkedIn && canCurrentUserSwapIntoOfficial(currentMatch)
 
-        _isRef.value = isAssignedTeamRef || isAssignedUserRef
-        _refCheckedIn.value = checkedIn
-        _showRefCheckInDialog.value = !checkedIn && (_isRef.value || canSwapIntoRef)
+        _isOfficial.value = isAssignedTeamOfficial || isAssignedUserOfficial
+        _officialCheckedIn.value = checkedIn
+        _showOfficialCheckInDialog.value = !checkedIn && (_isOfficial.value || canSwapIntoOfficial)
     }
 
-    override fun confirmRefCheckIn() {
+    override fun confirmOfficialCheckIn() {
         scope.launch {
             val currentMatch = matchWithTeams.value.match
             val teamIds = currentUserTeamIds().toSet()
-            val currentTeamRefereeId = normalizeOptionalId(currentMatch.teamRefereeId)
-            val isAssignedTeamRef =
-                currentTeamRefereeId != null && teamIds.contains(currentTeamRefereeId)
-            val isAssignedUserRef = normalizeOptionalId(currentMatch.refereeId) == _currentUser.id
-            val canSwap = canCurrentUserSwapIntoRef(currentMatch)
-            val checkedIn = currentMatch.refereeCheckedIn == true
+            val currentTeamOfficialId = normalizeOptionalId(currentMatch.teamOfficialId)
+            val isAssignedTeamOfficial =
+                currentTeamOfficialId != null && teamIds.contains(currentTeamOfficialId)
+            val isAssignedUserOfficial = normalizeOptionalId(currentMatch.officialId) == _currentUser.id
+            val canSwap = canCurrentUserSwapIntoOfficial(currentMatch)
+            val checkedIn = currentMatch.officialCheckedIn == true
 
             if (checkedIn) {
-                dismissRefDialog()
-                _refCheckedIn.value = true
+                dismissOfficialDialog()
+                _officialCheckedIn.value = true
                 return@launch
             }
 
-            if (!isAssignedTeamRef && !isAssignedUserRef && !canSwap) {
-                dismissRefDialog()
-                _errorState.value = "Only teams in this event can referee this match."
+            if (!isAssignedTeamOfficial && !isAssignedUserOfficial && !canSwap) {
+                dismissOfficialDialog()
+                _errorState.value = "Only teams in this event can officiate this match."
                 return@launch
             }
 
-            if (isAssignedTeamRef || isAssignedUserRef) {
+            if (isAssignedTeamOfficial || isAssignedUserOfficial) {
                 val updatedMatch = matchWithTeams.value.copy(
-                    match = currentMatch.copy(refereeCheckedIn = true),
+                    match = currentMatch.copy(officialCheckedIn = true),
                 )
                 matchRepository.updateMatch(updatedMatch.match).onSuccess {
-                    dismissRefDialog()
-                    _refCheckedIn.value = true
-                    _isRef.value = true
+                    dismissOfficialDialog()
+                    _officialCheckedIn.value = true
+                    _isOfficial.value = true
                 }.onFailure {
                     _errorState.value = it.message
                 }
@@ -270,20 +270,20 @@ class DefaultMatchContentComponent(
 
             val currentUserEventTeamId = resolveCurrentUserEventTeamId(currentMatch)
             if (currentUserEventTeamId == null) {
-                _errorState.value = "Only teams in this event can referee this match."
+                _errorState.value = "Only teams in this event can officiate this match."
                 return@launch
             }
 
             val updatedMatch = matchWithTeams.value.copy(
                 match = currentMatch.copy(
-                    teamRefereeId = currentUserEventTeamId,
-                    refereeCheckedIn = false,
+                    teamOfficialId = currentUserEventTeamId,
+                    officialCheckedIn = false,
                 ),
             )
             matchRepository.updateMatch(updatedMatch.match).onSuccess {
-                _isRef.value = true
-                _refCheckedIn.value = false
-                _showRefCheckInDialog.value = true
+                _isOfficial.value = true
+                _officialCheckedIn.value = false
+                _showOfficialCheckInDialog.value = true
             }.onFailure {
                 _errorState.value = it.message
             }
@@ -327,18 +327,18 @@ class DefaultMatchContentComponent(
         return resolveCurrentUserParticipatingTeamId(match)
     }
 
-    private fun canCurrentUserSwapIntoRef(match: MatchMVP): Boolean {
-        if (event.value?.doTeamsRef != true) {
+    private fun canCurrentUserSwapIntoOfficial(match: MatchMVP): Boolean {
+        if (event.value?.doTeamsOfficiate != true) {
             return false
         }
-        if (event.value?.teamRefsMaySwap != true) {
+        if (event.value?.teamOfficialsMaySwap != true) {
             return false
         }
-        if (match.refereeCheckedIn == true) {
+        if (match.officialCheckedIn == true) {
             return false
         }
         val eventTeamId = resolveCurrentUserEventTeamId(match) ?: return false
-        return eventTeamId != normalizeOptionalId(match.teamRefereeId)
+        return eventTeamId != normalizeOptionalId(match.teamOfficialId)
     }
 
     private fun normalizeOptionalId(rawId: String?): String? {
@@ -347,7 +347,7 @@ class DefaultMatchContentComponent(
     }
 
     override fun updateScore(isTeam1: Boolean, increment: Boolean) {
-        if (!isRef.value || refCheckedIn.value != true || matchFinished.value) {
+        if (!isOfficial.value || officialCheckedIn.value != true || matchFinished.value) {
             return
         }
 
@@ -389,7 +389,7 @@ class DefaultMatchContentComponent(
 
 
     override fun requestSetConfirmation() {
-        if (matchFinished.value || !isRef.value || refCheckedIn.value != true) return
+        if (matchFinished.value || !isOfficial.value || officialCheckedIn.value != true) return
 
         val scoringMatch = updateMatchStructureForCurrentContext(matchWithTeams.value.match)
         val setIndex = currentSet.value.coerceIn(0, maxSets - 1)
@@ -406,7 +406,7 @@ class DefaultMatchContentComponent(
 
 
     override fun confirmSet() {
-        if (matchFinished.value || !isRef.value || refCheckedIn.value != true) {
+        if (matchFinished.value || !isOfficial.value || officialCheckedIn.value != true) {
             _showSetConfirmDialog.value = false
             return
         }
@@ -634,3 +634,4 @@ class DefaultMatchContentComponent(
         return points?.takeIf { it > 0 }
     }
 }
+

@@ -156,11 +156,11 @@ fun CreateEventScreen(
     val onUpdateHostId: (String) -> Unit = remember(component) { component::updateHostId }
     val onUpdateAssistantHostIds: (List<String>) -> Unit =
         remember(component) { component::updateAssistantHostIds }
-    val onUpdateDoTeamsRef: (Boolean) -> Unit = remember(component) { component::updateDoTeamsRef }
-    val onUpdateTeamRefsMaySwap: (Boolean) -> Unit =
-        remember(component) { component::updateTeamRefsMaySwap }
-    val onAddRefereeId: (String) -> Unit = remember(component) { component::addRefereeId }
-    val onRemoveRefereeId: (String) -> Unit = remember(component) { component::removeRefereeId }
+    val onUpdateDoTeamsOfficiate: (Boolean) -> Unit = remember(component) { component::updateDoTeamsOfficiate }
+    val onUpdateTeamOfficialsMaySwap: (Boolean) -> Unit =
+        remember(component) { component::updateTeamOfficialsMaySwap }
+    val onAddOfficialId: (String) -> Unit = remember(component) { component::addOfficialId }
+    val onRemoveOfficialId: (String) -> Unit = remember(component) { component::removeOfficialId }
     val onSetPaymentPlansEnabled: (Boolean) -> Unit =
         remember(component) { component::setPaymentPlansEnabled }
     val onSetInstallmentCount: (Int) -> Unit = remember(component) { component::setInstallmentCount }
@@ -284,10 +284,10 @@ fun CreateEventScreen(
                         onRemovePendingStaffInvite = onRemovePendingStaffInvite,
                         onUpdateHostId = onUpdateHostId,
                         onUpdateAssistantHostIds = onUpdateAssistantHostIds,
-                        onUpdateDoTeamsRef = onUpdateDoTeamsRef,
-                        onUpdateTeamRefsMaySwap = onUpdateTeamRefsMaySwap,
-                        onAddRefereeId = onAddRefereeId,
-                        onRemoveRefereeId = onRemoveRefereeId,
+                        onUpdateDoTeamsOfficiate = onUpdateDoTeamsOfficiate,
+                        onUpdateTeamOfficialsMaySwap = onUpdateTeamOfficialsMaySwap,
+                        onAddOfficialId = onAddOfficialId,
+                        onRemoveOfficialId = onRemoveOfficialId,
                         onSetPaymentPlansEnabled = onSetPaymentPlansEnabled,
                         onSetInstallmentCount = onSetInstallmentCount,
                         onUpdateInstallmentAmount = onUpdateInstallmentAmount,
@@ -330,3 +330,5 @@ private fun buildValidationPopupMessage(errors: List<String>): String {
     val suffix = if (remaining > 0) " +$remaining more" else ""
     return "Fix: ${shown.joinToString("; ")}$suffix"
 }
+
+

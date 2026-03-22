@@ -18,7 +18,7 @@ data class MatchMVP (
     val team1Seed: Int? = null,
     val team2Seed: Int? = null,
     val eventId: String,
-    val refereeId: String? = null,
+    val officialId: String? = null,
     val fieldId: String? = null,
     @Contextual
     val start: Instant? = null,
@@ -33,8 +33,8 @@ data class MatchMVP (
     val loserNextMatchId: String? = null,
     val previousLeftId: String? = null,
     val previousRightId: String? = null,
-    val refereeCheckedIn: Boolean? = null,
-    val teamRefereeId: String? = null,
+    val officialCheckedIn: Boolean? = null,
+    val teamOfficialId: String? = null,
     val locked: Boolean = false,
     @PrimaryKey override val id: String,
 ) : MVPDocument {
@@ -47,7 +47,7 @@ data class MatchMVP (
             team1Seed = team1Seed,
             team2Seed = team2Seed,
             eventId = eventId,
-            refereeId = refereeId,
+            officialId = officialId,
             fieldId = fieldId,
             start = start?.toString(),
             end = end?.toString(),
@@ -61,8 +61,8 @@ data class MatchMVP (
             loserNextMatchId = loserNextMatchId,
             previousLeftId = previousLeftId,
             previousRightId = previousRightId,
-            refereeCheckedIn = refereeCheckedIn,
-            teamRefereeId = teamRefereeId,
+            officialCheckedIn = officialCheckedIn,
+            teamOfficialId = teamOfficialId,
             locked = locked,
         )
     }

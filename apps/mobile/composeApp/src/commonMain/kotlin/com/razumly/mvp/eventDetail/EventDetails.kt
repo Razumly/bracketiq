@@ -184,7 +184,7 @@ fun EventDetails(
     eventWithRelations: EventWithFullRelations,
     editEvent: Event,
     editView: Boolean,
-    showRefereesSection: Boolean = true,
+    showOfficialsPanel: Boolean = true,
     navPadding: PaddingValues = PaddingValues(),
     isNewEvent: Boolean,
     rentalTimeLocked: Boolean = false,
@@ -226,10 +226,10 @@ fun EventDetails(
     onRemovePendingStaffInvite: (String, EventStaffRole?) -> Unit = { _, _ -> },
     onUpdateHostId: (String) -> Unit = {},
     onUpdateAssistantHostIds: (List<String>) -> Unit = {},
-    onUpdateDoTeamsRef: (Boolean) -> Unit = {},
-    onUpdateTeamRefsMaySwap: (Boolean) -> Unit = {},
-    onAddRefereeId: (String) -> Unit = {},
-    onRemoveRefereeId: (String) -> Unit = {},
+    onUpdateDoTeamsOfficiate: (Boolean) -> Unit = {},
+    onUpdateTeamOfficialsMaySwap: (Boolean) -> Unit = {},
+    onAddOfficialId: (String) -> Unit = {},
+    onRemoveOfficialId: (String) -> Unit = {},
     onSetPaymentPlansEnabled: (Boolean) -> Unit = {},
     onSetInstallmentCount: (Int) -> Unit = {},
     onUpdateInstallmentAmount: (Int, Int) -> Unit = { _, _ -> },
@@ -285,10 +285,10 @@ fun EventDetails(
     var staffInviteFirstName by rememberSaveable { mutableStateOf("") }
     var staffInviteLastName by rememberSaveable { mutableStateOf("") }
     var staffInviteEmail by rememberSaveable { mutableStateOf("") }
-    var draftInviteReferee by rememberSaveable { mutableStateOf(false) }
+    var draftInviteOfficial by rememberSaveable { mutableStateOf(false) }
     var draftInviteAssistantHost by rememberSaveable { mutableStateOf(false) }
     var staffEditorError by remember { mutableStateOf<String?>(null) }
-    var visibleRefereeCards by rememberSaveable { mutableStateOf(5) }
+    var visibleOfficialCards by rememberSaveable { mutableStateOf(5) }
     var visibleHostCards by rememberSaveable { mutableStateOf(5) }
 
     val lazyListState = rememberLazyListState()
@@ -1174,7 +1174,7 @@ fun EventDetails(
         val localDateTime = event.start.toLocalDateTime(TimeZone.currentSystemDefault())
         val dateText = localDateTime.date.format(dateFormat)
         val timeText = localDateTime.time.format(timeFormat)
-        listOf(event.location, "$dateText • $timeText").filter { it.isNotBlank() }.joinToString(" • ")
+        listOf(event.location, "$dateText â€¢ $timeText").filter { it.isNotBlank() }.joinToString(" â€¢ ")
     }
     val eventSportName = remember(eventWithRelations.sport, sports, event.sportId) {
         eventWithRelations.sport?.name
@@ -1257,14 +1257,14 @@ fun EventDetails(
             .map(PendingStaffInviteDraft::normalized)
             .sortedBy { draft -> draft.displayName().lowercase() }
     }
-    val refereeStaffCards = remember(editEvent.refereeIds, knownUsersById, persistedStaffInvites, sortedPendingStaffInvites) {
+    val officialStaffCards = remember(editEvent.officialIds, knownUsersById, persistedStaffInvites, sortedPendingStaffInvites) {
         buildAssignedStaffCards(
-            role = EventStaffRole.REFEREE,
-            userIds = editEvent.refereeIds,
+            role = EventStaffRole.OFFICIAL,
+            userIds = editEvent.officialIds,
             knownUsersById = knownUsersById,
             staffInvites = persistedStaffInvites,
         ) + buildDraftStaffCards(
-            role = EventStaffRole.REFEREE,
+            role = EventStaffRole.OFFICIAL,
             drafts = sortedPendingStaffInvites,
         )
     }
@@ -1312,12 +1312,12 @@ fun EventDetails(
     val basicsSummaryLine = remember(event.location, dateRangeText, hostDisplayName) {
         listOf(hostDisplayName, event.location, dateRangeText)
             .filter { it.isNotBlank() }
-            .joinToString(" • ")
+            .joinToString(" â€¢ ")
     }
     val pricingSummaryLine = remember(priceSummary, registrationSummary, refundSummary) {
         listOf(priceSummary, registrationSummary, refundSummary)
             .filter { it.isNotBlank() }
-            .joinToString(" • ")
+            .joinToString(" â€¢ ")
     }
     val competitionSummaryLine = remember(
         event.teamSignup,
@@ -1338,7 +1338,7 @@ fun EventDetails(
             maxLabel,
             "Team size ${event.teamSizeLimit}",
             leagueSummary,
-        ).joinToString(" • ")
+        ).joinToString(" â€¢ ")
     }
     val readOnlyFieldCount = remember(event.fieldIds, editableFields.size) {
         resolveReadOnlyFieldCount(event = event, editableFields = editableFields)
@@ -1355,7 +1355,7 @@ fun EventDetails(
         } else {
             null
         }
-        listOfNotNull(fieldSummary, slotSummary).joinToString(" • ")
+        listOfNotNull(fieldSummary, slotSummary).joinToString(" â€¢ ")
     }
     val normalizedEventDivisions = remember(event.divisions) {
         event.divisions.normalizeDivisionIdentifiers()
@@ -2178,13 +2178,13 @@ fun EventDetails(
                     },
                 )
 
-                if (showRefereesSection) {
+                if (showOfficialsPanel) {
                     animatedCardSection(
-                        sectionId = "referees",
+                        sectionId = "officials",
                         sectionTitle = "Staff",
                         collapsibleInEditMode = true,
                         collapsibleInViewMode = true,
-                        viewSummary = "${assistantHostIds.size + event.refereeIds.size} assigned",
+                        viewSummary = "${assistantHostIds.size + event.officialIds.size} assigned",
                         defaultExpandedInViewMode = false,
                         isEditMode = editView,
                         animationDelay = 300,
@@ -2193,35 +2193,35 @@ fun EventDetails(
                                 rows = buildList {
                                     add(
                                         DetailRowSpec(
-                                            "Teams provide referees",
-                                            if (event.doTeamsRef == true) "Yes" else "No",
+                                            "Teams provide officials",
+                                            if (event.doTeamsOfficiate == true) "Yes" else "No",
                                         ),
                                     )
-                                    if (event.doTeamsRef == true) {
+                                    if (event.doTeamsOfficiate == true) {
                                         add(
                                             DetailRowSpec(
-                                                "Team refs may swap",
-                                                if (event.teamRefsMaySwap == true) "Yes" else "No",
+                                                "Team officials may swap",
+                                                if (event.teamOfficialsMaySwap == true) "Yes" else "No",
                                             ),
                                         )
                                     }
                                     add(DetailRowSpec("Primary host", resolvedHostDisplay))
                                     add(DetailRowSpec("Assistant hosts", assistantHostIds.size.toString()))
-                                    add(DetailRowSpec("Referees", event.refereeIds.size.toString()))
+                                    add(DetailRowSpec("Officials", event.officialIds.size.toString()))
                                 },
                             )
                         },
                         editContent = {
                             LabeledCheckboxRow(
-                                checked = editEvent.doTeamsRef == true,
-                                label = "Teams provide referees",
-                                onCheckedChange = onUpdateDoTeamsRef,
+                                checked = editEvent.doTeamsOfficiate == true,
+                                label = "Teams provide officials",
+                                onCheckedChange = onUpdateDoTeamsOfficiate,
                             )
-                            if (editEvent.doTeamsRef == true) {
+                            if (editEvent.doTeamsOfficiate == true) {
                                 LabeledCheckboxRow(
-                                    checked = editEvent.teamRefsMaySwap == true,
-                                    label = "Team refs may swap",
-                                    onCheckedChange = onUpdateTeamRefsMaySwap,
+                                    checked = editEvent.teamOfficialsMaySwap == true,
+                                    label = "Team officials may swap",
+                                    onCheckedChange = onUpdateTeamOfficialsMaySwap,
                                 )
                             }
                             Text(
@@ -2248,7 +2248,7 @@ fun EventDetails(
                                 )
                             }
                             visibleUserSuggestions.take(6).forEach { suggestedUser ->
-                                val canAddReferee = !editEvent.refereeIds.contains(suggestedUser.id)
+                                val canAddOfficial = !editEvent.officialIds.contains(suggestedUser.id)
                                 val canAddAssistant = suggestedUser.id != editEvent.hostId &&
                                     !assistantHostIds.contains(suggestedUser.id)
                                 Card(
@@ -2273,12 +2273,12 @@ fun EventDetails(
                                             Button(
                                                 onClick = {
                                                     staffEditorError = null
-                                                    onAddRefereeId(suggestedUser.id)
+                                                    onAddOfficialId(suggestedUser.id)
                                                 },
-                                                enabled = canAddReferee,
+                                                enabled = canAddOfficial,
                                                 modifier = Modifier.weight(1f),
                                             ) {
-                                                Text("Add as referee")
+                                                Text("Add as official")
                                             }
                                             Button(
                                                 onClick = {
@@ -2335,9 +2335,9 @@ fun EventDetails(
                             ) {
                                 Box(modifier = Modifier.weight(1f)) {
                                     LabeledCheckboxRow(
-                                        checked = draftInviteReferee,
-                                        label = "Referee",
-                                        onCheckedChange = { draftInviteReferee = it },
+                                        checked = draftInviteOfficial,
+                                        label = "Official",
+                                        onCheckedChange = { draftInviteOfficial = it },
                                     )
                                 }
                                 Box(modifier = Modifier.weight(1f)) {
@@ -2351,7 +2351,7 @@ fun EventDetails(
                             Button(
                                 onClick = {
                                     val roles = buildSet {
-                                        if (draftInviteReferee) add(EventStaffRole.REFEREE)
+                                        if (draftInviteOfficial) add(EventStaffRole.OFFICIAL)
                                         if (draftInviteAssistantHost) add(EventStaffRole.ASSISTANT_HOST)
                                     }
                                     coroutineScope.launch {
@@ -2365,7 +2365,7 @@ fun EventDetails(
                                             staffInviteFirstName = ""
                                             staffInviteLastName = ""
                                             staffInviteEmail = ""
-                                            draftInviteReferee = false
+                                            draftInviteOfficial = false
                                             draftInviteAssistantHost = false
                                         }.onFailure { error ->
                                             staffEditorError = error.message ?: "Unable to add staff invite."
@@ -2399,31 +2399,31 @@ fun EventDetails(
                                     verticalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
                                     Text(
-                                        text = "Referees",
+                                        text = "Officials",
                                         style = MaterialTheme.typography.bodyMedium,
                                         fontWeight = FontWeight.SemiBold,
                                     )
-                                    if (refereeStaffCards.isEmpty()) {
+                                    if (officialStaffCards.isEmpty()) {
                                         Text(
-                                            text = "No referees selected yet.",
+                                            text = "No officials selected yet.",
                                             style = MaterialTheme.typography.bodySmall,
                                             color = Color(localImageScheme.current.onSurfaceVariant),
                                         )
                                     } else {
-                                        refereeStaffCards.take(visibleRefereeCards).forEach { card ->
+                                        officialStaffCards.take(visibleOfficialCards).forEach { card ->
                                             StaffAssignmentCard(
                                                 card = card,
                                                 editView = true,
                                                 onRemoveAssigned = { userId, role ->
-                                                    if (role == EventStaffRole.REFEREE) {
-                                                        onRemoveRefereeId(userId)
+                                                    if (role == EventStaffRole.OFFICIAL) {
+                                                        onRemoveOfficialId(userId)
                                                     }
                                                 },
                                                 onRemoveDraft = onRemovePendingStaffInvite,
                                             )
                                         }
-                                        if (refereeStaffCards.size > visibleRefereeCards) {
-                                            TextButton(onClick = { visibleRefereeCards += 5 }) {
+                                        if (officialStaffCards.size > visibleOfficialCards) {
+                                            TextButton(onClick = { visibleOfficialCards += 5 }) {
                                                 Text("Show 5 more")
                                             }
                                         }
@@ -3121,7 +3121,7 @@ fun EventDetails(
                                     normalizedDetail.ageDivisionTypeName.ifBlank {
                                         normalizedDetail.ageDivisionTypeId.toDivisionDisplayLabel()
                                     },
-                                ).joinToString(" • ")
+                                ).joinToString(" â€¢ ")
 
                                 Card(
                                     modifier = Modifier.fillMaxWidth(),
@@ -3151,7 +3151,7 @@ fun EventDetails(
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
                                         Text(
-                                            text = "Price: ${priceCents.toDouble().div(100.0).moneyFormat()} • ${if (editEvent.teamSignup) "Max teams" else "Max participants"}: $maxParticipants",
+                                            text = "Price: ${priceCents.toDouble().div(100.0).moneyFormat()} â€¢ ${if (editEvent.teamSignup) "Max teams" else "Max participants"}: $maxParticipants",
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
@@ -4374,7 +4374,7 @@ private fun ReadOnlyDivisionCard(
         normalizedDetail.ageDivisionTypeName.ifBlank {
             normalizedDetail.ageDivisionTypeId.toDivisionDisplayLabel()
         },
-    ).joinToString(" • ")
+    ).joinToString(" â€¢ ")
     val priceCents = (detail.price ?: event.priceCents).coerceAtLeast(0)
     val maxParticipants = (detail.maxParticipants ?: event.maxParticipants).coerceAtLeast(2)
     val paymentPlanInstallmentCount = maxOf(
@@ -4420,7 +4420,7 @@ private fun ReadOnlyDivisionCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                text = "Price: ${priceCents.toDouble().div(100.0).moneyFormat()} • " +
+                text = "Price: ${priceCents.toDouble().div(100.0).moneyFormat()} â€¢ " +
                     "${if (event.teamSignup) "Max teams" else "Max participants"}: $maxParticipants",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -5664,3 +5664,4 @@ fun BackgroundImage(
         }
     }
 }
+

@@ -34,15 +34,15 @@ import kotlin.time.Instant
 
 class MatchContentComponentTest : MainDispatcherTest() {
     @Test
-    fun given_assigned_ref_team_when_match_not_checked_in_then_check_in_prompt_is_shown() = runTest(testDispatcher) {
+    fun given_assigned_official_team_when_match_not_checked_in_then_check_in_prompt_is_shown() = runTest(testDispatcher) {
         val user = createUser(id = "user-1", teamIds = listOf("team-c"))
         val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c"))
         val match = createMatch(
             eventId = event.id,
             team1Id = "team-a",
             team2Id = "team-b",
-            teamRefereeId = "team-c",
-            refereeCheckedIn = false,
+            teamOfficialId = "team-c",
+            officialCheckedIn = false,
         )
         val harness = MatchDetailHarness(
             event = event,
@@ -57,9 +57,9 @@ class MatchContentComponentTest : MainDispatcherTest() {
 
         advance()
 
-        assertTrue(harness.component.isRef.value)
-        assertFalse(harness.component.refCheckedIn.value)
-        assertTrue(harness.component.showRefCheckInDialog.value)
+        assertTrue(harness.component.isOfficial.value)
+        assertFalse(harness.component.officialCheckedIn.value)
+        assertTrue(harness.component.showOfficialCheckInDialog.value)
     }
 
     @Test
@@ -70,8 +70,8 @@ class MatchContentComponentTest : MainDispatcherTest() {
             eventId = event.id,
             team1Id = "team-a",
             team2Id = "team-b",
-            teamRefereeId = "team-a",
-            refereeCheckedIn = false,
+            teamOfficialId = "team-a",
+            officialCheckedIn = false,
         )
         val harness = MatchDetailHarness(
             event = event,
@@ -86,40 +86,40 @@ class MatchContentComponentTest : MainDispatcherTest() {
 
         advance()
 
-        assertFalse(harness.component.isRef.value)
-        assertFalse(harness.component.refCheckedIn.value)
-        assertTrue(harness.component.showRefCheckInDialog.value)
+        assertFalse(harness.component.isOfficial.value)
+        assertFalse(harness.component.officialCheckedIn.value)
+        assertTrue(harness.component.showOfficialCheckInDialog.value)
 
-        harness.component.confirmRefCheckIn()
+        harness.component.confirmOfficialCheckIn()
         advance()
 
         assertEquals(1, harness.matchRepository.updatedMatches.size)
-        assertEquals("team-c", harness.matchRepository.updatedMatches[0].teamRefereeId)
-        assertEquals(false, harness.matchRepository.updatedMatches[0].refereeCheckedIn)
-        assertTrue(harness.component.isRef.value)
-        assertFalse(harness.component.refCheckedIn.value)
-        assertTrue(harness.component.showRefCheckInDialog.value)
+        assertEquals("team-c", harness.matchRepository.updatedMatches[0].teamOfficialId)
+        assertEquals(false, harness.matchRepository.updatedMatches[0].officialCheckedIn)
+        assertTrue(harness.component.isOfficial.value)
+        assertFalse(harness.component.officialCheckedIn.value)
+        assertTrue(harness.component.showOfficialCheckInDialog.value)
 
-        harness.component.confirmRefCheckIn()
+        harness.component.confirmOfficialCheckIn()
         advance()
 
         assertEquals(2, harness.matchRepository.updatedMatches.size)
-        assertEquals(true, harness.matchRepository.updatedMatches[1].refereeCheckedIn)
-        assertTrue(harness.component.isRef.value)
-        assertTrue(harness.component.refCheckedIn.value)
-        assertFalse(harness.component.showRefCheckInDialog.value)
+        assertEquals(true, harness.matchRepository.updatedMatches[1].officialCheckedIn)
+        assertTrue(harness.component.isOfficial.value)
+        assertTrue(harness.component.officialCheckedIn.value)
+        assertFalse(harness.component.showOfficialCheckInDialog.value)
     }
 
     @Test
-    fun given_referee_already_checked_in_when_user_can_swap_then_swap_prompt_is_not_shown() = runTest(testDispatcher) {
+    fun given_official_already_checked_in_when_user_can_swap_then_swap_prompt_is_not_shown() = runTest(testDispatcher) {
         val user = createUser(id = "user-1", teamIds = listOf("team-c"))
         val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c"))
         val match = createMatch(
             eventId = event.id,
             team1Id = "team-a",
             team2Id = "team-b",
-            teamRefereeId = "team-a",
-            refereeCheckedIn = true,
+            teamOfficialId = "team-a",
+            officialCheckedIn = true,
         )
         val harness = MatchDetailHarness(
             event = event,
@@ -134,9 +134,9 @@ class MatchContentComponentTest : MainDispatcherTest() {
 
         advance()
 
-        assertFalse(harness.component.isRef.value)
-        assertTrue(harness.component.refCheckedIn.value)
-        assertFalse(harness.component.showRefCheckInDialog.value)
+        assertFalse(harness.component.isOfficial.value)
+        assertTrue(harness.component.officialCheckedIn.value)
+        assertFalse(harness.component.showOfficialCheckInDialog.value)
     }
 
     @Test
@@ -147,8 +147,8 @@ class MatchContentComponentTest : MainDispatcherTest() {
             eventId = event.id,
             team1Id = "team-a",
             team2Id = "team-b",
-            teamRefereeId = "team-a",
-            refereeCheckedIn = false,
+            teamOfficialId = "team-a",
+            officialCheckedIn = false,
         )
         val harness = MatchDetailHarness(
             event = event,
@@ -165,9 +165,9 @@ class MatchContentComponentTest : MainDispatcherTest() {
 
         advance()
 
-        assertFalse(harness.component.isRef.value)
-        assertFalse(harness.component.refCheckedIn.value)
-        assertTrue(harness.component.showRefCheckInDialog.value)
+        assertFalse(harness.component.isOfficial.value)
+        assertFalse(harness.component.officialCheckedIn.value)
+        assertTrue(harness.component.showOfficialCheckInDialog.value)
     }
 }
 
@@ -323,8 +323,8 @@ private fun createEvent(
     teamIds: List<String>,
 ): Event = Event(
     id = "event-1",
-    doTeamsRef = true,
-    teamRefsMaySwap = true,
+    doTeamsOfficiate = true,
+    teamOfficialsMaySwap = true,
     teamIds = teamIds,
 )
 
@@ -332,16 +332,16 @@ private fun createMatch(
     eventId: String,
     team1Id: String,
     team2Id: String,
-    teamRefereeId: String,
-    refereeCheckedIn: Boolean,
+    teamOfficialId: String,
+    officialCheckedIn: Boolean,
 ): MatchMVP = MatchMVP(
     id = "match-1",
     matchId = 1,
     eventId = eventId,
     team1Id = team1Id,
     team2Id = team2Id,
-    teamRefereeId = teamRefereeId,
-    refereeCheckedIn = refereeCheckedIn,
+    teamOfficialId = teamOfficialId,
+    officialCheckedIn = officialCheckedIn,
     team1Points = listOf(0),
     team2Points = listOf(0),
     setResults = listOf(0),
@@ -391,7 +391,7 @@ private fun MatchMVP.toMatchWithRelations(): MatchWithRelations = MatchWithRelat
     field = null,
     team1 = null,
     team2 = null,
-    teamReferee = null,
+    teamOfficial = null,
     winnerNextMatch = null,
     loserNextMatch = null,
     previousLeftMatch = null,
@@ -419,3 +419,5 @@ private fun Team.toTeamWithRelations(usersById: Map<String, UserData>): TeamWith
         matchAsTeam2 = emptyList(),
     )
 }
+
+

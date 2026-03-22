@@ -133,16 +133,16 @@ fun MatchCard(
                     }
                 }
                 val matchDateTimeLabel = formatMatchDateTimeLabel(match.match.start)
-                val showReferee =
-                    !match.match.teamRefereeId.isNullOrBlank() ||
-                    !match.match.refereeId.isNullOrBlank() ||
-                    match.teamReferee != null
-                val refereeLabel = resolveRefereeLabel(
-                    refereeUserId = match.match.refereeId,
-                    refereeTeamId = match.match.teamRefereeId,
+                val showOfficial =
+                    !match.match.teamOfficialId.isNullOrBlank() ||
+                    !match.match.officialId.isNullOrBlank() ||
+                    match.teamOfficial != null
+                val officialLabel = resolveOfficialLabel(
+                    officialUserId = match.match.officialId,
+                    officialTeamId = match.match.teamOfficialId,
                     teams = teams,
                     usersById = usersById,
-                    fallbackTeamName = match.teamReferee?.name,
+                    fallbackTeamName = match.teamOfficial?.name,
                 )
                 FloatingBox(
                     modifier = Modifier.align(Alignment.TopCenter).offset(y = (-20).dp).zIndex(1f),
@@ -182,7 +182,7 @@ fun MatchCard(
                         )
                     }
                 }
-                if (showReferee) {
+                if (showOfficial) {
                     FloatingBox(
                         modifier = Modifier.align(Alignment.BottomCenter).offset(y = 20.dp),
                         color = localColors.current.primaryContainer
@@ -193,7 +193,7 @@ fun MatchCard(
                             horizontalArrangement = Arrangement.Center
                         ) {
                             Text(
-                                "Ref: $refereeLabel",
+                                "Official: $officialLabel",
                                 style = MaterialTheme.typography.labelLarge,
                                 color = localColors.current.onPrimaryContainer
                             )
@@ -392,21 +392,21 @@ private fun resolveTeamLabel(team: TeamWithPlayers): String {
     return playerNames.joinToString(" & ").ifBlank { "TBD" }
 }
 
-private fun resolveRefereeLabel(
-    refereeUserId: String?,
-    refereeTeamId: String?,
+private fun resolveOfficialLabel(
+    officialUserId: String?,
+    officialTeamId: String?,
     teams: Map<String, TeamWithPlayers>,
     usersById: Map<String, UserData>,
     fallbackTeamName: String?,
 ): String {
-    val refereeTeam = refereeTeamId?.let { teams[it] }
-    if (refereeTeam != null) {
-        return resolveTeamLabel(refereeTeam)
+    val officialTeam = officialTeamId?.let { teams[it] }
+    if (officialTeam != null) {
+        return resolveTeamLabel(officialTeam)
     }
 
-    val refereeUser = refereeUserId?.let { usersById[it] }
-    if (refereeUser != null) {
-        return resolveUserLabel(refereeUser)
+    val officialUser = officialUserId?.let { usersById[it] }
+    if (officialUser != null) {
+        return resolveUserLabel(officialUser)
     }
 
     val fallback = fallbackTeamName?.trim().orEmpty()

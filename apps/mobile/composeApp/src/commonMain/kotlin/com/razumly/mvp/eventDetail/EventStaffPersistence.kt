@@ -58,11 +58,11 @@ private suspend fun validatePendingStaffEmailMembership(
 
 private fun buildTargetStaffRoles(event: Event): MutableMap<String, MutableSet<EventStaffRole>> {
     val rolesByUserId = linkedMapOf<String, MutableSet<EventStaffRole>>()
-    event.refereeIds
+    event.officialIds
         .map { userId -> userId.trim() }
         .filter(String::isNotBlank)
         .forEach { userId ->
-            rolesByUserId.getOrPut(userId) { linkedSetOf() }.add(EventStaffRole.REFEREE)
+            rolesByUserId.getOrPut(userId) { linkedSetOf() }.add(EventStaffRole.OFFICIAL)
         }
     event.assistantHostIds
         .map { userId -> userId.trim() }
@@ -194,14 +194,14 @@ suspend fun reconcileEventStaffInvites(
         }
     }.toList()
 
-    val resolvedRefereeIds = buildSet {
-        addAll(event.refereeIds.map(String::trim).filter(String::isNotBlank))
+    val resolvedAssignedOfficialIds = buildSet {
+        addAll(event.officialIds.map(String::trim).filter(String::isNotBlank))
         returnedInvites.forEach { invite ->
             val userId = invite.userId?.trim().takeIf { !it.isNullOrBlank() } ?: return@forEach
             val roles = targetRolesByUserId[userId]
                 ?: draftRolesByEmail[normalizeStaffInviteEmail(invite.email)]
                 ?: emptySet()
-            if (roles.contains(EventStaffRole.REFEREE)) {
+            if (roles.contains(EventStaffRole.OFFICIAL)) {
                 add(userId)
             }
         }
@@ -209,7 +209,7 @@ suspend fun reconcileEventStaffInvites(
 
     val updatedEvent = event.copy(
         assistantHostIds = resolvedAssistantHostIds,
-        refereeIds = resolvedRefereeIds,
+        officialIds = resolvedAssignedOfficialIds,
     )
 
     EventStaffSaveOutcome(
@@ -222,3 +222,5 @@ suspend fun reconcileEventStaffInvites(
         ),
     )
 }
+
+

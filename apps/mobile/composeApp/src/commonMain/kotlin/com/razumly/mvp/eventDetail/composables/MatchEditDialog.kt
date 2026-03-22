@@ -296,17 +296,17 @@ private fun MatchEditDialogContent(
                 }
             }
 
-            // Referee Section
+            // Official Section
             item {
                 TeamSelectionField(
-                    label = "Referee",
-                    selectedTeam = teams.find { it.team.id == editedMatch.match.teamRefereeId },
+                    label = "Official",
+                    selectedTeam = teams.find { it.team.id == editedMatch.match.teamOfficialId },
                     expanded = showRefDropdown,
                     onExpandedChange = { showRefDropdown = it },
                     teams = teams,
                     onTeamSelected = { team ->
                         editedMatch = editedMatch.copy(
-                            match = editedMatch.match.copy(teamRefereeId = team?.team?.id)
+                            match = editedMatch.match.copy(teamOfficialId = team?.team?.id)
                         )
                         showRefDropdown = false
                     })

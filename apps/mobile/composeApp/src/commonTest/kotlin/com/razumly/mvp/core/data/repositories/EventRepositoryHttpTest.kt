@@ -353,7 +353,7 @@ class EventRepositoryHttpTest {
                           "teamIds": [],
                           "fieldIds": [],
                           "timeSlotIds": [],
-                          "refereeIds": [],
+                          "officialIds": [],
                           "assistantHostIds": [],
                           "cancellationRefundHours": 0,
                           "registrationCutoffHours": 0,

@@ -9,11 +9,11 @@ import kotlin.test.assertTrue
 class EventDetailScreenRoleVisibilityTest {
 
     @Test
-    fun givenHost_whenCheckingRefereesVisibility_thenReturnsTrue() {
+    fun givenHost_whenCheckingOfficialsVisibility_thenReturnsTrue() {
         val event = Event(hostId = "host-1")
 
         assertTrue(
-            canViewRefereesSection(
+            canViewOfficialsPanel(
                 currentUserId = "host-1",
                 event = event,
                 organization = null,
@@ -22,11 +22,11 @@ class EventDetailScreenRoleVisibilityTest {
     }
 
     @Test
-    fun givenAssistantHostRefereeOrOrganizationManager_whenCheckingRefereesVisibility_thenReturnsTrue() {
+    fun givenAssistantHostOfficialOrOrganizationManager_whenCheckingOfficialsVisibility_thenReturnsTrue() {
         val event = Event(
             hostId = "host-1",
             assistantHostIds = listOf("assistant-1"),
-            refereeIds = listOf("ref-1"),
+            officialIds = listOf("official-1"),
         )
         val organization = Organization(
             id = "org-1",
@@ -37,35 +37,35 @@ class EventDetailScreenRoleVisibilityTest {
             ownerId = "owner-1",
             hostIds = listOf("org-host-1"),
             website = null,
-            refIds = emptyList(),
+            officialIds = emptyList(),
             hasStripeAccount = false,
             coordinates = null,
             fieldIds = emptyList(),
         )
 
         assertTrue(
-            canViewRefereesSection(
+            canViewOfficialsPanel(
                 currentUserId = "assistant-1",
                 event = event,
                 organization = organization,
             ),
         )
         assertTrue(
-            canViewRefereesSection(
-                currentUserId = "ref-1",
+            canViewOfficialsPanel(
+                currentUserId = "official-1",
                 event = event,
                 organization = organization,
             ),
         )
         assertTrue(
-            canViewRefereesSection(
+            canViewOfficialsPanel(
                 currentUserId = "owner-1",
                 event = event,
                 organization = organization,
             ),
         )
         assertTrue(
-            canViewRefereesSection(
+            canViewOfficialsPanel(
                 currentUserId = "org-host-1",
                 event = event,
                 organization = organization,
@@ -74,11 +74,11 @@ class EventDetailScreenRoleVisibilityTest {
     }
 
     @Test
-    fun givenRegularViewerOrBlankUser_whenCheckingRefereesVisibility_thenReturnsFalse() {
+    fun givenRegularViewerOrBlankUser_whenCheckingOfficialsVisibility_thenReturnsFalse() {
         val event = Event(
             hostId = "host-1",
             assistantHostIds = listOf("assistant-1"),
-            refereeIds = listOf("ref-1"),
+            officialIds = listOf("official-1"),
         )
         val organization = Organization(
             id = "org-1",
@@ -89,21 +89,21 @@ class EventDetailScreenRoleVisibilityTest {
             ownerId = "owner-1",
             hostIds = listOf("org-host-1"),
             website = null,
-            refIds = emptyList(),
+            officialIds = emptyList(),
             hasStripeAccount = false,
             coordinates = null,
             fieldIds = emptyList(),
         )
 
         assertFalse(
-            canViewRefereesSection(
+            canViewOfficialsPanel(
                 currentUserId = "player-1",
                 event = event,
                 organization = organization,
             ),
         )
         assertFalse(
-            canViewRefereesSection(
+            canViewOfficialsPanel(
                 currentUserId = "   ",
                 event = event,
                 organization = organization,
@@ -111,3 +111,6 @@ class EventDetailScreenRoleVisibilityTest {
         )
     }
 }
+
+
+

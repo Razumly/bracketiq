@@ -363,7 +363,7 @@ private fun matchWithRelations(
     field = null,
     team1 = null,
     team2 = null,
-    teamReferee = null,
+    teamOfficial = null,
     winnerNextMatch = null,
     loserNextMatch = null,
     previousLeftMatch = null,

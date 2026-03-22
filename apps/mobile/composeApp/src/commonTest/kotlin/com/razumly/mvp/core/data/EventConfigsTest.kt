@@ -65,20 +65,20 @@ class EventConfigsTest {
     }
 
     @Test
-    fun withLeagueConfig_disabling_team_refs_clears_team_ref_swap_flag() {
+    fun withLeagueConfig_disabling_team_officials_clears_team_official_swap_flag() {
         val initial = Event(
-            doTeamsRef = true,
-            teamRefsMaySwap = true,
+            doTeamsOfficiate = true,
+            teamOfficialsMaySwap = true,
         )
 
         val updated = initial.withLeagueConfig(
             LeagueConfig(
-                doTeamsRef = false,
+                doTeamsOfficiate = false,
             )
         )
 
-        assertEquals(false, updated.doTeamsRef)
-        assertEquals(false, updated.teamRefsMaySwap)
+        assertEquals(false, updated.doTeamsOfficiate)
+        assertEquals(false, updated.teamOfficialsMaySwap)
     }
 
     @Test

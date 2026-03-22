@@ -287,13 +287,13 @@ class PushNotificationsRepository(
     override suspend fun createEventTopic(event: Event) = upsertTopic(
         topicId = eventTopicId(event.id),
         topicName = event.name,
-        userIds = listOf(event.hostId) + event.userIds + event.refereeIds,
+        userIds = listOf(event.hostId) + event.userIds + event.officialIds,
     )
 
     override suspend fun createTournamentTopic(event: Event) = upsertTopic(
         topicId = tournamentTopicId(event.id),
         topicName = event.name,
-        userIds = listOf(event.hostId) + event.userIds + event.refereeIds,
+        userIds = listOf(event.hostId) + event.userIds + event.officialIds,
     )
 
     override suspend fun createChatGroupTopic(chatGroup: ChatGroup) = upsertTopic(

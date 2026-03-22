@@ -28,10 +28,10 @@ data class MatchWithRelations(
     val team2: Team?,
 
     @Relation(
-        parentColumn = "teamRefereeId",
+        parentColumn = "teamOfficialId",
         entityColumn = "id"
     )
-    val teamReferee: Team?,
+    val teamOfficial: Team?,
 
     @Relation(
         parentColumn = "winnerNextMatchId",

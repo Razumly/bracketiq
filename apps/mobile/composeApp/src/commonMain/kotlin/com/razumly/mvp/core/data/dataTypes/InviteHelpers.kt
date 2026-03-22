@@ -40,7 +40,7 @@ fun Invite.staffInviteRoleLabel(): String {
     return normalized.joinToString(", ") { type ->
         when (type) {
             "HOST" -> "Host"
-            "REFEREE" -> "Referee"
+            "OFFICIAL" -> "Official"
             "STAFF" -> "Staff"
             else -> type.lowercase().replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
         }
