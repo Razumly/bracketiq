@@ -1,7 +1,9 @@
 package com.razumly.mvp.eventCreate
 
 import com.razumly.mvp.core.data.dataTypes.Invite
+import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
+import com.razumly.mvp.core.data.dataTypes.SportOfficialPositionTemplate
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.presentation.RentalCreateContext
 import com.razumly.mvp.eventDetail.EventStaffRole
@@ -57,6 +59,90 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         assertEquals(true, updatedEvent.doTeamsOfficiate)
         assertEquals(true, updatedEvent.teamOfficialsMaySwap)
         assertEquals(listOf("official-2"), updatedEvent.officialIds)
+    }
+
+    @Test
+    fun selecting_sport_seeds_event_official_positions_from_sport_templates() = runTest(testDispatcher) {
+        val sport = createSport(id = "sport-officials", usePointsPerSetWin = true).copy(
+            officialPositionTemplates = listOf(
+                SportOfficialPositionTemplate(name = "R1", count = 1),
+                SportOfficialPositionTemplate(name = "R2", count = 1),
+            ),
+        )
+        val harness = CreateEventHarness(sports = listOf(sport))
+        advance()
+
+        harness.component.updateEventField { copy(sportId = sport.id) }
+        advance()
+
+        val updatedEvent = harness.component.newEventState.value
+        assertEquals(listOf("R1", "R2"), updatedEvent.officialPositions.map { it.name })
+        assertEquals(listOf(1, 1), updatedEvent.officialPositions.map { it.count })
+    }
+
+    @Test
+    fun adding_official_after_sport_selection_assigns_all_event_positions_to_official() = runTest(testDispatcher) {
+        val sport = createSport(id = "sport-lines", usePointsPerSetWin = true).copy(
+            officialPositionTemplates = listOf(
+                SportOfficialPositionTemplate(name = "Referee", count = 1),
+                SportOfficialPositionTemplate(name = "Line Judge", count = 2),
+            ),
+        )
+        val harness = CreateEventHarness(sports = listOf(sport))
+        advance()
+
+        harness.component.updateEventField { copy(sportId = sport.id) }
+        advance()
+        harness.component.addOfficialId("official-9")
+        advance()
+
+        val updatedEvent = harness.component.newEventState.value
+        assertEquals(listOf("official-9"), updatedEvent.officialIds)
+        assertEquals(1, updatedEvent.eventOfficials.size)
+        assertEquals(
+            updatedEvent.officialPositions.map { it.id },
+            updatedEvent.eventOfficials.single().positionIds,
+        )
+    }
+
+    @Test
+    fun switching_sports_does_not_overwrite_custom_event_official_positions() = runTest(testDispatcher) {
+        val originalSport = createSport(id = "sport-original", usePointsPerSetWin = true).copy(
+            officialPositionTemplates = listOf(
+                SportOfficialPositionTemplate(name = "Referee", count = 1),
+            ),
+        )
+        val nextSport = createSport(id = "sport-next", usePointsPerSetWin = false).copy(
+            officialPositionTemplates = listOf(
+                SportOfficialPositionTemplate(name = "Umpire", count = 1),
+            ),
+        )
+        val harness = CreateEventHarness(sports = listOf(originalSport, nextSport))
+        advance()
+
+        harness.component.updateEventField { copy(sportId = originalSport.id) }
+        advance()
+        harness.component.updateEventField {
+            copy(
+                officialPositions = listOf(
+                    EventOfficialPosition(
+                        id = "custom-position",
+                        name = "Lead Official",
+                        count = 1,
+                        order = 0,
+                    ),
+                ),
+            )
+        }
+        advance()
+
+        harness.component.updateEventField { copy(sportId = nextSport.id) }
+        advance()
+
+        assertEquals(
+            listOf("Lead Official"),
+            harness.component.newEventState.value.officialPositions.map { it.name },
+        )
     }
 
     @Test

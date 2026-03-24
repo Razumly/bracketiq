@@ -72,16 +72,22 @@ import coil3.compose.AsyncImage
 import com.kmpalette.loader.rememberNetworkLoader
 import com.kmpalette.rememberDominantColorState
 import com.materialkolor.scheme.DynamicScheme
+import com.razumly.mvp.core.data.dataTypes.EventOfficial
+import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
+import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.label
+import com.razumly.mvp.core.data.dataTypes.officialPositionSummary
+import com.razumly.mvp.core.data.dataTypes.positionSummary
 import com.razumly.mvp.core.data.dataTypes.toLeagueConfig
 import com.razumly.mvp.core.data.dataTypes.toTournamentConfig
 import com.razumly.mvp.core.data.dataTypes.withLeagueConfig
@@ -230,6 +236,12 @@ fun EventDetails(
     onUpdateTeamOfficialsMaySwap: (Boolean) -> Unit = {},
     onAddOfficialId: (String) -> Unit = {},
     onRemoveOfficialId: (String) -> Unit = {},
+    onUpdateOfficialSchedulingMode: (OfficialSchedulingMode) -> Unit = {},
+    onAddOfficialPosition: () -> Unit = {},
+    onUpdateOfficialPositionName: (String, String) -> Unit = { _, _ -> },
+    onUpdateOfficialPositionCount: (String, Int) -> Unit = { _, _ -> },
+    onRemoveOfficialPosition: (String) -> Unit = {},
+    onUpdateOfficialUserPositions: (String, List<String>) -> Unit = { _, _ -> },
     onSetPaymentPlansEnabled: (Boolean) -> Unit = {},
     onSetInstallmentCount: (Int) -> Unit = {},
     onUpdateInstallmentAmount: (Int, Int) -> Unit = { _, _ -> },
@@ -1257,13 +1269,49 @@ fun EventDetails(
             .map(PendingStaffInviteDraft::normalized)
             .sortedBy { draft -> draft.displayName().lowercase() }
     }
-    val officialStaffCards = remember(editEvent.officialIds, knownUsersById, persistedStaffInvites, sortedPendingStaffInvites) {
+    val eventOfficialRecordsByUserId = remember(editEvent.eventOfficials) {
+        editEvent.eventOfficials.associateBy { official -> official.userId.trim() }
+    }
+    val officialPositionOptions = remember(editEvent.officialPositions) {
+        editEvent.officialPositions
+            .sortedBy(EventOfficialPosition::order)
+            .map { position ->
+                DropdownOption(
+                    value = position.id,
+                    label = "${position.name} x${position.count.coerceAtLeast(1)}",
+                )
+            }
+    }
+    val officialSchedulingModeOptions = remember {
+        OfficialSchedulingMode.entries.map { mode ->
+            DropdownOption(
+                value = mode.name,
+                label = mode.label(),
+            )
+        }
+    }
+    val officialPositionSummary = remember(editEvent.officialPositions) {
+        editEvent.officialPositionSummary().ifBlank { "None" }
+    }
+    val officialStaffCards = remember(
+        editEvent.officialIds,
+        editEvent.eventOfficials,
+        editEvent.officialPositions,
+        knownUsersById,
+        persistedStaffInvites,
+        sortedPendingStaffInvites,
+    ) {
         buildAssignedStaffCards(
             role = EventStaffRole.OFFICIAL,
             userIds = editEvent.officialIds,
             knownUsersById = knownUsersById,
             staffInvites = persistedStaffInvites,
-        ) + buildDraftStaffCards(
+        ).map { card ->
+            val eventOfficial = card.userId?.let(eventOfficialRecordsByUserId::get)
+            card.copy(
+                subtitle = eventOfficial?.positionSummary(editEvent.officialPositions) ?: "No positions selected",
+            )
+        } + buildDraftStaffCards(
             role = EventStaffRole.OFFICIAL,
             drafts = sortedPendingStaffInvites,
         )
@@ -2208,6 +2256,13 @@ fun EventDetails(
                                     add(DetailRowSpec("Primary host", resolvedHostDisplay))
                                     add(DetailRowSpec("Assistant hosts", assistantHostIds.size.toString()))
                                     add(DetailRowSpec("Officials", event.officialIds.size.toString()))
+                                    add(
+                                        DetailRowSpec(
+                                            "Staffing mode",
+                                            event.officialSchedulingMode.label(),
+                                        ),
+                                    )
+                                    add(DetailRowSpec("Official positions", officialPositionSummary))
                                 },
                             )
                         },
@@ -2224,6 +2279,98 @@ fun EventDetails(
                                     onCheckedChange = onUpdateTeamOfficialsMaySwap,
                                 )
                             }
+                            Text(
+                                text = "Official scheduling",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = Color(localImageScheme.current.onSurface),
+                            )
+                            PlatformDropdown(
+                                selectedValue = editEvent.officialSchedulingMode.name,
+                                onSelectionChange = { selectedMode ->
+                                    OfficialSchedulingMode.entries
+                                        .firstOrNull { mode -> mode.name == selectedMode }
+                                        ?.let(onUpdateOfficialSchedulingMode)
+                                },
+                                options = officialSchedulingModeOptions,
+                                label = "Scheduling mode",
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            Text(
+                                text = "Event official positions",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = Color(localImageScheme.current.onSurface),
+                            )
+                            Text(
+                                text = "Sport defaults are copied into this event. Changes here only affect this event.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(localImageScheme.current.onSurfaceVariant),
+                            )
+                            if (editEvent.officialPositions.isEmpty()) {
+                                Text(
+                                    text = "No official positions configured yet.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(localImageScheme.current.onSurfaceVariant),
+                                )
+                            } else {
+                                editEvent.officialPositions
+                                    .sortedBy(EventOfficialPosition::order)
+                                    .forEach { position ->
+                                        Card(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            colors = CardDefaults.cardColors(
+                                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                            ),
+                                        ) {
+                                            Column(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(12.dp),
+                                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                            ) {
+                                                PlatformTextField(
+                                                    value = position.name,
+                                                    onValueChange = { newName ->
+                                                        onUpdateOfficialPositionName(position.id, newName)
+                                                    },
+                                                    label = "Position name",
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                )
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                    verticalAlignment = Alignment.Bottom,
+                                                ) {
+                                                    NumberInputField(
+                                                        modifier = Modifier.weight(1f),
+                                                        value = position.count.toString(),
+                                                        label = "Slots",
+                                                        isError = false,
+                                                        onValueChange = { newValue ->
+                                                            val nextCount = newValue.toIntOrNull()
+                                                            if (newValue.isBlank()) {
+                                                                onUpdateOfficialPositionCount(position.id, 1)
+                                                            } else if (nextCount != null) {
+                                                                onUpdateOfficialPositionCount(position.id, nextCount.coerceAtLeast(1))
+                                                            }
+                                                        },
+                                                    )
+                                                    Button(
+                                                        onClick = { onRemoveOfficialPosition(position.id) },
+                                                    ) {
+                                                        Text("Remove")
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                            }
+                            TextButton(
+                                onClick = onAddOfficialPosition,
+                                modifier = Modifier.align(Alignment.End),
+                            ) {
+                                Text("Add position")
+                            }
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                             Text(
                                 text = "Add / Invite Staff",
                                 style = MaterialTheme.typography.titleSmall,
@@ -2411,6 +2558,11 @@ fun EventDetails(
                                         )
                                     } else {
                                         officialStaffCards.take(visibleOfficialCards).forEach { card ->
+                                            val assignedUserId = card.userId
+                                            val selectedPositionIds = assignedUserId
+                                                ?.let(eventOfficialRecordsByUserId::get)
+                                                ?.positionIds
+                                                .orEmpty()
                                             StaffAssignmentCard(
                                                 card = card,
                                                 editView = true,
@@ -2420,6 +2572,27 @@ fun EventDetails(
                                                     }
                                                 },
                                                 onRemoveDraft = onRemovePendingStaffInvite,
+                                                extraContent = if (assignedUserId != null && officialPositionOptions.isNotEmpty()) {
+                                                    {
+                                                        PlatformDropdown(
+                                                            selectedValue = "",
+                                                            onSelectionChange = {},
+                                                            options = officialPositionOptions,
+                                                            label = "Eligible positions",
+                                                            modifier = Modifier.fillMaxWidth(),
+                                                            multiSelect = true,
+                                                            selectedValues = selectedPositionIds,
+                                                            onMultiSelectionChange = { selectedIds ->
+                                                                onUpdateOfficialUserPositions(
+                                                                    assignedUserId,
+                                                                    selectedIds,
+                                                                )
+                                                            },
+                                                        )
+                                                    }
+                                                } else {
+                                                    null
+                                                },
                                             )
                                         }
                                         if (officialStaffCards.size > visibleOfficialCards) {
@@ -5072,6 +5245,7 @@ private fun StaffAssignmentCard(
     editView: Boolean,
     onRemoveAssigned: (String, EventStaffRole) -> Unit,
     onRemoveDraft: (String, EventStaffRole) -> Unit,
+    extraContent: (@Composable () -> Unit)? = null,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -5114,6 +5288,7 @@ private fun StaffAssignmentCard(
                     },
                 )
             }
+            extraContent?.invoke()
             if (editView) {
                 val removeAction: (() -> Unit)? = when {
                     card.isDraft && !card.draftEmail.isNullOrBlank() -> {

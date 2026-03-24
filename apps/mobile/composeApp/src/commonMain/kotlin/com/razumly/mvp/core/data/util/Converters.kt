@@ -2,6 +2,10 @@ package com.razumly.mvp.core.data.util
 
 import androidx.room.TypeConverter
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
+import com.razumly.mvp.core.data.dataTypes.EventOfficial
+import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
+import com.razumly.mvp.core.data.dataTypes.MatchOfficialAssignment
+import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.normalizeDivisionDetails
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
@@ -72,6 +76,41 @@ class Converters {
 
     @TypeConverter
     fun toEventType(value: String): EventType = EventType.valueOf(value)
+
+    @TypeConverter
+    fun fromOfficialSchedulingMode(value: OfficialSchedulingMode): String = value.name
+
+    @TypeConverter
+    fun toOfficialSchedulingMode(value: String): OfficialSchedulingMode =
+        runCatching { OfficialSchedulingMode.valueOf(value.trim().uppercase()) }
+            .getOrDefault(OfficialSchedulingMode.STAFFING)
+
+    @TypeConverter
+    fun fromEventOfficialPositions(value: List<EventOfficialPosition>): String =
+        Json.encodeToString(value)
+
+    @TypeConverter
+    fun toEventOfficialPositions(value: String): List<EventOfficialPosition> =
+        runCatching { Json.decodeFromString<List<EventOfficialPosition>>(value) }
+            .getOrDefault(emptyList())
+
+    @TypeConverter
+    fun fromEventOfficials(value: List<EventOfficial>): String =
+        Json.encodeToString(value)
+
+    @TypeConverter
+    fun toEventOfficials(value: String): List<EventOfficial> =
+        runCatching { Json.decodeFromString<List<EventOfficial>>(value) }
+            .getOrDefault(emptyList())
+
+    @TypeConverter
+    fun fromMatchOfficialAssignments(value: List<MatchOfficialAssignment>): String =
+        Json.encodeToString(value)
+
+    @TypeConverter
+    fun toMatchOfficialAssignments(value: String): List<MatchOfficialAssignment> =
+        runCatching { Json.decodeFromString<List<MatchOfficialAssignment>>(value) }
+            .getOrDefault(emptyList())
 }
 
 class DivisionConverters {

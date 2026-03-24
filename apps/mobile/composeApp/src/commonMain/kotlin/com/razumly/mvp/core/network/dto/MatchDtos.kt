@@ -1,6 +1,7 @@
 package com.razumly.mvp.core.network.dto
 
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.dataTypes.MatchOfficialAssignment
 import com.razumly.mvp.core.data.util.normalizeDivisionLabel
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -33,11 +34,9 @@ data class MatchApiDto(
     val previousLeftId: String? = null,
     val previousRightId: String? = null,
     val officialCheckedIn: Boolean? = null,
+    val officialIds: List<MatchOfficialAssignment>? = null,
     val teamOfficialId: String? = null,
     val locked: Boolean? = null,
-
-    // Legacy/alternate field; ignore if present.
-    val officialCheckedIn: Boolean? = null,
 ) {
     @OptIn(ExperimentalTime::class)
     fun toMatchOrNull(): MatchMVP? {
@@ -69,7 +68,8 @@ data class MatchApiDto(
             loserNextMatchId = loserNextMatchId,
             previousLeftId = previousLeftId,
             previousRightId = previousRightId,
-            officialCheckedIn = officialCheckedIn ?: officialCheckedIn,
+            officialCheckedIn = officialCheckedIn,
+            officialIds = officialIds ?: emptyList(),
             teamOfficialId = teamOfficialId,
             locked = locked ?: false,
         )
@@ -104,6 +104,7 @@ data class MatchUpdateDto(
     val loserNextMatchId: String? = null,
     val side: String? = null,
     val officialCheckedIn: Boolean? = null,
+    val officialIds: List<MatchOfficialAssignment>? = null,
     val matchId: Int? = null,
     val finalize: Boolean? = null,
     val time: String? = null,
@@ -134,6 +135,7 @@ data class BulkMatchUpdateEntryDto(
     val loserNextMatchId: String? = null,
     val side: String? = null,
     val officialCheckedIn: Boolean? = null,
+    val officialIds: List<MatchOfficialAssignment>? = null,
     val start: String? = null,
     val end: String? = null,
     val division: String? = null,
@@ -170,6 +172,7 @@ data class BulkMatchCreateEntryDto(
     val loserNextMatchId: String? = null,
     val side: String? = null,
     val officialCheckedIn: Boolean? = null,
+    val officialIds: List<MatchOfficialAssignment>? = null,
     val start: String? = null,
     val end: String? = null,
     val division: String? = null,
@@ -203,6 +206,7 @@ fun MatchMVP.toBulkMatchUpdateEntryDto(): BulkMatchUpdateEntryDto = BulkMatchUpd
     loserNextMatchId = loserNextMatchId,
     side = side,
     officialCheckedIn = officialCheckedIn,
+    officialIds = officialIds,
     start = start?.toString(),
     end = end?.toString(),
     division = division,
@@ -235,6 +239,7 @@ fun MatchMVP.toBulkMatchCreateEntryDto(
     loserNextMatchId = loserNextMatchId,
     side = side,
     officialCheckedIn = officialCheckedIn,
+    officialIds = officialIds,
     start = start?.toString(),
     end = end?.toString(),
     division = division,

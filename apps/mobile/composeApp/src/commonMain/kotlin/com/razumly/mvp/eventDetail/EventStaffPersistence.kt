@@ -2,6 +2,9 @@ package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Invite
+import com.razumly.mvp.core.data.dataTypes.addOfficialUser
+import com.razumly.mvp.core.data.dataTypes.removeOfficialUser
+import com.razumly.mvp.core.data.dataTypes.syncOfficialStaffing
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.network.dto.InviteCreateDto
 
@@ -207,10 +210,27 @@ suspend fun reconcileEventStaffInvites(
         }
     }.toList()
 
-    val updatedEvent = event.copy(
+    val updatedEvent = resolvedAssignedOfficialIds.fold(
+        event.copy(
+            assistantHostIds = resolvedAssistantHostIds,
+            officialIds = emptyList(),
+            eventOfficials = event.eventOfficials.filterNot { official ->
+                official.userId.trim().isNotBlank()
+            },
+        ),
+    ) { currentEvent, userId ->
+        currentEvent.addOfficialUser(userId)
+    }.copy(
         assistantHostIds = resolvedAssistantHostIds,
-        officialIds = resolvedAssignedOfficialIds,
-    )
+    ).let { currentEvent ->
+        currentEvent.eventOfficials
+            .map { official -> official.userId.trim() }
+            .filter(String::isNotBlank)
+            .filterNot { userId -> resolvedAssignedOfficialIds.contains(userId) }
+            .fold(currentEvent) { eventState, userId ->
+                eventState.removeOfficialUser(userId)
+            }
+    }.syncOfficialStaffing()
 
     EventStaffSaveOutcome(
         event = updatedEvent,

@@ -1,62 +1,58 @@
-@file:OptIn(ExperimentalTime::class)
-
 package com.razumly.mvp.core.network.dto
 
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.dataTypes.MatchOfficialAssignment
+import com.razumly.mvp.core.data.dataTypes.OfficialAssignmentHolderType
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
-import kotlin.test.assertTrue
-import kotlin.time.ExperimentalTime
-import kotlin.time.Instant
 
 class MatchDtosTest {
     @Test
-    fun toMatchOrNull_defaultsLockedToFalse_whenMissingFromPayload() {
+    fun match_api_dto_maps_structured_official_assignments() {
         val dto = MatchApiDto(
             id = "match-1",
             matchId = 1,
             eventId = "event-1",
-            start = "2026-02-21T10:00:00Z",
+            officialIds = listOf(
+                MatchOfficialAssignment(
+                    positionId = "position-r1",
+                    slotIndex = 0,
+                    holderType = OfficialAssignmentHolderType.OFFICIAL,
+                    userId = "official-1",
+                    eventOfficialId = "event-official-1",
+                    checkedIn = true,
+                ),
+            ),
         )
 
-        val mapped = dto.toMatchOrNull()
+        val match = dto.toMatchOrNull()
 
-        assertNotNull(mapped)
-        assertFalse(mapped.locked)
+        assertNotNull(match)
+        assertEquals(listOf("official-1"), match.officialIds.map(MatchOfficialAssignment::userId))
+        assertEquals(true, match.officialIds.single().checkedIn)
     }
 
     @Test
-    fun toMatchOrNull_preservesLockedTrue_fromPayload() {
-        val dto = MatchApiDto(
-            id = "match-2",
-            matchId = 2,
-            eventId = "event-1",
-            start = "2026-02-21T11:00:00Z",
-            locked = true,
-        )
-
-        val mapped = dto.toMatchOrNull()
-
-        assertNotNull(mapped)
-        assertTrue(mapped.locked)
-    }
-
-    @Test
-    fun toBulkMatchUpdateEntryDto_includesLockedFlag() {
+    fun bulk_match_update_entry_includes_structured_official_assignments() {
         val match = MatchMVP(
-            id = "match-3",
-            matchId = 3,
-            eventId = "event-1",
-            start = Instant.parse("2026-02-21T12:00:00Z"),
-            locked = true,
+            id = "match-2",
+            eventId = "event-2",
+            matchId = 2,
+            officialIds = listOf(
+                MatchOfficialAssignment(
+                    positionId = "position-line",
+                    slotIndex = 1,
+                    holderType = OfficialAssignmentHolderType.PLAYER,
+                    userId = "player-1",
+                    checkedIn = false,
+                ),
+            ),
         )
 
         val dto = match.toBulkMatchUpdateEntryDto()
 
-        assertEquals("match-3", dto.id)
-        assertTrue(dto.locked == true)
+        assertEquals(listOf("player-1"), dto.officialIds?.map(MatchOfficialAssignment::userId))
+        assertEquals(OfficialAssignmentHolderType.PLAYER, dto.officialIds?.single()?.holderType)
     }
 }
-

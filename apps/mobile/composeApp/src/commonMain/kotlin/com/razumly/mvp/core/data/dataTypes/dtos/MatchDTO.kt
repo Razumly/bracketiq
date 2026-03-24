@@ -3,6 +3,7 @@
 package com.razumly.mvp.core.data.dataTypes.dtos
 
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.dataTypes.MatchOfficialAssignment
 import com.razumly.mvp.core.data.util.normalizeDivisionLabel
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
@@ -34,6 +35,7 @@ data class MatchDTO(
     val previousLeftId: String?,
     val previousRightId: String?,
     val officialCheckedIn: Boolean?,
+    val officialIds: List<MatchOfficialAssignment> = emptyList(),
     val teamOfficialId: String? = null,
     val locked: Boolean = false,
 )
@@ -58,6 +60,7 @@ fun MatchDTO.toMatch(id: String): MatchMVP {
         side = side,
         losersBracket = losersBracket,
         officialCheckedIn = officialCheckedIn,
+        officialIds = officialIds,
         winnerNextMatchId = winnerNextMatchId,
         loserNextMatchId = loserNextMatchId,
         previousLeftId = previousLeftId,

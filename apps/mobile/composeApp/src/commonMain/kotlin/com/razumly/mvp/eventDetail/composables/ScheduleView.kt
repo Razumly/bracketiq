@@ -62,6 +62,7 @@ import com.kizitonwose.calendar.core.DayPosition
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
+import com.razumly.mvp.core.data.dataTypes.assignedOfficialUserIds
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.util.getScreenHeight
 import com.razumly.mvp.core.presentation.util.getImageUrl
@@ -707,7 +708,7 @@ private fun ScheduleMatchCard(
     onClick: () -> Unit,
 ) {
     val hasAssignedMatchOfficial =
-        !match.match.officialId.isNullOrBlank() ||
+        match.match.assignedOfficialUserIds().isNotEmpty() ||
             !match.match.teamOfficialId.isNullOrBlank() ||
             match.teamOfficial != null
     val verticalPadding = if (hasAssignedMatchOfficial) {
@@ -839,7 +840,7 @@ private fun matchIncludesTrackedUsers(
 ): Boolean {
     if (trackedUserIds.isEmpty()) return false
 
-    if (!match.match.officialId.isNullOrBlank() && trackedUserIds.contains(match.match.officialId)) {
+    if (match.match.assignedOfficialUserIds().any { userId -> trackedUserIds.contains(userId) }) {
         return true
     }
 
@@ -941,6 +942,5 @@ private fun CalendarNavigationIcon(
         contentDescription = contentDescription,
     )
 }
-
 
 

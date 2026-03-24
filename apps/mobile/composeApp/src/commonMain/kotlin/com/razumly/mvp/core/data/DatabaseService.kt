@@ -28,6 +28,8 @@ import com.razumly.mvp.core.data.dataTypes.daos.TeamDao
 import com.razumly.mvp.core.data.dataTypes.daos.UserDataDao
 import com.razumly.mvp.core.data.util.Converters
 
+const val MVP_DATABASE_VERSION = 6
+
 @Database(
     entities = [
         Event::class,
@@ -43,7 +45,7 @@ import com.razumly.mvp.core.data.util.Converters
         TeamPendingPlayerCrossRef::class,
         ChatUserCrossRef::class,
         RefundRequest::class,
-    ], version = 4
+    ], version = MVP_DATABASE_VERSION
 )
 @TypeConverters(Converters::class)
 @ConstructedBy(MVPDatabaseCtor::class)

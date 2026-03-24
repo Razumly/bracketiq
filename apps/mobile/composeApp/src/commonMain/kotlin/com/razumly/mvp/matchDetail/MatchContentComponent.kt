@@ -8,6 +8,9 @@ import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.isUserAssignedToOfficialSlot
+import com.razumly.mvp.core.data.dataTypes.isUserCheckedInForOfficialSlot
+import com.razumly.mvp.core.data.dataTypes.updateOfficialAssignmentCheckIn
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
@@ -222,8 +225,11 @@ class DefaultMatchContentComponent(
         val teamOfficialId = normalizeOptionalId(currentMatch.teamOfficialId)
         val teamIds = currentUserTeamIds().toSet()
         val isAssignedTeamOfficial = teamOfficialId != null && teamIds.contains(teamOfficialId)
-        val isAssignedUserOfficial = normalizeOptionalId(currentMatch.officialId) == _currentUser.id
-        val checkedIn = currentMatch.officialCheckedIn == true
+        val isAssignedUserOfficial = currentMatch.isUserAssignedToOfficialSlot(_currentUser.id)
+        val checkedIn = when {
+            isAssignedUserOfficial -> currentMatch.isUserCheckedInForOfficialSlot(_currentUser.id)
+            else -> currentMatch.officialCheckedIn == true
+        }
         val canSwapIntoOfficial = !checkedIn && canCurrentUserSwapIntoOfficial(currentMatch)
 
         _isOfficial.value = isAssignedTeamOfficial || isAssignedUserOfficial
@@ -238,9 +244,12 @@ class DefaultMatchContentComponent(
             val currentTeamOfficialId = normalizeOptionalId(currentMatch.teamOfficialId)
             val isAssignedTeamOfficial =
                 currentTeamOfficialId != null && teamIds.contains(currentTeamOfficialId)
-            val isAssignedUserOfficial = normalizeOptionalId(currentMatch.officialId) == _currentUser.id
+            val isAssignedUserOfficial = currentMatch.isUserAssignedToOfficialSlot(_currentUser.id)
             val canSwap = canCurrentUserSwapIntoOfficial(currentMatch)
-            val checkedIn = currentMatch.officialCheckedIn == true
+            val checkedIn = when {
+                isAssignedUserOfficial -> currentMatch.isUserCheckedInForOfficialSlot(_currentUser.id)
+                else -> currentMatch.officialCheckedIn == true
+            }
 
             if (checkedIn) {
                 dismissOfficialDialog()
@@ -256,7 +265,14 @@ class DefaultMatchContentComponent(
 
             if (isAssignedTeamOfficial || isAssignedUserOfficial) {
                 val updatedMatch = matchWithTeams.value.copy(
-                    match = currentMatch.copy(officialCheckedIn = true),
+                    match = if (isAssignedUserOfficial) {
+                        currentMatch.updateOfficialAssignmentCheckIn(
+                            userId = _currentUser.id,
+                            checkedIn = true,
+                        )
+                    } else {
+                        currentMatch.copy(officialCheckedIn = true)
+                    },
                 )
                 matchRepository.updateMatch(updatedMatch.match).onSuccess {
                     dismissOfficialDialog()
@@ -634,4 +650,3 @@ class DefaultMatchContentComponent(
         return points?.takeIf { it > 0 }
     }
 }
-

@@ -8,6 +8,9 @@ import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
+import com.razumly.mvp.core.data.dataTypes.EventOfficial
+import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
+import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.core.data.util.normalizeDivisionDetails
@@ -92,6 +95,9 @@ data class EventApiDto(
 
     val state: String? = null,
     val pointsToVictory: List<Int>? = null,
+    val officialSchedulingMode: String? = null,
+    val officialPositions: List<EventOfficialPosition>? = null,
+    val eventOfficials: List<EventOfficial>? = null,
     val officialIds: List<String>? = null,
     val staffInvites: List<Invite>? = null,
 
@@ -272,6 +278,13 @@ data class EventApiDto(
             restTimeMinutes = restTimeMinutes,
             state = state ?: "UNPUBLISHED",
             pointsToVictory = pointsToVictory ?: emptyList(),
+            officialSchedulingMode = runCatching {
+                OfficialSchedulingMode.valueOf(
+                    officialSchedulingMode?.trim()?.uppercase() ?: OfficialSchedulingMode.STAFFING.name,
+                )
+            }.getOrDefault(OfficialSchedulingMode.STAFFING),
+            officialPositions = officialPositions ?: emptyList(),
+            eventOfficials = eventOfficials ?: emptyList(),
             officialIds = officialIds ?: emptyList(),
             allowPaymentPlans = resolvedEventAllowPaymentPlans,
             installmentCount = resolvedEventInstallmentCount,
@@ -441,6 +454,9 @@ data class EventUpdateDto(
     val restTimeMinutes: Int? = null,
     val state: String? = null,
     val pointsToVictory: List<Int>? = null,
+    val officialSchedulingMode: String? = null,
+    val officialPositions: List<EventOfficialPosition>? = null,
+    val eventOfficials: List<EventOfficial>? = null,
     val sportId: String? = null,
     val timeSlotIds: List<String>? = null,
     val fieldIds: List<String>? = null,
@@ -608,6 +624,9 @@ fun Event.toUpdateDto(
         restTimeMinutes = restTimeMinutes,
         state = state,
         pointsToVictory = pointsToVictory,
+        officialSchedulingMode = officialSchedulingMode.name,
+        officialPositions = officialPositions,
+        eventOfficials = eventOfficials,
         sportId = sportId,
         timeSlotIds = timeSlotIds,
         fieldIds = fieldIds,

@@ -2,7 +2,10 @@ package com.razumly.mvp.core.network.dto
 
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
+import com.razumly.mvp.core.data.dataTypes.EventOfficial
+import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
+import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -414,6 +417,78 @@ class EventDtosTest {
 
         assertEquals(true, event?.doTeamsOfficiate)
         assertEquals(true, event?.teamOfficialsMaySwap)
+    }
+
+    @Test
+    fun to_update_dto_includes_official_staffing_fields() {
+        val event = Event(
+            id = "event-21",
+            name = "Staffed Event",
+            hostId = "host-21",
+            start = Instant.fromEpochMilliseconds(1_700_000_000_000),
+            end = Instant.fromEpochMilliseconds(1_700_003_600_000),
+            officialSchedulingMode = OfficialSchedulingMode.SCHEDULE,
+            officialPositions = listOf(
+                EventOfficialPosition(
+                    id = "position-1",
+                    name = "R1",
+                    count = 1,
+                    order = 0,
+                ),
+            ),
+            eventOfficials = listOf(
+                EventOfficial(
+                    id = "event-official-1",
+                    userId = "official-1",
+                    positionIds = listOf("position-1"),
+                    fieldIds = listOf("field-1"),
+                ),
+            ),
+            officialIds = listOf("official-1"),
+        )
+
+        val dto = event.toUpdateDto()
+
+        assertEquals("SCHEDULE", dto.officialSchedulingMode)
+        assertEquals(listOf("R1"), dto.officialPositions?.map(EventOfficialPosition::name))
+        assertEquals(listOf("official-1"), dto.eventOfficials?.map(EventOfficial::userId))
+        assertEquals(listOf("official-1"), dto.officialIds)
+    }
+
+    @Test
+    fun event_api_dto_maps_official_staffing_fields() {
+        val dto = EventApiDto(
+            id = "event-22",
+            name = "API Event",
+            hostId = "host-22",
+            start = "2026-02-10T00:00:00Z",
+            end = "2026-02-10T01:00:00Z",
+            officialSchedulingMode = "OFF",
+            officialPositions = listOf(
+                EventOfficialPosition(
+                    id = "position-1",
+                    name = "Line Judge",
+                    count = 2,
+                    order = 0,
+                ),
+            ),
+            eventOfficials = listOf(
+                EventOfficial(
+                    id = "event-official-1",
+                    userId = "official-1",
+                    positionIds = listOf("position-1"),
+                    fieldIds = listOf("field-1"),
+                ),
+            ),
+            officialIds = listOf("official-1"),
+        )
+
+        val event = dto.toEventOrNull()
+
+        assertEquals(OfficialSchedulingMode.OFF, event?.officialSchedulingMode)
+        assertEquals(listOf("Line Judge"), event?.officialPositions?.map(EventOfficialPosition::name))
+        assertEquals(listOf("official-1"), event?.eventOfficials?.map(EventOfficial::userId))
+        assertEquals(listOf("official-1"), event?.officialIds)
     }
 
     @Test

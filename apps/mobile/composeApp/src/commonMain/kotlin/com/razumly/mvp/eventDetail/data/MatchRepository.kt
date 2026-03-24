@@ -3,6 +3,8 @@ package com.razumly.mvp.eventDetail.data
 import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
+import com.razumly.mvp.core.data.dataTypes.OfficialAssignmentHolderType
+import com.razumly.mvp.core.data.dataTypes.normalizedMatchOfficialAssignments
 import com.razumly.mvp.core.data.repositories.IMVPRepository
 import com.razumly.mvp.core.data.repositories.IMVPRepository.Companion.singleResponse
 import com.razumly.mvp.core.network.MvpApiClient
@@ -80,18 +82,36 @@ class MatchRepository(
 
     private fun sanitizeMatchRef(value: String?): String? = normalizeOptionalToken(value)
 
-    private fun MatchMVP.toSanitizedForBulk(): MatchMVP = copy(
-        team1Id = sanitizeTeamId(team1Id),
-        team2Id = sanitizeTeamId(team2Id),
-        teamOfficialId = sanitizeTeamId(teamOfficialId),
-        officialId = normalizeOptionalToken(officialId),
-        fieldId = normalizeOptionalToken(fieldId),
-        previousLeftId = sanitizeMatchRef(previousLeftId),
-        previousRightId = sanitizeMatchRef(previousRightId),
-        winnerNextMatchId = sanitizeMatchRef(winnerNextMatchId),
-        loserNextMatchId = sanitizeMatchRef(loserNextMatchId),
-        division = normalizeOptionalToken(division),
-    )
+    private fun MatchMVP.normalizedOfficialAssignmentsForSync() =
+        officialIds.normalizedMatchOfficialAssignments()
+
+    private fun MatchMVP.toSanitizedForBulk(): MatchMVP {
+        val normalizedAssignments = normalizedOfficialAssignmentsForSync()
+        val primaryOfficial = normalizedAssignments
+            .firstOrNull { assignment -> assignment.holderType == OfficialAssignmentHolderType.OFFICIAL }
+        return copy(
+            team1Id = sanitizeTeamId(team1Id),
+            team2Id = sanitizeTeamId(team2Id),
+            teamOfficialId = sanitizeTeamId(teamOfficialId),
+            officialId = if (normalizedAssignments.isNotEmpty()) {
+                primaryOfficial?.userId
+            } else {
+                normalizeOptionalToken(officialId)
+            },
+            fieldId = normalizeOptionalToken(fieldId),
+            previousLeftId = sanitizeMatchRef(previousLeftId),
+            previousRightId = sanitizeMatchRef(previousRightId),
+            winnerNextMatchId = sanitizeMatchRef(winnerNextMatchId),
+            loserNextMatchId = sanitizeMatchRef(loserNextMatchId),
+            division = normalizeOptionalToken(division),
+            officialCheckedIn = if (normalizedAssignments.isNotEmpty()) {
+                primaryOfficial?.checkedIn == true
+            } else {
+                officialCheckedIn
+            },
+            officialIds = normalizedAssignments,
+        )
+    }
 
     private suspend fun fetchRemoteMatches(tournamentId: String): List<MatchMVP> {
         return api.get<MatchesResponseDto>("api/events/$tournamentId/matches")
@@ -150,6 +170,7 @@ class MatchRepository(
                     team1Seed = sanitizedMatch.team1Seed,
                     team2Seed = sanitizedMatch.team2Seed,
                     officialId = sanitizedMatch.officialId,
+                    officialIds = sanitizedMatch.officialIds,
                     teamOfficialId = sanitizedMatch.teamOfficialId,
                     fieldId = sanitizedMatch.fieldId,
                     previousLeftId = sanitizedMatch.previousLeftId,
@@ -291,6 +312,7 @@ class MatchRepository(
                         team1Seed = sanitizedMatch.team1Seed,
                         team2Seed = sanitizedMatch.team2Seed,
                         officialId = sanitizedMatch.officialId,
+                        officialIds = sanitizedMatch.officialIds,
                         teamOfficialId = sanitizedMatch.teamOfficialId,
                         fieldId = sanitizedMatch.fieldId,
                         previousLeftId = sanitizedMatch.previousLeftId,

@@ -4,6 +4,9 @@ package com.razumly.mvp.core.data.dataTypes.dtos
 
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
+import com.razumly.mvp.core.data.dataTypes.EventOfficial
+import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
+import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
@@ -73,6 +76,9 @@ data class EventDTO(
     val restTimeMinutes: Int? = null,
     val state: String = "UNPUBLISHED",
     val pointsToVictory: List<Int> = emptyList(),
+    val officialSchedulingMode: OfficialSchedulingMode = OfficialSchedulingMode.STAFFING,
+    val officialPositions: List<EventOfficialPosition> = emptyList(),
+    val eventOfficials: List<EventOfficial> = emptyList(),
     val officialIds: List<String> = emptyList(),
     val allowPaymentPlans: Boolean? = null,
     val installmentCount: Int? = null,
@@ -144,6 +150,9 @@ data class EventDTO(
             restTimeMinutes = restTimeMinutes,
             state = state,
             pointsToVictory = pointsToVictory,
+            officialSchedulingMode = officialSchedulingMode,
+            officialPositions = officialPositions,
+            eventOfficials = eventOfficials,
             lastUpdated = Clock.System.now(),
             officialIds = officialIds,
             allowPaymentPlans = allowPaymentPlans,
