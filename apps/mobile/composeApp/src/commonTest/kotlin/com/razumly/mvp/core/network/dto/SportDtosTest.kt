@@ -1,8 +1,10 @@
 package com.razumly.mvp.core.network.dto
 
+import com.razumly.mvp.core.data.dataTypes.SportOfficialPositionTemplate
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class SportDtosTest {
@@ -58,5 +60,29 @@ class SportDtosTest {
 
         assertNotNull(sport)
         assertFalse(sport.usePointsForDraw)
+    }
+
+    @Test
+    fun to_sport_or_null_maps_official_position_templates() {
+        val dto = SportApiDto(
+            id = "Volleyball",
+            name = "Volleyball",
+            officialPositionTemplates = listOf(
+                SportOfficialPositionTemplate(name = "R1", count = 1),
+                SportOfficialPositionTemplate(name = "Line Judge", count = 2),
+            ),
+        )
+
+        val sport = dto.toSportOrNull()
+
+        assertNotNull(sport)
+        assertEquals(
+            listOf("R1", "Line Judge"),
+            sport.officialPositionTemplates.map(SportOfficialPositionTemplate::name),
+        )
+        assertEquals(
+            listOf(1, 2),
+            sport.officialPositionTemplates.map(SportOfficialPositionTemplate::count),
+        )
     }
 }

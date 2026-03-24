@@ -72,16 +72,22 @@ import coil3.compose.AsyncImage
 import com.kmpalette.loader.rememberNetworkLoader
 import com.kmpalette.rememberDominantColorState
 import com.materialkolor.scheme.DynamicScheme
+import com.razumly.mvp.core.data.dataTypes.EventOfficial
+import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
+import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.label
+import com.razumly.mvp.core.data.dataTypes.officialPositionSummary
+import com.razumly.mvp.core.data.dataTypes.positionSummary
 import com.razumly.mvp.core.data.dataTypes.toLeagueConfig
 import com.razumly.mvp.core.data.dataTypes.toTournamentConfig
 import com.razumly.mvp.core.data.dataTypes.withLeagueConfig
@@ -113,7 +119,6 @@ import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
 import com.razumly.mvp.core.presentation.composables.PlatformDropdown
 import com.razumly.mvp.core.presentation.composables.PlatformTextField
 import com.razumly.mvp.core.presentation.composables.StripeButton
-import com.razumly.mvp.core.presentation.util.CircularRevealUnderlay
 import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
 import com.razumly.mvp.core.presentation.util.getImageUrl
@@ -181,7 +186,6 @@ fun EventDetails(
     hostHasAccount: Boolean,
     imageScheme: DynamicScheme,
     imageIds: List<String>,
-    showMapUnderlay: Boolean = true,
     mapRevealCenter: Offset = Offset.Zero,
     eventWithRelations: EventWithFullRelations,
     editEvent: Event,
@@ -232,6 +236,12 @@ fun EventDetails(
     onUpdateTeamOfficialsMaySwap: (Boolean) -> Unit = {},
     onAddOfficialId: (String) -> Unit = {},
     onRemoveOfficialId: (String) -> Unit = {},
+    onUpdateOfficialSchedulingMode: (OfficialSchedulingMode) -> Unit = {},
+    onAddOfficialPosition: () -> Unit = {},
+    onUpdateOfficialPositionName: (String, String) -> Unit = { _, _ -> },
+    onUpdateOfficialPositionCount: (String, Int) -> Unit = { _, _ -> },
+    onRemoveOfficialPosition: (String) -> Unit = {},
+    onUpdateOfficialUserPositions: (String, List<String>) -> Unit = { _, _ -> },
     onSetPaymentPlansEnabled: (Boolean) -> Unit = {},
     onSetInstallmentCount: (Int) -> Unit = {},
     onUpdateInstallmentAmount: (Int, Int) -> Unit = { _, _ -> },
@@ -256,7 +266,6 @@ fun EventDetails(
     var showImageSelector by rememberSaveable { mutableStateOf(false) }
     var showUploadImagePicker by rememberSaveable { mutableStateOf(false) }
     var previousSelection by remember { mutableStateOf<LatLng?>(null) }
-    val showMap by mapComponent.showMap.collectAsState()
 
     // Validation states
     var isNameValid by remember { mutableStateOf(editEvent.name.isNotBlank()) }
@@ -291,6 +300,8 @@ fun EventDetails(
     var draftInviteOfficial by rememberSaveable { mutableStateOf(false) }
     var draftInviteAssistantHost by rememberSaveable { mutableStateOf(false) }
     var staffEditorError by remember { mutableStateOf<String?>(null) }
+    var visibleOfficialCards by rememberSaveable { mutableStateOf(5) }
+    var visibleHostCards by rememberSaveable { mutableStateOf(5) }
 
     val lazyListState = rememberLazyListState()
 
@@ -1258,13 +1269,49 @@ fun EventDetails(
             .map(PendingStaffInviteDraft::normalized)
             .sortedBy { draft -> draft.displayName().lowercase() }
     }
-    val officialStaffCards = remember(editEvent.officialIds, knownUsersById, persistedStaffInvites, sortedPendingStaffInvites) {
+    val eventOfficialRecordsByUserId = remember(editEvent.eventOfficials) {
+        editEvent.eventOfficials.associateBy { official -> official.userId.trim() }
+    }
+    val officialPositionOptions = remember(editEvent.officialPositions) {
+        editEvent.officialPositions
+            .sortedBy(EventOfficialPosition::order)
+            .map { position ->
+                DropdownOption(
+                    value = position.id,
+                    label = "${position.name} x${position.count.coerceAtLeast(1)}",
+                )
+            }
+    }
+    val officialSchedulingModeOptions = remember {
+        OfficialSchedulingMode.entries.map { mode ->
+            DropdownOption(
+                value = mode.name,
+                label = mode.label(),
+            )
+        }
+    }
+    val officialPositionSummary = remember(editEvent.officialPositions) {
+        editEvent.officialPositionSummary().ifBlank { "None" }
+    }
+    val officialStaffCards = remember(
+        editEvent.officialIds,
+        editEvent.eventOfficials,
+        editEvent.officialPositions,
+        knownUsersById,
+        persistedStaffInvites,
+        sortedPendingStaffInvites,
+    ) {
         buildAssignedStaffCards(
             role = EventStaffRole.OFFICIAL,
             userIds = editEvent.officialIds,
             knownUsersById = knownUsersById,
             staffInvites = persistedStaffInvites,
-        ) + buildDraftStaffCards(
+        ).map { card ->
+            val eventOfficial = card.userId?.let(eventOfficialRecordsByUserId::get)
+            card.copy(
+                subtitle = eventOfficial?.positionSummary(editEvent.officialPositions) ?: "No positions selected",
+            )
+        } + buildDraftStaffCards(
             role = EventStaffRole.OFFICIAL,
             drafts = sortedPendingStaffInvites,
         )
@@ -1376,8 +1423,7 @@ fun EventDetails(
     }
 
     CompositionLocalProvider(localImageScheme provides imageScheme) {
-        val foregroundLayer: @Composable () -> Unit = {
-            Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
+        Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
             BackgroundImage(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -2210,6 +2256,13 @@ fun EventDetails(
                                     add(DetailRowSpec("Primary host", resolvedHostDisplay))
                                     add(DetailRowSpec("Assistant hosts", assistantHostIds.size.toString()))
                                     add(DetailRowSpec("Officials", event.officialIds.size.toString()))
+                                    add(
+                                        DetailRowSpec(
+                                            "Staffing mode",
+                                            event.officialSchedulingMode.label(),
+                                        ),
+                                    )
+                                    add(DetailRowSpec("Official positions", officialPositionSummary))
                                 },
                             )
                         },
@@ -2226,6 +2279,98 @@ fun EventDetails(
                                     onCheckedChange = onUpdateTeamOfficialsMaySwap,
                                 )
                             }
+                            Text(
+                                text = "Official scheduling",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = Color(localImageScheme.current.onSurface),
+                            )
+                            PlatformDropdown(
+                                selectedValue = editEvent.officialSchedulingMode.name,
+                                onSelectionChange = { selectedMode ->
+                                    OfficialSchedulingMode.entries
+                                        .firstOrNull { mode -> mode.name == selectedMode }
+                                        ?.let(onUpdateOfficialSchedulingMode)
+                                },
+                                options = officialSchedulingModeOptions,
+                                label = "Scheduling mode",
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            Text(
+                                text = "Event official positions",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = Color(localImageScheme.current.onSurface),
+                            )
+                            Text(
+                                text = "Sport defaults are copied into this event. Changes here only affect this event.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(localImageScheme.current.onSurfaceVariant),
+                            )
+                            if (editEvent.officialPositions.isEmpty()) {
+                                Text(
+                                    text = "No official positions configured yet.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(localImageScheme.current.onSurfaceVariant),
+                                )
+                            } else {
+                                editEvent.officialPositions
+                                    .sortedBy(EventOfficialPosition::order)
+                                    .forEach { position ->
+                                        Card(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            colors = CardDefaults.cardColors(
+                                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                            ),
+                                        ) {
+                                            Column(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(12.dp),
+                                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                            ) {
+                                                PlatformTextField(
+                                                    value = position.name,
+                                                    onValueChange = { newName ->
+                                                        onUpdateOfficialPositionName(position.id, newName)
+                                                    },
+                                                    label = "Position name",
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                )
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                    verticalAlignment = Alignment.Bottom,
+                                                ) {
+                                                    NumberInputField(
+                                                        modifier = Modifier.weight(1f),
+                                                        value = position.count.toString(),
+                                                        label = "Slots",
+                                                        isError = false,
+                                                        onValueChange = { newValue ->
+                                                            val nextCount = newValue.toIntOrNull()
+                                                            if (newValue.isBlank()) {
+                                                                onUpdateOfficialPositionCount(position.id, 1)
+                                                            } else if (nextCount != null) {
+                                                                onUpdateOfficialPositionCount(position.id, nextCount.coerceAtLeast(1))
+                                                            }
+                                                        },
+                                                    )
+                                                    Button(
+                                                        onClick = { onRemoveOfficialPosition(position.id) },
+                                                    ) {
+                                                        Text("Remove")
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                            }
+                            TextButton(
+                                onClick = onAddOfficialPosition,
+                                modifier = Modifier.align(Alignment.End),
+                            ) {
+                                Text("Add position")
+                            }
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                             Text(
                                 text = "Add / Invite Staff",
                                 style = MaterialTheme.typography.titleSmall,
@@ -2396,12 +2541,6 @@ fun EventDetails(
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                                 verticalAlignment = Alignment.Top,
                             ) {
-                                val staffListVisibleCards = 4
-                                val staffCardApproxHeight = 84.dp
-                                val staffCardSpacing = 8.dp
-                                val staffListViewportHeight =
-                                    (staffCardApproxHeight * staffListVisibleCards) +
-                                        (staffCardSpacing * (staffListVisibleCards - 1))
                                 Column(
                                     modifier = Modifier.weight(1f),
                                     verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -2418,26 +2557,47 @@ fun EventDetails(
                                             color = Color(localImageScheme.current.onSurfaceVariant),
                                         )
                                     } else {
-                                        LazyColumn(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .heightIn(max = staffListViewportHeight),
-                                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                                        ) {
-                                            items(
-                                                items = officialStaffCards,
-                                                key = { card -> card.key },
-                                            ) { card ->
-                                                StaffAssignmentCard(
-                                                    card = card,
-                                                    editView = true,
-                                                    onRemoveAssigned = { userId, role ->
-                                                        if (role == EventStaffRole.OFFICIAL) {
-                                                            onRemoveOfficialId(userId)
-                                                        }
-                                                    },
-                                                    onRemoveDraft = onRemovePendingStaffInvite,
-                                                )
+                                        officialStaffCards.take(visibleOfficialCards).forEach { card ->
+                                            val assignedUserId = card.userId
+                                            val selectedPositionIds = assignedUserId
+                                                ?.let(eventOfficialRecordsByUserId::get)
+                                                ?.positionIds
+                                                .orEmpty()
+                                            StaffAssignmentCard(
+                                                card = card,
+                                                editView = true,
+                                                onRemoveAssigned = { userId, role ->
+                                                    if (role == EventStaffRole.OFFICIAL) {
+                                                        onRemoveOfficialId(userId)
+                                                    }
+                                                },
+                                                onRemoveDraft = onRemovePendingStaffInvite,
+                                                extraContent = if (assignedUserId != null && officialPositionOptions.isNotEmpty()) {
+                                                    {
+                                                        PlatformDropdown(
+                                                            selectedValue = "",
+                                                            onSelectionChange = {},
+                                                            options = officialPositionOptions,
+                                                            label = "Eligible positions",
+                                                            modifier = Modifier.fillMaxWidth(),
+                                                            multiSelect = true,
+                                                            selectedValues = selectedPositionIds,
+                                                            onMultiSelectionChange = { selectedIds ->
+                                                                onUpdateOfficialUserPositions(
+                                                                    assignedUserId,
+                                                                    selectedIds,
+                                                                )
+                                                            },
+                                                        )
+                                                    }
+                                                } else {
+                                                    null
+                                                },
+                                            )
+                                        }
+                                        if (officialStaffCards.size > visibleOfficialCards) {
+                                            TextButton(onClick = { visibleOfficialCards += 5 }) {
+                                                Text("Show 5 more")
                                             }
                                         }
                                     }
@@ -2447,41 +2607,36 @@ fun EventDetails(
                                     verticalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
                                     Text(
-                                        text = "Staff",
+                                        text = "Hosts",
                                         style = MaterialTheme.typography.bodyMedium,
                                         fontWeight = FontWeight.SemiBold,
                                     )
                                     if (hostStaffCards.isEmpty()) {
                                         Text(
-                                            text = "No staff assigned yet.",
+                                            text = "No host staff assigned yet.",
                                             style = MaterialTheme.typography.bodySmall,
                                             color = Color(localImageScheme.current.onSurfaceVariant),
                                         )
                                     } else {
-                                        LazyColumn(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .heightIn(max = staffListViewportHeight),
-                                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                                        ) {
-                                            items(
-                                                items = hostStaffCards,
-                                                key = { card -> card.key },
-                                            ) { card ->
-                                                StaffAssignmentCard(
-                                                    card = card,
-                                                    editView = true,
-                                                    onRemoveAssigned = { userId, role ->
-                                                        if (role == EventStaffRole.ASSISTANT_HOST) {
-                                                            onUpdateAssistantHostIds(
-                                                                assistantHostIds.filterNot { existingId ->
-                                                                    existingId == userId
-                                                                },
-                                                            )
-                                                        }
-                                                    },
-                                                    onRemoveDraft = onRemovePendingStaffInvite,
-                                                )
+                                        hostStaffCards.take(visibleHostCards).forEach { card ->
+                                            StaffAssignmentCard(
+                                                card = card,
+                                                editView = true,
+                                                onRemoveAssigned = { userId, role ->
+                                                    if (role == EventStaffRole.ASSISTANT_HOST) {
+                                                        onUpdateAssistantHostIds(
+                                                            assistantHostIds.filterNot { existingId ->
+                                                                existingId == userId
+                                                            },
+                                                        )
+                                                    }
+                                                },
+                                                onRemoveDraft = onRemovePendingStaffInvite,
+                                            )
+                                        }
+                                        if (hostStaffCards.size > visibleHostCards) {
+                                            TextButton(onClick = { visibleHostCards += 5 }) {
+                                                Text("Show 5 more")
                                             }
                                         }
                                     }
@@ -3719,55 +3874,6 @@ fun EventDetails(
                 }
             }
         }
-        }
-
-        if (showMapUnderlay) {
-            CircularRevealUnderlay(
-                isRevealed = showMap,
-                revealCenterInWindow = mapRevealCenter,
-                modifier = Modifier.fillMaxSize(),
-                backgroundContent = {
-                    EventMap(
-                        component = mapComponent,
-                        onEventSelected = { _ ->
-                            mapComponent.toggleMap()
-                        },
-                        onPlaceSelected = { place ->
-                            if (editView) {
-                                onPlaceSelected(place)
-                                previousSelection = LatLng(place.latitude, place.longitude)
-                                mapComponent.toggleMap()
-                            }
-                        },
-                        onPlaceSelectionPoint = { x, y ->
-                            onMapRevealCenterChange(Offset(x, y))
-                        },
-                        canClickPOI = editView,
-                        focusedLocation = if (editEvent.location.isNotBlank()) {
-                            editEvent.let { LatLng(it.lat, it.long) }
-                        } else if (previousSelection != null) {
-                            previousSelection!!
-                        } else {
-                            mapComponent.currentLocation.value ?: LatLng(0.0, 0.0)
-                        },
-                        focusedEvent = if (!editView && event.location.isNotBlank()) {
-                            event
-                        } else {
-                            null
-                        },
-                        modifier = Modifier.fillMaxSize(),
-                        onBackPressed = { mapComponent.toggleMap() },
-                    )
-                },
-                foregroundContent = {
-                    foregroundLayer()
-                },
-            )
-        } else {
-            Box(modifier = Modifier.fillMaxSize()) {
-                foregroundLayer()
-            }
-        }
     }
     PlatformDateTimePicker(
         onDateSelected = { selectedInstant ->
@@ -3865,6 +3971,38 @@ fun EventDetails(
         getTime = false,
         canSelectPast = false,
         initialDate = divisionInstallmentInitialDate,
+    )
+
+    EventMap(
+        component = mapComponent,
+        onEventSelected = { _ ->
+            mapComponent.toggleMap()
+        },
+        onPlaceSelected = { place ->
+            if (editView) {
+                onPlaceSelected(place)
+                previousSelection = LatLng(place.latitude, place.longitude)
+                mapComponent.toggleMap()
+            }
+        },
+        onPlaceSelectionPoint = { x, y ->
+            onMapRevealCenterChange(Offset(x, y))
+        },
+        canClickPOI = editView,
+        focusedLocation = if (editEvent.location.isNotBlank()) {
+            editEvent.let { LatLng(it.lat, it.long) }
+        } else if (previousSelection != null) {
+            previousSelection!!
+        } else {
+            mapComponent.currentLocation.value ?: LatLng(0.0, 0.0)
+        },
+        focusedEvent = if (!editView && event.location.isNotBlank()) {
+            event
+        } else {
+            null
+        },
+        revealCenter = mapRevealCenter,
+        onBackPressed = { mapComponent.toggleMap() },
     )
 
     // ImagePickerKMP Integration
@@ -4081,6 +4219,7 @@ fun LazyListScope.animatedCardSection(
         }
     }
 }
+
 private fun buildEventDetailsRows(
     event: Event,
     priceSummary: String,
@@ -5106,6 +5245,7 @@ private fun StaffAssignmentCard(
     editView: Boolean,
     onRemoveAssigned: (String, EventStaffRole) -> Unit,
     onRemoveDraft: (String, EventStaffRole) -> Unit,
+    extraContent: (@Composable () -> Unit)? = null,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -5148,6 +5288,7 @@ private fun StaffAssignmentCard(
                     },
                 )
             }
+            extraContent?.invoke()
             if (editView) {
                 val removeAction: (() -> Unit)? = when {
                     card.isDraft && !card.draftEmail.isNullOrBlank() -> {
@@ -5558,6 +5699,7 @@ private fun computeEventValidationResult(
         isValid = isValid,
     )
 }
+
 @Composable
 private fun LabeledCheckboxRow(
     checked: Boolean,
@@ -5697,3 +5839,4 @@ fun BackgroundImage(
         }
     }
 }
+

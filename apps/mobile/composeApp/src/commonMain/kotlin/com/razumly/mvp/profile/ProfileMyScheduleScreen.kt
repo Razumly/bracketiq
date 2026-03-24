@@ -54,6 +54,7 @@ import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.officialAssignmentLabels
 import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.timeFormat
 import com.razumly.mvp.eventDetail.composables.ScheduleItem
@@ -108,6 +109,9 @@ fun ProfileMyScheduleScreen(component: ProfileComponent) {
             matches = state.matches,
         )
     }
+    val eventsById = remember(state.events) {
+        state.events.associateBy(Event::id)
+    }
 
     LaunchedEffect(component) {
         component.refreshMySchedule()
@@ -138,6 +142,7 @@ fun ProfileMyScheduleScreen(component: ProfileComponent) {
             matchCardContent = { match, onClick ->
                 ProfileScheduleMatchCard(
                     match = match,
+                    event = eventsById[match.match.eventId],
                     onClick = onClick,
                 )
             },
@@ -327,6 +332,7 @@ private fun DayDatePicker(
 @Composable
 private fun ProfileScheduleMatchCard(
     match: MatchWithRelations,
+    event: Event?,
     onClick: () -> Unit,
 ) {
     val team1Name = match.team1?.name?.takeIf { it.isNotBlank() } ?: "TBD"
@@ -339,6 +345,15 @@ private fun ProfileScheduleMatchCard(
     } else {
         val end = match.match.end.takeIf { matchEnd -> matchEnd != null && matchEnd > start } ?: start.plus(1.hours)
         formatEntryWindow(start, end, timeZone)
+    }
+    val officialSummary = remember(match.match, event?.officialPositions) {
+        val labels = match.match.officialAssignmentLabels(event?.officialPositions.orEmpty())
+        when {
+            labels.isNotEmpty() -> "Officials: ${labels.joinToString(", ")}"
+            !match.match.teamOfficialId.isNullOrBlank() || match.teamOfficial != null -> "Team official assigned"
+            !match.match.officialId.isNullOrBlank() -> "Official assigned"
+            else -> null
+        }
     }
     Card(
         modifier = Modifier
@@ -353,7 +368,7 @@ private fun ProfileScheduleMatchCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(90.dp)
+                .height(if (officialSummary != null) 110.dp else 90.dp)
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.SpaceBetween,
         ) {
@@ -377,6 +392,15 @@ private fun ProfileScheduleMatchCard(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            officialSummary?.let { summary ->
+                Text(
+                    text = summary,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }

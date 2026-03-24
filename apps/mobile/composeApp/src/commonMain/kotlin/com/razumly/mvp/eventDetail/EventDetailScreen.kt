@@ -99,13 +99,20 @@ import androidx.compose.ui.unit.dp
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.ktx.DynamicScheme
+import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
+import com.razumly.mvp.core.data.dataTypes.addOfficialPosition
+import com.razumly.mvp.core.data.dataTypes.addOfficialUser
 import com.razumly.mvp.core.data.dataTypes.Event
-import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfig
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Organization
+import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.removeOfficialPosition
+import com.razumly.mvp.core.data.dataTypes.removeOfficialUser
+import com.razumly.mvp.core.data.dataTypes.updateOfficialPosition
+import com.razumly.mvp.core.data.dataTypes.updateOfficialUserPositions
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.FeeBreakdown
 import com.razumly.mvp.core.data.util.divisionsEquivalent
@@ -122,7 +129,6 @@ import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
 import com.razumly.mvp.core.presentation.composables.PullToRefreshContainer
 import com.razumly.mvp.core.presentation.composables.StripeButton
 import com.razumly.mvp.core.presentation.composables.TeamCard
-import com.razumly.mvp.core.presentation.util.CircularRevealUnderlay
 import com.razumly.mvp.core.presentation.util.buttonTransitionSpec
 import com.razumly.mvp.core.presentation.util.isScrollingUp
 import com.razumly.mvp.core.presentation.util.toTitleCase
@@ -136,14 +142,12 @@ import com.razumly.mvp.eventDetail.composables.ScheduleView
 import com.razumly.mvp.eventDetail.composables.SendNotificationDialog
 import com.razumly.mvp.eventDetail.composables.TeamSelectionDialog
 import com.razumly.mvp.eventDetail.composables.TournamentBracketView
-import com.razumly.mvp.eventMap.EventMap
 import com.razumly.mvp.eventMap.MapComponent
 import com.razumly.mvp.icons.Groups
 import com.razumly.mvp.icons.MVPIcons
 import com.razumly.mvp.icons.ProfileActionEvents
 import com.razumly.mvp.icons.TournamentBracket
 import com.razumly.mvp.icons.Trophy
-import dev.icerock.moko.geo.LatLng
 import kotlin.math.absoluteValue
 import kotlin.math.round
 import kotlin.time.Clock
@@ -1649,6 +1653,9 @@ fun EventDetailScreen(
             organization = selectedEvent.organization,
         )
     }
+    val selectedSport = remember(sports, editedEvent.sportId) {
+        sports.firstOrNull { it.id == editedEvent.sportId }
+    }
     val canConfirmLeagueResultsFromDock = hasStandingsView && canManageLeagueStandings
     val canManageMatchEditingFromDock = canManageTemplate
     val canEditMatches = canManageMatchEditingFromDock && isEditingMatches
@@ -1716,7 +1723,6 @@ fun EventDetailScreen(
     var showBuildBracketConfirmDialog by remember { mutableStateOf(false) }
     var showStickyDockByScroll by remember { mutableStateOf(true) }
     var mapRevealCenter by remember { mutableStateOf(Offset.Zero) }
-    var previousMapSelection by remember { mutableStateOf<LatLng?>(null) }
     var isManagingParticipants by rememberSaveable { mutableStateOf(false) }
 
     var imageScheme by remember {
@@ -1867,7 +1873,8 @@ fun EventDetailScreen(
             }
         }
     }
-    val shouldShowViewSchedulePrimaryAction = !isWeeklyParentEvent && (isUserInEvent || isHost || isAssistantHost || isEventOfficial)
+    val shouldShowViewSchedulePrimaryAction =
+        !isWeeklyParentEvent && (isUserInEvent || isHost || isAssistantHost || isEventOfficial)
     val showOverviewOpenDetailsAction = !isWeeklyParentEvent && !shouldShowViewSchedulePrimaryAction
     val showStickyActions = !showDetails && !isEditing && !showMap && showStickyDockByScroll
     val isEventRefreshInProgress = eventTeamsAndParticipantsLoading || eventMatchesLoading
@@ -2069,51 +2076,13 @@ fun EventDetailScreen(
     }
 
     CompositionLocalProvider(LocalTournamentComponent provides component) {
-        CircularRevealUnderlay(
-            isRevealed = showMap,
-            revealCenterInWindow = mapRevealCenter,
+        PullToRefreshContainer(
+            isRefreshing = isEventRefreshInProgress,
+            onRefresh = component::refreshEventDetails,
+            enabled = !showMap,
             modifier = Modifier.fillMaxSize(),
-            backgroundContent = {
-                EventMap(
-                    component = mapComponent,
-                    onEventSelected = { _ ->
-                        mapComponent.toggleMap()
-                    },
-                    onPlaceSelected = { place ->
-                        if (isEditing) {
-                            component.selectPlace(place)
-                            previousMapSelection = LatLng(place.latitude, place.longitude)
-                            mapComponent.toggleMap()
-                        }
-                    },
-                    onPlaceSelectionPoint = { x, y ->
-                        mapRevealCenter = Offset(x, y)
-                    },
-                    canClickPOI = isEditing,
-                    focusedLocation = if (editedEvent.location.isNotBlank()) {
-                        LatLng(editedEvent.lat, editedEvent.long)
-                    } else if (previousMapSelection != null) {
-                        previousMapSelection!!
-                    } else {
-                        mapComponent.currentLocation.value ?: LatLng(0.0, 0.0)
-                    },
-                    focusedEvent = if (!isEditing && selectedEvent.event.location.isNotBlank()) {
-                        selectedEvent.event
-                    } else {
-                        null
-                    },
-                    modifier = Modifier.fillMaxSize(),
-                    onBackPressed = mapComponent::toggleMap,
-                )
-            },
-            foregroundContent = {
-                PullToRefreshContainer(
-                    isRefreshing = isEventRefreshInProgress,
-                    onRefresh = component::refreshEventDetails,
-                    enabled = !showMap,
-                    modifier = Modifier.fillMaxSize(),
-                ) {
-                    Scaffold(Modifier.fillMaxSize()) { innerPadding ->
+        ) {
+            Scaffold(Modifier.fillMaxSize()) { innerPadding ->
                 Box(
                     Modifier.background(MaterialTheme.colorScheme.background).fillMaxSize()
                 ) {
@@ -2135,7 +2104,6 @@ fun EventDetailScreen(
                             onAddCurrentUser = {},
                             imageScheme = imageScheme,
                             imageIds = eventImageIds,
-                            showMapUnderlay = false,
                             mapRevealCenter = mapRevealCenter,
                             onHostCreateAccount = component::onHostCreateAccount,
                             onPlaceSelected = component::selectPlace,
@@ -2160,6 +2128,51 @@ fun EventDetailScreen(
                                 component.editEventField {
                                     copy(
                                         teamOfficialsMaySwap = if (doTeamsOfficiate == true) teamOfficialsMaySwap else false,
+                                    )
+                                }
+                            },
+                            onUpdateOfficialSchedulingMode = { mode ->
+                                component.editEventField {
+                                    copy(officialSchedulingMode = mode)
+                                }
+                            },
+                            onAddOfficialPosition = {
+                                component.editEventField {
+                                    addOfficialPosition(sport = selectedSport)
+                                }
+                            },
+                            onUpdateOfficialPositionName = { positionId, name ->
+                                component.editEventField {
+                                    updateOfficialPosition(
+                                        positionId = positionId,
+                                        name = name,
+                                        sport = selectedSport,
+                                    )
+                                }
+                            },
+                            onUpdateOfficialPositionCount = { positionId, count ->
+                                component.editEventField {
+                                    updateOfficialPosition(
+                                        positionId = positionId,
+                                        count = count,
+                                        sport = selectedSport,
+                                    )
+                                }
+                            },
+                            onRemoveOfficialPosition = { positionId ->
+                                component.editEventField {
+                                    removeOfficialPosition(
+                                        positionId = positionId,
+                                        sport = selectedSport,
+                                    )
+                                }
+                            },
+                            onUpdateOfficialUserPositions = { userId, positionIds ->
+                                component.editEventField {
+                                    updateOfficialUserPositions(
+                                        userId = userId,
+                                        positionIds = positionIds,
+                                        sport = selectedSport,
                                     )
                                 }
                             },
@@ -2197,17 +2210,18 @@ fun EventDetailScreen(
                             },
                             onAddOfficialId = { officialId ->
                                 component.editEventField {
-                                    copy(
-                                        officialIds = (officialIds + officialId)
-                                            .map(String::trim)
-                                            .filter(String::isNotBlank)
-                                            .distinct(),
+                                    addOfficialUser(
+                                        userId = officialId,
+                                        sport = selectedSport,
                                     )
                                 }
                             },
                             onRemoveOfficialId = { officialId ->
                                 component.editEventField {
-                                    copy(officialIds = officialIds.filterNot { existingId -> existingId == officialId })
+                                    removeOfficialUser(
+                                        userId = officialId,
+                                        sport = selectedSport,
+                                    )
                                 }
                             },
                         ) { isValid ->
@@ -3076,10 +3090,8 @@ fun EventDetailScreen(
                     onCancel = { component.dismissFeeBreakdown() })
             }
         }
-        }
-            },
-        )
     }
+}
 }
 @Composable
 fun TeamSelectionDialog(
@@ -3700,3 +3712,5 @@ private fun FeeRow(
         )
     }
 }
+
+

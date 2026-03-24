@@ -33,6 +33,11 @@ import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.ktx.DynamicScheme
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
+import com.razumly.mvp.core.data.dataTypes.addOfficialPosition
+import com.razumly.mvp.core.data.dataTypes.removeOfficialPosition
+import com.razumly.mvp.core.data.dataTypes.updateOfficialPosition
+import com.razumly.mvp.core.data.dataTypes.updateOfficialUserPositions
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
@@ -125,6 +130,9 @@ fun CreateEventScreen(
             timeSlots = leagueSlots,
         )
     }
+    val selectedSport = remember(sports, newEventState.sportId) {
+        sports.firstOrNull { it.id == newEventState.sportId }
+    }
 
     val onEditEvent: (Event.() -> Event) -> Unit = remember(component, isRentalFlow) {
         { update ->
@@ -161,6 +169,67 @@ fun CreateEventScreen(
         remember(component) { component::updateTeamOfficialsMaySwap }
     val onAddOfficialId: (String) -> Unit = remember(component) { component::addOfficialId }
     val onRemoveOfficialId: (String) -> Unit = remember(component) { component::removeOfficialId }
+    val onUpdateOfficialSchedulingMode: (OfficialSchedulingMode) -> Unit =
+        remember(component) {
+            { mode ->
+                component.updateEventField {
+                    copy(officialSchedulingMode = mode)
+                }
+            }
+        }
+    val onAddOfficialPosition: () -> Unit = remember(component, selectedSport) {
+        {
+            component.updateEventField {
+                addOfficialPosition(sport = selectedSport)
+            }
+        }
+    }
+    val onUpdateOfficialPositionName: (String, String) -> Unit =
+        remember(component, selectedSport) {
+            { positionId, name ->
+                component.updateEventField {
+                    updateOfficialPosition(
+                        positionId = positionId,
+                        name = name,
+                        sport = selectedSport,
+                    )
+                }
+            }
+        }
+    val onUpdateOfficialPositionCount: (String, Int) -> Unit =
+        remember(component, selectedSport) {
+            { positionId, count ->
+                component.updateEventField {
+                    updateOfficialPosition(
+                        positionId = positionId,
+                        count = count,
+                        sport = selectedSport,
+                    )
+                }
+            }
+        }
+    val onRemoveOfficialPosition: (String) -> Unit = remember(component, selectedSport) {
+        { positionId ->
+            component.updateEventField {
+                removeOfficialPosition(
+                    positionId = positionId,
+                    sport = selectedSport,
+                )
+            }
+        }
+    }
+    val onUpdateOfficialUserPositions: (String, List<String>) -> Unit =
+        remember(component, selectedSport) {
+            { userId, positionIds ->
+                component.updateEventField {
+                    updateOfficialUserPositions(
+                        userId = userId,
+                        positionIds = positionIds,
+                        sport = selectedSport,
+                    )
+                }
+            }
+        }
     val onSetPaymentPlansEnabled: (Boolean) -> Unit =
         remember(component) { component::setPaymentPlansEnabled }
     val onSetInstallmentCount: (Int) -> Unit = remember(component) { component::setInstallmentCount }
@@ -288,6 +357,12 @@ fun CreateEventScreen(
                         onUpdateTeamOfficialsMaySwap = onUpdateTeamOfficialsMaySwap,
                         onAddOfficialId = onAddOfficialId,
                         onRemoveOfficialId = onRemoveOfficialId,
+                        onUpdateOfficialSchedulingMode = onUpdateOfficialSchedulingMode,
+                        onAddOfficialPosition = onAddOfficialPosition,
+                        onUpdateOfficialPositionName = onUpdateOfficialPositionName,
+                        onUpdateOfficialPositionCount = onUpdateOfficialPositionCount,
+                        onRemoveOfficialPosition = onRemoveOfficialPosition,
+                        onUpdateOfficialUserPositions = onUpdateOfficialUserPositions,
                         onSetPaymentPlansEnabled = onSetPaymentPlansEnabled,
                         onSetInstallmentCount = onSetInstallmentCount,
                         onUpdateInstallmentAmount = onUpdateInstallmentAmount,

@@ -20,6 +20,8 @@ import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
+import com.razumly.mvp.core.data.dataTypes.shouldReplaceOfficialPositionsWithSportDefaults
+import com.razumly.mvp.core.data.dataTypes.syncOfficialStaffing
 import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
@@ -930,7 +932,10 @@ class DefaultEventDetailComponent(
                 .onSuccess {
                     _sports.value = it
                     if (_isEditing.value) {
-                        _editedEvent.value = _editedEvent.value.withSportRules()
+                        _editedEvent.value = syncOfficialStaffingForSportTransition(
+                            previous = _editedEvent.value,
+                            updated = _editedEvent.value.withSportRules(),
+                        )
                     }
                 }
                 .onFailure {
@@ -2092,7 +2097,10 @@ class DefaultEventDetailComponent(
         // Initialize or reset the draft from the latest selected event when mode changes.
         val selected = selectedEvent.value
         _editedEvent.value = if (enabled && _sports.value.isNotEmpty()) {
-            selected.withSportRules()
+            syncOfficialStaffingForSportTransition(
+                previous = selected,
+                updated = selected.withSportRules(),
+            )
         } else {
             selected
         }
@@ -2104,15 +2112,23 @@ class DefaultEventDetailComponent(
     }
 
     override fun editEventField(update: Event.() -> Event) {
-        _editedEvent.value = _editedEvent.value
-            .update()
-            .withSportRules()
+        val previous = _editedEvent.value
+        _editedEvent.value = syncOfficialStaffingForSportTransition(
+            previous = previous,
+            updated = previous
+                .update()
+                .withSportRules(),
+        )
     }
 
     override fun editTournamentField(update: Event.() -> Event) {
-        _editedEvent.value = _editedEvent.value
-            .update()
-            .withSportRules()
+        val previous = _editedEvent.value
+        _editedEvent.value = syncOfficialStaffingForSportTransition(
+            previous = previous,
+            updated = previous
+                .update()
+                .withSportRules(),
+        )
     }
 
     override fun searchUsers(query: String) {
@@ -2304,6 +2320,20 @@ class DefaultEventDetailComponent(
 
             val templateId = newId()
             val currentUserId = currentUser.value.id.trim().takeIf(String::isNotBlank)
+            val sourceSport = resolveSport(sourceEvent.sportId)
+            val templatePositions = sourceEvent.officialPositions.mapIndexed { index, position ->
+                position.copy(
+                    id = com.razumly.mvp.core.data.dataTypes.buildEventOfficialPositionId(
+                        eventId = templateId,
+                        order = index,
+                        name = position.name,
+                    ),
+                    order = index,
+                )
+            }
+            val templatePositionIdsByPreviousId = sourceEvent.officialPositions
+                .mapIndexed { index, position -> position.id to templatePositions[index].id }
+                .toMap()
             val templateEvent = sourceEvent.copy(
                 id = templateId,
                 name = addTemplateSuffix(sourceEvent.name),
@@ -2313,8 +2343,17 @@ class DefaultEventDetailComponent(
                 teamIds = emptyList(),
                 waitListIds = emptyList(),
                 freeAgentIds = emptyList(),
-                officialIds = emptyList(),
-            )
+                officialPositions = templatePositions,
+                eventOfficials = sourceEvent.eventOfficials.map { official ->
+                    official.copy(
+                        id = com.razumly.mvp.core.data.dataTypes.buildEventOfficialRecordId(
+                            eventId = templateId,
+                            userId = official.userId,
+                        ),
+                        positionIds = official.positionIds.mapNotNull(templatePositionIdsByPreviousId::get),
+                    )
+                },
+            ).syncOfficialStaffing(sport = sourceSport)
 
             eventRepository.createEvent(templateEvent)
                 .onSuccess {
@@ -2468,6 +2507,25 @@ class DefaultEventDetailComponent(
         ?.let { selectedSportId -> _sports.value.firstOrNull { it.id == selectedSportId } }
         ?.usePointsPerSetWin
         ?: false
+
+    private fun resolveSport(sportId: String?): Sport? = sportId
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+        ?.let { selectedSportId -> _sports.value.firstOrNull { it.id == selectedSportId } }
+
+    private fun syncOfficialStaffingForSportTransition(previous: Event, updated: Event): Event {
+        val previousSport = resolveSport(previous.sportId)
+        val nextSport = resolveSport(updated.sportId)
+        val shouldReplaceDefaults = previous.sportId != updated.sportId &&
+            previous.shouldReplaceOfficialPositionsWithSportDefaults(
+                previousSport = previousSport,
+                nextSport = nextSport,
+            )
+        return updated.syncOfficialStaffing(
+            sport = nextSport,
+            replacePositionsWithSportDefaults = shouldReplaceDefaults,
+        )
+    }
 
     private fun Event.withSportRules(): Event {
         val requiresSets = usesSetScoringForSport(sportId)

@@ -11,6 +11,7 @@ import com.arkivanov.decompose.router.stack.pushNew
 import com.arkivanov.decompose.value.Value
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
@@ -18,6 +19,11 @@ import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.addOfficialUser
+import com.razumly.mvp.core.data.dataTypes.removeOfficialPosition
+import com.razumly.mvp.core.data.dataTypes.removeOfficialUser
+import com.razumly.mvp.core.data.dataTypes.shouldReplaceOfficialPositionsWithSportDefaults
+import com.razumly.mvp.core.data.dataTypes.syncOfficialStaffing
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
 import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
@@ -317,7 +323,10 @@ class DefaultCreateEventComponent(
                 .update()
                 .applyCreateSelectionRules(_isRentalFlow.value)
                 .withSportRules()
-            val normalized = applyRentalConstraints(updated)
+            val normalized = syncOfficialStaffingForSportTransition(
+                previous = previous,
+                updated = applyRentalConstraints(updated),
+            )
             val sportChanged = previous.sportId != normalized.sportId
 
             _newEventState.value = normalized
@@ -335,7 +344,10 @@ class DefaultCreateEventComponent(
             val updated = previous
                 .update()
                 .withSportRules()
-            val normalized = applyRentalConstraints(updated)
+            val normalized = syncOfficialStaffingForSportTransition(
+                previous = previous,
+                updated = applyRentalConstraints(updated),
+            )
             val sportChanged = previous.sportId != normalized.sportId
 
             _newEventState.value = normalized
@@ -383,7 +395,10 @@ class DefaultCreateEventComponent(
                 .update()
                 .applyCreateSelectionRules(_isRentalFlow.value)
                 .withSportRules()
-            val normalized = applyRentalConstraints(updated)
+            val normalized = syncOfficialStaffingForSportTransition(
+                previous = previous,
+                updated = applyRentalConstraints(updated),
+            )
 
             _newEventState.value = normalized
             syncLeagueSlotDefaultStartDates(previousEvent = previous, updatedEvent = normalized)
@@ -436,7 +451,10 @@ class DefaultCreateEventComponent(
         val normalizedOfficialId = officialId.trim()
         if (normalizedOfficialId.isEmpty()) return
         updateEventField {
-            copy(officialIds = (officialIds + normalizedOfficialId).normalizeDistinctIds())
+            addOfficialUser(
+                userId = normalizedOfficialId,
+                sport = resolveSport(sportId),
+            )
         }
     }
 
@@ -444,7 +462,10 @@ class DefaultCreateEventComponent(
         val normalizedOfficialId = officialId.trim()
         if (normalizedOfficialId.isEmpty()) return
         updateEventField {
-            copy(officialIds = officialIds.filterNot { existingId -> existingId == normalizedOfficialId })
+            removeOfficialUser(
+                userId = normalizedOfficialId,
+                sport = resolveSport(sportId),
+            )
         }
     }
 
@@ -1256,7 +1277,10 @@ class DefaultCreateEventComponent(
             sportsRepository.getSports()
                 .onSuccess { loadedSports ->
                     _sports.value = loadedSports
-                    _newEventState.value = _newEventState.value.withSportRules()
+                    _newEventState.value = syncOfficialStaffingForSportTransition(
+                        previous = _newEventState.value,
+                        updated = _newEventState.value.withSportRules(),
+                    )
                 }
                 .onFailure { error ->
                     _errorState.value = ErrorMessage(error.message ?: "Failed to load sports.")
@@ -1268,6 +1292,23 @@ class DefaultCreateEventComponent(
         ?.let { selectedSportId -> _sports.value.firstOrNull { it.id == selectedSportId } }
         ?.usePointsPerSetWin
         ?: false
+
+    private fun resolveSport(sportId: String?): Sport? = sportId
+        ?.let { selectedSportId -> _sports.value.firstOrNull { it.id == selectedSportId } }
+
+    private fun syncOfficialStaffingForSportTransition(previous: Event, updated: Event): Event {
+        val previousSport = resolveSport(previous.sportId)
+        val nextSport = resolveSport(updated.sportId)
+        val shouldReplaceDefaults = previous.sportId != updated.sportId &&
+            previous.shouldReplaceOfficialPositionsWithSportDefaults(
+                previousSport = previousSport,
+                nextSport = nextSport,
+            )
+        return updated.syncOfficialStaffing(
+            sport = nextSport,
+            replacePositionsWithSportDefaults = shouldReplaceDefaults,
+        )
+    }
 
     private fun defaultLeagueScoringConfigForSport(sportId: String?): LeagueScoringConfigDTO {
         val defaults = LeagueScoringConfigDTO()

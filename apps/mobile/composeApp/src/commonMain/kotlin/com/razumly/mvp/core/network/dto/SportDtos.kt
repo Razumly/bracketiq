@@ -1,6 +1,7 @@
 package com.razumly.mvp.core.network.dto
 
 import com.razumly.mvp.core.data.dataTypes.Sport
+import com.razumly.mvp.core.data.dataTypes.SportOfficialPositionTemplate
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -57,6 +58,7 @@ data class SportApiDto(
     val useEnablePenaltyUnsporting: Boolean? = null,
     val usePenaltyPointsUnsporting: Boolean? = null,
     val usePointPrecision: Boolean? = null,
+    val officialPositionTemplates: List<SportOfficialPositionTemplate>? = null,
 ) {
     fun toSportOrNull(): Sport? {
         val resolvedId = id ?: legacyId ?: name
@@ -122,6 +124,7 @@ data class SportApiDto(
             useEnablePenaltyUnsporting = useEnablePenaltyUnsporting ?: false,
             usePenaltyPointsUnsporting = usePenaltyPointsUnsporting ?: false,
             usePointPrecision = usePointPrecision ?: false,
+            officialPositionTemplates = officialPositionTemplates ?: emptyList(),
         )
     }
 }

@@ -34,6 +34,7 @@ data class MatchMVP (
     val previousLeftId: String? = null,
     val previousRightId: String? = null,
     val officialCheckedIn: Boolean? = null,
+    val officialIds: List<MatchOfficialAssignment> = emptyList(),
     val teamOfficialId: String? = null,
     val locked: Boolean = false,
     @PrimaryKey override val id: String,
@@ -62,6 +63,7 @@ data class MatchMVP (
             previousLeftId = previousLeftId,
             previousRightId = previousRightId,
             officialCheckedIn = officialCheckedIn,
+            officialIds = officialIds,
             teamOfficialId = teamOfficialId,
             locked = locked,
         )

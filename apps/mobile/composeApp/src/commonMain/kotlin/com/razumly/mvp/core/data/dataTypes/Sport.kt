@@ -48,7 +48,8 @@ data class Sport(
     val useBonusPointsForHighScoringMatch: Boolean,
     val useEnablePenaltyUnsporting: Boolean,
     val usePenaltyPointsUnsporting: Boolean,
-    val usePointPrecision: Boolean
+    val usePointPrecision: Boolean,
+    val officialPositionTemplates: List<SportOfficialPositionTemplate> = emptyList(),
 )
 
 @Serializable
@@ -96,7 +97,8 @@ data class SportDTO(
     val useBonusPointsForHighScoringMatch: Boolean = false,
     val useEnablePenaltyUnsporting: Boolean = false,
     val usePenaltyPointsUnsporting: Boolean = false,
-    val usePointPrecision: Boolean = false
+    val usePointPrecision: Boolean = false,
+    val officialPositionTemplates: List<SportOfficialPositionTemplate> = emptyList(),
 ) {
     fun toSport(id: String): Sport =
         Sport(
@@ -144,6 +146,7 @@ data class SportDTO(
             useBonusPointsForHighScoringMatch = useBonusPointsForHighScoringMatch,
             useEnablePenaltyUnsporting = useEnablePenaltyUnsporting,
             usePenaltyPointsUnsporting = usePenaltyPointsUnsporting,
-            usePointPrecision = usePointPrecision
+            usePointPrecision = usePointPrecision,
+            officialPositionTemplates = officialPositionTemplates,
         )
 }

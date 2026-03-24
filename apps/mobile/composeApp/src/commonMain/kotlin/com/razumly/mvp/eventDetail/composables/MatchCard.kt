@@ -33,12 +33,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.assignedOfficialUserIds
+import com.razumly.mvp.core.data.dataTypes.officialAssignmentLabels
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.divisionsEquivalent
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
@@ -133,17 +136,14 @@ fun MatchCard(
                     }
                 }
                 val matchDateTimeLabel = formatMatchDateTimeLabel(match.match.start)
-                val showOfficial =
-                    !match.match.teamOfficialId.isNullOrBlank() ||
-                    !match.match.officialId.isNullOrBlank() ||
-                    match.teamOfficial != null
-                val officialLabel = resolveOfficialLabel(
-                    officialUserId = match.match.officialId,
-                    officialTeamId = match.match.teamOfficialId,
+                val officialSummary = resolveOfficialSummary(
+                    match = match.match,
+                    positions = selectedEvent.officialPositions,
                     teams = teams,
                     usersById = usersById,
                     fallbackTeamName = match.teamOfficial?.name,
                 )
+                val showOfficial = !officialSummary.isNullOrBlank()
                 FloatingBox(
                     modifier = Modifier.align(Alignment.TopCenter).offset(y = (-20).dp).zIndex(1f),
                     color = localColors.current.primaryContainer
@@ -193,7 +193,7 @@ fun MatchCard(
                             horizontalArrangement = Arrangement.Center
                         ) {
                             Text(
-                                "Official: $officialLabel",
+                                officialSummary.orEmpty(),
                                 style = MaterialTheme.typography.labelLarge,
                                 color = localColors.current.onPrimaryContainer
                             )
@@ -392,25 +392,38 @@ private fun resolveTeamLabel(team: TeamWithPlayers): String {
     return playerNames.joinToString(" & ").ifBlank { "TBD" }
 }
 
-private fun resolveOfficialLabel(
-    officialUserId: String?,
-    officialTeamId: String?,
+private fun resolveOfficialSummary(
+    match: MatchMVP,
+    positions: List<EventOfficialPosition>,
     teams: Map<String, TeamWithPlayers>,
     usersById: Map<String, UserData>,
     fallbackTeamName: String?,
-): String {
-    val officialTeam = officialTeamId?.let { teams[it] }
-    if (officialTeam != null) {
-        return resolveTeamLabel(officialTeam)
+): String? {
+    val assignmentLabels = match.officialAssignmentLabels(positions)
+    if (assignmentLabels.isNotEmpty()) {
+        val baseSummary = "Officials: ${assignmentLabels.joinToString(", ")}"
+        val officialTeam = match.teamOfficialId?.let { teams[it] }
+        val teamSummary = officialTeam?.let(::resolveTeamLabel)
+            ?: fallbackTeamName?.trim()?.takeIf(String::isNotBlank)
+        return if (teamSummary != null) {
+            "$baseSummary, Team: $teamSummary"
+        } else {
+            baseSummary
+        }
     }
 
-    val officialUser = officialUserId?.let { usersById[it] }
+    val officialTeam = match.teamOfficialId?.let { teams[it] }
+    if (officialTeam != null) {
+        return "Official: ${resolveTeamLabel(officialTeam)}"
+    }
+
+    val officialUser = match.officialId?.let { usersById[it] }
     if (officialUser != null) {
-        return resolveUserLabel(officialUser)
+        return "Official: ${resolveUserLabel(officialUser)}"
     }
 
     val fallback = fallbackTeamName?.trim().orEmpty()
-    return fallback.ifBlank { "TBD" }
+    return fallback.takeIf(String::isNotBlank)?.let { "Official: $it" }
 }
 
 private fun resolveUserLabel(user: UserData): String {
