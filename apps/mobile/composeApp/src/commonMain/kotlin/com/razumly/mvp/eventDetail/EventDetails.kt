@@ -291,8 +291,6 @@ fun EventDetails(
     var draftInviteOfficial by rememberSaveable { mutableStateOf(false) }
     var draftInviteAssistantHost by rememberSaveable { mutableStateOf(false) }
     var staffEditorError by remember { mutableStateOf<String?>(null) }
-    var visibleOfficialCards by rememberSaveable { mutableStateOf(5) }
-    var visibleHostCards by rememberSaveable { mutableStateOf(5) }
 
     val lazyListState = rememberLazyListState()
 
@@ -2398,6 +2396,12 @@ fun EventDetails(
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                                 verticalAlignment = Alignment.Top,
                             ) {
+                                val staffListVisibleCards = 4
+                                val staffCardApproxHeight = 84.dp
+                                val staffCardSpacing = 8.dp
+                                val staffListViewportHeight =
+                                    (staffCardApproxHeight * staffListVisibleCards) +
+                                        (staffCardSpacing * (staffListVisibleCards - 1))
                                 Column(
                                     modifier = Modifier.weight(1f),
                                     verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -2414,21 +2418,26 @@ fun EventDetails(
                                             color = Color(localImageScheme.current.onSurfaceVariant),
                                         )
                                     } else {
-                                        officialStaffCards.take(visibleOfficialCards).forEach { card ->
-                                            StaffAssignmentCard(
-                                                card = card,
-                                                editView = true,
-                                                onRemoveAssigned = { userId, role ->
-                                                    if (role == EventStaffRole.OFFICIAL) {
-                                                        onRemoveOfficialId(userId)
-                                                    }
-                                                },
-                                                onRemoveDraft = onRemovePendingStaffInvite,
-                                            )
-                                        }
-                                        if (officialStaffCards.size > visibleOfficialCards) {
-                                            TextButton(onClick = { visibleOfficialCards += 5 }) {
-                                                Text("Show 5 more")
+                                        LazyColumn(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .heightIn(max = staffListViewportHeight),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                                        ) {
+                                            items(
+                                                items = officialStaffCards,
+                                                key = { card -> card.key },
+                                            ) { card ->
+                                                StaffAssignmentCard(
+                                                    card = card,
+                                                    editView = true,
+                                                    onRemoveAssigned = { userId, role ->
+                                                        if (role == EventStaffRole.OFFICIAL) {
+                                                            onRemoveOfficialId(userId)
+                                                        }
+                                                    },
+                                                    onRemoveDraft = onRemovePendingStaffInvite,
+                                                )
                                             }
                                         }
                                     }
@@ -2438,36 +2447,41 @@ fun EventDetails(
                                     verticalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
                                     Text(
-                                        text = "Hosts",
+                                        text = "Staff",
                                         style = MaterialTheme.typography.bodyMedium,
                                         fontWeight = FontWeight.SemiBold,
                                     )
                                     if (hostStaffCards.isEmpty()) {
                                         Text(
-                                            text = "No host staff assigned yet.",
+                                            text = "No staff assigned yet.",
                                             style = MaterialTheme.typography.bodySmall,
                                             color = Color(localImageScheme.current.onSurfaceVariant),
                                         )
                                     } else {
-                                        hostStaffCards.take(visibleHostCards).forEach { card ->
-                                            StaffAssignmentCard(
-                                                card = card,
-                                                editView = true,
-                                                onRemoveAssigned = { userId, role ->
-                                                    if (role == EventStaffRole.ASSISTANT_HOST) {
-                                                        onUpdateAssistantHostIds(
-                                                            assistantHostIds.filterNot { existingId ->
-                                                                existingId == userId
-                                                            },
-                                                        )
-                                                    }
-                                                },
-                                                onRemoveDraft = onRemovePendingStaffInvite,
-                                            )
-                                        }
-                                        if (hostStaffCards.size > visibleHostCards) {
-                                            TextButton(onClick = { visibleHostCards += 5 }) {
-                                                Text("Show 5 more")
+                                        LazyColumn(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .heightIn(max = staffListViewportHeight),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                                        ) {
+                                            items(
+                                                items = hostStaffCards,
+                                                key = { card -> card.key },
+                                            ) { card ->
+                                                StaffAssignmentCard(
+                                                    card = card,
+                                                    editView = true,
+                                                    onRemoveAssigned = { userId, role ->
+                                                        if (role == EventStaffRole.ASSISTANT_HOST) {
+                                                            onUpdateAssistantHostIds(
+                                                                assistantHostIds.filterNot { existingId ->
+                                                                    existingId == userId
+                                                                },
+                                                            )
+                                                        }
+                                                    },
+                                                    onRemoveDraft = onRemovePendingStaffInvite,
+                                                )
                                             }
                                         }
                                     }

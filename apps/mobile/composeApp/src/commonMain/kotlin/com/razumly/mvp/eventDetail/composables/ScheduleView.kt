@@ -239,7 +239,14 @@ fun ScheduleView(
     val lazyListState = rememberLazyListState()
     val isScrollingUp by lazyListState.isScrollingUp()
     showFab(isScrollingUp)
-    val agendaViewportHeight = (getScreenHeight() * 0.75f).dp
+    val agendaViewportHeight = (
+        getScreenHeight() *
+            if (isMobileLayout) {
+                0.75f
+            } else {
+                0.8f
+            }
+        ).dp
     val dayItems = itemsByDate[selectedDate].orEmpty()
     val dayMatches = remember(dayItems) {
         dayItems.mapNotNull { item -> (item as? ScheduleItem.MatchEntry)?.match }
@@ -359,7 +366,7 @@ fun ScheduleView(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(if (isMobileLayout) agendaViewportHeight else 320.dp),
+                            .height(agendaViewportHeight),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
@@ -371,13 +378,9 @@ fun ScheduleView(
                 }
             } else {
                 item(key = "schedule_agenda_content") {
-                    val agendaContentModifier = if (isMobileLayout) {
-                        Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = agendaViewportHeight)
-                    } else {
-                        Modifier.fillMaxWidth()
-                    }
+                    val agendaContentModifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = agendaViewportHeight)
                     Column(
                         modifier = agendaContentModifier,
                         verticalArrangement = Arrangement.spacedBy(0.dp)
