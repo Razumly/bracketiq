@@ -2,11 +2,13 @@ package com.razumly.mvp.eventDetail.composables
 
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -30,6 +32,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
@@ -39,6 +43,9 @@ import com.razumly.mvp.core.presentation.util.isScrollingUp
 import com.razumly.mvp.core.util.ceilDiv
 import com.razumly.mvp.eventDetail.LocalTournamentComponent
 import kotlinx.coroutines.flow.distinctUntilChanged
+
+private val BRACKET_CONNECTOR_WIDTH = 20.dp
+private val BRACKET_CONNECTOR_STROKE = 2.dp
 
 @Composable
 fun TournamentBracketView(
@@ -76,9 +83,7 @@ fun TournamentBracketView(
         if (!isEditingMatches) {
             MATCH_CARD_BASE_HEIGHT_DP
         } else {
-            val candidateMatches = if (editableMatches.isNotEmpty()) {
-                editableMatches
-            } else {
+            val candidateMatches = editableMatches.ifEmpty {
                 roundsList
                     .flatten()
                     .filterNotNull()
@@ -181,8 +186,9 @@ fun TournamentBracketView(
                 itemsIndexed(displayRounds, key = { _, round ->
                     round.filterNotNull().joinToString { it.match.id }
                 }) { colIndex, round ->
+                    val showOutgoingConnectors = colIndex < displayRounds.lastIndex
                     Column(
-                        modifier = Modifier.padding(start = 16.dp)
+                        modifier = Modifier.padding(start = if (colIndex == 0) 16.dp else 0.dp)
                             .width(intrinsicSize = IntrinsicSize.Max).height(columnHeight),
                         verticalArrangement = Arrangement.SpaceBetween,
                     ) {
@@ -215,47 +221,146 @@ fun TournamentBracketView(
                                     .background(MaterialTheme.colorScheme.background),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Column(
+                                Row(
                                     modifier = Modifier.fillMaxHeight(),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.SpaceAround
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    filteredMatches.forEach { match ->
-                                        val displayMatch = if (isEditingMatches && editableMatches.isNotEmpty()) {
-                                            editableMatches.find { it.match.id == match?.match?.id } ?: match
-                                        } else {
-                                            match
-                                        }
+                                    Column(
+                                        modifier = Modifier.fillMaxHeight(),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.SpaceAround
+                                    ) {
+                                        filteredMatches.forEach { match ->
+                                            val displayMatch = if (isEditingMatches && editableMatches.isNotEmpty()) {
+                                                editableMatches.find { it.match.id == match?.match?.id } ?: match
+                                            } else {
+                                                match
+                                            }
 
-                                        Box(
-                                            modifier = Modifier
-                                                .height(cardHeight.dp)
-                                                .width(cardWidthDp)
-                                        ) {
-                                            if (displayMatch != null) {
-                                                MatchCard(
-                                                    match = displayMatch,
-                                                    onClick = {
-                                                        if (isEditingMatches) {
-                                                            onEditMatch?.invoke(displayMatch)
-                                                        } else {
-                                                            onMatchClick(displayMatch)
-                                                        }
-                                                    },
-                                                    modifier = Modifier
-                                                        .height(cardHeight.dp)
-                                                        .width(cardWidthDp),
-                                                    showEventOfficialNames = showEventOfficialNames,
-                                                    limitOfficialsToCurrentUser = limitOfficialsToCurrentUser,
-                                                    manageMode = isEditingMatches,
-                                                )
+                                            Box(
+                                                modifier = Modifier
+                                                    .height(cardHeight.dp)
+                                                    .width(cardWidthDp)
+                                            ) {
+                                                if (displayMatch != null) {
+                                                    MatchCard(
+                                                        match = displayMatch,
+                                                        onClick = {
+                                                            if (isEditingMatches) {
+                                                                onEditMatch?.invoke(displayMatch)
+                                                            } else {
+                                                                onMatchClick(displayMatch)
+                                                            }
+                                                        },
+                                                        modifier = Modifier
+                                                            .height(cardHeight.dp)
+                                                            .width(cardWidthDp),
+                                                        showEventOfficialNames = showEventOfficialNames,
+                                                        limitOfficialsToCurrentUser = limitOfficialsToCurrentUser,
+                                                        manageMode = isEditingMatches,
+                                                    )
+                                                }
                                             }
                                         }
                                     }
+
+                                    PairConnectorCanvas(
+                                        matches = filteredMatches,
+                                        enabled = showOutgoingConnectors,
+                                        modifier = Modifier.fillMaxHeight(),
+                                    )
                                 }
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PairConnectorCanvas(
+    matches: List<MatchWithRelations?>,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val lineColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val connectorWidth = if (enabled) BRACKET_CONNECTOR_WIDTH else 0.dp
+    Canvas(
+        modifier = modifier.width(connectorWidth)
+    ) {
+        if (!enabled) {
+            return@Canvas
+        }
+        val strokeWidthPx = BRACKET_CONNECTOR_STROKE.toPx()
+        val startX = 0f
+        val joinX = size.width * 0.55f
+        val tipX = size.width - (strokeWidthPx / 2f)
+
+        when (matches.size) {
+            2 -> {
+                val topY = size.height * 0.25f
+                val bottomY = size.height * 0.75f
+                val topVisible = matches[0] != null
+                val bottomVisible = matches[1] != null
+
+                when {
+                    topVisible && bottomVisible -> {
+                        val middleY = (topY + bottomY) / 2f
+                        drawLine(
+                            color = lineColor,
+                            start = Offset(startX, topY),
+                            end = Offset(joinX, topY),
+                            strokeWidth = strokeWidthPx,
+                            cap = StrokeCap.Round,
+                        )
+                        drawLine(
+                            color = lineColor,
+                            start = Offset(startX, bottomY),
+                            end = Offset(joinX, bottomY),
+                            strokeWidth = strokeWidthPx,
+                            cap = StrokeCap.Round,
+                        )
+                        drawLine(
+                            color = lineColor,
+                            start = Offset(joinX, topY),
+                            end = Offset(joinX, bottomY),
+                            strokeWidth = strokeWidthPx,
+                            cap = StrokeCap.Round,
+                        )
+                        drawLine(
+                            color = lineColor,
+                            start = Offset(joinX, middleY),
+                            end = Offset(tipX, middleY),
+                            strokeWidth = strokeWidthPx,
+                            cap = StrokeCap.Round,
+                        )
+                    }
+
+                    topVisible || bottomVisible -> {
+                        val y = if (topVisible) topY else bottomY
+                        drawLine(
+                            color = lineColor,
+                            start = Offset(startX, y),
+                            end = Offset(tipX, y),
+                            strokeWidth = strokeWidthPx,
+                            cap = StrokeCap.Round,
+                        )
+                    }
+                }
+            }
+
+            1 -> {
+                if (matches[0] != null) {
+                    val centerY = size.height / 2f
+                    drawLine(
+                        color = lineColor,
+                        start = Offset(startX, centerY),
+                        end = Offset(tipX, centerY),
+                        strokeWidth = strokeWidthPx,
+                        cap = StrokeCap.Round,
+                    )
                 }
             }
         }
