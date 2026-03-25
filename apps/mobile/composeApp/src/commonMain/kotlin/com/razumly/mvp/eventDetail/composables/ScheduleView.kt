@@ -743,7 +743,6 @@ private fun ScheduleMatchCard(
     val cardHeightDp = calculateMatchCardHeightDp(
         match = match.match,
         positions = selectedEvent.officialPositions,
-        showEventOfficialNames = showEventOfficialNames,
         manageMode = manageMode,
     )
     val verticalPadding = if (hasBottomEdgeOfficial) {

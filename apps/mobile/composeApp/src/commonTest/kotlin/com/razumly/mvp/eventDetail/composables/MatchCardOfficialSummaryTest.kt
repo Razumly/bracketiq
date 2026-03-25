@@ -178,7 +178,6 @@ class MatchCardOfficialSummaryTest {
         val height = calculateMatchCardHeightDp(
             match = match,
             positions = positions,
-            showEventOfficialNames = true,
             manageMode = true,
         )
 

@@ -70,7 +70,7 @@ private val AlternateBracketOnContainer = Color(0xFF123B39)
 
 internal const val MATCH_CARD_BASE_HEIGHT_DP = 90
 private const val MATCH_CARD_MANAGE_SECTION_BASE_HEIGHT_DP = 12
-private const val MATCH_CARD_MANAGE_LINE_HEIGHT_DP = 18
+private const val MATCH_CARD_MANAGE_LINE_HEIGHT_DP = 14
 
 @Composable
 fun MatchCard(
@@ -162,7 +162,7 @@ fun MatchCard(
                         usersById = usersById,
                         currentUserId = currentUser.id,
                         currentUserLabel = resolveUserLabel(currentUser),
-                        showEventOfficialNames = showEventOfficialNames,
+                        showEventOfficialNames = true,
                     )
                 } else {
                     emptyList()
@@ -201,29 +201,27 @@ fun MatchCard(
                         contentColor = localColors.current.onPrimary
                     )
                 ) {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Row(
-                            modifier = Modifier.padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            MatchInfoSection(
-                                match = match,
-                                fields = fields,
-                            )
-                            VerticalDivider(color = localColors.current.onPrimary)
-                            TeamsSection(
-                                team1 = teams[match.match.team1Id],
-                                team2 = teams[match.match.team2Id],
-                                match = match,
-                                matches = matches,
-                                playoffPlaceholders = playoffPlaceholderBySlot,
-                                displaySetCount = resolveDisplaySetCount(selectedEvent, match.match),
-                            )
-                        }
-                        if (showManageOfficials) {
-                            HorizontalDivider(color = localColors.current.onPrimary)
-                            ManageOfficialsSection(rows = manageOfficialRows)
-                        }
+                    Row(
+                        modifier = Modifier.padding(vertical = 4.dp),
+                        verticalAlignment = if (showManageOfficials) Alignment.Top else Alignment.CenterVertically
+                    ) {
+                        MatchInfoSection(
+                            match = match,
+                            fields = fields,
+                            showManageOfficials = showManageOfficials,
+                            manageOfficialRows = manageOfficialRows,
+                        )
+                        VerticalDivider(color = localColors.current.onPrimary)
+                        TeamsSection(
+                            team1 = teams[match.match.team1Id],
+                            team2 = teams[match.match.team2Id],
+                            match = match,
+                            matches = matches,
+                            playoffPlaceholders = playoffPlaceholderBySlot,
+                            displaySetCount = resolveDisplaySetCount(selectedEvent, match.match),
+                            showManageOfficials = showManageOfficials,
+                            manageOfficialRows = manageOfficialRows,
+                        )
                     }
                 }
                 if (showOfficial) {
@@ -267,58 +265,45 @@ private fun FloatingBox(modifier: Modifier, color: Color, content: @Composable (
 private fun MatchInfoSection(
     match: MatchWithRelations,
     fields: List<FieldWithMatches>,
+    showManageOfficials: Boolean,
+    manageOfficialRows: List<ManageOfficialRow>,
 ) {
     val fieldLabel = resolveFieldLabel(match, fields)
+    val rowTextStyle = if (showManageOfficials) {
+        MaterialTheme.typography.bodyLarge
+    } else {
+        MaterialTheme.typography.bodyMedium
+    }
     Column(
-        modifier = Modifier.padding(8.dp).width(IntrinsicSize.Max),
-        verticalArrangement = Arrangement.SpaceEvenly
+        modifier = Modifier
+            .padding(
+                start = 8.dp,
+                top = 8.dp,
+                end = 8.dp,
+                bottom = if (showManageOfficials) 2.dp else 8.dp,
+            )
+            .width(IntrinsicSize.Max),
+        verticalArrangement = if (showManageOfficials) Arrangement.Top else Arrangement.SpaceEvenly
     ) {
-        Text("M: ${match.match.matchId}", color = localColors.current.onPrimary)
+        Text(
+            text = "M: ${match.match.matchId}",
+            style = rowTextStyle,
+            color = localColors.current.onPrimary,
+        )
         HorizontalDivider(color = localColors.current.onPrimary)
         Text(
             "F: $fieldLabel",
+            style = rowTextStyle,
             color = localColors.current.onPrimary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
-    }
-}
-
-@Composable
-private fun ManageOfficialsSection(rows: List<ManageOfficialRow>) {
-    if (rows.isEmpty()) return
-
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.Top
-    ) {
-        Column(
-            modifier = Modifier
-                .padding(8.dp)
-                .width(IntrinsicSize.Max),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            rows.forEachIndexed { index, row ->
+        if (showManageOfficials) {
+            manageOfficialRows.forEach { row ->
+                HorizontalDivider(color = localColors.current.onPrimary)
                 Text(
-                    text = if (index == 0) "O: ${row.positionLabel}" else row.positionLabel,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = localColors.current.onPrimary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-        VerticalDivider(color = localColors.current.onPrimary)
-        Column(
-            modifier = Modifier
-                .padding(8.dp)
-                .fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            rows.forEach { row ->
-                Text(
-                    text = row.officialLabel,
-                    style = MaterialTheme.typography.bodySmall,
+                    text = row.positionLabel,
+                    style = rowTextStyle,
                     color = localColors.current.onPrimary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -361,9 +346,23 @@ private fun TeamsSection(
     matches: Map<String, MatchWithRelations>,
     playoffPlaceholders: Map<BracketSlotKey, String>,
     displaySetCount: Int,
+    showManageOfficials: Boolean,
+    manageOfficialRows: List<ManageOfficialRow>,
 ) {
+    val rowTextStyle = if (showManageOfficials) {
+        MaterialTheme.typography.bodyLarge
+    } else {
+        MaterialTheme.typography.bodyMedium
+    }
     Column(
-        modifier = Modifier.padding(8.dp).fillMaxWidth(),
+        modifier = Modifier
+            .padding(
+                start = 8.dp,
+                top = 8.dp,
+                end = 8.dp,
+                bottom = if (showManageOfficials) 2.dp else 8.dp,
+            )
+            .fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         val leftMatch = resolvePreviousMatch(
@@ -382,6 +381,7 @@ private fun TeamsSection(
             previousMatch = leftMatch,
             isLosersBracket = match.match.losersBracket,
             playoffPlaceholder = playoffPlaceholders[BracketSlotKey(match.match.id, BracketTeamSlot.TEAM1)],
+            forceUniformStyle = showManageOfficials,
         )
         HorizontalDivider(thickness = 1.dp, color = localColors.current.onPrimary)
         TeamRow(
@@ -390,7 +390,21 @@ private fun TeamsSection(
             previousMatch = rightMatch,
             isLosersBracket = match.match.losersBracket,
             playoffPlaceholder = playoffPlaceholders[BracketSlotKey(match.match.id, BracketTeamSlot.TEAM2)],
+            forceUniformStyle = showManageOfficials,
         )
+        if (showManageOfficials) {
+            manageOfficialRows.forEach { row ->
+                HorizontalDivider(thickness = 1.dp, color = localColors.current.onPrimary)
+                Text(
+                    text = row.officialLabel,
+                    modifier = Modifier.fillMaxWidth(),
+                    style = rowTextStyle,
+                    color = localColors.current.onPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
     }
 }
 
@@ -401,6 +415,7 @@ private fun TeamRow(
     previousMatch: MatchWithRelations?,
     isLosersBracket: Boolean,
     playoffPlaceholder: String?,
+    forceUniformStyle: Boolean = false,
 ) {
     val usesReferenceLabel = team == null
     val label = when {
@@ -420,10 +435,14 @@ private fun TeamRow(
         Text(
             text = label,
             modifier = Modifier.weight(1f),
-            style = if (usesReferenceLabel) {
-                MaterialTheme.typography.bodyMedium
-            } else {
+            style = if (forceUniformStyle) {
                 MaterialTheme.typography.bodyLarge
+            } else {
+                if (usesReferenceLabel) {
+                    MaterialTheme.typography.bodyMedium
+                } else {
+                    MaterialTheme.typography.bodyLarge
+                }
             },
             overflow = TextOverflow.Ellipsis,
             maxLines = 1,
@@ -490,10 +509,9 @@ internal data class ManageOfficialRow(
 internal fun calculateMatchCardHeightDp(
     match: MatchMVP,
     positions: List<EventOfficialPosition>,
-    showEventOfficialNames: Boolean,
     manageMode: Boolean,
 ): Int {
-    if (!manageMode || !showEventOfficialNames) {
+    if (!manageMode) {
         return MATCH_CARD_BASE_HEIGHT_DP
     }
     val lineCount = calculateManageOfficialLineCount(match, positions)
@@ -510,6 +528,7 @@ internal fun calculateManageOfficialLineCount(
     positions: List<EventOfficialPosition>,
 ): Int {
     val normalizedAssignments = match.normalizedOfficialAssignments()
+    val legacyOfficialId = match.officialId?.trim()?.takeIf(String::isNotBlank)
     val slots = positions
         .sortedBy(EventOfficialPosition::order)
         .flatMap { position ->
@@ -520,10 +539,11 @@ internal fun calculateManageOfficialLineCount(
     val extraAssignments = normalizedAssignments.count { assignment ->
         !slotKeys.contains(assignment.positionId to assignment.slotIndex)
     }
-    return if (slots.isNotEmpty()) {
-        slots.size + extraAssignments
-    } else {
-        normalizedAssignments.size
+    return when {
+        slots.isNotEmpty() -> slots.size + extraAssignments
+        normalizedAssignments.isNotEmpty() -> normalizedAssignments.size
+        legacyOfficialId != null -> 1
+        else -> 0
     }
 }
 
@@ -541,7 +561,8 @@ internal fun buildManageOfficialRows(
     val normalizedCurrentUserId = currentUserId?.trim()?.takeIf(String::isNotBlank)
     val normalizedCurrentUserLabel = currentUserLabel?.trim()?.takeIf(String::isNotBlank)
     val normalizedAssignments = match.normalizedOfficialAssignments()
-    if (normalizedAssignments.isEmpty() && positions.isEmpty()) {
+    val legacyOfficialId = match.officialId?.trim()?.takeIf(String::isNotBlank)
+    if (normalizedAssignments.isEmpty() && positions.isEmpty() && legacyOfficialId == null) {
         return emptyList()
     }
 
@@ -607,6 +628,23 @@ internal fun buildManageOfficialRows(
         }
         val officialLabel: String = resolvedUserLabel ?: currentUserFallback.ifBlank { "TBD" }
         rows += ManageOfficialRow(positionLabel = positionLabel, officialLabel = officialLabel)
+    }
+
+    if (normalizedAssignments.isEmpty() && legacyOfficialId != null) {
+        val legacyOfficialLabel = usersById[legacyOfficialId]
+            ?.let(::resolveUserLabel)
+            ?.takeIf(String::isNotBlank)
+            ?: if (legacyOfficialId == normalizedCurrentUserId) {
+                normalizedCurrentUserLabel ?: ""
+            } else {
+                ""
+            }
+            .ifBlank { "TBD" }
+        if (rows.isNotEmpty()) {
+            rows[0] = rows[0].copy(officialLabel = legacyOfficialLabel)
+        } else {
+            rows += ManageOfficialRow(positionLabel = "Official", officialLabel = legacyOfficialLabel)
+        }
     }
 
     return rows

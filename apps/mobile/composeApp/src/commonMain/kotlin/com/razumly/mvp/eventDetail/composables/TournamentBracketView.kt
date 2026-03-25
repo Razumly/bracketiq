@@ -87,7 +87,6 @@ fun TournamentBracketView(
                 calculateMatchCardHeightDp(
                     match = candidate.match,
                     positions = selectedEvent.officialPositions,
-                    showEventOfficialNames = showEventOfficialNames,
                     manageMode = true,
                 )
             } ?: MATCH_CARD_BASE_HEIGHT_DP
@@ -119,17 +118,17 @@ fun TournamentBracketView(
         showFab(isScrollingLeft)
     }
 
-    LaunchedEffect(lazyRowState, roundsList, losersBracket) {
+    LaunchedEffect(lazyRowState, displayRounds, losersBracket, cardContainerHeight) {
         // Function to calculate height
         fun calculateMaxHeight(index: Int) {
             var maxSize = 0
             val itemsInViewCount =
-                lazyRowState.layoutInfo.visibleItemsInfo.size.takeIf { it > 0 } ?: roundsList.size
+                lazyRowState.layoutInfo.visibleItemsInfo.size.takeIf { it > 0 } ?: displayRounds.size
             val lastItemInViewIndex =
-                (index + itemsInViewCount - 1).coerceAtMost(roundsList.size - 1)
+                (index + itemsInViewCount - 1).coerceAtMost(displayRounds.size - 1)
 
-            if (roundsList.isNotEmpty() && index < roundsList.size) {
-                roundsList.slice(index..lastItemInViewIndex).forEachIndexed { i, round ->
+            if (displayRounds.isNotEmpty() && index < displayRounds.size) {
+                displayRounds.slice(index..lastItemInViewIndex).forEachIndexed { i, round ->
                     val notNullSize = round.filterNotNull().size
                     val halfSize = round.size.ceilDiv(2)
                     val currentIndex = index + i
