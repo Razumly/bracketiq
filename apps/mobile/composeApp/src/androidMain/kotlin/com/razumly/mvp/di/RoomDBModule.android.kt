@@ -11,7 +11,7 @@ import com.razumly.mvp.core.data.MIGRATION_1_2_NO_OP
 import com.razumly.mvp.core.data.MIGRATION_2_3_MATCH_START_NULLABLE
 import com.razumly.mvp.core.data.MIGRATION_3_4_USER_PRIVACY_FIELDS
 import com.razumly.mvp.core.data.MVP_DATABASE_VERSION
-import com.razumly.mvp.core.data.MVPDatabaseservice
+import com.razumly.mvp.core.data.MVPDatabaseService
 import io.github.aakira.napier.Napier
 import org.koin.dsl.bind
 import org.koin.dsl.module
@@ -29,7 +29,7 @@ actual val roomDBModule = module {
         )
         Napier.i(tag = ROOM_DB_LOG_TAG) { "Initializing Room database at ${dbFile.absolutePath}" }
         runCatching {
-            Room.databaseBuilder<MVPDatabaseservice>(
+            Room.databaseBuilder<MVPDatabaseService>(
                 context.applicationContext,
                 dbFile.absolutePath
             ).setDriver(BundledSQLiteDriver())

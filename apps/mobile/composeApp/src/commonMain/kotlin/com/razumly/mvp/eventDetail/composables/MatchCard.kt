@@ -40,15 +40,17 @@ import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.UserData
-import com.razumly.mvp.core.data.dataTypes.assignedOfficialUserIds
 import com.razumly.mvp.core.data.dataTypes.officialAssignmentLabels
+import com.razumly.mvp.core.data.dataTypes.normalizedOfficialAssignments
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.divisionsEquivalent
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 import com.razumly.mvp.eventDetail.LocalTournamentComponent
+import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
+import kotlin.time.Clock
 import kotlin.time.Instant
 import kotlin.time.ExperimentalTime
 
@@ -66,17 +68,25 @@ private val AlternateBracketOnPrimary = Color(0xFFFFFFFF)
 private val AlternateBracketContainer = Color(0xFFD9F4EF)
 private val AlternateBracketOnContainer = Color(0xFF123B39)
 
+internal const val MATCH_CARD_BASE_HEIGHT_DP = 90
+private const val MATCH_CARD_MANAGE_SECTION_BASE_HEIGHT_DP = 12
+private const val MATCH_CARD_MANAGE_LINE_HEIGHT_DP = 18
+
 @Composable
 fun MatchCard(
     match: MatchWithRelations?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    showEventOfficialNames: Boolean = true,
+    limitOfficialsToCurrentUser: Boolean = false,
+    manageMode: Boolean = false,
 ) {
     val component = LocalTournamentComponent.current
     val teams by component.divisionTeams.collectAsState()
     val matches by component.divisionMatches.collectAsState()
     val fields by component.divisionFields.collectAsState()
     val selectedEvent by component.selectedEvent.collectAsState()
+    val currentUser by component.currentUser.collectAsState()
     val eventWithRelations by component.eventWithRelations.collectAsState()
     val usersById = remember(eventWithRelations.players) {
         eventWithRelations.players.associateBy(UserData::id)
@@ -136,14 +146,42 @@ fun MatchCard(
                     }
                 }
                 val matchDateTimeLabel = formatMatchDateTimeLabel(match.match.start)
-                val officialSummary = resolveOfficialSummary(
+                val eventOfficialSummary = resolveEventOfficialSummary(
                     match = match.match,
                     positions = selectedEvent.officialPositions,
-                    teams = teams,
                     usersById = usersById,
+                    showEventOfficialNames = showEventOfficialNames,
+                    currentUserId = currentUser.id,
+                    currentUserLabel = resolveUserLabel(currentUser),
+                    showOnlyCurrentOfficial = limitOfficialsToCurrentUser,
+                )
+                val manageOfficialRows = if (manageMode) {
+                    buildManageOfficialRows(
+                        match = match.match,
+                        positions = selectedEvent.officialPositions,
+                        usersById = usersById,
+                        currentUserId = currentUser.id,
+                        currentUserLabel = resolveUserLabel(currentUser),
+                        showEventOfficialNames = showEventOfficialNames,
+                    )
+                } else {
+                    emptyList()
+                }
+                val teamOfficialSummary = resolveTeamOfficialSummary(
+                    match = match.match,
+                    teams = teams,
                     fallbackTeamName = match.teamOfficial?.name,
                 )
+                val officialSummary = if (manageMode) {
+                    teamOfficialSummary
+                } else {
+                    resolveOfficialSummary(
+                        eventOfficialSummary = eventOfficialSummary,
+                        teamOfficialSummary = teamOfficialSummary,
+                    )
+                }
                 val showOfficial = !officialSummary.isNullOrBlank()
+                val showManageOfficials = manageMode && manageOfficialRows.isNotEmpty()
                 FloatingBox(
                     modifier = Modifier.align(Alignment.TopCenter).offset(y = (-20).dp).zIndex(1f),
                     color = localColors.current.primaryContainer
@@ -163,23 +201,29 @@ fun MatchCard(
                         contentColor = localColors.current.onPrimary
                     )
                 ) {
-                    Row(
-                        modifier = Modifier.padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        MatchInfoSection(
-                            match = match,
-                            fields = fields,
-                        )
-                        VerticalDivider(color = localColors.current.onPrimary)
-                        TeamsSection(
-                            team1 = teams[match.match.team1Id],
-                            team2 = teams[match.match.team2Id],
-                            match = match,
-                            matches = matches,
-                            playoffPlaceholders = playoffPlaceholderBySlot,
-                            displaySetCount = resolveDisplaySetCount(selectedEvent, match.match),
-                        )
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier.padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            MatchInfoSection(
+                                match = match,
+                                fields = fields,
+                            )
+                            VerticalDivider(color = localColors.current.onPrimary)
+                            TeamsSection(
+                                team1 = teams[match.match.team1Id],
+                                team2 = teams[match.match.team2Id],
+                                match = match,
+                                matches = matches,
+                                playoffPlaceholders = playoffPlaceholderBySlot,
+                                displaySetCount = resolveDisplaySetCount(selectedEvent, match.match),
+                            )
+                        }
+                        if (showManageOfficials) {
+                            HorizontalDivider(color = localColors.current.onPrimary)
+                            ManageOfficialsSection(rows = manageOfficialRows)
+                        }
                     }
                 }
                 if (showOfficial) {
@@ -195,7 +239,9 @@ fun MatchCard(
                             Text(
                                 officialSummary.orEmpty(),
                                 style = MaterialTheme.typography.labelLarge,
-                                color = localColors.current.onPrimaryContainer
+                                color = localColors.current.onPrimaryContainer,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
                     }
@@ -235,6 +281,50 @@ private fun MatchInfoSection(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
+    }
+}
+
+@Composable
+private fun ManageOfficialsSection(rows: List<ManageOfficialRow>) {
+    if (rows.isEmpty()) return
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.Top
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(8.dp)
+                .width(IntrinsicSize.Max),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            rows.forEachIndexed { index, row ->
+                Text(
+                    text = if (index == 0) "O: ${row.positionLabel}" else row.positionLabel,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = localColors.current.onPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        VerticalDivider(color = localColors.current.onPrimary)
+        Column(
+            modifier = Modifier
+                .padding(8.dp)
+                .fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            rows.forEach { row ->
+                Text(
+                    text = row.officialLabel,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = localColors.current.onPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
     }
 }
 
@@ -392,38 +482,215 @@ private fun resolveTeamLabel(team: TeamWithPlayers): String {
     return playerNames.joinToString(" & ").ifBlank { "TBD" }
 }
 
-private fun resolveOfficialSummary(
+internal data class ManageOfficialRow(
+    val positionLabel: String,
+    val officialLabel: String,
+)
+
+internal fun calculateMatchCardHeightDp(
     match: MatchMVP,
     positions: List<EventOfficialPosition>,
-    teams: Map<String, TeamWithPlayers>,
+    showEventOfficialNames: Boolean,
+    manageMode: Boolean,
+): Int {
+    if (!manageMode || !showEventOfficialNames) {
+        return MATCH_CARD_BASE_HEIGHT_DP
+    }
+    val lineCount = calculateManageOfficialLineCount(match, positions)
+    if (lineCount == 0) {
+        return MATCH_CARD_BASE_HEIGHT_DP
+    }
+    return MATCH_CARD_BASE_HEIGHT_DP +
+        MATCH_CARD_MANAGE_SECTION_BASE_HEIGHT_DP +
+        (lineCount * MATCH_CARD_MANAGE_LINE_HEIGHT_DP)
+}
+
+internal fun calculateManageOfficialLineCount(
+    match: MatchMVP,
+    positions: List<EventOfficialPosition>,
+): Int {
+    val normalizedAssignments = match.normalizedOfficialAssignments()
+    val slots = positions
+        .sortedBy(EventOfficialPosition::order)
+        .flatMap { position ->
+            val slotCount = position.count.coerceAtLeast(1)
+            (0 until slotCount).map { slotIndex -> position.id to slotIndex }
+        }
+    val slotKeys = slots.toSet()
+    val extraAssignments = normalizedAssignments.count { assignment ->
+        !slotKeys.contains(assignment.positionId to assignment.slotIndex)
+    }
+    return if (slots.isNotEmpty()) {
+        slots.size + extraAssignments
+    } else {
+        normalizedAssignments.size
+    }
+}
+
+internal fun buildManageOfficialRows(
+    match: MatchMVP,
+    positions: List<EventOfficialPosition>,
     usersById: Map<String, UserData>,
-    fallbackTeamName: String?,
-): String? {
-    val assignmentLabels = match.officialAssignmentLabels(positions)
-    if (assignmentLabels.isNotEmpty()) {
-        val baseSummary = "Officials: ${assignmentLabels.joinToString(", ")}"
-        val officialTeam = match.teamOfficialId?.let { teams[it] }
-        val teamSummary = officialTeam?.let(::resolveTeamLabel)
-            ?: fallbackTeamName?.trim()?.takeIf(String::isNotBlank)
-        return if (teamSummary != null) {
-            "$baseSummary, Team: $teamSummary"
+    currentUserId: String? = null,
+    currentUserLabel: String? = null,
+    showEventOfficialNames: Boolean,
+): List<ManageOfficialRow> {
+    if (!showEventOfficialNames) {
+        return emptyList()
+    }
+    val normalizedCurrentUserId = currentUserId?.trim()?.takeIf(String::isNotBlank)
+    val normalizedCurrentUserLabel = currentUserLabel?.trim()?.takeIf(String::isNotBlank)
+    val normalizedAssignments = match.normalizedOfficialAssignments()
+    if (normalizedAssignments.isEmpty() && positions.isEmpty()) {
+        return emptyList()
+    }
+
+    val assignmentLabels = if (normalizedAssignments.isNotEmpty()) {
+        match.officialAssignmentLabels(positions)
+    } else {
+        emptyList()
+    }
+    val assignmentLabelsByKey = normalizedAssignments.mapIndexed { index, assignment ->
+        (assignment.positionId to assignment.slotIndex) to (assignmentLabels.getOrNull(index) ?: "Official")
+    }.toMap()
+    val assignmentsByKey = normalizedAssignments.associateBy { assignment -> assignment.positionId to assignment.slotIndex }
+
+    val positionSlots = positions
+        .sortedBy(EventOfficialPosition::order)
+        .flatMap { position ->
+            val slotCount = position.count.coerceAtLeast(1)
+            val baseLabel = position.name.trim().ifBlank { "Official" }
+            (0 until slotCount).map { slotIndex ->
+                val slotLabel = if (slotCount > 1) "$baseLabel ${slotIndex + 1}" else baseLabel
+                Triple(position.id, slotIndex, slotLabel)
+            }
+        }
+
+    val rows = mutableListOf<ManageOfficialRow>()
+    val handledKeys = mutableSetOf<Pair<String, Int>>()
+
+    positionSlots.forEach { (positionId, slotIndex, slotLabel) ->
+        val key = positionId to slotIndex
+        handledKeys += key
+        val assignment = assignmentsByKey[key]
+        val officialLabel: String = when {
+            assignment == null -> "TBD"
+            else -> {
+                val resolvedUserLabel = usersById[assignment.userId]
+                    ?.let(::resolveUserLabel)
+                    ?.takeIf(String::isNotBlank)
+                val currentUserFallback = if (assignment.userId == normalizedCurrentUserId) {
+                    normalizedCurrentUserLabel ?: ""
+                } else {
+                    ""
+                }
+                resolvedUserLabel ?: currentUserFallback.ifBlank { "TBD" }
+            }
+        }
+        rows += ManageOfficialRow(
+            positionLabel = slotLabel,
+            officialLabel = officialLabel,
+        )
+    }
+
+    normalizedAssignments.forEach { assignment ->
+        val key = assignment.positionId to assignment.slotIndex
+        if (handledKeys.contains(key)) return@forEach
+        val positionLabel = assignmentLabelsByKey[key] ?: "Official"
+        val resolvedUserLabel = usersById[assignment.userId]
+            ?.let(::resolveUserLabel)
+            ?.takeIf(String::isNotBlank)
+        val currentUserFallback = if (assignment.userId == normalizedCurrentUserId) {
+            normalizedCurrentUserLabel ?: ""
         } else {
-            baseSummary
+            ""
+        }
+        val officialLabel: String = resolvedUserLabel ?: currentUserFallback.ifBlank { "TBD" }
+        rows += ManageOfficialRow(positionLabel = positionLabel, officialLabel = officialLabel)
+    }
+
+    return rows
+}
+
+internal fun resolveOfficialSummary(
+    eventOfficialSummary: String?,
+    teamOfficialSummary: String?,
+): String? {
+    if (eventOfficialSummary.isNullOrBlank()) {
+        return teamOfficialSummary
+    }
+    if (teamOfficialSummary.isNullOrBlank()) {
+        return eventOfficialSummary
+    }
+    val teamLabel = teamOfficialSummary.removePrefix("Official: ").trim().ifBlank { teamOfficialSummary }
+    return "$eventOfficialSummary, Team: $teamLabel"
+}
+
+internal fun resolveEventOfficialSummary(
+    match: MatchMVP,
+    positions: List<EventOfficialPosition>,
+    usersById: Map<String, UserData>,
+    showEventOfficialNames: Boolean,
+    currentUserId: String? = null,
+    currentUserLabel: String? = null,
+    showOnlyCurrentOfficial: Boolean = false,
+): String? {
+    val normalizedCurrentUserId = currentUserId?.trim()?.takeIf(String::isNotBlank)
+    val normalizedCurrentUserLabel = currentUserLabel?.trim()?.takeIf(String::isNotBlank)
+    if (!showEventOfficialNames) {
+        return null
+    }
+
+    val normalizedAssignments = match.normalizedOfficialAssignments()
+    val assignmentLabels = if (normalizedAssignments.isNotEmpty()) {
+        match.officialAssignmentLabels(positions)
+    } else {
+        emptyList()
+    }
+    val labeledAssignments = normalizedAssignments.mapIndexed { index, assignment ->
+        assignment to assignmentLabels.getOrNull(index)
+    }
+    val visibleAssignments = if (showOnlyCurrentOfficial) {
+        val currentUserIdForFilter = normalizedCurrentUserId ?: return null
+        labeledAssignments.filter { (assignment, _) -> assignment.userId == currentUserIdForFilter }
+    } else {
+        labeledAssignments
+    }
+    val assignmentDisplayNames = visibleAssignments.map { (assignment, label) ->
+        usersById[assignment.userId]
+            ?.let(::resolveUserLabel)
+            ?.takeIf(String::isNotBlank)
+            ?: if (assignment.userId == normalizedCurrentUserId) normalizedCurrentUserLabel else null
+            ?: label
+            ?: "Official"
+    }.distinct()
+    if (assignmentDisplayNames.isNotEmpty()) {
+        return "Officials: ${assignmentDisplayNames.joinToString(", ")}"
+    }
+
+    val legacyOfficialId = match.officialId?.trim()?.takeIf(String::isNotBlank)
+    if (!showOnlyCurrentOfficial || legacyOfficialId == normalizedCurrentUserId) {
+        val officialUser = legacyOfficialId?.let { usersById[it] }
+        if (officialUser != null) {
+            return "Official: ${resolveUserLabel(officialUser)}"
+        }
+        if (legacyOfficialId != null && legacyOfficialId == normalizedCurrentUserId && normalizedCurrentUserLabel != null) {
+            return "Official: $normalizedCurrentUserLabel"
         }
     }
 
-    val officialTeam = match.teamOfficialId?.let { teams[it] }
-    if (officialTeam != null) {
-        return "Official: ${resolveTeamLabel(officialTeam)}"
-    }
+    return null
+}
 
-    val officialUser = match.officialId?.let { usersById[it] }
-    if (officialUser != null) {
-        return "Official: ${resolveUserLabel(officialUser)}"
-    }
-
-    val fallback = fallbackTeamName?.trim().orEmpty()
-    return fallback.takeIf(String::isNotBlank)?.let { "Official: $it" }
+internal fun resolveTeamOfficialSummary(
+    match: MatchMVP,
+    teams: Map<String, TeamWithPlayers>,
+    fallbackTeamName: String?,
+): String? {
+    val officialTeamSummary = match.teamOfficialId?.let { teams[it] }
+        ?.let(::resolveTeamLabel)
+        ?: fallbackTeamName?.trim()?.takeIf(String::isNotBlank)
+    return officialTeamSummary?.let { "Official: $it" }
 }
 
 private fun resolveUserLabel(user: UserData): String {
@@ -740,19 +1007,30 @@ internal fun formatOrdinalPlacement(position: Int): String {
 }
 
 private fun formatMatchDateTimeLabel(start: Instant?): String {
+    val today = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).date
+    return formatMatchDateTimeLabel(start = start, today = today)
+}
+
+internal fun formatMatchDateTimeLabel(start: Instant?, today: LocalDate): String {
     if (start == null) {
         return "TBD"
     }
     val localDateTime = start.toLocalDateTime(TimeZone.currentSystemDefault())
-    val month = localDateTime.date.month.toString().padStart(2, '0')
-    val day = localDateTime.date.day.toString().padStart(2, '0')
-    val year = localDateTime.date.year
     val hour24 = localDateTime.time.hour
     val minute = localDateTime.time.minute.toString().padStart(2, '0')
-    val amPm = if (hour24 >= 12) "PM" else "AM"
+    val amPm = if (hour24 >= 12) "P.M." else "A.M."
     val hour12 = when (val normalizedHour = hour24 % 12) {
         0 -> 12
         else -> normalizedHour
     }
-    return "$month/$day/$year $hour12:$minute $amPm"
+    val formattedTime = "$hour12:$minute $amPm"
+    if (localDateTime.date == today) {
+        return formattedTime
+    }
+
+    val monthName = localDateTime.date.month.name
+        .take(3)
+        .lowercase()
+        .replaceFirstChar { it.titlecase() }
+    return "${localDateTime.date.day} $monthName, ${localDateTime.date.year} $formattedTime"
 }

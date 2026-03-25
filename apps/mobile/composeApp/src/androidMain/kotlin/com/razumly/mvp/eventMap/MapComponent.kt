@@ -231,7 +231,8 @@ actual class MapComponent(
             val fields = listOf(
                 Place.Field.ID,
                 Place.Field.DISPLAY_NAME,
-                Place.Field.LOCATION
+                Place.Field.LOCATION,
+                Place.Field.FORMATTED_ADDRESS,
             )
             val fetchPlaceRequest = FetchPlaceRequest.builder(placeId, fields).build()
             placesClient.fetchPlace(fetchPlaceRequest)
@@ -293,7 +294,8 @@ actual class MapComponent(
             val fields = listOf(
                 Place.Field.ID,
                 Place.Field.DISPLAY_NAME,
-                Place.Field.LOCATION
+                Place.Field.LOCATION,
+                Place.Field.FORMATTED_ADDRESS,
             )
 
             val request = SearchByTextRequest.builder(query, fields)

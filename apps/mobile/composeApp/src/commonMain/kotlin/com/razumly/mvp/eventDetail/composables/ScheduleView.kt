@@ -35,6 +35,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -63,12 +64,14 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.assignedOfficialUserIds
+import com.razumly.mvp.core.data.dataTypes.normalizedOfficialAssignments
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.util.getScreenHeight
 import com.razumly.mvp.core.presentation.util.getImageUrl
 import com.razumly.mvp.core.presentation.util.getScreenWidth
 import com.razumly.mvp.core.presentation.util.isScrollingUp
 import com.razumly.mvp.core.presentation.util.timeFormat
+import com.razumly.mvp.eventDetail.LocalTournamentComponent
 import kotlinx.coroutines.launch
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.Month
@@ -131,6 +134,8 @@ fun ScheduleView(
     fields: List<FieldWithMatches>,
     showFab: (Boolean) -> Unit,
     trackedUserIds: Set<String> = emptySet(),
+    showEventOfficialNames: Boolean = true,
+    limitOfficialsToCurrentUser: Boolean = false,
     canManageMatches: Boolean = false,
     onToggleLockAllMatches: ((Boolean, List<String>) -> Unit)? = null,
     onMatchClick: (MatchWithRelations) -> Unit,
@@ -139,6 +144,9 @@ fun ScheduleView(
         ScheduleMatchCard(
             match = match,
             onClick = onClick,
+            showEventOfficialNames = showEventOfficialNames,
+            limitOfficialsToCurrentUser = limitOfficialsToCurrentUser,
+            manageMode = canManageMatches,
         )
     },
     eventCardContent: @Composable (Event, Instant, Instant, () -> Unit) -> Unit = { event, start, end, onClick ->
@@ -500,7 +508,7 @@ private fun ScheduleDay(
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                text = day.date.dayOfMonth.toString(),
+                text = day.date.day.toString(),
                 color = contentColor,
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
@@ -709,12 +717,36 @@ private fun normalizeScheduleEnd(start: Instant, end: Instant?): Instant =
 private fun ScheduleMatchCard(
     match: MatchWithRelations,
     onClick: () -> Unit,
+    showEventOfficialNames: Boolean,
+    limitOfficialsToCurrentUser: Boolean,
+    manageMode: Boolean,
 ) {
-    val hasAssignedMatchOfficial =
-        match.match.assignedOfficialUserIds().isNotEmpty() ||
-            !match.match.teamOfficialId.isNullOrBlank() ||
+    val component = LocalTournamentComponent.current
+    val currentUser by component.currentUser.collectAsState()
+    val selectedEvent by component.selectedEvent.collectAsState()
+    val normalizedCurrentUserId = currentUser.id.trim()
+    val hasTeamOfficial =
+        !match.match.teamOfficialId.isNullOrBlank() ||
             match.teamOfficial != null
-    val verticalPadding = if (hasAssignedMatchOfficial) {
+    val hasAnyEventOfficial =
+        match.match.assignedOfficialUserIds().isNotEmpty()
+    val hasVisibleEventOfficial = if (
+        limitOfficialsToCurrentUser && normalizedCurrentUserId.isNotBlank()
+    ) {
+        match.match.normalizedOfficialAssignments().any { assignment ->
+            assignment.userId == normalizedCurrentUserId
+        } || match.match.officialId?.trim() == normalizedCurrentUserId
+    } else {
+        hasAnyEventOfficial
+    }
+    val hasBottomEdgeOfficial = hasTeamOfficial || (!manageMode && showEventOfficialNames && hasVisibleEventOfficial)
+    val cardHeightDp = calculateMatchCardHeightDp(
+        match = match.match,
+        positions = selectedEvent.officialPositions,
+        showEventOfficialNames = showEventOfficialNames,
+        manageMode = manageMode,
+    )
+    val verticalPadding = if (hasBottomEdgeOfficial) {
         BRACKET_CARD_VERTICAL_PADDING_WITH_OFFICIAL_DP.dp
     } else {
         BRACKET_CARD_VERTICAL_PADDING_DP.dp
@@ -729,7 +761,10 @@ private fun ScheduleMatchCard(
             onClick = onClick,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(BRACKET_CARD_HEIGHT_DP.dp),
+                .height(cardHeightDp.dp),
+            showEventOfficialNames = showEventOfficialNames,
+            limitOfficialsToCurrentUser = limitOfficialsToCurrentUser,
+            manageMode = manageMode,
         )
     }
 }
@@ -831,7 +866,7 @@ private fun formatScheduleDateTimeWindow(
     val startTimeLabel = localStart.time.format(timeFormat)
     val endTimeLabel = localEnd.time.format(timeFormat)
     return if (localStart.date == localEnd.date) {
-        "${formatDate(localStart.date)} â€¢ $startTimeLabel - $endTimeLabel"
+        "${formatDate(localStart.date)} - $startTimeLabel - $endTimeLabel"
     } else {
         "${formatDate(localStart.date)} $startTimeLabel - ${formatDate(localEnd.date)} $endTimeLabel"
     }
@@ -945,5 +980,3 @@ private fun CalendarNavigationIcon(
         contentDescription = contentDescription,
     )
 }
-
-

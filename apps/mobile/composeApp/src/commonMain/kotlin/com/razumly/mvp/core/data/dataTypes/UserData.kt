@@ -3,7 +3,7 @@ package com.razumly.mvp.core.data.dataTypes
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import com.razumly.mvp.core.data.dataTypes.dtos.UserDataDTO
-import com.razumly.mvp.core.presentation.util.toTitleCase
+import com.razumly.mvp.core.presentation.util.toNameCase
 import kotlinx.serialization.Serializable
 
 @Entity
@@ -61,7 +61,7 @@ data class UserData(
 
             val resolvedFullName = "$firstName $lastName".trim()
             if (resolvedFullName.isNotBlank()) {
-                return resolvedFullName.toTitleCase()
+                return resolvedFullName.toNameCase()
             }
 
             if (isIdentityHidden) {

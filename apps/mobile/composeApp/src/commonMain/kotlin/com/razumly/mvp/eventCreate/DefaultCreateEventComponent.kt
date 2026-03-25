@@ -719,7 +719,8 @@ class DefaultCreateEventComponent(
         updateEventField {
             copy(
                 coordinates = place?.coordinates ?: listOf(0.0, 0.0),
-                location = place?.name ?: ""
+                location = place?.name ?: "",
+                address = place?.address,
             )
         }
     }
@@ -870,6 +871,7 @@ class DefaultCreateEventComponent(
         _newEventState.value = applyRentalConstraints(_newEventState.value.copy(
             name = _newEventState.value.name.ifBlank { "${context.organizationName} Rental Event" },
             location = context.organizationLocation ?: _newEventState.value.location,
+            address = context.organizationAddress ?: _newEventState.value.address,
             coordinates = context.organizationCoordinates ?: _newEventState.value.coordinates,
             organizationId = context.organizationId,
             fieldIds = selectedFieldIds,
@@ -1671,5 +1673,3 @@ class DefaultCreateEventComponent(
         private val rentalCheckoutLocks = mutableMapOf<String, Instant>()
     }
 }
-
-

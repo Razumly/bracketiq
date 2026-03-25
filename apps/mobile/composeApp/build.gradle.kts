@@ -310,6 +310,20 @@ dependencies {
     implementation(libs.androidx.material)
 }
 
+// KSP can occasionally keep stale Room constructor outputs between Android variants on Windows.
+// Force Android KSP regeneration and wipe all Android KSP outputs/caches before each Android KSP run.
+tasks.matching { task ->
+    task.name == "kspDebugKotlinAndroid" || task.name == "kspReleaseKotlinAndroid"
+}.configureEach {
+    outputs.upToDateWhen { false }
+    outputs.cacheIf { false }
+    doFirst {
+        delete(layout.buildDirectory.dir("generated/ksp/android"))
+        delete(layout.buildDirectory.dir("kspCaches/android"))
+        delete(layout.buildDirectory.dir("tmp/ksp"))
+    }
+}
+
 val deviceName =
     project.findProperty("iosDevice") as? String ?: "BE7968D4-D8CD-4F4F-A995-307A153AB31C"
 

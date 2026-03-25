@@ -1,6 +1,9 @@
 package com.razumly.mvp.eventMap
 
+import android.location.Geocoder
+import android.os.Build
 import android.location.Location
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -46,9 +49,12 @@ import com.razumly.mvp.eventMap.composables.MapEventCard
 import com.razumly.mvp.eventMap.composables.MapPOICard
 import dev.icerock.moko.geo.compose.BindLocationTrackerEffect
 import io.github.aakira.napier.Napier
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Collections.emptyList
+import java.util.Locale
 
 @Composable
 actual fun EventMap(
@@ -62,6 +68,7 @@ actual fun EventMap(
     focusedEvent: Event?,
     onBackPressed: (() -> Unit)?
 ) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val trackedLocation by component.currentLocation.collectAsState()
     val events by component.events.collectAsState()
@@ -116,10 +123,14 @@ actual fun EventMap(
                 throwable = throwable,
             )
             val fallbackLatLng = markerLatLng ?: LatLng(0.0, 0.0)
+            val fallbackAddress = searchResult.formattedAddress
+                ?.takeIf { it.isNotBlank() }
+                ?: reverseGeocodeAddress(context, fallbackLatLng)
             MVPPlace(
                 name = searchResult.displayName ?: "Selected location",
                 id = searchResult.id ?: "",
                 coordinates = listOf(fallbackLatLng.longitude, fallbackLatLng.latitude),
+                address = fallbackAddress,
             )
         }
 
@@ -135,10 +146,12 @@ actual fun EventMap(
                 message = "Failed to fetch POI details. Falling back to marker coordinates.",
                 throwable = throwable,
             )
+            val fallbackAddress = reverseGeocodeAddress(context, poi.latLng)
             MVPPlace(
                 name = poi.name,
                 id = poi.placeId,
                 coordinates = listOf(poi.latLng.longitude, poi.latLng.latitude),
+                address = fallbackAddress,
             )
         }
 
@@ -444,6 +457,32 @@ actual fun EventMap(
             )
         }
     }
+}
+
+private suspend fun reverseGeocodeAddress(
+    context: android.content.Context,
+    latLng: LatLng,
+): String? = withContext(Dispatchers.IO) {
+    if (!Geocoder.isPresent()) return@withContext null
+    runCatching {
+        val geocoder = Geocoder(context, Locale.getDefault())
+        val addresses = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            geocoder.getFromLocation(latLng.latitude, latLng.longitude, 1)
+        } else {
+            @Suppress("DEPRECATION")
+            geocoder.getFromLocation(latLng.latitude, latLng.longitude, 1)
+        }
+        addresses
+            ?.firstOrNull()
+            ?.getAddressLine(0)
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+    }.onFailure { throwable ->
+        Napier.w(
+            message = "Reverse geocode fallback failed: ${throwable.message}",
+            tag = "EventMap.reverseGeocodeAddress",
+        )
+    }.getOrNull()
 }
 
 private fun distanceBetweenMeters(start: LatLng, end: LatLng): Float {

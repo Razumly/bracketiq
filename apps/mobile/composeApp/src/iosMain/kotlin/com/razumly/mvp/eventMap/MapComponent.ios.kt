@@ -111,7 +111,7 @@ actual class MapComponent(
      */
     suspend fun getPlace(placeId: String): MVPPlace? {
         val url = "https://places.googleapis.com/v1/places/$placeId" +
-                "?fields=name,location,displayName"
+                "?fields=name,location,displayName,formattedAddress"
 
         return try {
             val response = httpClient.get(url) {
@@ -119,10 +119,14 @@ actual class MapComponent(
                 header("X-Goog-Api-Key", apiKey)
             }.body<WebPlaceDetails>()
 
+            val locationName = response.displayName.text
+                ?.takeIf { it.isNotBlank() }
+                ?: response.formattedAddress.orEmpty()
             MVPPlace(
-                name = response.displayName.text,
+                name = locationName,
                 id = placeId,
                 coordinates = listOf(response.location.longitude, response.location.latitude),
+                address = response.formattedAddress,
             )
         } catch (t: Throwable) {
             _error.value = t.message
@@ -220,16 +224,20 @@ actual class MapComponent(
             val resp = httpClient.post("https://places.googleapis.com/v1/places:searchText") {
                 header("Content-Type", "application/json")
                 header("X-Goog-Api-Key", apiKey)
-                header("X-Goog-FieldMask", "places.displayName,places.location")
+                header("X-Goog-FieldMask", "places.displayName,places.location,places.formattedAddress")
                 setBody(requestBody)
             }
             Napier.d("Response: ${resp.bodyAsText()}")
             val body: SearchTextResponse = resp.body()
             body.places.map { place ->
+                val locationName = place.displayName.text
+                    ?.takeIf { it.isNotBlank() }
+                    ?: place.formattedAddress.orEmpty()
                 MVPPlace(
-                    name = place.displayName.text,
+                    name = locationName,
                     id = place.id,
                     coordinates = listOf(place.location.longitude, place.location.latitude),
+                    address = place.formattedAddress,
                 )
             }
         } catch (t: Throwable) {
@@ -283,6 +291,7 @@ actual class MapComponent(
 data class WebPlaceDetails(
     val displayName: LocalizedText,
     val location: LatLngDto,
+    val formattedAddress: String? = null,
     val photos: List<PhotoRef> = emptyList()
 )
 
@@ -367,7 +376,8 @@ data class IOSGMPlace(
     val displayName: LocalizedText,
     val id: String = "",
     val photos: List<PhotoRef> = emptyList(),
-    val location: LatLngDto
+    val location: LatLngDto,
+    val formattedAddress: String? = null,
 )
 
 @Serializable

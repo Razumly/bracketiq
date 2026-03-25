@@ -1,7 +1,6 @@
 package com.razumly.mvp.di
 
 import com.razumly.mvp.core.data.DatabaseService
-import com.razumly.mvp.core.data.MVPDatabaseservice
 import com.razumly.mvp.core.data.getDatabase
 import io.github.aakira.napier.Napier
 import org.koin.core.module.Module

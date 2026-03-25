@@ -1,6 +1,7 @@
 package com.razumly.mvp.core.data.dataTypes.dtos
 
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.presentation.util.toNameCase
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 
@@ -49,8 +50,8 @@ data class UserDataDTO(
 
 suspend fun UserDataDTO.toUserData(id: String): UserData {
     return UserData(
-        firstName = firstName,
-        lastName = lastName,
+        firstName = firstName.toNameCase(),
+        lastName = lastName.toNameCase(),
         teamIds = teamIds,
         friendIds = friendIds,
         friendRequestIds = friendRequestIds,

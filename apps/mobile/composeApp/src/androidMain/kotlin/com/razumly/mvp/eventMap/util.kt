@@ -7,8 +7,9 @@ import kotlinx.coroutines.coroutineScope
 
 suspend fun Place.toMVPPlace(placesClient: PlacesClient): MVPPlace = coroutineScope {
     MVPPlace(
-        name = this@toMVPPlace.displayName ?: "",
+        name = this@toMVPPlace.displayName ?: this@toMVPPlace.formattedAddress ?: "",
         id = this@toMVPPlace.id ?: "",
         coordinates = listOf(this@toMVPPlace.location?.longitude ?: 0.0, this@toMVPPlace.location?.latitude ?: 0.0),
+        address = this@toMVPPlace.formattedAddress,
     )
 }

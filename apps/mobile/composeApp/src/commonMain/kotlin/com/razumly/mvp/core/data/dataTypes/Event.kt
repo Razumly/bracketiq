@@ -41,6 +41,7 @@ data class Event(
     @field:TypeConverters(DivisionDetailConverters::class)
     val divisionDetails: List<DivisionDetail> = emptyList(),
     val location: String = "",
+    val address: String? = null,
     @Contextual val start: Instant = Instant.DISTANT_PAST,
     @Contextual val end: Instant = Instant.DISTANT_PAST,
     val priceCents: Int = 0,
@@ -140,6 +141,7 @@ fun Event.toEventDTO(): EventDTO =
         loserBracketPointsToVictory = loserBracketPointsToVictory,
         prize = prize,
         location = location,
+        address = address,
         start = start.toString(),
         end = end.toString(),
         priceCents = priceCents,

@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Directions
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
@@ -130,7 +131,9 @@ import com.razumly.mvp.core.presentation.composables.PullToRefreshContainer
 import com.razumly.mvp.core.presentation.composables.StripeButton
 import com.razumly.mvp.core.presentation.composables.TeamCard
 import com.razumly.mvp.core.presentation.util.buttonTransitionSpec
+import com.razumly.mvp.core.presentation.util.CircularRevealUnderlay
 import com.razumly.mvp.core.presentation.util.isScrollingUp
+import com.razumly.mvp.core.presentation.util.toNameCase
 import com.razumly.mvp.core.presentation.util.toTitleCase
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
@@ -142,12 +145,14 @@ import com.razumly.mvp.eventDetail.composables.ScheduleView
 import com.razumly.mvp.eventDetail.composables.SendNotificationDialog
 import com.razumly.mvp.eventDetail.composables.TeamSelectionDialog
 import com.razumly.mvp.eventDetail.composables.TournamentBracketView
+import com.razumly.mvp.eventMap.EventMap
 import com.razumly.mvp.eventMap.MapComponent
 import com.razumly.mvp.icons.Groups
 import com.razumly.mvp.icons.MVPIcons
 import com.razumly.mvp.icons.ProfileActionEvents
 import com.razumly.mvp.icons.TournamentBracket
 import com.razumly.mvp.icons.Trophy
+import dev.icerock.moko.geo.LatLng
 import kotlin.math.absoluteValue
 import kotlin.math.round
 import kotlin.time.Clock
@@ -361,9 +366,30 @@ internal fun canViewOfficialsPanel(
     }
     return event.hostId == normalizedCurrentUserId ||
         event.assistantHostIds.any { assistantHostId -> assistantHostId == normalizedCurrentUserId } ||
-        event.officialIds.any { officialId -> officialId == normalizedCurrentUserId } ||
+        isCurrentUserEventOfficial(normalizedCurrentUserId, event) ||
         organization?.ownerId == normalizedCurrentUserId ||
         organization?.hostIds?.any { hostId -> hostId == normalizedCurrentUserId } == true
+}
+
+internal fun isCurrentUserEventOfficial(
+    currentUserId: String,
+    event: Event,
+): Boolean {
+    val normalizedCurrentUserId = currentUserId.trim()
+    if (normalizedCurrentUserId.isBlank()) {
+        return false
+    }
+    val activeEventOfficialIds = event.eventOfficials
+        .asSequence()
+        .filter { official -> official.isActive }
+        .map { official -> official.userId.trim() }
+        .filter { officialId -> officialId.isNotBlank() }
+        .toList()
+    return if (activeEventOfficialIds.isNotEmpty()) {
+        activeEventOfficialIds.any { officialId -> officialId == normalizedCurrentUserId }
+    } else {
+        event.officialIds.any { officialId -> officialId.trim() == normalizedCurrentUserId }
+    }
 }
 
 private fun List<BracketDivisionOption>.resolveSelectedDivisionId(preferredId: String?): String? {
@@ -602,7 +628,7 @@ private fun EventOverviewSections(
                     color = MaterialTheme.colorScheme.primary
                 )
                 Text(
-                    text = "${(progress * 100).toInt()}% full â€¢ $spotsLeft left",
+                    text = "${(progress * 100).toInt()}% full - $spotsLeft left",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -833,7 +859,7 @@ private fun DivisionCapacityRow(
             )
             Text(
                 text = if (summary.capacity > 0) {
-                    "${(summary.progress * 100).toInt()}% full â€¢ ${summary.left} left"
+                    "${(summary.progress * 100).toInt()}% full - ${summary.left} left"
                 } else {
                     "No capacity configured"
                 },
@@ -952,7 +978,7 @@ private fun FreeAgentPreview(
                 )
             }
             Text(
-                text = user.firstName.toTitleCase(),
+                text = user.firstName.toNameCase(),
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -967,10 +993,13 @@ private fun StickyActionBar(
     primaryEnabled: Boolean,
     onPrimaryClick: () -> Unit,
     onMapClick: () -> Unit,
+    onDirectionsClick: () -> Unit,
+    directionsEnabled: Boolean,
     onMapButtonPositioned: (Offset) -> Unit,
     onShareClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var mapButtonCenter by remember { mutableStateOf(Offset.Zero) }
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
@@ -997,12 +1026,22 @@ private fun StickyActionBar(
                 )
             }
             IconButton(
-                onClick = onMapClick,
+                onClick = {
+                    onMapButtonPositioned(mapButtonCenter)
+                    onMapClick()
+                },
                 modifier = Modifier.onGloballyPositioned {
-                    onMapButtonPositioned(it.boundsInWindow().center)
+                    mapButtonCenter = it.boundsInWindow().center
+                    onMapButtonPositioned(mapButtonCenter)
                 }
             ) {
                 Icon(Icons.Default.Place, contentDescription = "Map")
+            }
+            IconButton(
+                onClick = onDirectionsClick,
+                enabled = directionsEnabled,
+            ) {
+                Icon(Icons.Default.Directions, contentDescription = "Directions")
             }
             IconButton(onClick = onShareClick) {
                 Icon(Icons.Default.Share, contentDescription = "Share")
@@ -1590,11 +1629,15 @@ fun EventDetailScreen(
             assistantHostId.trim() == currentUserId
         }
     }
-    val isEventOfficial = remember(currentUser.id, selectedEvent.event.officialIds) {
-        val currentUserId = currentUser.id.trim()
-        currentUserId.isNotBlank() && selectedEvent.event.officialIds.any { officialId ->
-            officialId.trim() == currentUserId
-        }
+    val isEventOfficial = remember(
+        currentUser.id,
+        selectedEvent.event.eventOfficials,
+        selectedEvent.event.officialIds,
+    ) {
+        isCurrentUserEventOfficial(
+            currentUserId = currentUser.id,
+            event = selectedEvent.event,
+        )
     }
     val isOrganizationManager = remember(
         currentUser.id,
@@ -1723,6 +1766,7 @@ fun EventDetailScreen(
     var showBuildBracketConfirmDialog by remember { mutableStateOf(false) }
     var showStickyDockByScroll by remember { mutableStateOf(true) }
     var mapRevealCenter by remember { mutableStateOf(Offset.Zero) }
+    var previousMapSelection by remember { mutableStateOf<LatLng?>(null) }
     var isManagingParticipants by rememberSaveable { mutableStateOf(false) }
 
     var imageScheme by remember {
@@ -1756,6 +1800,15 @@ fun EventDetailScreen(
     val joinBlockedByStart = eventHasStarted && !isWeeklyEvent
     val hasWeeklyParentTimeSlots = remember(selectedEvent.event.timeSlotIds) {
         selectedEvent.event.timeSlotIds.any { slotId -> slotId.isNotBlank() }
+    }
+    val hasDirectionsTarget = remember(
+        selectedEvent.event.address,
+        selectedEvent.event.lat,
+        selectedEvent.event.long,
+    ) {
+        !selectedEvent.event.address.isNullOrBlank() ||
+            selectedEvent.event.lat != 0.0 ||
+            selectedEvent.event.long != 0.0
     }
     val isWeeklyParentEvent = isWeeklyEvent && hasWeeklyParentTimeSlots
     val weeklySessionOptions = remember(
@@ -2082,7 +2135,45 @@ fun EventDetailScreen(
             enabled = !showMap,
             modifier = Modifier.fillMaxSize(),
         ) {
-            Scaffold(Modifier.fillMaxSize()) { innerPadding ->
+            CircularRevealUnderlay(
+                isRevealed = showMap,
+                revealCenterInWindow = mapRevealCenter,
+                animationDurationMillis = 800,
+                modifier = Modifier.fillMaxSize(),
+                backgroundContent = {
+                    EventMap(
+                        component = mapComponent,
+                        onEventSelected = { _ ->
+                            mapComponent.toggleMap()
+                        },
+                        onPlaceSelected = { place ->
+                            if (isEditing) {
+                                component.selectPlace(place)
+                                previousMapSelection = LatLng(place.latitude, place.longitude)
+                                mapComponent.toggleMap()
+                            }
+                        },
+                        onPlaceSelectionPoint = { x, y ->
+                            mapRevealCenter = Offset(x, y)
+                        },
+                        canClickPOI = isEditing,
+                        focusedLocation = if (editedEvent.location.isNotBlank()) {
+                            LatLng(editedEvent.lat, editedEvent.long)
+                        } else if (previousMapSelection != null) {
+                            previousMapSelection!!
+                        } else {
+                            mapComponent.currentLocation.value ?: LatLng(0.0, 0.0)
+                        },
+                        focusedEvent = if (!isEditing && selectedEvent.event.location.isNotBlank()) {
+                            selectedEvent.event
+                        } else {
+                            null
+                        },
+                        onBackPressed = mapComponent::toggleMap,
+                    )
+                },
+            ) {
+                Scaffold(Modifier.fillMaxSize()) { innerPadding ->
                 Box(
                     Modifier.background(MaterialTheme.colorScheme.background).fillMaxSize()
                 ) {
@@ -2104,7 +2195,6 @@ fun EventDetailScreen(
                             onAddCurrentUser = {},
                             imageScheme = imageScheme,
                             imageIds = eventImageIds,
-                            mapRevealCenter = mapRevealCenter,
                             onHostCreateAccount = component::onHostCreateAccount,
                             onPlaceSelected = component::selectPlace,
                             onEditEvent = component::editEventField,
@@ -2593,6 +2683,8 @@ fun EventDetailScreen(
                                                 component.matchSelected(match)
                                             }
                                         },
+                                        showEventOfficialNames = canEditMatches || isEventOfficial,
+                                        limitOfficialsToCurrentUser = isEventOfficial && !canEditMatches,
                                     )
                                 }
 
@@ -2623,6 +2715,8 @@ fun EventDetailScreen(
                                             fields = eventFields,
                                             showFab = { showFab = it },
                                             trackedUserIds = scheduleTrackedUserIds,
+                                            showEventOfficialNames = canEditMatches || isEventOfficial,
+                                            limitOfficialsToCurrentUser = isEventOfficial && !canEditMatches,
                                             canManageMatches = canEditMatches,
                                             onToggleLockAllMatches = { locked, matchIds ->
                                                 component.setLockForEditableMatches(matchIds, locked)
@@ -2806,12 +2900,16 @@ fun EventDetailScreen(
                         }
                     },
                     onMapClick = mapComponent::toggleMap,
+                    onDirectionsClick = component::openEventDirections,
+                    directionsEnabled = hasDirectionsTarget,
                     onMapButtonPositioned = { center ->
                         mapRevealCenter = center
                     },
                     onShareClick = component::shareEvent,
                 )
             }
+            }
+                }
         }
 
         if (showWithdrawTargetDialog && actionWithdrawTargets.isNotEmpty()) {
@@ -2877,6 +2975,9 @@ fun EventDetailScreen(
                     teams = dialogState.teams,
                     fields = dialogState.fields,
                     allMatches = dialogState.allMatches,
+                    eventOfficials = dialogState.eventOfficials,
+                    officialPositions = dialogState.officialPositions,
+                    users = dialogState.players,
                     eventType = dialogState.eventType,
                     isCreateMode = dialogState.isCreateMode,
                     creationContext = dialogState.creationContext,
@@ -3073,7 +3174,7 @@ fun EventDetailScreen(
                 } else {
                     null
                 }
-                val description = listOfNotNull(progressLabel, signerLabel).joinToString(" â€¢ ")
+                val description = listOfNotNull(progressLabel, signerLabel).joinToString(" - ")
 
                 EmbeddedWebModal(
                     title = prompt.step?.title ?: "Sign required document",
@@ -3091,7 +3192,6 @@ fun EventDetailScreen(
             }
         }
     }
-}
 }
 @Composable
 fun TeamSelectionDialog(
@@ -3712,5 +3812,3 @@ private fun FeeRow(
         )
     }
 }
-
-

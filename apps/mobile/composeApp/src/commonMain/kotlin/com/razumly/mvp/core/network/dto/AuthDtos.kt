@@ -2,6 +2,7 @@ package com.razumly.mvp.core.network.dto
 
 import com.razumly.mvp.core.data.dataTypes.AuthAccount
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.presentation.util.toNameCase
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -164,8 +165,8 @@ fun AuthUserDto.toAuthAccountOrNull(): AuthAccount? {
 fun UserProfileDto.toUserDataOrNull(): UserData? {
     val resolvedId = (id ?: legacyId)?.takeIf(String::isNotBlank) ?: return null
     return UserData(
-        firstName = firstName.orEmpty(),
-        lastName = lastName.orEmpty(),
+        firstName = firstName.orEmpty().toNameCase(),
+        lastName = lastName.orEmpty().toNameCase(),
         teamIds = teamIds ?: emptyList(),
         friendIds = friendIds ?: emptyList(),
         friendRequestIds = friendRequestIds ?: emptyList(),

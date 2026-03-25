@@ -10,8 +10,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
@@ -51,6 +53,8 @@ fun PullToRefreshContainer(
             }
         }
     }
+    val contentState by rememberUpdatedState(content)
+    val stableContent = remember { movableContentOf { contentState() } }
 
     // Hide indicator for first-load/programmatic loading. Show only for pull-to-refresh actions.
     val indicatorRefreshing = userInitiatedRefresh && isRefreshing
@@ -97,12 +101,12 @@ fun PullToRefreshContainer(
                     Modifier
                 }
             ) {
-                content()
+                stableContent()
             }
         }
     } else {
         Box(modifier = modifier) {
-            content()
+            stableContent()
         }
     }
 }

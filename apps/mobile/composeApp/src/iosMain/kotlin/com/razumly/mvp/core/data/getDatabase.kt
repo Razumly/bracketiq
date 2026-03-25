@@ -13,9 +13,9 @@ import platform.Foundation.NSFileManager
 import platform.Foundation.NSUserDomainMask
 
 
-fun getDatabase() : RoomDatabase.Builder<MVPDatabaseservice> {
+fun getDatabase(): RoomDatabase.Builder<MVPDatabaseService> {
     return try {
-        Room.databaseBuilder<MVPDatabaseservice>(
+        Room.databaseBuilder<MVPDatabaseService>(
             name = documentDirectory() + "/tournament.db",
         )
             .setDriver(BundledSQLiteDriver())

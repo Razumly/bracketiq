@@ -137,6 +137,18 @@ fun String.toTitleCase(): String {
         }
 }
 
+fun String.toNameCase(): String {
+    return this
+        .trim()
+        .split(Regex("\\s+"))
+        .filter { token -> token.isNotBlank() }
+        .joinToString(" ") { token ->
+            token.replaceFirstChar { char ->
+                if (char.isLowerCase()) char.titlecase() else char.toString()
+            }
+        }
+}
+
 fun String.toEnumTitleCase(): String {
     return this
         .trim()

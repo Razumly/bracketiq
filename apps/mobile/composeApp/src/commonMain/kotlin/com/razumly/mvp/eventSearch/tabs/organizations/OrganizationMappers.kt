@@ -13,5 +13,6 @@ internal fun Organization.toMvpPlaceOrNull(): MVPPlace? {
         name = name,
         id = id,
         coordinates = listOf(longitude, latitude),
+        address = address ?: location,
     )
 }

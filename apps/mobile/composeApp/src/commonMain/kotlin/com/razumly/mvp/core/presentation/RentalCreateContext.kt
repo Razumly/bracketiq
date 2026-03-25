@@ -7,6 +7,7 @@ data class RentalCreateContext(
     val organizationId: String,
     val organizationName: String,
     val organizationLocation: String?,
+    val organizationAddress: String? = null,
     val organizationCoordinates: List<Double>?,
     val organizationFieldIds: List<String> = emptyList(),
     val selectedFieldIds: List<String> = emptyList(),

@@ -47,11 +47,14 @@ fun TournamentBracketView(
     isEditingMatches: Boolean = false,
     editableMatches: List<MatchWithRelations> = emptyList(),
     onEditMatch: ((MatchWithRelations) -> Unit)? = null,
+    showEventOfficialNames: Boolean = true,
+    limitOfficialsToCurrentUser: Boolean = false,
 ) {
     val component = LocalTournamentComponent.current
     val losersBracket by component.losersBracket.collectAsState()
     val roundsList by component.rounds.collectAsState()
     val editableRounds by component.editableRounds.collectAsState()
+    val selectedEvent by component.selectedEvent.collectAsState()
     val columnScrollState = rememberScrollState()
     val displayRounds = if (isEditingMatches) {
         editableRounds
@@ -63,7 +66,33 @@ fun TournamentBracketView(
     val columnHeight by animateDpAsState(
         targetValue = maxHeightInRowDp, label = "Column Height"
     )
-    val cardHeight = 90
+    val cardHeight = remember(
+        isEditingMatches,
+        showEventOfficialNames,
+        selectedEvent.officialPositions,
+        editableMatches,
+        roundsList,
+    ) {
+        if (!isEditingMatches) {
+            MATCH_CARD_BASE_HEIGHT_DP
+        } else {
+            val candidateMatches = if (editableMatches.isNotEmpty()) {
+                editableMatches
+            } else {
+                roundsList
+                    .flatten()
+                    .filterNotNull()
+            }
+            candidateMatches.maxOfOrNull { candidate ->
+                calculateMatchCardHeightDp(
+                    match = candidate.match,
+                    positions = selectedEvent.officialPositions,
+                    showEventOfficialNames = showEventOfficialNames,
+                    manageMode = true,
+                )
+            } ?: MATCH_CARD_BASE_HEIGHT_DP
+        }
+    }
     val cardPadding = 64
     val cardContainerHeight = cardHeight + cardPadding
     var boxHeight by remember { mutableStateOf(Dp.Unspecified) }
@@ -217,6 +246,9 @@ fun TournamentBracketView(
                                                     modifier = Modifier
                                                         .height(cardHeight.dp)
                                                         .width(cardWidthDp),
+                                                    showEventOfficialNames = showEventOfficialNames,
+                                                    limitOfficialsToCurrentUser = limitOfficialsToCurrentUser,
+                                                    manageMode = isEditingMatches,
                                                 )
                                             }
                                         }

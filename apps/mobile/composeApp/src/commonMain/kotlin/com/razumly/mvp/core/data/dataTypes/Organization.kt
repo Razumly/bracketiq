@@ -10,6 +10,7 @@ data class Organization(
     val id: String,
     val name: String,
     val location: String?,
+    val address: String? = null,
     @property:ObjCName(swiftName = "organizationDescription")
     val description: String?,
     val logoId: String?,
@@ -28,6 +29,7 @@ data class Organization(
 data class OrganizationDTO(
     val name: String,
     val location: String? = null,
+    val address: String? = null,
     @property:ObjCName(swiftName = "organizationDescription")
     val description: String? = null,
     val logoId: String? = null,
@@ -46,6 +48,7 @@ data class OrganizationDTO(
             id = id,
             name = name,
             location = location,
+            address = address,
             description = description,
             logoId = logoId,
             ownerId = ownerId,

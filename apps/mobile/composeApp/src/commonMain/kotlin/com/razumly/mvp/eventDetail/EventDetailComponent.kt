@@ -8,6 +8,8 @@ import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.AuthAccount
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.EventOfficial
+import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.Invite
@@ -63,6 +65,7 @@ import com.razumly.mvp.eventDetail.data.StagedMatchCreate
 import com.razumly.mvp.eventDetail.data.validateAndNormalizeBracketGraph
 import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
 import io.github.aakira.napier.Napier
+import io.ktor.http.encodeURLQueryComponent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -177,6 +180,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun publishEvent()
     fun deleteEvent()
     fun shareEvent()
+    fun openEventDirections()
     fun createNewTeam()
     fun inviteFreeAgentToTeam(userId: String)
     fun removeTeamParticipant(team: TeamWithPlayers)
@@ -245,6 +249,9 @@ data class MatchEditDialogState(
     val teams: List<TeamWithPlayers>,
     val fields: List<FieldWithMatches>,
     val allMatches: List<MatchWithRelations>,
+    val eventOfficials: List<EventOfficial>,
+    val officialPositions: List<EventOfficialPosition>,
+    val players: List<UserData>,
     val eventType: EventType,
     val isCreateMode: Boolean = false,
     val creationContext: MatchCreateContext = MatchCreateContext.BRACKET,
@@ -2494,7 +2501,9 @@ class DefaultEventDetailComponent(
     override fun selectPlace(place: MVPPlace?) {
         editEventField {
             copy(
-                coordinates = place?.coordinates ?: listOf(0.0, 0.0), location = place?.name ?: ""
+                coordinates = place?.coordinates ?: listOf(0.0, 0.0),
+                location = place?.name ?: "",
+                address = place?.address,
             )
         }
     }
@@ -2720,6 +2729,37 @@ class DefaultEventDetailComponent(
         shareService.share(
             selectedEvent.value.name, createEventUrl(selectedEvent.value)
         )
+    }
+
+    override fun openEventDirections() {
+        val targetEvent = selectedEvent.value
+        val destinationQuery = when {
+            !targetEvent.address.isNullOrBlank() -> {
+                targetEvent.address.trim()
+            }
+            targetEvent.lat != 0.0 || targetEvent.long != 0.0 -> {
+                "${targetEvent.lat},${targetEvent.long}"
+            }
+            else -> {
+                _errorState.value = ErrorMessage("No event location available for directions.")
+                return
+            }
+        }
+
+        val directionsUrl = "geo:0,0?q=${destinationQuery.encodeURLQueryComponent()}"
+
+        scope.launch {
+            val result = urlHandler?.openUrlInWebView(directionsUrl)
+            if (result == null) {
+                _errorState.value = ErrorMessage("Unable to open directions.")
+                return@launch
+            }
+            result.onFailure { throwable ->
+                _errorState.value = ErrorMessage(
+                    throwable.message ?: "Unable to open directions.",
+                )
+            }
+        }
     }
 
     override fun checkIsUserFreeAgent(event: Event): Boolean {
@@ -3546,6 +3586,9 @@ class DefaultEventDetailComponent(
             teams = eventWithRelations.value.teams,
             fields = divisionFields.value,
             allMatches = availableMatches,
+            eventOfficials = selectedEvent.value.eventOfficials,
+            officialPositions = selectedEvent.value.officialPositions,
+            players = eventWithRelations.value.players,
             eventType = selectedEvent.value.eventType,
             isCreateMode = isCreateMode,
             creationContext = creationContext,

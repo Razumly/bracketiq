@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessTime
@@ -45,8 +46,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
+import com.razumly.mvp.core.data.dataTypes.EventOfficial
+import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
+import com.razumly.mvp.core.data.dataTypes.MatchOfficialAssignment
+import com.razumly.mvp.core.data.dataTypes.OfficialAssignmentHolderType
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
+import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.normalizedMatchOfficialAssignments
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
 import com.razumly.mvp.core.presentation.composables.PlatformTextField
@@ -70,6 +77,9 @@ fun MatchEditDialog(
     teams: List<TeamWithPlayers>,
     fields: List<FieldWithMatches>,
     allMatches: List<MatchWithRelations>,
+    eventOfficials: List<EventOfficial>,
+    officialPositions: List<EventOfficialPosition>,
+    users: List<UserData>,
     eventType: EventType,
     isCreateMode: Boolean,
     creationContext: MatchCreateContext,
@@ -91,6 +101,9 @@ fun MatchEditDialog(
                 teams = teams,
                 fields = fields,
                 allMatches = allMatches,
+                eventOfficials = eventOfficials,
+                officialPositions = officialPositions,
+                users = users,
                 eventType = eventType,
                 isCreateMode = isCreateMode,
                 creationContext = creationContext,
@@ -108,6 +121,9 @@ private fun MatchEditDialogContent(
     teams: List<TeamWithPlayers>,
     fields: List<FieldWithMatches>,
     allMatches: List<MatchWithRelations>,
+    eventOfficials: List<EventOfficial>,
+    officialPositions: List<EventOfficialPosition>,
+    users: List<UserData>,
     eventType: EventType,
     isCreateMode: Boolean,
     creationContext: MatchCreateContext,
@@ -206,6 +222,60 @@ private fun MatchEditDialogContent(
     val selectedLoserNext = remember(loserNextMatchId, loserCandidateIds) {
         normalizeToken(loserNextMatchId)?.takeIf { candidate -> loserCandidateIds.contains(candidate) }
     }
+    val usersById = remember(users) { users.associateBy(UserData::id) }
+    val activeEventOfficials = remember(eventOfficials) {
+        eventOfficials.filter { official -> official.isActive && official.userId.trim().isNotBlank() }
+    }
+    val officialSlots = remember(officialPositions, editedMatch.match.officialIds) {
+        buildMatchOfficialSlots(officialPositions, editedMatch.match.officialIds)
+    }
+
+    fun updateOfficialAssignment(
+        slot: MatchOfficialSlot,
+        selectedOption: EventOfficialSelectionOption?,
+    ) {
+        val normalizedAssignments = editedMatch.match.officialIds
+            .normalizedMatchOfficialAssignments()
+            .toMutableList()
+        val existingIndex = normalizedAssignments.indexOfFirst { assignment ->
+            assignment.positionId == slot.positionId && assignment.slotIndex == slot.slotIndex
+        }
+        if (selectedOption == null) {
+            if (existingIndex >= 0) {
+                normalizedAssignments.removeAt(existingIndex)
+            }
+        } else {
+            val existing = normalizedAssignments.getOrNull(existingIndex)
+            val updatedAssignment = MatchOfficialAssignment(
+                positionId = slot.positionId,
+                slotIndex = slot.slotIndex,
+                holderType = OfficialAssignmentHolderType.OFFICIAL,
+                userId = selectedOption.userId,
+                eventOfficialId = selectedOption.eventOfficialId,
+                checkedIn = existing?.checkedIn ?: false,
+                hasConflict = existing?.hasConflict ?: false,
+            )
+            if (existingIndex >= 0) {
+                normalizedAssignments[existingIndex] = updatedAssignment
+            } else {
+                normalizedAssignments += updatedAssignment
+            }
+        }
+        val cleanedAssignments = normalizedAssignments.normalizedMatchOfficialAssignments()
+        val primaryOfficial = cleanedAssignments
+            .firstOrNull { assignment -> assignment.holderType == OfficialAssignmentHolderType.OFFICIAL }
+        editedMatch = editedMatch.copy(
+            match = editedMatch.match.copy(
+                officialIds = cleanedAssignments,
+                officialId = primaryOfficial?.userId,
+                officialCheckedIn = if (primaryOfficial != null) {
+                    primaryOfficial.checkedIn
+                } else {
+                    editedMatch.match.officialCheckedIn
+                },
+            ),
+        )
+    }
 
     LaunchedEffect(
         editedMatch.match.team1Id,
@@ -296,10 +366,48 @@ private fun MatchEditDialogContent(
                 }
             }
 
-            // Official Section
+            if (officialSlots.isNotEmpty()) {
+                item {
+                    Text(
+                        text = "Event Officials",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+                items(officialSlots.size, key = { index -> officialSlots[index].key }) { index ->
+                    val slot = officialSlots[index]
+                    val currentAssignment = editedMatch.match.officialIds
+                        .normalizedMatchOfficialAssignments()
+                        .firstOrNull { assignment ->
+                            assignment.positionId == slot.positionId &&
+                                assignment.slotIndex == slot.slotIndex &&
+                                assignment.holderType == OfficialAssignmentHolderType.OFFICIAL
+                        }
+                    val options = buildEventOfficialSelectionOptions(
+                        slot = slot,
+                        eventOfficials = activeEventOfficials,
+                        usersById = usersById,
+                    )
+                    val selectedOption = currentAssignment?.eventOfficialId?.let { selectedId ->
+                        options.firstOrNull { option -> option.eventOfficialId == selectedId }
+                    }
+                    EventOfficialSelectionField(
+                        label = slot.label,
+                        selectedOption = selectedOption,
+                        options = options,
+                        onOptionSelected = { selected ->
+                            updateOfficialAssignment(
+                                slot = slot,
+                                selectedOption = selected,
+                            )
+                        },
+                    )
+                }
+            }
+
             item {
                 TeamSelectionField(
-                    label = "Official",
+                    label = "Team Official",
                     selectedTeam = teams.find { it.team.id == editedMatch.match.teamOfficialId },
                     expanded = showRefDropdown,
                     onExpandedChange = { showRefDropdown = it },
@@ -703,6 +811,135 @@ fun IndividualScoreInputSection(
                     }) {
                     Icon(Icons.Default.Remove, contentDescription = "Remove set")
                 }
+            }
+        }
+    }
+}
+
+private data class MatchOfficialSlot(
+    val key: String,
+    val positionId: String,
+    val slotIndex: Int,
+    val label: String,
+)
+
+private data class EventOfficialSelectionOption(
+    val eventOfficialId: String,
+    val userId: String,
+    val label: String,
+)
+
+private fun buildMatchOfficialSlots(
+    officialPositions: List<EventOfficialPosition>,
+    existingAssignments: List<MatchOfficialAssignment>,
+): List<MatchOfficialSlot> {
+    val normalizedPositions = officialPositions
+        .sortedBy(EventOfficialPosition::order)
+        .filter { position -> position.id.trim().isNotBlank() && position.name.trim().isNotBlank() }
+    if (normalizedPositions.isNotEmpty()) {
+        return normalizedPositions.flatMap { position ->
+            val count = position.count.coerceAtLeast(1)
+            (0 until count).map { slotIndex ->
+                MatchOfficialSlot(
+                    key = "${position.id}:$slotIndex",
+                    positionId = position.id,
+                    slotIndex = slotIndex,
+                    label = if (count > 1) {
+                        "${position.name} ${slotIndex + 1}"
+                    } else {
+                        position.name
+                    },
+                )
+            }
+        }
+    }
+    val fallbackAssignments = existingAssignments
+        .normalizedMatchOfficialAssignments()
+        .sortedWith(
+            compareBy<MatchOfficialAssignment>({ it.positionId }, { it.slotIndex })
+        )
+    if (fallbackAssignments.isEmpty()) {
+        return emptyList()
+    }
+    return fallbackAssignments.map { assignment ->
+        MatchOfficialSlot(
+            key = "${assignment.positionId}:${assignment.slotIndex}",
+            positionId = assignment.positionId,
+            slotIndex = assignment.slotIndex,
+            label = "Official ${assignment.slotIndex + 1}",
+        )
+    }
+}
+
+private fun buildEventOfficialSelectionOptions(
+    slot: MatchOfficialSlot,
+    eventOfficials: List<EventOfficial>,
+    usersById: Map<String, UserData>,
+): List<EventOfficialSelectionOption> {
+    return eventOfficials
+        .map { official ->
+            val userName = usersById[official.userId]?.fullName ?: official.userId
+            val eligibleForSlot = official.positionIds.contains(slot.positionId)
+            EventOfficialSelectionOption(
+                eventOfficialId = official.id,
+                userId = official.userId,
+                label = if (eligibleForSlot) {
+                    userName
+                } else {
+                    "$userName (not eligible)"
+                },
+            ) to eligibleForSlot
+        }
+        .sortedWith(
+            compareByDescending<Pair<EventOfficialSelectionOption, Boolean>> { pair -> pair.second }
+                .thenBy { pair -> pair.first.label.lowercase() }
+        )
+        .map(Pair<EventOfficialSelectionOption, Boolean>::first)
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EventOfficialSelectionField(
+    label: String,
+    selectedOption: EventOfficialSelectionOption?,
+    options: List<EventOfficialSelectionOption>,
+    onOptionSelected: (EventOfficialSelectionOption?) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = !expanded },
+    ) {
+        PlatformTextField(
+            value = selectedOption?.label ?: "Unassigned",
+            onValueChange = {},
+            modifier = Modifier
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable, true)
+                .fillMaxWidth(),
+            label = label,
+            readOnly = true,
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+        )
+
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            DropdownMenuItem(
+                text = { Text("Unassigned") },
+                onClick = {
+                    onOptionSelected(null)
+                    expanded = false
+                },
+            )
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(option.label) },
+                    onClick = {
+                        onOptionSelected(option)
+                        expanded = false
+                    },
+                )
             }
         }
     }

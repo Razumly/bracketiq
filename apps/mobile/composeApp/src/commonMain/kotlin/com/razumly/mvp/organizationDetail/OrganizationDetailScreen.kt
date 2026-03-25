@@ -415,6 +415,7 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                                                 organizationId = currentOrganization.id,
                                                 organizationName = currentOrganization.name,
                                                 organizationLocation = currentOrganization.location,
+                                                organizationAddress = currentOrganization.address,
                                                 organizationCoordinates = currentOrganization.coordinates,
                                                 organizationFieldIds = currentOrganization.fieldIds,
                                                 selectedFieldIds = selectedFieldIdsForCreate,

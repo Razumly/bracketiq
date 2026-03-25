@@ -17,6 +17,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
+import kotlinx.coroutines.CancellationException
 
 internal fun HttpClientConfig<*>.configureMvpHttpClient() {
     install(HttpTimeout) {
@@ -65,6 +66,9 @@ internal fun HttpClientConfig<*>.configureMvpHttpClient() {
                         Napier.e(message, cause)
                     }
                 }
+                is CancellationException -> Napier.d(
+                    "HTTP request cancelled: ${request.method.value} ${request.url} -> ${cause.message}"
+                )
                 else -> Napier.e(
                     "HTTP request failed: ${request.method.value} ${request.url} -> ${cause::class.simpleName}: ${cause.message}",
                     cause

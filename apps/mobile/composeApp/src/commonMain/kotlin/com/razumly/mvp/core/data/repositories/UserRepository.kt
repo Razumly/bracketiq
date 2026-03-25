@@ -31,6 +31,7 @@ import com.razumly.mvp.core.network.dto.UserUpdateDto
 import com.razumly.mvp.core.network.dto.UsersResponseDto
 import com.razumly.mvp.core.network.dto.toAuthAccountOrNull
 import com.razumly.mvp.core.network.dto.toUserDataOrNull
+import com.razumly.mvp.core.presentation.util.toNameCase
 import com.razumly.mvp.core.util.jsonMVP
 import io.github.aakira.napier.Napier
 import io.ktor.http.encodeURLQueryComponent
@@ -359,6 +360,8 @@ class UserRepository(
         profileSelection: SignupProfileSelection?,
     ): Result<UserData> = runCatching {
         val normalizedEmail = normalizeEmail(email)
+        val normalizedFirstName = normalizeRequiredName(firstName)
+        val normalizedLastName = normalizeRequiredName(lastName)
         if (normalizedEmail.isBlank()) error("Email is required")
         Napier.d(tag = USER_REPOSITORY_LOG_TAG) { "Signup started for ${maskEmail(normalizedEmail)}" }
         val res = try {
@@ -368,8 +371,8 @@ class UserRepository(
                     email = normalizedEmail,
                     password = password,
                     name = userName,
-                    firstName = firstName,
-                    lastName = lastName,
+                    firstName = normalizedFirstName,
+                    lastName = normalizedLastName,
                     userName = userName,
                     dateOfBirth = dateOfBirth,
                     enforceProfileConflictSelection = true,
@@ -604,8 +607,8 @@ class UserRepository(
 
     private fun RegisterProfileSnapshotDto?.toSignupProfileSnapshot(): SignupProfileSnapshot {
         return SignupProfileSnapshot(
-            firstName = this?.firstName?.trim()?.takeIf(String::isNotBlank),
-            lastName = this?.lastName?.trim()?.takeIf(String::isNotBlank),
+            firstName = normalizeName(this?.firstName),
+            lastName = normalizeName(this?.lastName),
             userName = this?.userName?.trim()?.takeIf(String::isNotBlank),
             dateOfBirth = normalizeDateOnly(this?.dateOfBirth),
         )
@@ -613,12 +616,19 @@ class UserRepository(
 
     private fun SignupProfileSelection.toDto(): RegisterProfileSelectionDto {
         return RegisterProfileSelectionDto(
-            firstName = firstName?.trim()?.takeIf(String::isNotBlank),
-            lastName = lastName?.trim()?.takeIf(String::isNotBlank),
+            firstName = normalizeName(firstName),
+            lastName = normalizeName(lastName),
             userName = userName?.trim()?.takeIf(String::isNotBlank),
             dateOfBirth = normalizeDateOnly(dateOfBirth),
         )
     }
+
+    private fun normalizeName(value: String?): String? = value
+        ?.trim()
+        ?.takeIf(String::isNotBlank)
+        ?.toNameCase()
+
+    private fun normalizeRequiredName(value: String): String = value.trim().toNameCase()
 
     private fun normalizeDateOnly(value: String?): String? {
         val trimmed = value?.trim()?.takeIf(String::isNotBlank) ?: return null
@@ -681,8 +691,8 @@ class UserRepository(
                     teamId = invite.teamId?.trim()?.takeIf(String::isNotBlank),
                     userId = invite.userId?.trim()?.takeIf(String::isNotBlank),
                     createdBy = invite.createdBy?.trim()?.takeIf(String::isNotBlank),
-                    firstName = invite.firstName?.trim()?.takeIf(String::isNotBlank),
-                    lastName = invite.lastName?.trim()?.takeIf(String::isNotBlank),
+                    firstName = normalizeName(invite.firstName),
+                    lastName = normalizeName(invite.lastName),
                 )
             }
         }
@@ -807,8 +817,8 @@ class UserRepository(
         email: String?,
         relationship: String?,
     ): Result<Unit> = runCatching {
-        val normalizedFirstName = firstName.trim()
-        val normalizedLastName = lastName.trim()
+        val normalizedFirstName = normalizeRequiredName(firstName)
+        val normalizedLastName = normalizeRequiredName(lastName)
         val normalizedDateOfBirth = dateOfBirth.trim()
 
         if (normalizedFirstName.isBlank() || normalizedLastName.isBlank() || normalizedDateOfBirth.isBlank()) {
@@ -837,8 +847,8 @@ class UserRepository(
         relationship: String?,
     ): Result<Unit> = runCatching {
         val normalizedChildUserId = childUserId.trim()
-        val normalizedFirstName = firstName.trim()
-        val normalizedLastName = lastName.trim()
+        val normalizedFirstName = normalizeRequiredName(firstName)
+        val normalizedLastName = normalizeRequiredName(lastName)
         val normalizedDateOfBirth = dateOfBirth.trim()
 
         if (
@@ -928,19 +938,24 @@ class UserRepository(
             error("Forbidden")
         }
 
+        val normalizedUser = user.copy(
+            firstName = normalizeRequiredName(user.firstName),
+            lastName = normalizeRequiredName(user.lastName),
+        )
+
         val request = UpdateUserRequestDto(
             data = UserUpdateDto(
-                firstName = user.firstName,
-                lastName = user.lastName,
-                userName = user.userName,
-                teamIds = user.teamIds,
-                friendIds = user.friendIds,
-                friendRequestIds = user.friendRequestIds,
-                friendRequestSentIds = user.friendRequestSentIds,
-                followingIds = user.followingIds,
-                hasStripeAccount = user.hasStripeAccount,
-                uploadedImages = user.uploadedImages,
-                profileImageId = user.profileImageId,
+                firstName = normalizedUser.firstName,
+                lastName = normalizedUser.lastName,
+                userName = normalizedUser.userName,
+                teamIds = normalizedUser.teamIds,
+                friendIds = normalizedUser.friendIds,
+                friendRequestIds = normalizedUser.friendRequestIds,
+                friendRequestSentIds = normalizedUser.friendRequestSentIds,
+                followingIds = normalizedUser.followingIds,
+                hasStripeAccount = normalizedUser.hasStripeAccount,
+                uploadedImages = normalizedUser.uploadedImages,
+                profileImageId = normalizedUser.profileImageId,
             )
         )
 
@@ -951,18 +966,18 @@ class UserRepository(
 
         val responseUser = res.user
         val updated = responseUser?.toUserDataOrNull()?.copy(
-            firstName = responseUser.firstName ?: user.firstName,
-            lastName = responseUser.lastName ?: user.lastName,
-            userName = responseUser.userName ?: user.userName,
-            teamIds = responseUser.teamIds ?: user.teamIds,
-            friendIds = responseUser.friendIds ?: user.friendIds,
-            friendRequestIds = responseUser.friendRequestIds ?: user.friendRequestIds,
-            friendRequestSentIds = responseUser.friendRequestSentIds ?: user.friendRequestSentIds,
-            followingIds = responseUser.followingIds ?: user.followingIds,
-            hasStripeAccount = responseUser.hasStripeAccount ?: user.hasStripeAccount,
-            uploadedImages = responseUser.uploadedImages ?: user.uploadedImages,
-            profileImageId = responseUser.profileImageId ?: user.profileImageId,
-        ) ?: user
+            firstName = normalizeName(responseUser.firstName) ?: normalizedUser.firstName,
+            lastName = normalizeName(responseUser.lastName) ?: normalizedUser.lastName,
+            userName = responseUser.userName ?: normalizedUser.userName,
+            teamIds = responseUser.teamIds ?: normalizedUser.teamIds,
+            friendIds = responseUser.friendIds ?: normalizedUser.friendIds,
+            friendRequestIds = responseUser.friendRequestIds ?: normalizedUser.friendRequestIds,
+            friendRequestSentIds = responseUser.friendRequestSentIds ?: normalizedUser.friendRequestSentIds,
+            followingIds = responseUser.followingIds ?: normalizedUser.followingIds,
+            hasStripeAccount = responseUser.hasStripeAccount ?: normalizedUser.hasStripeAccount,
+            uploadedImages = responseUser.uploadedImages ?: normalizedUser.uploadedImages,
+            profileImageId = responseUser.profileImageId ?: normalizedUser.profileImageId,
+        ) ?: normalizedUser
         databaseService.getUserDataDao.upsertUserWithRelations(updated)
 
         // Update current user state.
@@ -1003,8 +1018,8 @@ class UserRepository(
         }
 
         val updatedUser = currentUserData.copy(
-            firstName = firstName,
-            lastName = lastName,
+            firstName = normalizeRequiredName(firstName),
+            lastName = normalizeRequiredName(lastName),
             userName = userName,
         )
 
@@ -1144,8 +1159,8 @@ private data class FamilyChildDto(
 
         return FamilyChild(
             userId = resolvedUserId,
-            firstName = firstName.orEmpty(),
-            lastName = lastName.orEmpty(),
+            firstName = firstName?.trim()?.takeIf(String::isNotBlank)?.toNameCase().orEmpty(),
+            lastName = lastName?.trim()?.takeIf(String::isNotBlank)?.toNameCase().orEmpty(),
             userName = userName?.trim()?.takeIf(String::isNotBlank),
             dateOfBirth = dateOfBirth,
             age = age,
@@ -1188,9 +1203,9 @@ private data class FamilyJoinRequestDto(
             eventName = eventName?.trim()?.takeIf(String::isNotBlank),
             eventStart = eventStart?.trim()?.takeIf(String::isNotBlank),
             childUserId = normalizedChildUserId,
-            childFirstName = childFirstName?.trim()?.takeIf(String::isNotBlank),
-            childLastName = childLastName?.trim()?.takeIf(String::isNotBlank),
-            childFullName = childFullName?.trim()?.takeIf(String::isNotBlank),
+            childFirstName = childFirstName?.trim()?.takeIf(String::isNotBlank)?.toNameCase(),
+            childLastName = childLastName?.trim()?.takeIf(String::isNotBlank)?.toNameCase(),
+            childFullName = childFullName?.trim()?.takeIf(String::isNotBlank)?.toNameCase(),
             childDateOfBirth = childDateOfBirth?.trim()?.takeIf(String::isNotBlank),
             childEmail = childEmail?.trim()?.takeIf(String::isNotBlank),
             childHasEmail = childHasEmail ?: (childEmail?.isNotBlank() == true),

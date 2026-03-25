@@ -26,9 +26,10 @@ import com.razumly.mvp.core.data.dataTypes.daos.MessageDao
 import com.razumly.mvp.core.data.dataTypes.daos.RefundRequestDao
 import com.razumly.mvp.core.data.dataTypes.daos.TeamDao
 import com.razumly.mvp.core.data.dataTypes.daos.UserDataDao
+import com.razumly.mvp.core.db.MVPDatabaseCtor
 import com.razumly.mvp.core.data.util.Converters
 
-const val MVP_DATABASE_VERSION = 6
+const val MVP_DATABASE_VERSION = 7
 
 @Database(
     entities = [
@@ -49,7 +50,7 @@ const val MVP_DATABASE_VERSION = 6
 )
 @TypeConverters(Converters::class)
 @ConstructedBy(MVPDatabaseCtor::class)
-abstract class MVPDatabaseservice : RoomDatabase(), DatabaseService {
+abstract class MVPDatabaseService : RoomDatabase(), DatabaseService {
     abstract override val getMatchDao: MatchDao
     abstract override val getTeamDao: TeamDao
     abstract override val getFieldDao: FieldDao

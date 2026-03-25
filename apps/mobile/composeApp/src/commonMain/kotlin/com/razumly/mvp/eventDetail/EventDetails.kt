@@ -43,7 +43,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -127,6 +126,7 @@ import com.razumly.mvp.core.presentation.util.getScreenWidth
 import com.razumly.mvp.core.presentation.util.moneyFormat
 import com.razumly.mvp.core.presentation.util.MoneyInputUtils
 import com.razumly.mvp.core.presentation.util.toEnumTitleCase
+import com.razumly.mvp.core.presentation.util.toNameCase
 import com.razumly.mvp.core.presentation.util.teamSizeFormat
 import com.razumly.mvp.core.presentation.util.timeFormat
 import com.razumly.mvp.core.presentation.util.toTitleCase
@@ -142,10 +142,8 @@ import com.razumly.mvp.eventDetail.composables.PointsTextField
 import com.razumly.mvp.eventDetail.composables.RegistrationOptions
 import com.razumly.mvp.eventDetail.composables.SelectEventImage
 import com.razumly.mvp.eventDetail.composables.TextInputField
-import com.razumly.mvp.eventMap.EventMap
 import com.razumly.mvp.eventMap.MapComponent
 import dev.chrisbanes.haze.ExperimentalHazeApi
-import dev.icerock.moko.geo.LatLng
 import io.github.aakira.napier.Napier
 import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
 import io.github.ismoy.imagepickerkmp.domain.models.MimeType
@@ -186,7 +184,6 @@ fun EventDetails(
     hostHasAccount: Boolean,
     imageScheme: DynamicScheme,
     imageIds: List<String>,
-    mapRevealCenter: Offset = Offset.Zero,
     eventWithRelations: EventWithFullRelations,
     editEvent: Event,
     editView: Boolean,
@@ -265,8 +262,7 @@ fun EventDetails(
     var divisionInstallmentDueDatePickerIndex by remember { mutableStateOf<Int?>(null) }
     var showImageSelector by rememberSaveable { mutableStateOf(false) }
     var showUploadImagePicker by rememberSaveable { mutableStateOf(false) }
-    var previousSelection by remember { mutableStateOf<LatLng?>(null) }
-
+    var editLocationButtonCenter by remember { mutableStateOf(Offset.Zero) }
     // Validation states
     var isNameValid by remember { mutableStateOf(editEvent.name.isNotBlank()) }
     var isPriceValid by remember { mutableStateOf(editEvent.priceCents >= 0) }
@@ -1186,7 +1182,7 @@ fun EventDetails(
         val localDateTime = event.start.toLocalDateTime(TimeZone.currentSystemDefault())
         val dateText = localDateTime.date.format(dateFormat)
         val timeText = localDateTime.time.format(timeFormat)
-        listOf(event.location, "$dateText â€¢ $timeText").filter { it.isNotBlank() }.joinToString(" â€¢ ")
+        listOf(event.location, "$dateText - $timeText").filter { it.isNotBlank() }.joinToString(" - ")
     }
     val eventSportName = remember(eventWithRelations.sport, sports, event.sportId) {
         eventWithRelations.sport?.name
@@ -1209,8 +1205,8 @@ fun EventDetails(
     val hostDisplayName = remember(host, eventWithRelations.organization) {
         val organizationName = eventWithRelations.organization?.name.orEmpty()
         val hostName = buildString {
-            val firstName = host?.firstName?.toTitleCase().orEmpty()
-            val lastName = host?.lastName?.toTitleCase().orEmpty()
+            val firstName = host?.firstName?.toNameCase().orEmpty()
+            val lastName = host?.lastName?.toNameCase().orEmpty()
             if (firstName.isNotBlank()) {
                 append(firstName)
             }
@@ -1360,12 +1356,12 @@ fun EventDetails(
     val basicsSummaryLine = remember(event.location, dateRangeText, hostDisplayName) {
         listOf(hostDisplayName, event.location, dateRangeText)
             .filter { it.isNotBlank() }
-            .joinToString(" â€¢ ")
+            .joinToString(" - ")
     }
     val pricingSummaryLine = remember(priceSummary, registrationSummary, refundSummary) {
         listOf(priceSummary, registrationSummary, refundSummary)
             .filter { it.isNotBlank() }
-            .joinToString(" â€¢ ")
+            .joinToString(" - ")
     }
     val competitionSummaryLine = remember(
         event.teamSignup,
@@ -1386,7 +1382,7 @@ fun EventDetails(
             maxLabel,
             "Team size ${event.teamSizeLimit}",
             leagueSummary,
-        ).joinToString(" â€¢ ")
+        ).joinToString(" - ")
     }
     val readOnlyFieldCount = remember(event.fieldIds, editableFields.size) {
         resolveReadOnlyFieldCount(event = event, editableFields = editableFields)
@@ -1403,7 +1399,7 @@ fun EventDetails(
         } else {
             null
         }
-        listOfNotNull(fieldSummary, slotSummary).joinToString(" â€¢ ")
+        listOfNotNull(fieldSummary, slotSummary).joinToString(" - ")
     }
     val normalizedEventDivisions = remember(event.divisions) {
         event.divisions.normalizeDivisionIdentifiers()
@@ -1563,9 +1559,13 @@ fun EventDetails(
                                     style = MaterialTheme.typography.bodyMedium,
                                 )
                                 Button(
-                                    onClick = { mapComponent.toggleMap() },
+                                    onClick = {
+                                        onMapRevealCenterChange(editLocationButtonCenter)
+                                        mapComponent.toggleMap()
+                                    },
                                     modifier = Modifier.onGloballyPositioned {
-                                        onMapRevealCenterChange(it.boundsInWindow().center)
+                                        editLocationButtonCenter = it.boundsInWindow().center
+                                        onMapRevealCenterChange(editLocationButtonCenter)
                                     },
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = Color.Black, contentColor = Color.White
@@ -3294,7 +3294,7 @@ fun EventDetails(
                                     normalizedDetail.ageDivisionTypeName.ifBlank {
                                         normalizedDetail.ageDivisionTypeId.toDivisionDisplayLabel()
                                     },
-                                ).joinToString(" â€¢ ")
+                                ).joinToString(" - ")
 
                                 Card(
                                     modifier = Modifier.fillMaxWidth(),
@@ -3324,7 +3324,7 @@ fun EventDetails(
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
                                         Text(
-                                            text = "Price: ${priceCents.toDouble().div(100.0).moneyFormat()} â€¢ ${if (editEvent.teamSignup) "Max teams" else "Max participants"}: $maxParticipants",
+                                            text = "Price: ${priceCents.toDouble().div(100.0).moneyFormat()} - ${if (editEvent.teamSignup) "Max teams" else "Max participants"}: $maxParticipants",
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
@@ -3973,38 +3973,6 @@ fun EventDetails(
         initialDate = divisionInstallmentInitialDate,
     )
 
-    EventMap(
-        component = mapComponent,
-        onEventSelected = { _ ->
-            mapComponent.toggleMap()
-        },
-        onPlaceSelected = { place ->
-            if (editView) {
-                onPlaceSelected(place)
-                previousSelection = LatLng(place.latitude, place.longitude)
-                mapComponent.toggleMap()
-            }
-        },
-        onPlaceSelectionPoint = { x, y ->
-            onMapRevealCenterChange(Offset(x, y))
-        },
-        canClickPOI = editView,
-        focusedLocation = if (editEvent.location.isNotBlank()) {
-            editEvent.let { LatLng(it.lat, it.long) }
-        } else if (previousSelection != null) {
-            previousSelection!!
-        } else {
-            mapComponent.currentLocation.value ?: LatLng(0.0, 0.0)
-        },
-        focusedEvent = if (!editView && event.location.isNotBlank()) {
-            event
-        } else {
-            null
-        },
-        revealCenter = mapRevealCenter,
-        onBackPressed = { mapComponent.toggleMap() },
-    )
-
     // ImagePickerKMP Integration
     if (showUploadImagePicker) {
         GalleryPickerLauncher(
@@ -4547,7 +4515,7 @@ private fun ReadOnlyDivisionCard(
         normalizedDetail.ageDivisionTypeName.ifBlank {
             normalizedDetail.ageDivisionTypeId.toDivisionDisplayLabel()
         },
-    ).joinToString(" â€¢ ")
+    ).joinToString(" - ")
     val priceCents = (detail.price ?: event.priceCents).coerceAtLeast(0)
     val maxParticipants = (detail.maxParticipants ?: event.maxParticipants).coerceAtLeast(2)
     val paymentPlanInstallmentCount = maxOf(
@@ -4593,7 +4561,7 @@ private fun ReadOnlyDivisionCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                text = "Price: ${priceCents.toDouble().div(100.0).moneyFormat()} â€¢ " +
+                text = "Price: ${priceCents.toDouble().div(100.0).moneyFormat()} - " +
                     "${if (event.teamSignup) "Max teams" else "Max participants"}: $maxParticipants",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -5839,4 +5807,3 @@ fun BackgroundImage(
         }
     }
 }
-

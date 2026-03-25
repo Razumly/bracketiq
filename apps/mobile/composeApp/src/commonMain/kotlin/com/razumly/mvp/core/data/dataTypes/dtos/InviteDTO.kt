@@ -1,6 +1,7 @@
 package com.razumly.mvp.core.data.dataTypes.dtos
 
 import com.razumly.mvp.core.data.dataTypes.Invite
+import com.razumly.mvp.core.presentation.util.toNameCase
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 
@@ -28,8 +29,8 @@ data class InviteDTO(
             teamId = teamId,
             userId = userId,
             createdBy = createdBy,
-            firstName = firstName,
-            lastName = lastName,
+            firstName = firstName?.toNameCase(),
+            lastName = lastName?.toNameCase(),
             id = id,
         )
 }
