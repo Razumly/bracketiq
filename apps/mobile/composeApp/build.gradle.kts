@@ -1,5 +1,7 @@
 
 import co.touchlab.skie.configuration.SuppressSkieWarning
+import org.gradle.api.GradleException
+import org.gradle.api.logging.Logger
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.plugin.mpp.NativeBuildType
 import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
@@ -35,6 +37,10 @@ compose.resources {
 val mvpVersion = "1.1"
 val mvpVersionCode = 15
 kotlin {
+    compilerOptions {
+        freeCompilerArgs.add("-Xexpect-actual-classes")
+    }
+
     androidTarget {
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_17)
@@ -301,7 +307,7 @@ secrets {
 dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose.android)
     implementation(libs.androidx.animation.android)
-    debugImplementation(compose.uiTooling)
+    debugImplementation("org.jetbrains.compose.ui:ui-tooling:${libs.versions.uiVersion.get()}")
     add("kspAndroid", libs.androidx.room.compiler)
     add("kspIosX64", libs.androidx.room.compiler)
     add("kspIosArm64", libs.androidx.room.compiler)
@@ -313,7 +319,7 @@ dependencies {
 // KSP can occasionally keep stale Room constructor outputs between Android variants on Windows.
 // Force Android KSP regeneration and wipe all Android KSP outputs/caches before each Android KSP run.
 tasks.matching { task ->
-    task.name == "kspDebugKotlinAndroid" || task.name == "kspReleaseKotlinAndroid"
+    task.name.startsWith("ksp") && task.name.endsWith("KotlinAndroid")
 }.configureEach {
     outputs.upToDateWhen { false }
     outputs.cacheIf { false }
@@ -486,8 +492,12 @@ fun runProcess(
     timeoutSeconds: Long,
     outAppend: File? = null,
     errAppend: File? = null,
+    workingDir: File? = null,
 ): Int? {
     val pb = ProcessBuilder(command)
+    if (workingDir != null) {
+        pb.directory(workingDir)
+    }
     pb.redirectOutput(outAppend?.let { ProcessBuilder.Redirect.appendTo(it) } ?: ProcessBuilder.Redirect.DISCARD)
     pb.redirectError(errAppend?.let { ProcessBuilder.Redirect.appendTo(it) } ?: ProcessBuilder.Redirect.DISCARD)
 
@@ -568,7 +578,7 @@ fun resolveBackendPort(project: Project, backendPortProp: String?): Int {
 }
 
 fun configureAdbReverse(
-    logger: org.gradle.api.logging.Logger,
+    logger: Logger,
     ports: Collection<Int>,
 ) {
     val uniquePorts = ports.filter { it > 0 }.distinct()
@@ -755,9 +765,18 @@ val startLocalBackend = tasks.register("startLocalBackend") {
             if (!File(backendDir, "node_modules").exists()) {
                 logger.lifecycle("startLocalBackend: installing backend dependencies ($pm) ...")
                 val installArgs = listOf(pmCmd, "install")
-                exec {
-                    workingDir = backendDir
-                    commandLine(installArgs)
+                val installExit = runProcess(
+                    command = installArgs,
+                    timeoutSeconds = 60 * 15,
+                    outAppend = outFile,
+                    errAppend = errFile,
+                    workingDir = backendDir,
+                )
+                if (installExit != 0) {
+                    throw GradleException(
+                        "startLocalBackend: failed to install backend dependencies ($pm). " +
+                            "Exit code: $installExit. Logs: ${outFile.absolutePath}, ${errFile.absolutePath}"
+                    )
                 }
             }
 
@@ -897,7 +916,7 @@ fun prunePreparedComposeDrawableDirectories(logPrefix: String) {
                             "$logPrefix: removed nested drawable directory ${sourceSetDir.name}/${nestedDir.name}"
                         )
                     } else if (nestedDir.exists()) {
-                        throw org.gradle.api.GradleException(
+                        throw GradleException(
                             "$logPrefix: failed to remove nested prepared drawable directory ${nestedDir.absolutePath}"
                         )
                     }
@@ -919,7 +938,7 @@ fun sanitizeSourceComposeDrawableDirectories(logPrefix: String) {
         val containsFiles = nestedDir.walkTopDown().any { it.isFile }
         if (containsFiles) {
             val relPath = nestedDir.relativeTo(project.projectDir).invariantSeparatorsPath
-            throw org.gradle.api.GradleException(
+            throw GradleException(
                 "$logPrefix: nested drawable directories with files are not supported by Compose resources: $relPath"
             )
         }

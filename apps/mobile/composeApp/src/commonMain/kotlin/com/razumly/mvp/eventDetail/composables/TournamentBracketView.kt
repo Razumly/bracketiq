@@ -2,6 +2,15 @@ package com.razumly.mvp.eventDetail.composables
 
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -13,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
@@ -46,7 +56,9 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 
 private val BRACKET_CONNECTOR_WIDTH = 20.dp
 private val BRACKET_CONNECTOR_STROKE = 2.dp
+private const val BRACKET_LAYOUT_ANIMATION_MS = 300
 
+@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 fun TournamentBracketView(
     showFab: (Boolean) -> Unit,
@@ -69,9 +81,14 @@ fun TournamentBracketView(
         roundsList
     }
     val lazyRowState = rememberLazyListState()
-    var maxHeightInRowDp by remember { mutableStateOf(Dp.Unspecified) }
+    var maxHeightInRowDp by remember { mutableStateOf(0.dp) }
     val columnHeight by animateDpAsState(
-        targetValue = maxHeightInRowDp, label = "Column Height"
+        targetValue = maxHeightInRowDp,
+        animationSpec = tween(
+            durationMillis = BRACKET_LAYOUT_ANIMATION_MS,
+            easing = FastOutSlowInEasing
+        ),
+        label = "Column Height"
     )
     val cardHeight = remember(
         isEditingMatches,
@@ -193,13 +210,32 @@ fun TournamentBracketView(
                         verticalArrangement = Arrangement.SpaceBetween,
                     ) {
                         round.chunked(2).forEachIndexed { chunkIndex, matches ->
-                            val filteredMatches = remember(colIndex, maxHeightIndex, lazyRowState) {
-                                if (colIndex == 0 || maxHeightIndex == colIndex) {
-                                    matches.filterNotNull()
+                            val filteredMatches = if (colIndex == 0 || maxHeightIndex == colIndex) {
+                                matches.filterNotNull()
+                            } else {
+                                matches
+                            }
+                            val resolvedMatches = filteredMatches.map { match ->
+                                if (isEditingMatches && editableMatches.isNotEmpty()) {
+                                    editableMatches.find { it.match.id == match?.match?.id } ?: match
                                 } else {
-                                    matches
+                                    match
                                 }
                             }
+                            val oppositeMatchIndex = resolvedMatches.indexOfFirst { match ->
+                                match != null && match.match.losersBracket != losersBracket
+                            }.takeIf { it >= 0 }
+                            val currentBracketMatch = resolvedMatches.firstOrNull { match ->
+                                match != null && match.match.losersBracket == losersBracket
+                            }
+                            val oppositeMatch = oppositeMatchIndex?.let { index ->
+                                resolvedMatches.getOrNull(index)
+                            }
+                            val visibleColumnPosition = colIndex - lazyRowState.firstVisibleItemIndex
+                            val useOffsetOppositeLayout =
+                                oppositeMatchIndex != null &&
+                                    currentBracketMatch != null &&
+                                    visibleColumnPosition >= 2
                             var visible by remember(colIndex, chunkIndex, matches) {
                                 mutableStateOf(
                                     true
@@ -208,6 +244,10 @@ fun TournamentBracketView(
 
                             val pairWeight by animateFloatAsState(
                                 targetValue = if (visible) 1.0f else 0.01f,
+                                animationSpec = tween(
+                                    durationMillis = BRACKET_LAYOUT_ANIMATION_MS,
+                                    easing = FastOutSlowInEasing
+                                ),
                                 label = "Card Visibility",
                             )
                             LaunchedEffect(maxHeightIndex) {
@@ -228,37 +268,136 @@ fun TournamentBracketView(
                                     Column(
                                         modifier = Modifier.fillMaxHeight(),
                                         horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.SpaceAround
                                     ) {
-                                        filteredMatches.forEach { match ->
-                                            val displayMatch = if (isEditingMatches && editableMatches.isNotEmpty()) {
-                                                editableMatches.find { it.match.id == match?.match?.id } ?: match
-                                            } else {
-                                                match
-                                            }
-
-                                            Box(
-                                                modifier = Modifier
-                                                    .height(cardHeight.dp)
-                                                    .width(cardWidthDp)
-                                            ) {
-                                                if (displayMatch != null) {
-                                                    MatchCard(
-                                                        match = displayMatch,
-                                                        onClick = {
-                                                            if (isEditingMatches) {
-                                                                onEditMatch?.invoke(displayMatch)
-                                                            } else {
-                                                                onMatchClick(displayMatch)
-                                                            }
-                                                        },
+                                        SharedTransitionLayout {
+                                            AnimatedContent(
+                                                targetState = useOffsetOppositeLayout,
+                                                transitionSpec = {
+                                                    (EnterTransition.None togetherWith ExitTransition.None)
+                                                        .using(SizeTransform(clip = false))
+                                                },
+                                                label = "OppositeBracketPairLayout"
+                                            ) { isOffsetLayout ->
+                                                if (isOffsetLayout) {
+                                                    val oppositeOffsetY = if (oppositeMatchIndex == 0) {
+                                                        -cardContainerHeight.dp
+                                                    } else {
+                                                        cardContainerHeight.dp
+                                                    }
+                                                    Box(
                                                         modifier = Modifier
-                                                            .height(cardHeight.dp)
-                                                            .width(cardWidthDp),
-                                                        showEventOfficialNames = showEventOfficialNames,
-                                                        limitOfficialsToCurrentUser = limitOfficialsToCurrentUser,
-                                                        manageMode = isEditingMatches,
-                                                    )
+                                                            .fillMaxHeight()
+                                                            .width(cardWidthDp)
+                                                    ) {
+                                                        if (currentBracketMatch != null) {
+                                                            MatchCard(
+                                                                match = currentBracketMatch,
+                                                                onClick = {
+                                                                    if (isEditingMatches) {
+                                                                        onEditMatch?.invoke(currentBracketMatch)
+                                                                    } else {
+                                                                        onMatchClick(currentBracketMatch)
+                                                                    }
+                                                                },
+                                                                modifier = Modifier
+                                                                    .align(Alignment.Center)
+                                                                    .height(cardHeight.dp)
+                                                                    .width(cardWidthDp)
+                                                                    .sharedElement(
+                                                                        sharedContentState = rememberSharedContentState(
+                                                                            key = "bracket-card-${currentBracketMatch.match.id}"
+                                                                        ),
+                                                                        animatedVisibilityScope = this@AnimatedContent,
+                                                                        boundsTransform = { _, _ ->
+                                                                            tween(
+                                                                                durationMillis = BRACKET_LAYOUT_ANIMATION_MS,
+                                                                                easing = FastOutSlowInEasing
+                                                                            )
+                                                                        },
+                                                                    ),
+                                                                showEventOfficialNames = showEventOfficialNames,
+                                                                limitOfficialsToCurrentUser = limitOfficialsToCurrentUser,
+                                                                manageMode = isEditingMatches,
+                                                            )
+                                                        }
+                                                        if (oppositeMatch != null) {
+                                                            MatchCard(
+                                                                match = oppositeMatch,
+                                                                onClick = {
+                                                                    if (isEditingMatches) {
+                                                                        onEditMatch?.invoke(oppositeMatch)
+                                                                    } else {
+                                                                        onMatchClick(oppositeMatch)
+                                                                    }
+                                                                },
+                                                                modifier = Modifier
+                                                                    .align(Alignment.Center)
+                                                                    .offset(y = oppositeOffsetY)
+                                                                    .height(cardHeight.dp)
+                                                                    .width(cardWidthDp)
+                                                                    .sharedElement(
+                                                                        sharedContentState = rememberSharedContentState(
+                                                                            key = "bracket-card-${oppositeMatch.match.id}"
+                                                                        ),
+                                                                        animatedVisibilityScope = this@AnimatedContent,
+                                                                        boundsTransform = { _, _ ->
+                                                                            tween(
+                                                                                durationMillis = BRACKET_LAYOUT_ANIMATION_MS,
+                                                                                easing = FastOutSlowInEasing
+                                                                            )
+                                                                        },
+                                                                    ),
+                                                                showEventOfficialNames = showEventOfficialNames,
+                                                                limitOfficialsToCurrentUser = limitOfficialsToCurrentUser,
+                                                                manageMode = isEditingMatches,
+                                                            )
+                                                        }
+                                                    }
+                                                } else {
+                                                    Column(
+                                                        modifier = Modifier.fillMaxHeight(),
+                                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                                        verticalArrangement = Arrangement.SpaceAround,
+                                                    ) {
+                                                        resolvedMatches.forEach { displayMatch ->
+                                                            Box(
+                                                                modifier = Modifier
+                                                                    .height(cardHeight.dp)
+                                                                    .width(cardWidthDp)
+                                                            ) {
+                                                                if (displayMatch != null) {
+                                                                    MatchCard(
+                                                                        match = displayMatch,
+                                                                        onClick = {
+                                                                            if (isEditingMatches) {
+                                                                                onEditMatch?.invoke(displayMatch)
+                                                                            } else {
+                                                                                onMatchClick(displayMatch)
+                                                                            }
+                                                                        },
+                                                                        modifier = Modifier
+                                                                            .height(cardHeight.dp)
+                                                                            .width(cardWidthDp)
+                                                                            .sharedElement(
+                                                                                sharedContentState = rememberSharedContentState(
+                                                                                    key = "bracket-card-${displayMatch.match.id}"
+                                                                                ),
+                                                                                animatedVisibilityScope = this@AnimatedContent,
+                                                                                boundsTransform = { _, _ ->
+                                                                                    tween(
+                                                                                        durationMillis = BRACKET_LAYOUT_ANIMATION_MS,
+                                                                                        easing = FastOutSlowInEasing
+                                                                                    )
+                                                                                },
+                                                                            ),
+                                                                        showEventOfficialNames = showEventOfficialNames,
+                                                                        limitOfficialsToCurrentUser = limitOfficialsToCurrentUser,
+                                                                        manageMode = isEditingMatches,
+                                                                    )
+                                                                }
+                                                            }
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }

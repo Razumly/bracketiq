@@ -194,7 +194,9 @@ fun MatchCard(
                     )
                 }
                 Card(
-                    modifier = modifier.fillMaxWidth().clickable(onClick = onClick),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onClick),
                     elevation = CardDefaults.cardElevation(4.dp),
                     colors = CardDefaults.cardColors(
                         containerColor = localColors.current.primary,
@@ -226,7 +228,10 @@ fun MatchCard(
                 }
                 if (showOfficial) {
                     FloatingBox(
-                        modifier = Modifier.align(Alignment.BottomCenter).offset(y = 20.dp),
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .offset(y = 20.dp)
+                            .zIndex(1f),
                         color = localColors.current.primaryContainer
                     ) {
                         Row(
@@ -235,7 +240,7 @@ fun MatchCard(
                             horizontalArrangement = Arrangement.Center
                         ) {
                             Text(
-                                officialSummary.orEmpty(),
+                                officialSummary,
                                 style = MaterialTheme.typography.labelLarge,
                                 color = localColors.current.onPrimaryContainer,
                                 maxLines = 1,
@@ -695,10 +700,15 @@ internal fun resolveEventOfficialSummary(
         labeledAssignments
     }
     val assignmentDisplayNames = visibleAssignments.map { (assignment, label) ->
+        val currentUserFallbackLabel = if (assignment.userId == normalizedCurrentUserId) {
+            normalizedCurrentUserLabel
+        } else {
+            null
+        }
         usersById[assignment.userId]
             ?.let(::resolveUserLabel)
             ?.takeIf(String::isNotBlank)
-            ?: if (assignment.userId == normalizedCurrentUserId) normalizedCurrentUserLabel else null
+            ?: currentUserFallbackLabel
             ?: label
             ?: "Official"
     }.distinct()

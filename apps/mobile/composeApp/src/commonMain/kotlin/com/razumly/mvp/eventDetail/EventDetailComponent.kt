@@ -2615,77 +2615,94 @@ class DefaultEventDetailComponent(
     }
 
     private fun generateRounds() {
-        if (_divisionMatches.value.isEmpty()) {
-            _rounds.value = emptyList()
-            return
-        }
-
-        val rounds = mutableListOf<List<MatchWithRelations?>>()
-        val visited = mutableSetOf<String>()
-
-        val finalRound = _divisionMatches.value.values.filter {
-            it.winnerNextMatch == null && it.loserNextMatch == null
-        }
-
-        if (finalRound.isNotEmpty()) {
-            rounds.add(finalRound)
-            visited.addAll(finalRound.map { it.match.id })
-        }
-
-        // Generate subsequent rounds
-        var currentRound: List<MatchWithRelations?> = finalRound
-        while (currentRound.isNotEmpty()) {
-            val nextRound = mutableListOf<MatchWithRelations?>()
-
-            for (match in currentRound.filterNotNull()) {
-                if (!validMatch(match)) {
-                    nextRound.addAll(listOf(null, null))
-                    continue
-                }
-                if (match.previousLeftMatch == null) {
-                    nextRound.add(null)
-                } else if (!visited.contains(match.previousLeftMatch.id)) {
-                    nextRound.add(_divisionMatches.value[match.previousLeftMatch.id])
-                    visited.add(match.previousLeftMatch.id)
-                }
-
-                // Add right match
-                if (match.previousRightMatch == null) {
-                    nextRound.add(null)
-                } else if (!visited.contains(match.previousRightMatch.id)) {
-                    nextRound.add(_divisionMatches.value[match.previousRightMatch.id])
-                    visited.add(match.previousRightMatch.id)
-                }
-            }
-
-            if (nextRound.any { it != null }) {
-                rounds.add(nextRound)
-                currentRound = nextRound
-            } else {
-                break
-            }
-        }
-
-        _rounds.value = rounds.reversed()
+        _rounds.value = buildBracketRounds(_divisionMatches.value)
     }
 
     override fun selectFieldCount(count: Int) {
         _fieldCount.value = count
     }
 
-    private fun validMatch(match: MatchWithRelations): Boolean {
-        return if (losersBracket.value) {
-            val finalsMatch =
-                match.previousLeftMatch == match.previousRightMatch && match.previousLeftMatch != null
-            val mergeMatch =
-                match.previousLeftMatch != null && match.previousLeftMatch.losersBracket != match.previousRightMatch?.losersBracket
-            val opposite = match.match.losersBracket != losersBracket.value
-            val firstRound = match.previousLeftMatch == null && match.previousRightMatch == null
-
-            finalsMatch || mergeMatch || !opposite || firstRound
-        } else {
-            match.match.losersBracket == losersBracket.value
+    private fun buildBracketRounds(
+        matchesById: Map<String, MatchWithRelations>,
+    ): List<List<MatchWithRelations?>> {
+        if (matchesById.isEmpty()) {
+            return emptyList()
         }
+
+        val rounds = mutableListOf<List<MatchWithRelations?>>()
+        val visited = mutableSetOf<String>()
+
+        fun nextInScope(matchId: String?): MatchWithRelations? {
+            val normalizedId = normalizeToken(matchId) ?: return null
+            return matchesById[normalizedId]
+        }
+
+        val finalRound = matchesById.values.filter { match ->
+            nextInScope(match.match.winnerNextMatchId) == null &&
+                nextInScope(match.match.loserNextMatchId) == null
+        }
+
+        if (finalRound.isNotEmpty()) {
+            rounds += finalRound
+            visited += finalRound.map { match -> match.match.id }
+        }
+
+        var currentRound: List<MatchWithRelations?> = finalRound
+        while (currentRound.isNotEmpty()) {
+            val nextRound = mutableListOf<MatchWithRelations?>()
+
+            currentRound.filterNotNull().forEach { match ->
+                if (!shouldIncludeInCurrentBracket(match, matchesById)) {
+                    nextRound += listOf(null, null)
+                    return@forEach
+                }
+
+                val leftId = normalizeToken(match.match.previousLeftId)
+                val rightId = normalizeToken(match.match.previousRightId)
+
+                val leftMatch = leftId?.let { id -> matchesById[id] }
+                if (leftMatch == null) {
+                    nextRound += null
+                } else if (visited.add(leftMatch.match.id)) {
+                    nextRound += leftMatch
+                }
+
+                val rightMatch = rightId?.let { id -> matchesById[id] }
+                if (rightMatch == null) {
+                    nextRound += null
+                } else if (visited.add(rightMatch.match.id)) {
+                    nextRound += rightMatch
+                }
+            }
+
+            if (nextRound.any { it != null }) {
+                rounds += nextRound
+                currentRound = nextRound
+            } else {
+                break
+            }
+        }
+
+        return rounds.reversed()
+    }
+
+    private fun shouldIncludeInCurrentBracket(
+        match: MatchWithRelations,
+        matchesById: Map<String, MatchWithRelations>,
+    ): Boolean {
+        if (!losersBracket.value) {
+            return !match.match.losersBracket
+        }
+
+        val left = normalizeToken(match.match.previousLeftId)?.let { id -> matchesById[id] }
+        val right = normalizeToken(match.match.previousRightId)?.let { id -> matchesById[id] }
+
+        val finalsMatch = left != null && right != null && left.match.id == right.match.id
+        val mergeMatch = left != null && right != null && left.match.losersBracket != right.match.losersBracket
+        val opposite = match.match.losersBracket != losersBracket.value
+        val firstRound = left == null && right == null
+
+        return finalsMatch || mergeMatch || !opposite || firstRound
     }
 
     override fun checkIsUserWaitListed(event: Event): Boolean {
@@ -3065,11 +3082,12 @@ class DefaultEventDetailComponent(
         }
 
         val bracketMatches = divisionScopedMatches.filter { relation ->
-            val match = relation.match
-            !normalizeToken(match.previousLeftId).isNullOrBlank() ||
-                !normalizeToken(match.previousRightId).isNullOrBlank() ||
-                !normalizeToken(match.winnerNextMatchId).isNullOrBlank() ||
-                !normalizeToken(match.loserNextMatchId).isNullOrBlank()
+            !(
+                relation.previousRightMatch == null &&
+                    relation.previousLeftMatch == null &&
+                    relation.winnerNextMatch == null &&
+                    relation.loserNextMatch == null
+                )
         }
 
         if (bracketMatches.isEmpty()) {
@@ -3078,75 +3096,7 @@ class DefaultEventDetailComponent(
         }
 
         val matchesById = bracketMatches.associateBy { match -> match.match.id }
-        val rounds = mutableListOf<List<MatchWithRelations?>>()
-        val visited = mutableSetOf<String>()
-
-        val finalRound = bracketMatches.filter { match ->
-            normalizeToken(match.match.winnerNextMatchId).isNullOrBlank() &&
-                normalizeToken(match.match.loserNextMatchId).isNullOrBlank()
-        }.filter { match ->
-            validEditableMatch(match, matchesById)
-        }
-
-        if (finalRound.isNotEmpty()) {
-            rounds += finalRound
-            visited += finalRound.map { match -> match.match.id }
-        }
-
-        var currentRound: List<MatchWithRelations?> = finalRound
-        while (currentRound.isNotEmpty()) {
-            val nextRound = mutableListOf<MatchWithRelations?>()
-
-            fun resolvePreviousMatch(matchId: String?): MatchWithRelations? {
-                if (matchId == null || !visited.add(matchId)) {
-                    return null
-                }
-                val candidate = matchesById[matchId] ?: return null
-                return candidate.takeIf { validEditableMatch(candidate, matchesById) }
-            }
-
-            currentRound.filterNotNull().forEach { match ->
-                if (!validEditableMatch(match, matchesById)) {
-                    nextRound += listOf(null, null)
-                    return@forEach
-                }
-
-                val leftId = normalizeToken(match.match.previousLeftId)
-                val rightId = normalizeToken(match.match.previousRightId)
-
-                nextRound += resolvePreviousMatch(leftId)
-                nextRound += resolvePreviousMatch(rightId)
-            }
-
-            if (nextRound.any { it != null }) {
-                rounds += nextRound
-                currentRound = nextRound
-            } else {
-                break
-            }
-        }
-
-        _editableRounds.value = rounds.reversed()
-    }
-
-    private fun validEditableMatch(
-        match: MatchWithRelations,
-        matchesById: Map<String, MatchWithRelations>,
-    ): Boolean {
-        return if (losersBracket.value) {
-            val left = normalizeToken(match.match.previousLeftId)?.let { id -> matchesById[id] }
-            val right = normalizeToken(match.match.previousRightId)?.let { id -> matchesById[id] }
-            val finalsMatch = left != null && right != null && left.match.id == right.match.id
-            val mergeMatch =
-                left != null && right != null &&
-                    left.match.losersBracket != right.match.losersBracket
-            val opposite = match.match.losersBracket != losersBracket.value
-            val firstRound = left == null && right == null
-
-            finalsMatch || mergeMatch || !opposite || firstRound
-        } else {
-            match.match.losersBracket == losersBracket.value
-        }
+        _editableRounds.value = buildBracketRounds(matchesById)
     }
 
     private fun buildBracketNodes(matches: List<MatchWithRelations>): List<BracketNode> {
@@ -3311,7 +3261,9 @@ class DefaultEventDetailComponent(
         }
         scope.launch {
             val currentMatches = eventWithRelations.value.matches
-            _editableMatches.value = normalizeEditableBracketGraph(currentMatches.map { it.copy() })
+            _editableMatches.value = currentMatches.map { matchRelation ->
+                matchRelation.copy(match = matchRelation.match.copy())
+            }
             _stagedMatchCreates.value = emptyMap()
             _stagedMatchDeletes.value = emptySet()
             pendingCreateMatchId = null

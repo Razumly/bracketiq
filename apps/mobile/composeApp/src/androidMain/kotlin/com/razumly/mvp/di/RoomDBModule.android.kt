@@ -10,8 +10,8 @@ import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.MIGRATION_1_2_NO_OP
 import com.razumly.mvp.core.data.MIGRATION_2_3_MATCH_START_NULLABLE
 import com.razumly.mvp.core.data.MIGRATION_3_4_USER_PRIVACY_FIELDS
-import com.razumly.mvp.core.data.MVP_DATABASE_VERSION
-import com.razumly.mvp.core.data.MVPDatabaseService
+import com.razumly.mvp.core.db.MVP_DATABASE_VERSION
+import com.razumly.mvp.core.db.MVPDatabaseService
 import io.github.aakira.napier.Napier
 import org.koin.dsl.bind
 import org.koin.dsl.module
@@ -25,7 +25,6 @@ actual val roomDBModule = module {
         deleteDatabaseIfSchemaVersionChanged(
             context = context.applicationContext,
             dbName = dbFile.name,
-            expectedVersion = MVP_DATABASE_VERSION,
         )
         Napier.i(tag = ROOM_DB_LOG_TAG) { "Initializing Room database at ${dbFile.absolutePath}" }
         runCatching {
@@ -68,7 +67,6 @@ actual val roomDBModule = module {
 private fun deleteDatabaseIfSchemaVersionChanged(
     context: Context,
     dbName: String,
-    expectedVersion: Int,
 ) {
     val dbFile = context.getDatabasePath(dbName)
     if (!dbFile.exists()) return
@@ -88,10 +86,10 @@ private fun deleteDatabaseIfSchemaVersionChanged(
         Int.MIN_VALUE
     }
 
-    if (currentVersion == expectedVersion) return
+    if (currentVersion == MVP_DATABASE_VERSION) return
 
     Napier.w(tag = ROOM_DB_LOG_TAG) {
-        "Deleting Room database at ${dbFile.absolutePath} because schema version $currentVersion != $expectedVersion"
+        "Deleting Room database at ${dbFile.absolutePath} because schema version $currentVersion != $MVP_DATABASE_VERSION"
     }
     context.deleteDatabase(dbName)
 }
