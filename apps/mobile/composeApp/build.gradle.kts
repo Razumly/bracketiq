@@ -1,7 +1,5 @@
 
 import co.touchlab.skie.configuration.SuppressSkieWarning
-import org.gradle.api.GradleException
-import org.gradle.api.logging.Logger
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.plugin.mpp.NativeBuildType
 import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
@@ -34,8 +32,8 @@ compose.resources {
     generateResClass = always
 }
 
-val mvpVersion = "1.1"
-val mvpVersionCode = 15
+val mvpVersion = "1.1.1"
+val mvpVersionCode = 16
 kotlin {
     compilerOptions {
         freeCompilerArgs.add("-Xexpect-actual-classes")
@@ -255,6 +253,9 @@ android {
             proguardFiles (
                 getDefaultProguardFile("proguard-android-optimize.txt"),
             )
+            ndk {
+                debugSymbolLevel = "SYMBOL_TABLE"
+            }
         }
 
     }

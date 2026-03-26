@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -42,6 +43,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         val splashScreen = installSplashScreen()
         splashScreen.setKeepOnScreenCondition { keepSystemSplashVisible }
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
         NotifierManager.onCreateOrOnNewIntent(intent)
@@ -103,8 +105,10 @@ class MainActivity : ComponentActivity() {
         SideEffect {
             val activity = view.context as? Activity ?: return@SideEffect
             val window = activity.window
+            val insetsController = WindowCompat.getInsetsController(window, view)
 
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
+            insetsController.isAppearanceLightStatusBars = !darkTheme
+            insetsController.isAppearanceLightNavigationBars = !darkTheme
         }
     }
 

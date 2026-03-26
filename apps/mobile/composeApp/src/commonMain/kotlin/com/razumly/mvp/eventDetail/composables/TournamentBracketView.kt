@@ -40,10 +40,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
@@ -117,13 +119,26 @@ fun TournamentBracketView(
     val cardPadding = 64
     val cardContainerHeight = cardHeight + cardPadding
     var boxHeight by remember { mutableStateOf(Dp.Unspecified) }
+    var previousBoxHeight by remember { mutableStateOf(Dp.Unspecified) }
+    val animatedBoxHeight by animateDpAsState(
+        targetValue = boxHeight.takeIf { it != Dp.Unspecified } ?: 0.dp,
+        animationSpec = tween(
+            durationMillis = BRACKET_LAYOUT_ANIMATION_MS,
+            easing = FastOutSlowInEasing
+        ),
+        label = "Bracket Container Height"
+    )
     val width = getScreenWidth() / 1.5
     val cardWidthDp = width.dp
     var maxHeightIndex by remember { mutableIntStateOf(0) }
     val navBarPadding = LocalNavBarPadding.current.calculateBottomPadding()
+    val density = LocalDensity.current
     var prevColumnScroll by remember { mutableStateOf(columnScrollState.value) }
     var isScrollingUp by remember { mutableStateOf(true) }
     val isScrollingLeft by lazyRowState.isScrollingUp()
+    var pendingCollapseClamp by remember { mutableStateOf(false) }
+    var collapseAnchorColumnIndex by remember { mutableIntStateOf(0) }
+    var collapseTargetScrollMax by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(columnScrollState) {
         snapshotFlow { columnScrollState.value }.distinctUntilChanged().collect { currentScroll ->
@@ -175,9 +190,23 @@ fun TournamentBracketView(
 
                 maxHeightInRowDp = maxSize.dp * cardContainerHeight
 
-                if (boxHeight == Dp.Unspecified || maxHeightInRowDp > boxHeight) {
-                    boxHeight = maxHeightInRowDp + navBarPadding + 16.dp
+                val nextBoxHeight = maxHeightInRowDp + navBarPadding + 16.dp
+                val hasPreviousHeight = previousBoxHeight != Dp.Unspecified
+                val isCollapsing = hasPreviousHeight && nextBoxHeight < previousBoxHeight
+                if (isCollapsing) {
+                    collapseAnchorColumnIndex = lazyRowState.firstVisibleItemIndex
+                    val collapseDeltaPx = with(density) {
+                        (previousBoxHeight - nextBoxHeight).coerceAtLeast(0.dp).roundToPx()
+                    }
+                    val nextGapBelowColumnPx = with(density) {
+                        (nextBoxHeight - maxHeightInRowDp).coerceAtLeast(0.dp).roundToPx()
+                    }
+                    val estimatedNextMaxScroll = (columnScrollState.maxValue - collapseDeltaPx).coerceAtLeast(0)
+                    collapseTargetScrollMax = (estimatedNextMaxScroll - nextGapBelowColumnPx).coerceAtLeast(0)
+                    pendingCollapseClamp = true
                 }
+                boxHeight = nextBoxHeight
+                previousBoxHeight = nextBoxHeight
             }
         }
 
@@ -190,6 +219,27 @@ fun TournamentBracketView(
         }
     }
 
+    LaunchedEffect(pendingCollapseClamp, collapseTargetScrollMax, collapseAnchorColumnIndex) {
+        if (!pendingCollapseClamp) return@LaunchedEffect
+        val safeAnchorIndex = collapseAnchorColumnIndex.coerceIn(0, displayRounds.lastIndex.coerceAtLeast(0))
+        if (displayRounds.isEmpty() || safeAnchorIndex >= displayRounds.size) {
+            pendingCollapseClamp = false
+            return@LaunchedEffect
+        }
+        // Ensure the container height animation has started before clamping.
+        withFrameNanos { }
+        if (columnScrollState.value > collapseTargetScrollMax) {
+            columnScrollState.animateScrollTo(
+                collapseTargetScrollMax,
+                animationSpec = tween(
+                    durationMillis = BRACKET_LAYOUT_ANIMATION_MS,
+                    easing = FastOutSlowInEasing
+                )
+            )
+        }
+        pendingCollapseClamp = false
+    }
+
 
     Column(
         Modifier.fillMaxSize().verticalScroll(columnScrollState)
@@ -198,7 +248,7 @@ fun TournamentBracketView(
         Column(Modifier.fillMaxWidth()) {
             LazyRow(
                 state = lazyRowState,
-                modifier = Modifier.height(boxHeight).fillMaxWidth(),
+                modifier = Modifier.height(animatedBoxHeight).fillMaxWidth(),
             ) {
                 itemsIndexed(displayRounds, key = { _, round ->
                     round.filterNotNull().joinToString { it.match.id }
