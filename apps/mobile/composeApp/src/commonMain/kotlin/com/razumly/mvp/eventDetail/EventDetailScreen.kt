@@ -2563,7 +2563,7 @@ fun EventDetailScreen(
                     enter = expandVertically(expandFrom = Alignment.Top),
                     exit = shrinkVertically(shrinkTowards = Alignment.Top)
                 ) {
-                    Column(Modifier.padding(innerPadding).padding(top = 32.dp)) {
+                    Column(Modifier.padding(innerPadding).padding(top = 4.dp)) {
                         val availableTabs = remember(hasBracketView, hasScheduleView, hasStandingsView) {
                             buildList {
                                 add(DetailTab.PARTICIPANTS)
@@ -2662,7 +2662,7 @@ fun EventDetailScreen(
                             onTabSelected = { selectedTab = it },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(top = 16.dp, start = 12.dp, end = 12.dp, bottom = 10.dp),
+                                .padding(start = 12.dp, end = 12.dp, bottom = 10.dp),
                         )
                         Box(Modifier.fillMaxSize()) {
                             when (selectedTab) {

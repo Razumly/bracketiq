@@ -184,6 +184,36 @@ class MatchCardOfficialSummaryTest {
         assertTrue(height > MATCH_CARD_BASE_HEIGHT_DP)
         assertEquals(3, calculateManageOfficialLineCount(match, positions))
     }
+
+    @Test
+    fun calculate_manage_card_height_uses_larger_increment_per_official_line() {
+        val match = MatchMVP(
+            matchId = 1,
+            eventId = "event_1",
+            id = "match_1",
+        )
+        val fiveSlots = listOf(
+            EventOfficialPosition(id = "r1", name = "R1", count = 5, order = 0),
+        )
+        val sixSlots = listOf(
+            EventOfficialPosition(id = "r1", name = "R1", count = 6, order = 0),
+        )
+
+        val fiveSlotHeight = calculateMatchCardHeightDp(
+            match = match,
+            positions = fiveSlots,
+            manageMode = true,
+        )
+        val sixSlotHeight = calculateMatchCardHeightDp(
+            match = match,
+            positions = sixSlots,
+            manageMode = true,
+        )
+
+        assertEquals(5, calculateManageOfficialLineCount(match, fiveSlots))
+        assertEquals(6, calculateManageOfficialLineCount(match, sixSlots))
+        assertEquals(16, sixSlotHeight - fiveSlotHeight)
+    }
 }
 
 private fun user(

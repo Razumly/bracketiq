@@ -70,7 +70,7 @@ private val AlternateBracketOnContainer = Color(0xFF123B39)
 
 internal const val MATCH_CARD_BASE_HEIGHT_DP = 90
 private const val MATCH_CARD_MANAGE_SECTION_BASE_HEIGHT_DP = 12
-private const val MATCH_CARD_MANAGE_LINE_HEIGHT_DP = 14
+private const val MATCH_CARD_MANAGE_LINE_HEIGHT_DP = 16
 
 @Composable
 fun MatchCard(

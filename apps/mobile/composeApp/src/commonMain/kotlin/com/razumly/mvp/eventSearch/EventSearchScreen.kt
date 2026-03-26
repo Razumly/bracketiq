@@ -174,6 +174,7 @@ internal data class RentalBusyRange(
 private val DISCOVER_FIRST_ITEM_EXTRA_TOP_GAP = 4.dp
 private val DISCOVER_PULL_INDICATOR_TOP_OFFSET = 64.dp
 private val DISCOVER_MAP_FAB_EXTRA_DOWN_OFFSET = 10.dp
+private val DISCOVER_TAB_ROW_HEIGHT = 48.dp
 
 @OptIn(ExperimentalHazeMaterialsApi::class)
 @Composable
@@ -285,11 +286,12 @@ fun EventSearchScreen(
     }
 
     LaunchedEffect(currentListScrollingUp, isMapVisible, showingFilter, selectedTab) {
-        showFab = (currentListScrollingUp || isMapVisible) && !showingFilter
+        showFab = isMapVisible || (currentListScrollingUp && !showingFilter)
     }
 
-    LaunchedEffect(currentListScrollingUp, showSearchOverlay, showingFilter, searchQuery) {
-        showFloatingSearch = currentListScrollingUp ||
+    LaunchedEffect(currentListScrollingUp, isMapVisible, showSearchOverlay, showingFilter, searchQuery) {
+        showFloatingSearch = isMapVisible ||
+            currentListScrollingUp ||
             showSearchOverlay ||
             showingFilter ||
             searchQuery.isNotEmpty()
@@ -343,7 +345,9 @@ fun EventSearchScreen(
         CircularRevealUnderlay(
             isRevealed = isMapVisible,
             revealCenterInWindow = revealCenter,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .hazeSource(hazeState),
             backgroundContent = {
                 EventMap(
                     component = mapComponent,
@@ -383,146 +387,153 @@ fun EventSearchScreen(
                 )
             },
             foregroundContent = {
-                Box(modifier = Modifier.fillMaxSize()) {
-        Scaffold(
-            topBar = {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .hazeEffect(
-                            hazeState,
-                            HazeMaterials.ultraThin(NavigationBarDefaults.containerColor)
+                Scaffold(
+                    topBar = {
+                        Spacer(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .statusBarsPadding()
+                                .height(DISCOVER_TAB_ROW_HEIGHT)
                         )
-                        .statusBarsPadding()
-                ) {
-                    PrimaryTabRow(
-                        selectedTabIndex = selectedTab.ordinal,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        DiscoverTab.values().forEachIndexed { index, tab ->
-                            Tab(
-                                selected = selectedTab.ordinal == index,
+                    },
+                    floatingActionButton = {
+                        AnimatedVisibility(
+                            visible = showFab,
+                            enter = (slideInVertically { it / 2 } + fadeIn()),
+                            exit = (slideOutVertically { it / 2 } + fadeOut())
+                        ) {
+                            Button(
                                 onClick = {
-                                    selectedTab = tab
-                                },
-                                text = { Text(tab.label) }
-                            )
-                        }
-                    }
-                }
-            },
-            floatingActionButton = {
-                AnimatedVisibility(
-                    visible = showFab,
-                    enter = (slideInVertically { it / 2 } + fadeIn()),
-                    exit = (slideOutVertically { it / 2 } + fadeOut())
-                ) {
-                    Button(
-                        onClick = {
-                            if (!isMapVisible) {
-                                revealCenter = fabOffset
-                            }
-                            component.onMapClick()
-                            mapComponent.toggleMap()
-                        },
-                        modifier = Modifier
-                            .padding(offsetNavPadding)
-                            .offset(y = DISCOVER_MAP_FAB_EXTRA_DOWN_OFFSET)
-                            .onGloballyPositioned { layoutCoordinates ->
-                                val boundsInWindow = layoutCoordinates.boundsInWindow()
-                                fabOffset = boundsInWindow.center
-                            },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color.Black,
-                            contentColor = Color.White
-                        )
-                    ) {
-                        val text = if (isMapVisible) "List" else "Map"
-                        val icon =
-                            if (isMapVisible) Icons.AutoMirrored.Filled.List else Icons.Default.Place
-                        Text(text)
-                        Icon(icon, contentDescription = "$text Button")
-                    }
-                }
-            },
-            floatingActionButtonPosition = FabPosition.Center,
-        ) { paddingValues ->
-            val firstElementPadding = PaddingValues(
-                top = paddingValues.calculateTopPadding().plus(72.dp + DISCOVER_FIRST_ITEM_EXTRA_TOP_GAP)
-            )
-            PullToRefreshContainer(
-                isRefreshing = isRefreshingCurrentTab,
-                onRefresh = {
-                    when (selectedTab) {
-                        DiscoverTab.EVENTS -> component.refreshEvents(force = true)
-                        DiscoverTab.ORGANIZATIONS -> component.refreshOrganizations(force = true)
-                        DiscoverTab.RENTALS -> component.refreshRentals(force = true)
-                    }
-                },
-                modifier = Modifier.fillMaxSize(),
-                enabled = !isMapVisible,
-                shiftContentWithPull = true,
-                indicatorTopPadding = paddingValues.calculateTopPadding()
-                    .plus(DISCOVER_PULL_INDICATOR_TOP_OFFSET),
-            ) {
-                Box(
-                    Modifier
-                        .hazeSource(hazeState)
-                        .fillMaxSize()
-                ) {
-                    when (selectedTab) {
-                        DiscoverTab.EVENTS -> {
-                            EventsTabContent(
-                                events = events,
-                                firstElementPadding = firstElementPadding,
-                                lastElementPadding = offsetNavPadding,
-                                lazyListState = eventsListState,
-                                isLoadingMore = isLoadingMore,
-                                hasMoreEvents = hasMoreEvents,
-                                onLoadMore = { component.loadMoreEvents() },
-                                onMapClick = { offset, event ->
-                                    revealCenter = offset
-                                    component.onMapClick(event)
+                                    if (!isMapVisible) {
+                                        revealCenter = fabOffset
+                                    }
+                                    component.onMapClick()
                                     mapComponent.toggleMap()
                                 },
-                                onEventClick = { event ->
-                                    component.viewEvent(event)
-                                }
-                            )
+                                modifier = Modifier
+                                    .padding(offsetNavPadding)
+                                    .offset(y = DISCOVER_MAP_FAB_EXTRA_DOWN_OFFSET)
+                                    .onGloballyPositioned { layoutCoordinates ->
+                                        val boundsInWindow = layoutCoordinates.boundsInWindow()
+                                        fabOffset = boundsInWindow.center
+                                    },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color.Black,
+                                    contentColor = Color.White
+                                )
+                            ) {
+                                val text = if (isMapVisible) "List" else "Map"
+                                val icon =
+                                    if (isMapVisible) Icons.AutoMirrored.Filled.List else Icons.Default.Place
+                                Text(text)
+                                Icon(icon, contentDescription = "$text Button")
+                            }
                         }
-
-                        DiscoverTab.ORGANIZATIONS -> {
-                            DiscoverOrganizationList(
-                                organizations = organizations,
-                                isLoading = isLoadingOrganizations,
-                                listState = organizationsListState,
-                                firstElementPadding = firstElementPadding,
-                                lastElementPadding = offsetNavPadding,
-                                emptyMessage = "No organizations discovered yet.",
-                                onOrganizationClick = { organization ->
-                                    component.viewOrganization(organization)
-                                }
-                            )
-                        }
-
-                        DiscoverTab.RENTALS -> {
-                            DiscoverRentalList(
-                                organizations = rentals,
-                                isLoading = isLoadingRentals,
-                                listState = rentalsListState,
-                                firstElementPadding = firstElementPadding,
-                                lastElementPadding = offsetNavPadding,
-                                emptyMessage = "No rentals discovered nearby yet.",
-                                onOrganizationClick = { organization ->
-                                    component.viewOrganization(
-                                        organization,
-                                        com.razumly.mvp.core.presentation.OrganizationDetailTab.RENTALS
+                    },
+                    floatingActionButtonPosition = FabPosition.Center,
+                ) { paddingValues ->
+                    val firstElementPadding = PaddingValues(
+                        top = paddingValues.calculateTopPadding().plus(72.dp + DISCOVER_FIRST_ITEM_EXTRA_TOP_GAP)
+                    )
+                    PullToRefreshContainer(
+                        isRefreshing = isRefreshingCurrentTab,
+                        onRefresh = {
+                            when (selectedTab) {
+                                DiscoverTab.EVENTS -> component.refreshEvents(force = true)
+                                DiscoverTab.ORGANIZATIONS -> component.refreshOrganizations(force = true)
+                                DiscoverTab.RENTALS -> component.refreshRentals(force = true)
+                            }
+                        },
+                        modifier = Modifier.fillMaxSize(),
+                        enabled = !isMapVisible,
+                        shiftContentWithPull = true,
+                        indicatorTopPadding = paddingValues.calculateTopPadding()
+                            .plus(DISCOVER_PULL_INDICATOR_TOP_OFFSET),
+                    ) {
+                        Box(
+                            Modifier
+                                .fillMaxSize()
+                        ) {
+                            when (selectedTab) {
+                                DiscoverTab.EVENTS -> {
+                                    EventsTabContent(
+                                        events = events,
+                                        firstElementPadding = firstElementPadding,
+                                        lastElementPadding = offsetNavPadding,
+                                        lazyListState = eventsListState,
+                                        isLoadingMore = isLoadingMore,
+                                        hasMoreEvents = hasMoreEvents,
+                                        onLoadMore = { component.loadMoreEvents() },
+                                        onMapClick = { offset, event ->
+                                            revealCenter = offset
+                                            component.onMapClick(event)
+                                            mapComponent.toggleMap()
+                                        },
+                                        onEventClick = { event ->
+                                            component.viewEvent(event)
+                                        }
                                     )
                                 }
-                            )
+
+                                DiscoverTab.ORGANIZATIONS -> {
+                                    DiscoverOrganizationList(
+                                        organizations = organizations,
+                                        isLoading = isLoadingOrganizations,
+                                        listState = organizationsListState,
+                                        firstElementPadding = firstElementPadding,
+                                        lastElementPadding = offsetNavPadding,
+                                        emptyMessage = "No organizations discovered yet.",
+                                        onOrganizationClick = { organization ->
+                                            component.viewOrganization(organization)
+                                        }
+                                    )
+                                }
+
+                                DiscoverTab.RENTALS -> {
+                                    DiscoverRentalList(
+                                        organizations = rentals,
+                                        isLoading = isLoadingRentals,
+                                        listState = rentalsListState,
+                                        firstElementPadding = firstElementPadding,
+                                        lastElementPadding = offsetNavPadding,
+                                        emptyMessage = "No rentals discovered nearby yet.",
+                                        onOrganizationClick = { organization ->
+                                            component.viewOrganization(
+                                                organization,
+                                                com.razumly.mvp.core.presentation.OrganizationDetailTab.RENTALS
+                                            )
+                                        }
+                                    )
+                                }
+                            }
                         }
                     }
+                }
+            },
+        )
 
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .hazeEffect(
+                    hazeState,
+                    HazeMaterials.ultraThin(NavigationBarDefaults.containerColor)
+                )
+                .statusBarsPadding()
+                .align(Alignment.TopCenter),
+        ) {
+            PrimaryTabRow(
+                selectedTabIndex = selectedTab.ordinal,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                DiscoverTab.values().forEachIndexed { index, tab ->
+                    Tab(
+                        selected = selectedTab.ordinal == index,
+                        onClick = {
+                            selectedTab = tab
+                        },
+                        text = { Text(tab.label) }
+                    )
                 }
             }
         }
@@ -685,9 +696,6 @@ fun EventSearchScreen(
                 }
                 EmptyDiscoverListItem(message = message)
             }
-        )
-                }
-            },
         )
     }
 

@@ -46,6 +46,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
@@ -133,6 +134,7 @@ fun TournamentBracketView(
     var maxHeightIndex by remember { mutableIntStateOf(0) }
     val navBarPadding = LocalNavBarPadding.current.calculateBottomPadding()
     val density = LocalDensity.current
+    var viewportHeightPx by remember { mutableIntStateOf(0) }
     var prevColumnScroll by remember { mutableStateOf(columnScrollState.value) }
     var isScrollingUp by remember { mutableStateOf(true) }
     val isScrollingLeft by lazyRowState.isScrollingUp()
@@ -190,7 +192,13 @@ fun TournamentBracketView(
 
                 maxHeightInRowDp = maxSize.dp * cardContainerHeight
 
-                val nextBoxHeight = maxHeightInRowDp + navBarPadding + 16.dp
+                val rawBoxHeight = maxHeightInRowDp + navBarPadding + 16.dp
+                val minBoxHeight = if (viewportHeightPx > 0) {
+                    with(density) { viewportHeightPx.toDp() }
+                } else {
+                    0.dp
+                }
+                val nextBoxHeight = rawBoxHeight.coerceAtLeast(minBoxHeight)
                 val hasPreviousHeight = previousBoxHeight != Dp.Unspecified
                 val isCollapsing = hasPreviousHeight && nextBoxHeight < previousBoxHeight
                 if (isCollapsing) {
@@ -242,7 +250,9 @@ fun TournamentBracketView(
 
 
     Column(
-        Modifier.fillMaxSize().verticalScroll(columnScrollState)
+        Modifier.fillMaxSize()
+            .onSizeChanged { viewportHeightPx = it.height }
+            .verticalScroll(columnScrollState)
             .background(MaterialTheme.colorScheme.background)
     ) {
         Column(Modifier.fillMaxWidth()) {
