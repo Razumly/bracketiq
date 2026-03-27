@@ -15,6 +15,8 @@ data class ChatGroupApiDto(
     val teamId: String? = null,
     val userIds: List<String>? = null,
     val hostId: String? = null,
+    val unreadCount: Int? = null,
+    val lastMessage: MessageApiDto? = null,
 ) {
     fun toChatGroupOrNull(): ChatGroup? {
         val resolvedId = id ?: legacyId
@@ -28,6 +30,18 @@ data class ChatGroupApiDto(
         ).apply {
             this.teamId = teamId?.trim()?.takeIf(String::isNotBlank)
         }
+    }
+
+    @OptIn(ExperimentalTime::class)
+    fun toSummaryOrNull(): com.razumly.mvp.chat.data.ChatGroupSummary? {
+        val resolvedId = id ?: legacyId
+        if (resolvedId.isNullOrBlank()) return null
+        val lastPreview = lastMessage?.toMessageOrNull()
+        return com.razumly.mvp.chat.data.ChatGroupSummary(
+            unreadCount = (unreadCount ?: 0).coerceAtLeast(0),
+            lastMessageBody = lastPreview?.body,
+            lastMessageSentTime = lastPreview?.sentTime,
+        )
     }
 }
 

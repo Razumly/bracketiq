@@ -50,6 +50,7 @@ import com.razumly.mvp.core.presentation.composables.SearchPlayerDialog
 @Composable
 fun ChatListScreen(component: ChatListComponent) {
     val chatList by component.chatGroups.collectAsState()
+    val chatSummaries by component.chatSummaries.collectAsState()
     var showNewChatDialog by remember { mutableStateOf(false) }
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
@@ -89,6 +90,7 @@ fun ChatListScreen(component: ChatListComponent) {
                     modifier = Modifier.clickable { component.onChatSelected(it) },
                     chatGroup = it,
                     currentUserId = component.currentUser.id,
+                    summary = chatSummaries[it.chatGroup.id],
                 )
             }
         }

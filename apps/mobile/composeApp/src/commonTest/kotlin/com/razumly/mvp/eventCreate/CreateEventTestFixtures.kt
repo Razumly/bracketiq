@@ -427,6 +427,10 @@ internal class CreateEvent_FakeFieldRepository : IFieldRepository {
     override suspend fun listFields(eventId: String?): Result<List<Field>> = Result.success(emptyList())
     override suspend fun getTimeSlots(ids: List<String>): Result<List<TimeSlot>> = Result.success(emptyList())
     override suspend fun getTimeSlotsForField(fieldId: String): Result<List<TimeSlot>> = Result.success(emptyList())
+    override suspend fun getTimeSlotsForFields(
+        fieldIds: List<String>,
+        rentalOnly: Boolean,
+    ): Result<List<TimeSlot>> = Result.success(emptyList())
 
     override suspend fun createTimeSlot(slot: TimeSlot): Result<TimeSlot> = runCatching {
         slotCounter += 1
@@ -482,6 +486,14 @@ internal class CreateEvent_FakeMatchRepository : IMatchRepository {
     override suspend fun updateMatchFinished(match: MatchMVP, time: Instant): Result<Unit> = Result.success(Unit)
     override suspend fun getMatchesOfTournament(tournamentId: String): Result<List<MatchMVP>> =
         Result.success(tournamentMatches)
+    override suspend fun getMatchesByEventIds(
+        eventIds: List<String>,
+        fieldIds: List<String>?,
+        rangeStart: Instant?,
+        rangeEnd: Instant?,
+    ): Result<List<MatchMVP>> = Result.success(
+        tournamentMatches.filter { match -> eventIds.contains(match.eventId) }
+    )
     override suspend fun deleteMatchesOfTournament(tournamentId: String): Result<Unit> = Result.success(Unit)
     override suspend fun subscribeToMatches(): Result<Unit> = Result.success(Unit)
     override suspend fun unsubscribeFromRealtime(): Result<Unit> = Result.success(Unit)

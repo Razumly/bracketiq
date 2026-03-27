@@ -17,6 +17,7 @@ import com.razumly.mvp.core.network.dto.MatchUpdateDto
 import com.razumly.mvp.core.network.dto.MatchesResponseDto
 import com.razumly.mvp.core.network.dto.toBulkMatchCreateEntryDto
 import com.razumly.mvp.core.network.dto.toBulkMatchUpdateEntryDto
+import io.ktor.http.encodeURLQueryComponent
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -50,6 +51,12 @@ interface IMatchRepository : IMVPRepository {
     fun getMatchesOfTournamentFlow(tournamentId: String): Flow<Result<List<MatchWithRelations>>>
     suspend fun updateMatchFinished(match: MatchMVP, time: Instant): Result<Unit>
     suspend fun getMatchesOfTournament(tournamentId: String): Result<List<MatchMVP>>
+    suspend fun getMatchesByEventIds(
+        eventIds: List<String>,
+        fieldIds: List<String>? = null,
+        rangeStart: Instant? = null,
+        rangeEnd: Instant? = null,
+    ): Result<List<MatchMVP>>
     suspend fun deleteMatchesOfTournament(tournamentId: String): Result<Unit>
     suspend fun subscribeToMatches(): Result<Unit>
     suspend fun unsubscribeFromRealtime(): Result<Unit>
@@ -345,6 +352,55 @@ class MatchRepository(
             )
             databaseService.getMatchDao.getMatchesOfTournament(tournamentId)
         }
+
+    override suspend fun getMatchesByEventIds(
+        eventIds: List<String>,
+        fieldIds: List<String>?,
+        rangeStart: Instant?,
+        rangeEnd: Instant?,
+    ): Result<List<MatchMVP>> = runCatching {
+        val normalizedEventIds = eventIds
+            .mapNotNull { eventId -> normalizeOptionalToken(eventId) }
+            .distinct()
+        if (normalizedEventIds.isEmpty()) {
+            return@runCatching emptyList()
+        }
+
+        val normalizedFieldIds = fieldIds
+            .orEmpty()
+            .mapNotNull { fieldId -> normalizeOptionalToken(fieldId) }
+            .distinct()
+
+        val aggregatedMatches = mutableListOf<MatchMVP>()
+        normalizedEventIds.chunked(100).forEach { eventIdChunk ->
+            val query = buildList {
+                add(
+                    "eventIds=${
+                        eventIdChunk.joinToString(",").encodeURLQueryComponent()
+                    }"
+                )
+                if (normalizedFieldIds.isNotEmpty()) {
+                    add(
+                        "fieldIds=${
+                            normalizedFieldIds.joinToString(",").encodeURLQueryComponent()
+                        }"
+                    )
+                }
+                rangeStart?.let { start -> add("start=${start.toString().encodeURLQueryComponent()}") }
+                rangeEnd?.let { end -> add("end=${end.toString().encodeURLQueryComponent()}") }
+            }.joinToString("&")
+            val fetchedMatches = api.get<MatchesResponseDto>("api/matches?$query")
+                .matches
+                .mapNotNull { match -> match.toMatchOrNull() }
+            aggregatedMatches.addAll(fetchedMatches)
+        }
+
+        val dedupedMatches = aggregatedMatches.distinctBy { match -> match.id }
+        if (dedupedMatches.isNotEmpty()) {
+            databaseService.getMatchDao.upsertMatches(dedupedMatches)
+        }
+        dedupedMatches
+    }
 
     override suspend fun deleteMatchesOfTournament(tournamentId: String): Result<Unit> = runCatching {
         val normalizedId = tournamentId.trim()

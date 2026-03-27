@@ -9,6 +9,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.razumly.mvp.chat.data.ChatGroupSummary
 import com.razumly.mvp.chat.data.countUnreadMessages
 import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.presentation.composables.UnifiedCard
@@ -21,6 +22,7 @@ fun ChatListItem(
     modifier: Modifier = Modifier,
     chatGroup: ChatGroupWithRelations,
     currentUserId: String,
+    summary: ChatGroupSummary? = null,
 ) {
     val avatarModel = resolveChatAvatarRenderModel(
         chatGroup = chatGroup,
@@ -36,8 +38,9 @@ fun ChatListItem(
         ?: participantNames
         ?: "Unknown chat"
     val imageUrl = avatarModel.sources.firstOrNull()?.imageRef
-    val subtitle = chatGroup.messages.lastOrNull()?.body.asMeaningfulText()
-    val unreadCount = countUnreadMessages(chatGroup.messages, currentUserId)
+    val subtitle = summary?.lastMessageBody.asMeaningfulText()
+        ?: chatGroup.messages.lastOrNull()?.body.asMeaningfulText()
+    val unreadCount = summary?.unreadCount ?: countUnreadMessages(chatGroup.messages, currentUserId)
     val unreadBadgeText = if (unreadCount > 99) "99+" else unreadCount.toString()
     val displayChat = chatGroup.chatGroup.copy()
         .setDisplayName(displayName)
@@ -57,9 +60,9 @@ fun ChatListItem(
                 horizontalAlignment = Alignment.End,
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                chatGroup.messages.lastOrNull()?.let { message ->
+                (summary?.lastMessageSentTime ?: chatGroup.messages.lastOrNull()?.sentTime)?.let { sentTime ->
                     Text(
-                        text = formatMessageTime(message.sentTime),
+                        text = formatMessageTime(sentTime),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

@@ -7,7 +7,6 @@ import com.arkivanov.essenty.backhandler.BackCallback
 import com.arkivanov.essenty.instancekeeper.InstanceKeeper
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.Event
-import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
@@ -117,6 +116,11 @@ class DefaultEventSearchComponent(
         }
     }
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob() + scopeExceptionHandler)
+    private val rentalAvailabilityLoader = RentalAvailabilityLoader(
+        eventRepository = eventRepository,
+        matchRepository = matchRepository,
+        fieldRepository = fieldRepository,
+    )
 
     private val _currentRadius = MutableStateFlow(50.0)
     override val currentRadius: StateFlow<Double> = _currentRadius.asStateFlow()
@@ -169,6 +173,7 @@ class DefaultEventSearchComponent(
     private var suggestOrganizationsJob: Job? = null
     private var cachedEventsSyncJob: Job? = null
     private var eventOffset = 0
+    private var organizationFieldIdsFromFieldsCache: Map<String, List<String>> = emptyMap()
 
     private lateinit var loadingHandler: LoadingHandler
 
@@ -221,8 +226,8 @@ class DefaultEventSearchComponent(
                     if (previousLocation == null ||
                         calcDistance(previousLocation, trackedLocation) > 50
                     ) {
-                        refreshOrganizations(force = true)
-                        refreshRentals(force = true)
+                        refreshOrganizations(force = false)
+                        refreshRentals(force = false)
                     }
                 }
             } catch (deniedAlwaysException: DeniedAlwaysException) {
@@ -238,15 +243,15 @@ class DefaultEventSearchComponent(
 
         scope.launch {
             currentRadius.collect {
-                refreshOrganizations(force = true)
-                refreshRentals(force = true)
+                refreshOrganizations(force = false)
+                refreshRentals(force = false)
             }
         }
 
         observeCachedEvents()
         refreshEvents(force = true)
-        refreshOrganizations(force = true)
-        refreshRentals(force = true)
+        refreshOrganizations(force = false)
+        refreshRentals(force = false)
     }
 
     override fun selectRadius(radius: Double) {
@@ -404,52 +409,13 @@ class DefaultEventSearchComponent(
         scope.launch {
             _isLoadingRentalFields.value = true
             _rentalFieldOptions.value = emptyList()
-
-            val fields = fieldRepository.getFields(fieldIds)
-                .getOrElse { e ->
-                    _errorState.value = ErrorMessage("Failed to fetch organization fields: ${e.message}")
-                    _isLoadingRentalFields.value = false
-                    return@launch
+            rentalAvailabilityLoader.loadFieldOptions(fieldIds)
+                .onSuccess { options ->
+                    _rentalFieldOptions.value = options
                 }
-
-            val sortedFields = fields.sortedBy { field -> fieldDisplayLabel(field).lowercase() }
-            val slotIds = sortedFields
-                .flatMap { field -> field.rentalSlotIds }
-                .distinct()
-                .filter(String::isNotBlank)
-
-            val timeSlotById = if (slotIds.isEmpty()) {
-                emptyMap()
-            } else {
-                fieldRepository.getTimeSlots(slotIds)
-                    .getOrElse { e ->
-                        _errorState.value = ErrorMessage("Failed to fetch rental time slots: ${e.message}")
-                        _isLoadingRentalFields.value = false
-                        return@launch
-                    }
-                    .associateBy { slot -> slot.id }
-            }
-
-            _rentalFieldOptions.value = sortedFields.map { field ->
-                val linkedSlots = field.rentalSlotIds.mapNotNull { slotId -> timeSlotById[slotId] }
-
-                // Fallback for legacy/stale data where field.rentalSlotIds is empty but slots exist by scheduledFieldId.
-                val fallbackSlots = if (linkedSlots.isEmpty()) {
-                    fieldRepository.getTimeSlotsForField(field.id)
-                        .onFailure { error ->
-                            Napier.w("Fallback rental-slot lookup failed for field ${field.id}: ${error.message}")
-                        }
-                        .getOrElse { emptyList() }
-                } else {
-                    emptyList()
+                .onFailure { e ->
+                    _errorState.value = ErrorMessage("Failed to fetch rental field options: ${e.message}")
                 }
-
-                val mergedSlots = (linkedSlots + fallbackSlots)
-                    .distinctBy { slot -> slot.id }
-                    .sortedBy { slot -> slot.startTimeMinutes ?: Int.MAX_VALUE }
-
-                RentalFieldOption(field = field, rentalSlots = mergedSlots)
-            }
 
             _isLoadingRentalFields.value = false
         }
@@ -457,80 +423,8 @@ class DefaultEventSearchComponent(
 
     override fun loadRentalBusyBlocks(organizationId: String, fieldIds: List<String>) {
         scope.launch {
-            val normalizedFieldIds = fieldIds.map { id -> id.trim() }.filter(String::isNotBlank).distinct()
-            if (organizationId.isBlank() || normalizedFieldIds.isEmpty()) {
-                _rentalBusyBlocks.value = emptyList()
-                return@launch
-            }
-            val selectedFieldSet = normalizedFieldIds.toSet()
-
-            eventRepository.getEventsByOrganization(organizationId, limit = 300)
-                .onSuccess { organizationEvents ->
-                    val busyBlocks = organizationEvents.flatMap { event ->
-                        when (event.eventType) {
-                            EventType.EVENT, EventType.WEEKLY_EVENT -> {
-                                val eventFieldIds = event.fieldIds
-                                    .map { id -> id.trim() }
-                                    .filter(String::isNotBlank)
-                                    .distinct()
-                                if (eventFieldIds.isEmpty()) {
-                                    emptyList()
-                                } else {
-                                    eventFieldIds
-                                        .intersect(selectedFieldSet)
-                                        .map { fieldId ->
-                                            RentalBusyBlock(
-                                                eventId = event.id,
-                                                eventName = event.name.ifBlank { "Reserved event" },
-                                                fieldId = fieldId,
-                                                start = event.start,
-                                                end = event.end,
-                                            )
-                                        }
-                                }
-                            }
-
-                            EventType.LEAGUE, EventType.TOURNAMENT -> {
-                                val eventFieldIds = event.fieldIds
-                                    .map { id -> id.trim() }
-                                    .filter(String::isNotBlank)
-                                    .distinct()
-                                if (eventFieldIds.isNotEmpty() &&
-                                    eventFieldIds.intersect(selectedFieldSet).isEmpty()
-                                ) {
-                                    emptyList()
-                                } else {
-                                    matchRepository.getMatchesOfTournament(event.id)
-                                        .onFailure { error ->
-                                            Napier.w(
-                                                "Failed to load matches for event ${event.id}: ${error.message}",
-                                                tag = "Discover"
-                                            )
-                                        }
-                                        .getOrElse { emptyList() }
-                                        .mapNotNull { match ->
-                                            val fieldId = match.fieldId?.trim()
-                                            val matchStart = match.start ?: return@mapNotNull null
-                                            val matchEnd = match.end
-                                            if (fieldId.isNullOrBlank()) return@mapNotNull null
-                                            if (!selectedFieldSet.contains(fieldId)) return@mapNotNull null
-                                            if (matchEnd == null || matchEnd <= matchStart) return@mapNotNull null
-
-                                            RentalBusyBlock(
-                                                eventId = event.id,
-                                                eventName = event.name.ifBlank { "Reserved match" },
-                                                fieldId = fieldId,
-                                                start = matchStart,
-                                                end = matchEnd,
-                                            )
-                                        }
-                                }
-                            }
-                        }
-                    }
-                        .filter { block -> block.end > block.start }
-                        .distinctBy { block -> "${block.eventId}:${block.fieldId}:${block.start.toEpochMilliseconds()}:${block.end.toEpochMilliseconds()}" }
-
+            rentalAvailabilityLoader.loadBusyBlocks(organizationId = organizationId, fieldIds = fieldIds)
+                .onSuccess { busyBlocks ->
                     _rentalBusyBlocks.value = busyBlocks
                 }
                 .onFailure { error ->
@@ -597,10 +491,13 @@ class DefaultEventSearchComponent(
 
     private suspend fun loadRentalOrganizations(force: Boolean = false) {
         if (_isLoadingRentals.value) return
-        if (rentalsLoaded && !force) return
 
         _isLoadingRentals.value = true
-        val organizations = loadOrganizations(force = force)
+        val organizations = if (organizationsLoaded || !force) {
+            loadOrganizations(force = force)
+        } else {
+            loadOrganizations(force = true)
+        }
         val normalizedOrganizations = organizations.map { organization ->
             organization.copy(
                 fieldIds = organization.fieldIds
@@ -613,15 +510,18 @@ class DefaultEventSearchComponent(
             organization.fieldIds.isEmpty()
         }
         val organizationFieldIdsFromFields = if (missingFieldIds) {
-            fieldRepository.listFields()
-                .getOrElse { emptyList() }
-                .filter { field -> !field.organizationId.isNullOrBlank() }
-                .groupBy { field -> field.organizationId!! }
-                .mapValues { (_, fields) ->
-                    fields.map { field -> field.id }
-                        .distinct()
-                        .filter(String::isNotBlank)
-                }
+            if (organizationFieldIdsFromFieldsCache.isEmpty() || force) {
+                organizationFieldIdsFromFieldsCache = fieldRepository.listFields()
+                    .getOrElse { emptyList() }
+                    .filter { field -> !field.organizationId.isNullOrBlank() }
+                    .groupBy { field -> field.organizationId!! }
+                    .mapValues { (_, fields) ->
+                        fields.map { field -> field.id }
+                            .distinct()
+                            .filter(String::isNotBlank)
+                    }
+            }
+            organizationFieldIdsFromFieldsCache
         } else {
             emptyMap()
         }
@@ -647,7 +547,16 @@ class DefaultEventSearchComponent(
 
     private suspend fun loadOrganizations(force: Boolean = false): List<Organization> {
         if (_isLoadingOrganizations.value) return _organizations.value
-        if (organizationsLoaded && !force) return _organizations.value
+        if (organizationsLoaded && !force) {
+            val source = if (_allOrganizations.value.isNotEmpty()) {
+                _allOrganizations.value
+            } else {
+                _organizations.value
+            }
+            val distanceFiltered = applyDistanceFilter(source)
+            _organizations.value = distanceFiltered
+            return distanceFiltered
+        }
 
         _isLoadingOrganizations.value = true
         var organizations: List<Organization> = emptyList()
@@ -662,6 +571,7 @@ class DefaultEventSearchComponent(
 
         val sortedOrganizations = organizations.sortedBy { organization -> organization.name.lowercase() }
         _allOrganizations.value = sortedOrganizations
+        organizationFieldIdsFromFieldsCache = emptyMap()
 
         val distanceFiltered = applyDistanceFilter(sortedOrganizations)
         _organizations.value = distanceFiltered

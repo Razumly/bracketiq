@@ -1,6 +1,7 @@
 package com.razumly.mvp.chat
 
 import com.arkivanov.decompose.ComponentContext
+import com.razumly.mvp.chat.data.ChatGroupSummary
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.chat.data.IChatGroupRepository
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
@@ -23,6 +24,7 @@ interface ChatListComponent {
     val newChat: StateFlow<ChatGroupWithRelations>
     val selectedChat: StateFlow<ChatGroup?>
     val chatGroups: StateFlow<List<ChatGroupWithRelations>>
+    val chatSummaries: StateFlow<Map<String, ChatGroupSummary>>
     val errorState: StateFlow<String?>
     val suggestedPlayers: StateFlow<List<UserData>>
     val currentUser: UserData
@@ -74,6 +76,8 @@ class DefaultChatListComponent(
             emptyList()
         }
     }.stateIn(scope, SharingStarted.Eagerly, listOf())
+    override val chatSummaries = chatGroupRepository.chatSummariesFlow
+        .stateIn(scope, SharingStarted.Eagerly, emptyMap())
 
     init {
         scope.launch {

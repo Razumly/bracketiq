@@ -26,6 +26,10 @@ interface IFieldRepository : IMVPRepository {
     suspend fun listFields(eventId: String? = null): Result<List<Field>>
     suspend fun getTimeSlots(ids: List<String>): Result<List<TimeSlot>>
     suspend fun getTimeSlotsForField(fieldId: String): Result<List<TimeSlot>>
+    suspend fun getTimeSlotsForFields(
+        fieldIds: List<String>,
+        rentalOnly: Boolean = false,
+    ): Result<List<TimeSlot>>
     suspend fun createTimeSlot(slot: TimeSlot): Result<TimeSlot>
     suspend fun updateTimeSlot(slot: TimeSlot): Result<TimeSlot>
     suspend fun deleteTimeSlot(timeSlotId: String): Result<Unit>
@@ -127,6 +131,26 @@ class FieldRepository(
         if (normalizedFieldId.isEmpty()) return@runCatching emptyList()
         val encodedFieldId = normalizedFieldId.encodeURLQueryComponent()
         api.get<TimeSlotsResponseDto>("api/time-slots?fieldId=$encodedFieldId").timeSlots
+    }
+
+    override suspend fun getTimeSlotsForFields(
+        fieldIds: List<String>,
+        rentalOnly: Boolean,
+    ): Result<List<TimeSlot>> = runCatching {
+        val normalizedFieldIds = fieldIds
+            .map { fieldId -> fieldId.trim() }
+            .filter(String::isNotBlank)
+            .distinct()
+        if (normalizedFieldIds.isEmpty()) return@runCatching emptyList()
+
+        val encodedFieldIds = normalizedFieldIds.joinToString(",").encodeURLQueryComponent()
+        val query = buildList {
+            add("fieldIds=$encodedFieldIds")
+            if (rentalOnly) {
+                add("rentalOnly=true")
+            }
+        }.joinToString("&")
+        api.get<TimeSlotsResponseDto>("api/time-slots?$query").timeSlots
     }
 
     override suspend fun createTimeSlot(slot: TimeSlot): Result<TimeSlot> = runCatching {

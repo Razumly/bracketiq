@@ -4,7 +4,6 @@ import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.chat.data.IChatGroupRepository
 import com.razumly.mvp.chat.data.IMessageRepository
-import com.razumly.mvp.chat.data.countUnreadMessages
 import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.data.dataTypes.MessageMVP
 import com.razumly.mvp.core.data.dataTypes.UserData
@@ -114,17 +113,19 @@ class DefaultChatGroupComponent(
         scope.launch {
             chatGroup
                 .map { group ->
-                    val chatId = group?.chatGroup?.id?.trim().orEmpty()
-                    val unreadCount = group?.messages?.let { messages ->
-                        countUnreadMessages(messages, currentUser.id)
-                    } ?: 0
-                    chatId to unreadCount
+                    group?.chatGroup?.id?.trim().orEmpty()
                 }
                 .distinctUntilChanged()
-                .collect { (chatId, unreadCount) ->
-                    if (chatId.isBlank() || unreadCount <= 0) return@collect
+                .collect { chatId ->
+                    if (chatId.isBlank()) return@collect
+                    messagesRepository.getMessagesInChatGroup(chatId).onFailure { error ->
+                        Napier.w("Failed to load messages for opened chat $chatId: ${error.message}")
+                    }
                     messagesRepository.markMessagesRead(chatId, currentUser.id).onFailure { error ->
                         Napier.w("Failed to mark messages as read for chat $chatId: ${error.message}")
+                    }
+                    chatGroupRepository.refreshChatGroupsAndMessages().onFailure { error ->
+                        Napier.w("Failed to refresh chat summaries after mark-read for chat $chatId: ${error.message}")
                     }
                 }
         }

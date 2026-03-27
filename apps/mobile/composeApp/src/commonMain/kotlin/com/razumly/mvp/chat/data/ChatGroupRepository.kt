@@ -30,6 +30,7 @@ import kotlinx.coroutines.launch
 
 interface IChatGroupRepository : IMVPRepository {
     val chatGroupsFlow: Flow<Result<List<ChatGroupWithRelations>>>
+    val chatSummariesFlow: Flow<Map<String, ChatGroupSummary>>
     fun getUnreadMessageCountFlow(userId: String): Flow<Int>
 
     fun getChatGroupFlow(
@@ -53,10 +54,20 @@ class ChatGroupRepository(
     private val messageRepository: IMessageRepository,
     private val teamRepository: ITeamRepository,
 ) : IChatGroupRepository {
+    private val _chatSummaries = kotlinx.coroutines.flow.MutableStateFlow<Map<String, ChatGroupSummary>>(emptyMap())
     override val chatGroupsFlow = groupsFlow()
+    override val chatSummariesFlow: Flow<Map<String, ChatGroupSummary>> = _chatSummaries
     override fun getUnreadMessageCountFlow(userId: String): Flow<Int> =
-        databaseService.getChatGroupDao.getChatGroupsFlowByUserId(userId)
-            .map { chatGroups -> countUnreadMessages(chatGroups, userId) }
+        kotlinx.coroutines.flow.combine(
+            databaseService.getChatGroupDao.getChatGroupsFlowByUserId(userId),
+            chatSummariesFlow,
+        ) { chatGroups, summaries ->
+            if (summaries.isNotEmpty()) {
+                summaries.values.sumOf { summary -> summary.unreadCount }
+            } else {
+                countUnreadMessages(chatGroups, userId)
+            }
+        }
 
     override fun getChatGroupFlow(
         user: UserData?, chatGroup: ChatGroupWithRelations?
@@ -100,6 +111,16 @@ class ChatGroupRepository(
             getRemoteData = {
                 val encoded = userId.encodeURLQueryComponent()
                 val res = api.get<ChatGroupsResponseDto>("api/chat/groups?userId=$encoded")
+                val summaries = res.groups.mapNotNull { groupDto ->
+                    val groupId = groupDto.id ?: groupDto.legacyId
+                    val summary = groupDto.toSummaryOrNull()
+                    if (groupId.isNullOrBlank() || summary == null) {
+                        null
+                    } else {
+                        groupId to summary
+                    }
+                }.toMap()
+                _chatSummaries.value = summaries
                 res.groups.mapNotNull { it.toChatGroupOrNull() }
             },
             getLocalData = {
@@ -120,12 +141,6 @@ class ChatGroupRepository(
                     val team = resolveTeamId(group)?.let(teamsById::get)
                     group.setDisplayName(resolveDisplayName(group, otherUsers, team))
                         .setImageUrl(resolveImageUrl(group, otherUsers, team))
-                }
-
-                chatGroups.forEach { group ->
-                    messageRepository.getMessagesInChatGroup(group.id).onFailure { e ->
-                        Napier.e("Failed to refresh messages for chat group ${group.id}", e)
-                    }
                 }
 
                 databaseService.getChatGroupDao.upsertChatGroupsWithRelations(chatGroups)
