@@ -72,6 +72,7 @@ actual fun PlatformTextField(
 ) {
     val focusManager = externalFocusManager ?: rememberPlatformFocusManager()
     val allFocusManagers = localAllFocusManagers.current
+    val platformTextFieldVisible = LocalPlatformTextFieldVisible.current
 
     DisposableEffect(focusManager) {
         allFocusManagers.add(focusManager)
@@ -200,7 +201,12 @@ actual fun PlatformTextField(
                             borderColor = borderUIColor,
                             cornerRadius = cornerRadius.value.toDouble(),
                             onImeAction = onImeAction,
-                        )
+                        ).also { textField ->
+                            textField.hidden = !platformTextFieldVisible
+                            if (!platformTextFieldVisible) {
+                                textField.resignFirstResponder()
+                            }
+                        }
                     },
                     modifier = Modifier
                         .weight(1f)
@@ -226,6 +232,10 @@ actual fun PlatformTextField(
                             borderColor = borderUIColor,
                             cornerRadius = cornerRadius.value.toDouble(),
                         )
+                        textField.hidden = !platformTextFieldVisible
+                        if (!platformTextFieldVisible) {
+                            textField.resignFirstResponder()
+                        }
                     }
                 )
             }
@@ -293,25 +303,12 @@ fun createSimpleUITextField(
     textField.rightView = UIView(frame = CGRectMake(0.0, 0.0, 12.0, 0.0))
     textField.rightViewMode = UITextFieldViewMode.UITextFieldViewModeAlways
 
-    // Set keyboard type
-    when (keyboardType) {
-        "email" -> textField.keyboardType = UIKeyboardTypeEmailAddress
-        "number", "money" -> textField.keyboardType = UIKeyboardTypeNumberPad
-        "password" -> {
-            textField.keyboardType = UIKeyboardTypeDefault
-            textField.secureTextEntry = true
-        }
-        else -> textField.keyboardType = UIKeyboardTypeDefault
-    }
-
-    // Set return key type
-    textField.returnKeyType = when (imeAction) {
-        ImeAction.Next -> UIReturnKeyType.UIReturnKeyNext
-        ImeAction.Done -> UIReturnKeyType.UIReturnKeyDone
-        ImeAction.Go -> UIReturnKeyType.UIReturnKeyGo
-        ImeAction.Send -> UIReturnKeyType.UIReturnKeySend
-        else -> UIReturnKeyType.UIReturnKeyDefault
-    }
+    // Set keyboard traits once when creating the field.
+    textField.keyboardType = resolveKeyboardType(
+        keyboardType = keyboardType,
+        isSecure = isSecure,
+    )
+    textField.returnKeyType = resolveReturnKeyType(imeAction)
 
     focusManager.attachToTextField(textField)
 
@@ -360,8 +357,12 @@ fun updateSimpleUITextField(
         textField.text = displayText
     }
 
-    textField.secureTextEntry = isSecure
-    textField.enabled = enabled
+    if (textField.secureTextEntry != isSecure) {
+        textField.secureTextEntry = isSecure
+    }
+    if (textField.enabled != enabled) {
+        textField.enabled = enabled
+    }
     textField.font = UIFont.systemFontOfSize(fontSize.value.toDouble())
     textField.borderStyle = UITextBorderStyle.UITextBorderStyleNone
     textField.layer.cornerRadius = cornerRadius
@@ -371,25 +372,40 @@ fun updateSimpleUITextField(
     textField.textColor = if (enabled) textColor else disabledTextColor
     textField.attributedPlaceholder = placeholder.toAttributedPlaceholder(placeholderColor)
 
-    // Update keyboard type
-    when (keyboardType) {
-        "email" -> textField.keyboardType = UIKeyboardTypeEmailAddress
-        "number", "money" -> textField.keyboardType = UIKeyboardTypeNumberPad
-        "password" -> {
-            textField.keyboardType = UIKeyboardTypeDefault
-            textField.secureTextEntry = true
+    // Avoid forcing keyboard trait updates while editing unless they changed.
+    val resolvedKeyboardType = resolveKeyboardType(
+        keyboardType = keyboardType,
+        isSecure = isSecure,
+    )
+    if (textField.keyboardType != resolvedKeyboardType) {
+        textField.keyboardType = resolvedKeyboardType
+        if (textField.isFirstResponder()) {
+            textField.reloadInputViews()
         }
-        else -> textField.keyboardType = UIKeyboardTypeDefault
     }
 
-    // Update return key type
-    textField.returnKeyType = when (imeAction) {
-        ImeAction.Next -> UIReturnKeyType.UIReturnKeyNext
-        ImeAction.Done -> UIReturnKeyType.UIReturnKeyDone
-        ImeAction.Go -> UIReturnKeyType.UIReturnKeyGo
-        ImeAction.Send -> UIReturnKeyType.UIReturnKeySend
-        else -> UIReturnKeyType.UIReturnKeyDefault
+    val resolvedReturnKeyType = resolveReturnKeyType(imeAction)
+    if (textField.returnKeyType != resolvedReturnKeyType) {
+        textField.returnKeyType = resolvedReturnKeyType
     }
+}
+
+private fun resolveKeyboardType(
+    keyboardType: String,
+    isSecure: Boolean,
+): UIKeyboardType = when {
+    isSecure || keyboardType == "password" -> UIKeyboardTypeDefault
+    keyboardType == "email" -> UIKeyboardTypeEmailAddress
+    keyboardType == "number" || keyboardType == "money" -> UIKeyboardTypeNumberPad
+    else -> UIKeyboardTypeDefault
+}
+
+private fun resolveReturnKeyType(imeAction: ImeAction): UIReturnKeyType = when (imeAction) {
+    ImeAction.Next -> UIReturnKeyType.UIReturnKeyNext
+    ImeAction.Done -> UIReturnKeyType.UIReturnKeyDone
+    ImeAction.Go -> UIReturnKeyType.UIReturnKeyGo
+    ImeAction.Send -> UIReturnKeyType.UIReturnKeySend
+    else -> UIReturnKeyType.UIReturnKeyDefault
 }
 
 private fun toDisplayText(value: String, keyboardType: String): String {

@@ -43,6 +43,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -113,6 +114,7 @@ import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabels
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.composables.DropdownOption
+import com.razumly.mvp.core.presentation.composables.LocalPlatformTextFieldVisible
 import com.razumly.mvp.core.presentation.composables.MoneyInputField
 import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
 import com.razumly.mvp.core.presentation.composables.PlatformDropdown
@@ -252,6 +254,7 @@ fun EventDetails(
     onValidationChange: (Boolean, List<String>) -> Unit = { _, _ -> },
     joinButton: @Composable (isValid: Boolean) -> Unit
 ) {
+    val isMapVisible by mapComponent.showMap.collectAsState()
     val event = eventWithRelations.event
     val host = eventWithRelations.host
     val isMobileEventDetailsLayout = getScreenWidth() < MOBILE_EVENT_DETAILS_BREAKPOINT_DP
@@ -1418,7 +1421,10 @@ fun EventDetails(
         heroSpacerHeightPx
     }
 
-    CompositionLocalProvider(localImageScheme provides imageScheme) {
+    CompositionLocalProvider(
+        localImageScheme provides imageScheme,
+        LocalPlatformTextFieldVisible provides !isMapVisible,
+    ) {
         Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
             BackgroundImage(
                 modifier = Modifier

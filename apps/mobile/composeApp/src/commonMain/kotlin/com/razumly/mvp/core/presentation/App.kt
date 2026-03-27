@@ -78,7 +78,7 @@ fun App(root: RootComponent) {
     val loadingState by loadingHandler.loadingState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
-    val allFocusManagers = MutableObjectList<PlatformFocusManager>()
+    val allFocusManagers = remember { MutableObjectList<PlatformFocusManager>() }
 
 
     LaunchedEffect(Unit) {

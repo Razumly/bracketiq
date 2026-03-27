@@ -137,10 +137,11 @@ fun TournamentBracketView(
     var viewportHeightPx by remember { mutableIntStateOf(0) }
     var prevColumnScroll by remember { mutableStateOf(columnScrollState.value) }
     var isScrollingUp by remember { mutableStateOf(true) }
+    var isAutoVerticalScroll by remember { mutableStateOf(false) }
+    var suppressFabAfterAutoScroll by remember { mutableStateOf(false) }
     val isScrollingLeft by lazyRowState.isScrollingUp()
     var pendingCollapseClamp by remember { mutableStateOf(false) }
     var collapseAnchorColumnIndex by remember { mutableIntStateOf(0) }
-    var collapseTargetScrollMax by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(columnScrollState) {
         snapshotFlow { columnScrollState.value }.distinctUntilChanged().collect { currentScroll ->
@@ -149,12 +150,31 @@ fun TournamentBracketView(
         }
     }
 
-    LaunchedEffect(isScrollingUp) {
-        showFab(isScrollingUp)
+    LaunchedEffect(
+        columnScrollState.isScrollInProgress,
+        isScrollingUp,
+        isAutoVerticalScroll,
+        suppressFabAfterAutoScroll,
+    ) {
+        if (
+            columnScrollState.isScrollInProgress &&
+            !isAutoVerticalScroll &&
+            !suppressFabAfterAutoScroll
+        ) {
+            showFab(isScrollingUp)
+        }
     }
 
-    LaunchedEffect(isScrollingLeft) {
-        showFab(isScrollingLeft)
+    LaunchedEffect(lazyRowState.isScrollInProgress, isScrollingLeft) {
+        if (lazyRowState.isScrollInProgress) {
+            showFab(isScrollingLeft)
+        }
+    }
+
+    LaunchedEffect(suppressFabAfterAutoScroll, columnScrollState.isScrollInProgress) {
+        if (suppressFabAfterAutoScroll && !columnScrollState.isScrollInProgress) {
+            suppressFabAfterAutoScroll = false
+        }
     }
 
     LaunchedEffect(lazyRowState, displayRounds, losersBracket, cardContainerHeight) {
@@ -203,14 +223,6 @@ fun TournamentBracketView(
                 val isCollapsing = hasPreviousHeight && nextBoxHeight < previousBoxHeight
                 if (isCollapsing) {
                     collapseAnchorColumnIndex = lazyRowState.firstVisibleItemIndex
-                    val collapseDeltaPx = with(density) {
-                        (previousBoxHeight - nextBoxHeight).coerceAtLeast(0.dp).roundToPx()
-                    }
-                    val nextGapBelowColumnPx = with(density) {
-                        (nextBoxHeight - maxHeightInRowDp).coerceAtLeast(0.dp).roundToPx()
-                    }
-                    val estimatedNextMaxScroll = (columnScrollState.maxValue - collapseDeltaPx).coerceAtLeast(0)
-                    collapseTargetScrollMax = (estimatedNextMaxScroll - nextGapBelowColumnPx).coerceAtLeast(0)
                     pendingCollapseClamp = true
                 }
                 boxHeight = nextBoxHeight
@@ -227,8 +239,16 @@ fun TournamentBracketView(
         }
     }
 
-    LaunchedEffect(pendingCollapseClamp, collapseTargetScrollMax, collapseAnchorColumnIndex) {
+    LaunchedEffect(
+        pendingCollapseClamp,
+        collapseAnchorColumnIndex,
+        boxHeight,
+        maxHeightInRowDp,
+        viewportHeightPx,
+        columnScrollState.isScrollInProgress,
+    ) {
         if (!pendingCollapseClamp) return@LaunchedEffect
+        if (columnScrollState.isScrollInProgress || viewportHeightPx <= 0) return@LaunchedEffect
         val safeAnchorIndex = collapseAnchorColumnIndex.coerceIn(0, displayRounds.lastIndex.coerceAtLeast(0))
         if (displayRounds.isEmpty() || safeAnchorIndex >= displayRounds.size) {
             pendingCollapseClamp = false
@@ -236,14 +256,42 @@ fun TournamentBracketView(
         }
         // Ensure the container height animation has started before clamping.
         withFrameNanos { }
-        if (columnScrollState.value > collapseTargetScrollMax) {
-            columnScrollState.animateScrollTo(
-                collapseTargetScrollMax,
-                animationSpec = tween(
-                    durationMillis = BRACKET_LAYOUT_ANIMATION_MS,
-                    easing = FastOutSlowInEasing
-                )
-            )
+
+        val boxHeightPx = with(density) { (boxHeight.takeIf { it != Dp.Unspecified } ?: 0.dp).roundToPx() }
+        val contentHeightPx = with(density) { maxHeightInRowDp.roundToPx() }
+        val contentTopPx = ((boxHeightPx - contentHeightPx) / 2).coerceAtLeast(0)
+        val contentBottomPx = contentTopPx + contentHeightPx
+
+        val viewportTopPx = columnScrollState.value
+        val viewportBottomPx = viewportTopPx + viewportHeightPx
+        val intersectsContentBand = viewportBottomPx > contentTopPx && viewportTopPx < contentBottomPx
+
+        if (!intersectsContentBand) {
+            val viewportCenterPx = viewportTopPx + viewportHeightPx / 2
+            val contentCenterPx = contentTopPx + contentHeightPx / 2
+            val targetScroll = if (viewportCenterPx > contentCenterPx) {
+                // Too low: pull up until the content's bottom edge is visible.
+                (contentBottomPx - viewportHeightPx).coerceAtLeast(0)
+            } else {
+                // Too high: push down until the content's top edge is visible.
+                contentTopPx
+            }.coerceIn(0, columnScrollState.maxValue)
+
+            if (targetScroll != columnScrollState.value) {
+                isAutoVerticalScroll = true
+                suppressFabAfterAutoScroll = true
+                try {
+                    columnScrollState.animateScrollTo(
+                        targetScroll,
+                        animationSpec = tween(
+                            durationMillis = BRACKET_LAYOUT_ANIMATION_MS,
+                            easing = FastOutSlowInEasing
+                        )
+                    )
+                } finally {
+                    isAutoVerticalScroll = false
+                }
+            }
         }
         pendingCollapseClamp = false
     }
@@ -259,6 +307,7 @@ fun TournamentBracketView(
             LazyRow(
                 state = lazyRowState,
                 modifier = Modifier.height(animatedBoxHeight).fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 itemsIndexed(displayRounds, key = { _, round ->
                     round.filterNotNull().joinToString { it.match.id }
