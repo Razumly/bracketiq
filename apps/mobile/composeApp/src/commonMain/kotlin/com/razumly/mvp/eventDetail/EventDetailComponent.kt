@@ -22,6 +22,8 @@ import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
+import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
+import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
 import com.razumly.mvp.core.data.dataTypes.shouldReplaceOfficialPositionsWithSportDefaults
 import com.razumly.mvp.core.data.dataTypes.syncOfficialStaffing
 import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
@@ -48,7 +50,9 @@ import com.razumly.mvp.core.data.repositories.UserVisibilityContext
 import com.razumly.mvp.core.data.util.divisionsEquivalent
 import com.razumly.mvp.core.data.util.isPlaceholderSlot
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
+import com.razumly.mvp.core.data.util.DEFAULT_DIVISION
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
+import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentProcessor
@@ -86,6 +90,9 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
+import kotlinx.datetime.isoDayNumber
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import kotlin.time.Clock
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.hours
@@ -142,6 +149,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val leagueStandingsConfirming: StateFlow<Boolean>
     val suggestedUsers: StateFlow<List<UserData>>
     val pendingStaffInvites: StateFlow<List<PendingStaffInviteDraft>>
+    val editableLeagueTimeSlots: StateFlow<List<TimeSlot>>
 
 
     fun onNavigateToChat(user: UserData)
@@ -198,6 +206,9 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun selectPlace(place: MVPPlace?)
     fun onTypeSelected(type: EventType)
     fun selectFieldCount(count: Int)
+    fun addLeagueTimeSlot()
+    fun updateLeagueTimeSlot(index: Int, update: TimeSlot.() -> TimeSlot)
+    fun removeLeagueTimeSlot(index: Int)
     fun checkIsUserWaitListed(event: Event): Boolean
     fun checkIsUserFreeAgent(event: Event): Boolean
     fun dismissFeeBreakdown()
@@ -485,6 +496,8 @@ class DefaultEventDetailComponent(
     override var isEditing = _isEditing.asStateFlow()
 
     private val _fieldCount = MutableStateFlow(0)
+    private val _editableLeagueTimeSlots = MutableStateFlow<List<TimeSlot>>(emptyList())
+    override val editableLeagueTimeSlots = _editableLeagueTimeSlots.asStateFlow()
 
     override val backCallback = BackCallback {
         if (isEditing.value) {
@@ -865,6 +878,13 @@ class DefaultEventDetailComponent(
                     if (!canEditEventDetails(event.event) && _isEditing.value) {
                         _isEditing.value = false
                         _editedEvent.value = event.event
+                        _editableLeagueTimeSlots.value = event.timeSlots.sortedBy { slot ->
+                            slot.startTimeMinutes ?: Int.MAX_VALUE
+                        }
+                    } else if (!_isEditing.value) {
+                        _editableLeagueTimeSlots.value = event.timeSlots.sortedBy { slot ->
+                            slot.startTimeMinutes ?: Int.MAX_VALUE
+                        }
                     }
                     _isUserInEvent.value = checkIsUserInEvent(event.event)
                     _isUserInWaitlist.value = checkIsUserWaitListed(event.event)
@@ -2111,6 +2131,9 @@ class DefaultEventDetailComponent(
         } else {
             selected
         }
+        _editableLeagueTimeSlots.value = eventWithRelations.value.timeSlots.sortedBy { slot ->
+            slot.startTimeMinutes ?: Int.MAX_VALUE
+        }
         if (!enabled) {
             _pendingStaffInvites.value = emptyList()
             _suggestedUsers.value = emptyList()
@@ -2226,7 +2249,11 @@ class DefaultEventDetailComponent(
         scope.launch {
             loadingHandler.showLoading("Saving event...")
             runCatching {
-                val updated = eventRepository.updateEvent(_editedEvent.value).getOrThrow()
+                val (eventDraft, timeSlotsDraft) = prepareEventForUpdate()
+                val updated = eventRepository.updateEvent(
+                    newEvent = eventDraft,
+                    timeSlots = timeSlotsDraft,
+                ).getOrThrow()
                 val saveOutcome = reconcileEventStaffInvites(
                     userRepository = userRepository,
                     event = updated,
@@ -2261,7 +2288,11 @@ class DefaultEventDetailComponent(
             loadingHandler.showLoading("Rescheduling event...")
             var shouldExitEditMode = false
             runCatching {
-                val updated = eventRepository.updateEvent(_editedEvent.value).getOrThrow()
+                val (eventDraft, timeSlotsDraft) = prepareEventForUpdate()
+                val updated = eventRepository.updateEvent(
+                    newEvent = eventDraft,
+                    timeSlots = timeSlotsDraft,
+                ).getOrThrow()
                 eventRepository.scheduleEvent(updated.id).getOrThrow()
                 matchRepository.getMatchesOfTournament(updated.id).getOrThrow()
                 shouldExitEditMode = true
@@ -2283,7 +2314,11 @@ class DefaultEventDetailComponent(
             loadingHandler.showLoading("Building bracket(s)...")
             var shouldExitEditMode = false
             runCatching {
-                val updated = eventRepository.updateEvent(_editedEvent.value).getOrThrow()
+                val (eventDraft, timeSlotsDraft) = prepareEventForUpdate()
+                val updated = eventRepository.updateEvent(
+                    newEvent = eventDraft,
+                    timeSlots = timeSlotsDraft,
+                ).getOrThrow()
                 val participantCount = updated.maxParticipants.takeIf { maxParticipants ->
                     maxParticipants > 0
                 }
@@ -2620,6 +2655,153 @@ class DefaultEventDetailComponent(
 
     override fun selectFieldCount(count: Int) {
         _fieldCount.value = count
+    }
+
+    override fun addLeagueTimeSlot() {
+        _editableLeagueTimeSlots.value = _editableLeagueTimeSlots.value + createDefaultLeagueSlot()
+    }
+
+    override fun updateLeagueTimeSlot(index: Int, update: TimeSlot.() -> TimeSlot) {
+        val slots = _editableLeagueTimeSlots.value.toMutableList()
+        if (index !in slots.indices) return
+        slots[index] = slots[index].update()
+        _editableLeagueTimeSlots.value = slots
+    }
+
+    override fun removeLeagueTimeSlot(index: Int) {
+        val slots = _editableLeagueTimeSlots.value.toMutableList()
+        if (index !in slots.indices) return
+        slots.removeAt(index)
+        _editableLeagueTimeSlots.value = slots
+    }
+
+    private fun prepareEventForUpdate(): Pair<Event, List<TimeSlot>?> {
+        val eventDraft = _editedEvent.value
+        val shouldPersistTimeSlots = eventDraft.eventType == EventType.LEAGUE ||
+            eventDraft.eventType == EventType.TOURNAMENT ||
+            eventDraft.eventType == EventType.WEEKLY_EVENT
+        if (!shouldPersistTimeSlots) {
+            return eventDraft to null
+        }
+
+        val preparedTimeSlots = buildLeagueSlotDrafts(eventDraft)
+        val preparedEvent = eventDraft.copy(timeSlotIds = preparedTimeSlots.map { slot -> slot.id })
+        return preparedEvent to preparedTimeSlots
+    }
+
+    private fun buildLeagueSlotDrafts(event: Event): List<TimeSlot> {
+        val selectedDivisionIds = event.divisions
+            .normalizeDivisionIdentifiers()
+            .ifEmpty { listOf(DEFAULT_DIVISION) }
+        val validFieldIds = event.fieldIds
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .toSet()
+
+        return _editableLeagueTimeSlots.value.mapNotNull { slot ->
+            val normalizedFieldIds = slot.normalizedScheduledFieldIds()
+            val mappedFieldIds = if (validFieldIds.isEmpty()) {
+                normalizedFieldIds
+            } else {
+                normalizedFieldIds.filter(validFieldIds::contains)
+            }
+            if (mappedFieldIds.isEmpty()) {
+                return@mapNotNull null
+            }
+
+            val mappedDivisionIds = slot.normalizedDivisionIds()
+                .map { divisionId -> divisionId.normalizeDivisionIdentifier() }
+                .filter(String::isNotBlank)
+                .distinct()
+            val effectiveDivisionIds = if (event.singleDivision) {
+                selectedDivisionIds
+            } else {
+                mappedDivisionIds.ifEmpty { selectedDivisionIds }
+            }
+
+            if (!slot.repeating) {
+                val slotStartDate = slot.startDate.takeUnless { it == Instant.DISTANT_PAST } ?: event.start
+                val slotEndDate = slot.endDate ?: return@mapNotNull null
+                if (slotEndDate <= slotStartDate) {
+                    return@mapNotNull null
+                }
+                val slotDayOfWeek = slotStartDate.toMondayFirstDay()
+                return@mapNotNull slot.copy(
+                    id = slot.id.ifBlank { newId() },
+                    dayOfWeek = slotDayOfWeek,
+                    daysOfWeek = listOf(slotDayOfWeek),
+                    divisions = effectiveDivisionIds,
+                    scheduledFieldId = mappedFieldIds.first(),
+                    scheduledFieldIds = mappedFieldIds,
+                    startDate = slotStartDate,
+                    endDate = slotEndDate,
+                    startTimeMinutes = slotStartDate.toMinutesOfDay(),
+                    endTimeMinutes = slotEndDate.toMinutesOfDay(),
+                    repeating = false,
+                )
+            }
+
+            val normalizedDays = slot.normalizedDaysOfWeek()
+            val startMinutes = slot.startTimeMinutes
+            val endMinutes = slot.endTimeMinutes
+            if (normalizedDays.isEmpty() || startMinutes == null || endMinutes == null || endMinutes <= startMinutes) {
+                return@mapNotNull null
+            }
+
+            val slotStartDate = slot.startDate.takeUnless { it == Instant.DISTANT_PAST } ?: event.start
+            val repeatingEndDate = if (event.eventType == EventType.WEEKLY_EVENT) {
+                null
+            } else {
+                event.end.takeIf { end -> end > event.start }
+            }
+            slot.copy(
+                id = slot.id.ifBlank { newId() },
+                dayOfWeek = normalizedDays.first(),
+                daysOfWeek = normalizedDays,
+                divisions = effectiveDivisionIds,
+                scheduledFieldId = mappedFieldIds.first(),
+                scheduledFieldIds = mappedFieldIds,
+                startDate = slotStartDate,
+                endDate = repeatingEndDate,
+                repeating = true,
+            )
+        }
+    }
+
+    private fun createDefaultLeagueSlot(): TimeSlot {
+        val event = _editedEvent.value
+        val startDate = if (event.start == Instant.DISTANT_PAST) Clock.System.now() else event.start
+        val endDate = if (event.eventType == EventType.WEEKLY_EVENT) {
+            null
+        } else {
+            event.end.takeIf { end -> end > event.start }
+        }
+        return TimeSlot(
+            id = newId(),
+            dayOfWeek = null,
+            daysOfWeek = emptyList(),
+            divisions = event.divisions
+                .normalizeDivisionIdentifiers()
+                .ifEmpty { listOf(DEFAULT_DIVISION) },
+            startTimeMinutes = null,
+            endTimeMinutes = null,
+            startDate = startDate,
+            repeating = true,
+            endDate = endDate,
+            scheduledFieldId = null,
+            scheduledFieldIds = emptyList(),
+            price = null,
+        )
+    }
+
+    private fun Instant.toMinutesOfDay(): Int {
+        val localTime = toLocalDateTime(TimeZone.currentSystemDefault()).time
+        return localTime.hour * 60 + localTime.minute
+    }
+
+    private fun Instant.toMondayFirstDay(): Int {
+        val isoDay = toLocalDateTime(TimeZone.currentSystemDefault()).date.dayOfWeek.isoDayNumber
+        return (isoDay - 1).mod(7)
     }
 
     private fun buildBracketRounds(

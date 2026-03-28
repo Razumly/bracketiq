@@ -1604,6 +1604,7 @@ fun EventDetailScreen(
     val leagueStandingsConfirming by component.leagueStandingsConfirming.collectAsState()
     val suggestedUsers by component.suggestedUsers.collectAsState()
     val pendingStaffInvites by component.pendingStaffInvites.collectAsState()
+    val editableLeagueTimeSlots by component.editableLeagueTimeSlots.collectAsState()
 
     var isRefundAutomatic by remember { mutableStateOf(false) }
     val isHost by component.isHost.collectAsState()
@@ -2031,10 +2032,6 @@ fun EventDetailScreen(
             .map { relation -> relation.field }
             .sortedBy { field -> field.fieldNumber }
     }
-    val leagueTimeSlotsForDetails = remember(selectedEvent.timeSlots) {
-        selectedEvent.timeSlots
-            .sortedBy { slot -> slot.startTimeMinutes ?: Int.MAX_VALUE }
-    }
     val joinOptions = remember(
         isUserInEvent,
         isEventFull,
@@ -2276,7 +2273,12 @@ fun EventDetailScreen(
                                 }
                             },
                             editableFields = editableFieldsForDetails,
-                            leagueTimeSlots = leagueTimeSlotsForDetails,
+                            leagueTimeSlots = editableLeagueTimeSlots,
+                            onAddLeagueTimeSlot = component::addLeagueTimeSlot,
+                            onUpdateLeagueTimeSlot = { index, updated ->
+                                component.updateLeagueTimeSlot(index) { updated }
+                            },
+                            onRemoveLeagueTimeSlot = component::removeLeagueTimeSlot,
                             onSelectFieldCount = component::selectFieldCount,
                             onUploadSelected = component::onUploadSelected,
                             onDeleteImage = component::deleteImage,

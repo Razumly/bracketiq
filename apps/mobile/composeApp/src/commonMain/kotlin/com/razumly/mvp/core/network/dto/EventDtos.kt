@@ -283,9 +283,9 @@ data class EventApiDto(
             pointsToVictory = pointsToVictory ?: emptyList(),
             officialSchedulingMode = runCatching {
                 OfficialSchedulingMode.valueOf(
-                    officialSchedulingMode?.trim()?.uppercase() ?: OfficialSchedulingMode.STAFFING.name,
+                    officialSchedulingMode?.trim()?.uppercase() ?: OfficialSchedulingMode.SCHEDULE.name,
                 )
-            }.getOrDefault(OfficialSchedulingMode.STAFFING),
+            }.getOrDefault(OfficialSchedulingMode.SCHEDULE),
             officialPositions = officialPositions ?: emptyList(),
             eventOfficials = eventOfficials ?: emptyList(),
             officialIds = officialIds ?: emptyList(),

@@ -85,7 +85,7 @@ data class Event(
     val restTimeMinutes: Int? = null,
     val state: String = "UNPUBLISHED",
     val pointsToVictory: List<Int> = emptyList(),
-    val officialSchedulingMode: OfficialSchedulingMode = OfficialSchedulingMode.STAFFING,
+    val officialSchedulingMode: OfficialSchedulingMode = OfficialSchedulingMode.SCHEDULE,
     val officialPositions: List<EventOfficialPosition> = emptyList(),
     val eventOfficials: List<EventOfficial> = emptyList(),
     val officialIds: List<String> = emptyList(),

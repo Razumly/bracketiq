@@ -83,7 +83,7 @@ class Converters {
     @TypeConverter
     fun toOfficialSchedulingMode(value: String): OfficialSchedulingMode =
         runCatching { OfficialSchedulingMode.valueOf(value.trim().uppercase()) }
-            .getOrDefault(OfficialSchedulingMode.STAFFING)
+            .getOrDefault(OfficialSchedulingMode.SCHEDULE)
 
     @TypeConverter
     fun fromEventOfficialPositions(value: List<EventOfficialPosition>): String =

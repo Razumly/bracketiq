@@ -537,6 +537,21 @@ class EventDtosTest {
     }
 
     @Test
+    fun event_api_dto_defaults_official_scheduling_mode_to_schedule_when_missing() {
+        val dto = EventApiDto(
+            id = "event-23",
+            name = "API Event",
+            hostId = "host-23",
+            start = "2026-02-10T00:00:00Z",
+            end = "2026-02-10T01:00:00Z",
+        )
+
+        val event = dto.toEventOrNull()
+
+        assertEquals(OfficialSchedulingMode.SCHEDULE, event?.officialSchedulingMode)
+    }
+
+    @Test
     fun event_api_dto_applies_event_playoff_count_to_multi_division_details_when_missing() {
         val dto = EventApiDto(
             id = "event-16",

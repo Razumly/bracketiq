@@ -319,18 +319,6 @@ fun EventSearchScreen(
         }
     }
 
-    LaunchedEffect(selectedTab, rentals, isLoadingRentals) {
-        if (selectedTab == DiscoverTab.RENTALS && rentals.isEmpty() && !isLoadingRentals) {
-            component.refreshRentals()
-        }
-    }
-
-    LaunchedEffect(selectedTab, allOrganizations, isLoadingOrganizations) {
-        if (selectedTab == DiscoverTab.ORGANIZATIONS && allOrganizations.isEmpty() && !isLoadingOrganizations) {
-            component.refreshOrganizations()
-        }
-    }
-
     LaunchedEffect(Unit) {
         component.setLoadingHandler(loadingHandler)
         component.errorState.collect { error ->

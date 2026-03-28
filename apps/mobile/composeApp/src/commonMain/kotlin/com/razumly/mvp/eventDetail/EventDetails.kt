@@ -1426,6 +1426,49 @@ fun EventDetails(
         }
         listOfNotNull(fieldSummary, slotSummary).joinToString(" - ")
     }
+    val showSectionMissingBadges = isNewEvent && editView
+    val basicsMissingRequiredCount = if (showSectionMissingBadges) {
+        listOf(
+            !isSportValid,
+            !isFixedEndDateRangeValid,
+        ).count { it }
+    } else {
+        0
+    }
+    val eventDetailsMissingRequiredCount = if (showSectionMissingBadges) {
+        listOf(
+            !isMaxParticipantsValid,
+            !isTeamSizeValid,
+            !isPriceValid,
+            !isPaymentPlansValid,
+            editEvent.eventType == EventType.LEAGUE && editEvent.singleDivision && !isLeaguePlayoffTeamsValid,
+        ).count { it }
+    } else {
+        0
+    }
+    val divisionSettingsMissingRequiredCount = if (showSectionMissingBadges) {
+        listOf(
+            !isSkillLevelValid,
+        ).count { it }
+    } else {
+        0
+    }
+    val scheduleMissingRequiredCount = if (showSectionMissingBadges) {
+        listOf(
+            !isFieldCountValid,
+            !isLeagueSlotsValid,
+            !isLeagueGamesValid,
+            !isLeagueDurationValid,
+            !isLeaguePointsValid,
+            editEvent.eventType == EventType.TOURNAMENT && !isWinnerSetCountValid,
+            editEvent.eventType == EventType.TOURNAMENT && !isWinnerPointsValid,
+            editEvent.eventType == EventType.TOURNAMENT && editEvent.doubleElimination && !isLoserSetCountValid,
+            editEvent.eventType == EventType.TOURNAMENT && editEvent.doubleElimination && !isLoserPointsValid,
+            editEvent.eventType == EventType.LEAGUE && !editEvent.singleDivision && !isLeaguePlayoffTeamsValid,
+        ).count { it }
+    } else {
+        0
+    }
     val normalizedEventDivisions = remember(event.divisions) {
         event.divisions.normalizeDivisionIdentifiers()
     }
@@ -1638,6 +1681,7 @@ fun EventDetails(
                     collapsibleInViewMode = true,
                     viewSummary = basicsSummaryLine,
                     defaultExpandedInViewMode = false,
+                    requiredMissingCount = basicsMissingRequiredCount,
                     isEditMode = editView,
                     animationDelay = 100,
                     viewContent = {
@@ -1812,6 +1856,8 @@ fun EventDetails(
                     collapsibleInViewMode = true,
                     viewSummary = pricingSummaryLine,
                     defaultExpandedInViewMode = false,
+                    defaultExpandedInEditMode = !isNewEvent,
+                    requiredMissingCount = eventDetailsMissingRequiredCount,
                     isEditMode = editView,
                     animationDelay = 200,
                     viewContent = {
@@ -2259,6 +2305,7 @@ fun EventDetails(
                         collapsibleInViewMode = true,
                         viewSummary = "${assistantHostIds.size + event.officialIds.size} assigned",
                         defaultExpandedInViewMode = false,
+                        defaultExpandedInEditMode = !isNewEvent,
                         isEditMode = editView,
                         animationDelay = 300,
                         viewContent = {
@@ -2689,7 +2736,8 @@ fun EventDetails(
                     defaultExpandedInViewMode = false,
                     isEditMode = editView,
                     animationDelay = 400,
-                    defaultExpandedInEditMode = true,
+                    defaultExpandedInEditMode = !isNewEvent,
+                    requiredMissingCount = divisionSettingsMissingRequiredCount,
                     viewContent = {
                         val maxParticipantsLabel =
                             if (event.teamSignup) "Max teams" else "Max players"
@@ -3412,7 +3460,7 @@ fun EventDetails(
                         collapsibleInViewMode = true,
                         viewSummary = "Scoring rules",
                         defaultExpandedInViewMode = false,
-                        defaultExpandedInEditMode = true,
+                        defaultExpandedInEditMode = !isNewEvent,
                         isEditMode = editView,
                         animationDelay = 440,
                         viewContent = {
@@ -3449,6 +3497,7 @@ fun EventDetails(
                         viewSummary = facilitiesSummaryLine,
                         defaultExpandedInViewMode = false,
                         defaultExpandedInEditMode = false,
+                        requiredMissingCount = scheduleMissingRequiredCount,
                         isEditMode = editView,
                         animationDelay = 450,
                         viewContent = {
@@ -4122,6 +4171,7 @@ fun LazyListScope.animatedCardSection(
     collapsibleInViewMode: Boolean = false,
     defaultExpandedInEditMode: Boolean = true,
     defaultExpandedInViewMode: Boolean = true,
+    requiredMissingCount: Int = 0,
     viewSummary: String? = null,
     editSummary: String? = null,
     isEditMode: Boolean,
@@ -4184,6 +4234,24 @@ fun LazyListScope.animatedCardSection(
                             }
                             if (isCollapsible) {
                                 TextButton(onClick = { expanded = !expanded }) {
+                                    if (requiredMissingCount > 0) {
+                                        Box(
+                                            modifier = Modifier
+                                                .padding(end = 6.dp)
+                                                .size(20.dp)
+                                                .background(
+                                                    color = MaterialTheme.colorScheme.error,
+                                                    shape = RoundedCornerShape(999.dp),
+                                                ),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            Text(
+                                                text = if (requiredMissingCount > 99) "99+" else requiredMissingCount.toString(),
+                                                color = Color.White,
+                                                style = MaterialTheme.typography.labelSmall,
+                                            )
+                                        }
+                                    }
                                     Icon(
                                         imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                                         contentDescription = if (expanded) "Collapse section" else "Expand section",
