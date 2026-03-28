@@ -8,6 +8,7 @@ import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.isUserAssignedToOfficialSlot
 import com.razumly.mvp.core.data.dataTypes.isUserCheckedInForOfficialSlot
 import com.razumly.mvp.core.data.dataTypes.updateOfficialAssignmentCheckIn
@@ -169,10 +170,22 @@ class DefaultMatchContentComponent(
     private val _showSetConfirmDialog = MutableStateFlow(false)
     override val showSetConfirmDialog = _showSetConfirmDialog.asStateFlow()
 
-    private val _currentUser = userRepository.currentUser.value.getOrThrow()
+    private val currentUserState = userRepository.currentUser
+        .map { result -> result.getOrNull() ?: UserData() }
+        .stateIn(scope, SharingStarted.Eagerly, UserData())
+    private val currentUser: UserData
+        get() = currentUserState.value
 
-    private val _currentUserTeams =
-        teamRepository.getTeamsWithPlayersFlow(_currentUser.id).map { teamResults ->
+    private val _currentUserTeams = currentUserState
+        .map { user -> user.id.trim() }
+        .distinctUntilChanged()
+        .flatMapLatest { currentUserId ->
+            if (currentUserId.isBlank()) {
+                flowOf(Result.success(emptyList()))
+            } else {
+                teamRepository.getTeamsWithPlayersFlow(currentUserId)
+            }
+        }.map { teamResults ->
             teamResults.getOrElse {
                 _errorState.value = it.message
                 emptyList()
@@ -225,9 +238,9 @@ class DefaultMatchContentComponent(
         val teamOfficialId = normalizeOptionalId(currentMatch.teamOfficialId)
         val teamIds = currentUserTeamIds().toSet()
         val isAssignedTeamOfficial = teamOfficialId != null && teamIds.contains(teamOfficialId)
-        val isAssignedUserOfficial = currentMatch.isUserAssignedToOfficialSlot(_currentUser.id)
+        val isAssignedUserOfficial = currentMatch.isUserAssignedToOfficialSlot(currentUser.id)
         val checkedIn = when {
-            isAssignedUserOfficial -> currentMatch.isUserCheckedInForOfficialSlot(_currentUser.id)
+            isAssignedUserOfficial -> currentMatch.isUserCheckedInForOfficialSlot(currentUser.id)
             else -> currentMatch.officialCheckedIn == true
         }
         val canSwapIntoOfficial = !checkedIn && canCurrentUserSwapIntoOfficial(currentMatch)
@@ -244,10 +257,10 @@ class DefaultMatchContentComponent(
             val currentTeamOfficialId = normalizeOptionalId(currentMatch.teamOfficialId)
             val isAssignedTeamOfficial =
                 currentTeamOfficialId != null && teamIds.contains(currentTeamOfficialId)
-            val isAssignedUserOfficial = currentMatch.isUserAssignedToOfficialSlot(_currentUser.id)
+            val isAssignedUserOfficial = currentMatch.isUserAssignedToOfficialSlot(currentUser.id)
             val canSwap = canCurrentUserSwapIntoOfficial(currentMatch)
             val checkedIn = when {
-                isAssignedUserOfficial -> currentMatch.isUserCheckedInForOfficialSlot(_currentUser.id)
+                isAssignedUserOfficial -> currentMatch.isUserCheckedInForOfficialSlot(currentUser.id)
                 else -> currentMatch.officialCheckedIn == true
             }
 
@@ -267,7 +280,7 @@ class DefaultMatchContentComponent(
                 val updatedMatch = matchWithTeams.value.copy(
                     match = if (isAssignedUserOfficial) {
                         currentMatch.updateOfficialAssignmentCheckIn(
-                            userId = _currentUser.id,
+                            userId = currentUser.id,
                             checkedIn = true,
                         )
                     } else {
@@ -310,7 +323,7 @@ class DefaultMatchContentComponent(
         val repositoryTeamIds = _currentUserTeams.value
             .map { team -> team.team.id.trim() }
             .filter(String::isNotBlank)
-        val profileTeamIds = _currentUser.teamIds
+        val profileTeamIds = currentUser.teamIds
             .map { teamId -> teamId.trim() }
             .filter(String::isNotBlank)
         return (repositoryTeamIds + profileTeamIds).distinct()

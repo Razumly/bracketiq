@@ -150,6 +150,8 @@ private object BillingRepositoryHttp_UnusedEventRepository : IEventRepository {
         newEvent: Event,
         requiredTemplateIds: List<String>,
         leagueScoringConfig: com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO?,
+        fields: List<com.razumly.mvp.core.data.dataTypes.Field>?,
+        timeSlots: List<com.razumly.mvp.core.data.dataTypes.TimeSlot>?,
     ): Result<Event> = error("unused")
     override suspend fun createWeeklySession(
         parentEventId: String,

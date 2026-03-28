@@ -43,7 +43,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -114,7 +113,6 @@ import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabels
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.composables.DropdownOption
-import com.razumly.mvp.core.presentation.composables.LocalPlatformTextFieldVisible
 import com.razumly.mvp.core.presentation.composables.MoneyInputField
 import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
 import com.razumly.mvp.core.presentation.composables.PlatformDropdown
@@ -236,6 +234,7 @@ fun EventDetails(
     onAddOfficialId: (String) -> Unit = {},
     onRemoveOfficialId: (String) -> Unit = {},
     onUpdateOfficialSchedulingMode: (OfficialSchedulingMode) -> Unit = {},
+    onLoadOfficialPositionDefaults: () -> Unit = {},
     onAddOfficialPosition: () -> Unit = {},
     onUpdateOfficialPositionName: (String, String) -> Unit = { _, _ -> },
     onUpdateOfficialPositionCount: (String, Int) -> Unit = { _, _ -> },
@@ -254,7 +253,6 @@ fun EventDetails(
     onValidationChange: (Boolean, List<String>) -> Unit = { _, _ -> },
     joinButton: @Composable (isValid: Boolean) -> Unit
 ) {
-    val isMapVisible by mapComponent.showMap.collectAsState()
     val event = eventWithRelations.event
     val host = eventWithRelations.host
     val isMobileEventDetailsLayout = getScreenWidth() < MOBILE_EVENT_DETAILS_BREAKPOINT_DP
@@ -1197,6 +1195,17 @@ fun EventDetails(
                 ?.toTitleCase()
             ?: "Sport not set"
     }
+    val selectedSportForOfficialDefaults = remember(sports, editEvent.sportId) {
+        val normalizedSportId = editEvent.sportId
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+        normalizedSportId?.let { sportId ->
+            sports.firstOrNull { sport -> sport.id == sportId }
+        }
+    }
+    var lastAutoLoadedOfficialDefaultsSportId by rememberSaveable(editEvent.id, editView) {
+        mutableStateOf<String?>(null)
+    }
     val summaryTags = remember(event.eventType, eventSportName, event.teamSizeLimit, event.singleDivision) {
         buildList {
             add(eventSportName)
@@ -1204,6 +1213,19 @@ fun EventDetails(
             add("Teams of ${event.teamSizeLimit}")
             add(if (event.singleDivision) "Single division" else "Multi division")
         }
+    }
+    LaunchedEffect(editView, selectedSportForOfficialDefaults?.id) {
+        if (!editView) return@LaunchedEffect
+        val selectedSportId = selectedSportForOfficialDefaults?.id
+        if (selectedSportId == null) {
+            lastAutoLoadedOfficialDefaultsSportId = null
+            return@LaunchedEffect
+        }
+        if (lastAutoLoadedOfficialDefaultsSportId == selectedSportId) return@LaunchedEffect
+        if (editEvent.officialPositions.isEmpty()) {
+            onLoadOfficialPositionDefaults()
+        }
+        lastAutoLoadedOfficialDefaultsSportId = selectedSportId
     }
     val hostDisplayName = remember(host, eventWithRelations.organization) {
         val organizationName = eventWithRelations.organization?.name.orEmpty()
@@ -1421,10 +1443,7 @@ fun EventDetails(
         heroSpacerHeightPx
     }
 
-    CompositionLocalProvider(
-        localImageScheme provides imageScheme,
-        LocalPlatformTextFieldVisible provides !isMapVisible,
-    ) {
+    CompositionLocalProvider(localImageScheme provides imageScheme) {
         Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
             BackgroundImage(
                 modifier = Modifier
@@ -2311,6 +2330,13 @@ fun EventDetails(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Color(localImageScheme.current.onSurfaceVariant),
                             )
+                            TextButton(
+                                onClick = onLoadOfficialPositionDefaults,
+                                enabled = selectedSportForOfficialDefaults != null,
+                                modifier = Modifier.align(Alignment.End),
+                            ) {
+                                Text("Load defaults")
+                            }
                             if (editEvent.officialPositions.isEmpty()) {
                                 Text(
                                     text = "No official positions configured yet.",

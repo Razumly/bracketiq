@@ -36,6 +36,7 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.addOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.removeOfficialPosition
+import com.razumly.mvp.core.data.dataTypes.syncOfficialStaffing
 import com.razumly.mvp.core.data.dataTypes.updateOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.updateOfficialUserPositions
 import com.razumly.mvp.core.data.dataTypes.UserData
@@ -395,6 +396,14 @@ fun CreateEventScreen(
                             onAddOfficialId = onAddOfficialId,
                             onRemoveOfficialId = onRemoveOfficialId,
                             onUpdateOfficialSchedulingMode = onUpdateOfficialSchedulingMode,
+                            onLoadOfficialPositionDefaults = {
+                                onEditEvent {
+                                    syncOfficialStaffing(
+                                        sport = sports.firstOrNull { sport -> sport.id == sportId },
+                                        replacePositionsWithSportDefaults = true,
+                                    )
+                                }
+                            },
                             onAddOfficialPosition = onAddOfficialPosition,
                             onUpdateOfficialPositionName = onUpdateOfficialPositionName,
                             onUpdateOfficialPositionCount = onUpdateOfficialPositionCount,

@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -24,6 +25,7 @@ import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import com.razumly.mvp.core.presentation.composables.LocalPlatformTextFieldVisible
 import kotlin.math.hypot
 import kotlin.math.max
 
@@ -56,6 +58,9 @@ fun CircularRevealUnderlay(
             var foregroundSize by remember { mutableStateOf(Size.Zero) }
             val density = LocalDensity.current
             val revealInsetPx = with(density) { 32.dp.toPx() }
+            // Keep UIKit-backed controls hidden for the entire reveal animation window.
+            // This prevents a one-frame flash when closing the map on iOS.
+            val platformTextFieldVisible = !isRevealed && revealProgress <= 0.001f
             val localRevealCenter = remember(
                 revealCenterInWindow,
                 foregroundTopLeft,
@@ -70,20 +75,24 @@ fun CircularRevealUnderlay(
                 )
             }
 
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .onGloballyPositioned { coordinates ->
-                        val bounds = coordinates.boundsInWindow()
-                        foregroundTopLeft = bounds.topLeft
-                        foregroundSize = bounds.size
-                    }
-                    .drawRevealHole(
-                        progress = revealProgress,
-                        revealCenter = localRevealCenter,
-                    ),
-                content = foregroundContentState,
-            )
+            CompositionLocalProvider(
+                LocalPlatformTextFieldVisible provides platformTextFieldVisible,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .onGloballyPositioned { coordinates ->
+                            val bounds = coordinates.boundsInWindow()
+                            foregroundTopLeft = bounds.topLeft
+                            foregroundSize = bounds.size
+                        }
+                        .drawRevealHole(
+                            progress = revealProgress,
+                            revealCenter = localRevealCenter,
+                        ),
+                    content = foregroundContentState,
+                )
+            }
         }
     }
 }
@@ -91,18 +100,23 @@ fun CircularRevealUnderlay(
 private fun Modifier.drawRevealHole(
     progress: Float,
     revealCenter: Offset,
-): Modifier = graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
-    .drawWithContent {
-        drawContent()
-        if (progress <= 0f) return@drawWithContent
-
-        drawCircle(
-            color = Color.Transparent,
-            radius = maxRevealRadius(revealCenter = revealCenter, progress = progress),
-            center = revealCenter,
-            blendMode = BlendMode.Clear,
-        )
+): Modifier {
+    if (progress <= 0f) {
+        return this
     }
+
+    return this
+        .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
+        .drawWithContent {
+            drawContent()
+            drawCircle(
+                color = Color.Transparent,
+                radius = maxRevealRadius(revealCenter = revealCenter, progress = progress),
+                center = revealCenter,
+                blendMode = BlendMode.Clear,
+            )
+        }
+}
 
 private fun DrawScope.maxRevealRadius(revealCenter: Offset, progress: Float): Float {
     return with(revealCenter) {

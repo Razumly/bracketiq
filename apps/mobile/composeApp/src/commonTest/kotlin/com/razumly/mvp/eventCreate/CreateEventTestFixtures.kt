@@ -290,6 +290,8 @@ internal data class CreateEventCall(
     val event: Event,
     val requiredTemplateIds: List<String>,
     val leagueScoringConfig: LeagueScoringConfigDTO?,
+    val fields: List<Field>?,
+    val timeSlots: List<TimeSlot>?,
 )
 
 internal class CreateEvent_FakeEventRepository(
@@ -319,11 +321,15 @@ internal class CreateEvent_FakeEventRepository(
         newEvent: Event,
         requiredTemplateIds: List<String>,
         leagueScoringConfig: LeagueScoringConfigDTO?,
+        fields: List<Field>?,
+        timeSlots: List<TimeSlot>?,
     ): Result<Event> = runCatching {
         createEventCalls += CreateEventCall(
             event = newEvent,
             requiredTemplateIds = requiredTemplateIds,
             leagueScoringConfig = leagueScoringConfig,
+            fields = fields,
+            timeSlots = timeSlots,
         )
         newEvent
     }

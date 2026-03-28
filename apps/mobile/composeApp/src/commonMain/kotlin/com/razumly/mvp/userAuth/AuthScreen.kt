@@ -92,12 +92,20 @@ fun AuthScreenBase(component: AuthComponent, onOauth2: () -> Unit?) {
         }
     }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(isSignup) {
         firstNameFocusManager.setOnNextAction { lastNameFocusManager.requestFocus() }
         lastNameFocusManager.setOnNextAction { userNameFocusManager.requestFocus() }
         userNameFocusManager.setOnNextAction { emailFocusManager.requestFocus() }
         emailFocusManager.setOnNextAction { passwordFocusManager.requestFocus() }
-        passwordFocusManager.setOnDoneAction { handleSubmit() }
+        if (isSignup) {
+            passwordFocusManager.setOnNextAction { confirmPasswordFocusManager.requestFocus() }
+            passwordFocusManager.setOnDoneAction { handleSubmit() }
+            confirmPasswordFocusManager.setOnDoneAction { handleSubmit() }
+        } else {
+            passwordFocusManager.setOnNextAction { handleSubmit() }
+            passwordFocusManager.setOnDoneAction { handleSubmit() }
+            confirmPasswordFocusManager.setOnDoneAction {}
+        }
     }
 
     LaunchedEffect(loginState) {

@@ -452,7 +452,7 @@ class DefaultEventDetailComponent(
         matchId.removePrefix(CLIENT_MATCH_PREFIX)
 
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
-    override val currentUser = userRepository.currentUser.map { it.getOrThrow() }
+    override val currentUser = userRepository.currentUser.map { it.getOrNull() ?: UserData() }
         .stateIn(scope, SharingStarted.Eagerly, UserData())
 
     private val _currentAccount = userRepository.currentAccount.map { result ->

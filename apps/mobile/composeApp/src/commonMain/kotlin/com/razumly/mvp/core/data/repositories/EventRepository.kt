@@ -11,6 +11,7 @@ import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
+import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventTeamCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
@@ -69,6 +70,8 @@ interface IEventRepository : IMVPRepository {
         newEvent: Event,
         requiredTemplateIds: List<String> = emptyList(),
         leagueScoringConfig: LeagueScoringConfigDTO? = null,
+        fields: List<Field>? = null,
+        timeSlots: List<TimeSlot>? = null,
     ): Result<Event>
     suspend fun createWeeklySession(
         parentEventId: String,
@@ -362,6 +365,8 @@ class EventRepository(
         newEvent: Event,
         requiredTemplateIds: List<String>,
         leagueScoringConfig: LeagueScoringConfigDTO?,
+        fields: List<Field>?,
+        timeSlots: List<TimeSlot>?,
     ): Result<Event> =
         singleResponse(networkCall = {
             val created = api.post<CreateEventRequestDto, EventResponseDto>(
@@ -371,6 +376,8 @@ class EventRepository(
                     event = newEvent.toUpdateDto(
                         requiredTemplateIdsOverride = requiredTemplateIds,
                         leagueScoringConfigOverride = leagueScoringConfig,
+                        fieldsOverride = fields,
+                        timeSlotsOverride = timeSlots,
                     ),
                 ),
             ).event?.toEventOrNull() ?: error("Create event response missing event")

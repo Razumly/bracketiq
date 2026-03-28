@@ -4,6 +4,8 @@ import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.SportOfficialPositionTemplate
+import com.razumly.mvp.core.data.dataTypes.removeOfficialPosition
+import com.razumly.mvp.core.data.dataTypes.syncOfficialStaffing
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.presentation.RentalCreateContext
 import com.razumly.mvp.eventDetail.EventStaffRole
@@ -102,6 +104,45 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         assertEquals(
             updatedEvent.officialPositions.map { it.id },
             updatedEvent.eventOfficials.single().positionIds,
+        )
+    }
+
+    @Test
+    fun removing_last_position_does_not_auto_restore_defaults_until_requested() = runTest(testDispatcher) {
+        val sport = createSport(id = "sport-clearable", usePointsPerSetWin = true).copy(
+            officialPositionTemplates = listOf(
+                SportOfficialPositionTemplate(name = "Referee", count = 1),
+            ),
+        )
+        val harness = CreateEventHarness(sports = listOf(sport))
+        advance()
+
+        harness.component.updateEventField { copy(sportId = sport.id) }
+        advance()
+
+        val seededPositionId = harness.component.newEventState.value.officialPositions.single().id
+        harness.component.updateEventField {
+            removeOfficialPosition(
+                positionId = seededPositionId,
+                sport = sport,
+            )
+        }
+        advance()
+
+        val clearedEvent = harness.component.newEventState.value
+        assertTrue(clearedEvent.officialPositions.isEmpty())
+
+        harness.component.updateEventField {
+            syncOfficialStaffing(
+                sport = sport,
+                replacePositionsWithSportDefaults = true,
+            )
+        }
+        advance()
+
+        assertEquals(
+            listOf("Referee"),
+            harness.component.newEventState.value.officialPositions.map { it.name },
         )
     }
 
@@ -522,21 +563,24 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
 
         assertEquals(1, harness.eventRepository.createEventCalls.size)
         assertEquals(1, harness.onEventCreatedCount)
-        assertEquals(2, harness.fieldRepository.createdFields.size)
-        assertEquals(1, harness.fieldRepository.createdTimeSlots.size)
+        assertEquals(0, harness.fieldRepository.createdFields.size)
+        assertEquals(0, harness.fieldRepository.createdTimeSlots.size)
 
         val createCall = harness.eventRepository.createEventCalls.single()
-        val createdFieldIds = harness.fieldRepository.createdFields.map { it.id }
-        val createdSlots = harness.fieldRepository.createdTimeSlots
+        val payloadFields = createCall.fields.orEmpty()
+        val payloadSlots = createCall.timeSlots.orEmpty()
+        val createdFieldIds = payloadFields.map { it.id }
 
+        assertEquals(2, payloadFields.size)
+        assertEquals(1, payloadSlots.size)
         assertEquals(createdFieldIds, createCall.event.fieldIds)
-        assertEquals(createdSlots.map { it.id }, createCall.event.timeSlotIds)
-        assertEquals(listOf("a"), harness.fieldRepository.createdFields[0].divisions)
-        assertEquals(listOf("b", "open"), harness.fieldRepository.createdFields[1].divisions)
-        assertEquals(createdFieldIds.first(), createdSlots[0].scheduledFieldId)
-        assertEquals(listOf(createdFieldIds.first()), createdSlots[0].scheduledFieldIds)
-        assertEquals(1, createdSlots[0].dayOfWeek)
-        assertEquals(listOf(1, 3), createdSlots[0].daysOfWeek)
+        assertEquals(payloadSlots.map { it.id }, createCall.event.timeSlotIds)
+        assertEquals(listOf("a"), payloadFields[0].divisions)
+        assertEquals(listOf("b", "open"), payloadFields[1].divisions)
+        assertEquals(createdFieldIds.first(), payloadSlots[0].scheduledFieldId)
+        assertEquals(listOf(createdFieldIds.first()), payloadSlots[0].scheduledFieldIds)
+        assertEquals(1, payloadSlots[0].dayOfWeek)
+        assertEquals(listOf(1, 3), payloadSlots[0].daysOfWeek)
         assertEquals(3, createCall.leagueScoringConfig?.pointsForWin)
         assertEquals(emptyList(), createCall.requiredTemplateIds)
     }
@@ -580,7 +624,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.createEvent()
         advance()
 
-        val createdSlots = harness.fieldRepository.createdTimeSlots
+        val createdSlots = harness.eventRepository.createEventCalls.single().timeSlots.orEmpty()
         assertEquals(1, createdSlots.size)
         assertEquals(true, createdSlots[0].repeating)
         assertEquals(customSlotStart, createdSlots[0].startDate)
@@ -632,7 +676,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.createEvent()
         advance()
 
-        val createdSlots = harness.fieldRepository.createdTimeSlots
+        val createdSlots = harness.eventRepository.createEventCalls.single().timeSlots.orEmpty()
         assertEquals(1, createdSlots.size)
         assertEquals(false, createdSlots[0].repeating)
         assertEquals(slotStart, createdSlots[0].startDate)
@@ -678,8 +722,9 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.createEvent()
         advance()
 
-        assertEquals(1, harness.fieldRepository.createdFields.size)
-        assertEquals(listOf("open"), harness.fieldRepository.createdFields.first().divisions)
+        val payloadFields = harness.eventRepository.createEventCalls.single().fields.orEmpty()
+        assertEquals(1, payloadFields.size)
+        assertEquals(listOf("open"), payloadFields.first().divisions)
     }
 
     @Test
@@ -718,8 +763,9 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.createEvent()
         advance()
 
-        val createdSlots = harness.fieldRepository.createdTimeSlots
-        val createdFieldIds = harness.fieldRepository.createdFields.map { field -> field.id }
+        val createCall = harness.eventRepository.createEventCalls.single()
+        val createdSlots = createCall.timeSlots.orEmpty()
+        val createdFieldIds = createCall.fields.orEmpty().map { field -> field.id }
         assertEquals(1, createdSlots.size)
         assertEquals(1, createdSlots[0].dayOfWeek)
         assertEquals(listOf(1, 3), createdSlots[0].daysOfWeek)
@@ -755,13 +801,13 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
 
         assertEquals(1, harness.eventRepository.createEventCalls.size)
         assertEquals(1, harness.onEventCreatedCount)
-        assertEquals(1, harness.fieldRepository.createdFields.size)
+        assertEquals(0, harness.fieldRepository.createdFields.size)
         assertEquals(0, harness.fieldRepository.createdTimeSlots.size)
 
         val createCall = harness.eventRepository.createEventCalls.single()
+        assertEquals(1, createCall.fields.orEmpty().size)
+        assertEquals(0, createCall.timeSlots.orEmpty().size)
         assertEquals(emptyList(), createCall.event.timeSlotIds)
         assertNull(createCall.leagueScoringConfig)
     }
 }
-
-

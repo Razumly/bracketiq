@@ -503,16 +503,24 @@ class Coordinator: NSObject, GMSMapViewDelegate {
             onPlaceSelected(placeData.place)
             return true
         } else if let poiData = marker.userData as? POIMarkerData {
+            let fallbackPlace = parent.component.buildFallbackPlace(
+                name: marker.title ?? poiData.name,
+                placeId: poiData.placeId,
+                latitude: marker.position.latitude,
+                longitude: marker.position.longitude
+            )
             Task {
                 do {
-                    let place = try await parent.component.getPlace(placeId: poiData.placeId)
-                    if let place = place {
-                        await MainActor.run {
-                            self.onPlaceSelected(place)
-                        }
+                    let resolvedPlace =
+                        try await parent.component.getPlace(placeId: poiData.placeId) ?? fallbackPlace
+                    await MainActor.run {
+                        self.onPlaceSelected(resolvedPlace)
                     }
                 } catch {
-                    print("Error getting place details: \(error)")
+                    print("Error getting place details: \(error). Using fallback place.")
+                    await MainActor.run {
+                        self.onPlaceSelected(fallbackPlace)
+                    }
                 }
             }
             return true

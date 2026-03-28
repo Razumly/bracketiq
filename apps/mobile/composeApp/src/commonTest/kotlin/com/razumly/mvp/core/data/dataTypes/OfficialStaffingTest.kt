@@ -1,5 +1,6 @@
 package com.razumly.mvp.core.data.dataTypes
 
+import com.razumly.mvp.eventCreate.createSport
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -72,9 +73,7 @@ class OfficialStaffingTest {
 
     @Test
     fun sync_official_staffing_seeds_positions_and_event_officials_from_sport_defaults() {
-        val sport = Sport(
-            id = "sport-1",
-            name = "Volleyball",
+        val sport = createSport(id = "sport-1", usePointsPerSetWin = true).copy(
             officialPositionTemplates = listOf(
                 SportOfficialPositionTemplate(name = "R1", count = 1),
                 SportOfficialPositionTemplate(name = "Line Judge", count = 2),
@@ -102,16 +101,12 @@ class OfficialStaffingTest {
 
     @Test
     fun should_replace_defaults_only_when_existing_positions_still_match_previous_sport() {
-        val previousSport = Sport(
-            id = "sport-old",
-            name = "Old",
+        val previousSport = createSport(id = "sport-old", usePointsPerSetWin = true).copy(
             officialPositionTemplates = listOf(
                 SportOfficialPositionTemplate(name = "Referee", count = 1),
             ),
         )
-        val nextSport = Sport(
-            id = "sport-new",
-            name = "New",
+        val nextSport = createSport(id = "sport-new", usePointsPerSetWin = false).copy(
             officialPositionTemplates = listOf(
                 SportOfficialPositionTemplate(name = "Umpire", count = 1),
             ),
@@ -148,9 +143,7 @@ class OfficialStaffingTest {
 
     @Test
     fun add_and_remove_position_keep_event_official_role_mappings_in_sync() {
-        val sport = Sport(
-            id = "sport-3",
-            name = "Soccer",
+        val sport = createSport(id = "sport-3", usePointsPerSetWin = true).copy(
             officialPositionTemplates = listOf(
                 SportOfficialPositionTemplate(name = "Referee", count = 1),
             ),
@@ -179,10 +172,36 @@ class OfficialStaffingTest {
         assertTrue(withAddedPosition.eventOfficials.single().positionIds.contains(addedPositionId))
         assertEquals(listOf(addedPositionId), withUpdatedRole.eventOfficials.single().positionIds)
         assertTrue(withoutAddedPosition.officialPositions.none { position -> position.id == addedPositionId })
-        assertEquals(
-            listOf(withoutAddedPosition.officialPositions.single().id),
-            withoutAddedPosition.eventOfficials.single().positionIds,
+        assertTrue(withoutAddedPosition.eventOfficials.isEmpty())
+        assertTrue(withoutAddedPosition.officialIds.isEmpty())
+    }
+
+    @Test
+    fun removing_last_position_keeps_positions_empty_until_defaults_are_explicitly_loaded() {
+        val sport = createSport(id = "sport-4", usePointsPerSetWin = true).copy(
+            officialPositionTemplates = listOf(
+                SportOfficialPositionTemplate(name = "Referee", count = 1),
+            ),
         )
+        val seeded = Event(
+            id = "event-4",
+            sportId = sport.id,
+            officialIds = listOf("official-1"),
+        ).syncOfficialStaffing(sport = sport)
+
+        val cleared = seeded.removeOfficialPosition(
+            positionId = seeded.officialPositions.single().id,
+            sport = sport,
+        )
+        val restored = cleared.syncOfficialStaffing(
+            sport = sport,
+            replacePositionsWithSportDefaults = true,
+        )
+
+        assertTrue(cleared.officialPositions.isEmpty())
+        assertTrue(cleared.eventOfficials.isEmpty())
+        assertTrue(cleared.officialIds.isEmpty())
+        assertEquals(listOf("Referee"), restored.officialPositions.map(EventOfficialPosition::name))
     }
 
     @Test

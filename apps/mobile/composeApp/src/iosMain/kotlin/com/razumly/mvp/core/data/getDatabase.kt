@@ -5,6 +5,8 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.SQLiteConnection
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
+import androidx.sqlite.driver.bundled.SQLITE_OPEN_READONLY
+import com.razumly.mvp.core.db.MVP_DATABASE_VERSION
 import io.github.aakira.napier.Napier
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.coroutines.Dispatchers
@@ -12,11 +14,20 @@ import platform.Foundation.NSDocumentDirectory
 import platform.Foundation.NSFileManager
 import platform.Foundation.NSUserDomainMask
 
+private const val ROOM_DB_LOG_TAG = "RoomDB"
+private const val ROOM_DB_NAME = "tournament.db"
+private val ROOM_DB_SIDE_SUFFIXES = listOf("", "-wal", "-shm", "-journal")
 
 fun getDatabase(): RoomDatabase.Builder<MVPDatabaseService> {
+    val dbPath = databasePath()
+    deleteDatabaseIfSchemaVersionChanged(
+        dbPath = dbPath,
+        expectedVersion = MVP_DATABASE_VERSION,
+    )
+
     return try {
         Room.databaseBuilder<MVPDatabaseService>(
-            name = documentDirectory() + "/tournament.db",
+            name = dbPath,
         )
             .setDriver(BundledSQLiteDriver())
             .setQueryCoroutineContext(Dispatchers.Default)
@@ -27,10 +38,64 @@ fun getDatabase(): RoomDatabase.Builder<MVPDatabaseService> {
             )
             .fallbackToDestructiveMigrationOnDowngrade(true)
 
-            .also { Napier.d(tag = "Database") { "Database builder created successfully" } }
+            .also { Napier.d(tag = ROOM_DB_LOG_TAG) { "Database builder created successfully for $dbPath" } }
     } catch (e: Exception) {
-        Napier.e(tag = "Database", throwable = e) { "Failed to create database builder" }
+        Napier.e(tag = ROOM_DB_LOG_TAG, throwable = e) { "Failed to create database builder for $dbPath" }
         throw e
+    }
+}
+
+@OptIn(ExperimentalForeignApi::class)
+private fun deleteDatabaseIfSchemaVersionChanged(
+    dbPath: String,
+    expectedVersion: Int,
+) {
+    val fileManager = NSFileManager.defaultManager
+    if (!fileManager.fileExistsAtPath(dbPath)) return
+
+    val currentVersion = runCatching {
+        readDatabaseVersion(dbPath)
+    }.getOrElse { throwable ->
+        Napier.w(tag = ROOM_DB_LOG_TAG, throwable = throwable) {
+            "Failed reading Room database version for $dbPath; deleting database."
+        }
+        Int.MIN_VALUE
+    }
+
+    if (currentVersion == expectedVersion) return
+
+    Napier.w(tag = ROOM_DB_LOG_TAG) {
+        "Deleting Room database at $dbPath because schema version $currentVersion != $expectedVersion"
+    }
+
+    ROOM_DB_SIDE_SUFFIXES.forEach { suffix ->
+        val path = dbPath + suffix
+        if (!fileManager.fileExistsAtPath(path)) return@forEach
+
+        val removed = runCatching {
+            fileManager.removeItemAtPath(path, error = null)
+        }.getOrElse { throwable ->
+            Napier.w(tag = ROOM_DB_LOG_TAG, throwable = throwable) {
+                "Failed deleting Room database file at $path"
+            }
+            false
+        }
+
+        if (removed) {
+            Napier.w(tag = ROOM_DB_LOG_TAG) { "Deleted Room database file at $path" }
+        }
+    }
+}
+
+private fun readDatabaseVersion(dbPath: String): Int {
+    BundledSQLiteDriver().open(
+        fileName = dbPath,
+        flags = SQLITE_OPEN_READONLY,
+    ).use { connection ->
+        connection.prepare("PRAGMA user_version").use { statement ->
+            check(statement.step()) { "PRAGMA user_version returned no rows for $dbPath" }
+            return statement.getInt(0)
+        }
     }
 }
 
@@ -273,7 +338,7 @@ private val MIGRATION_3_4_USER_PRIVACY_FIELDS = object : Migration(3, 4) {
 
 @OptIn(ExperimentalForeignApi::class)
 private fun documentDirectory(): String {
-    Napier.d(tag = "Database") { "Fetching document directory" }
+    Napier.d(tag = ROOM_DB_LOG_TAG) { "Fetching document directory" }
 
     return try {
         val documentDirectory = NSFileManager.defaultManager.URLForDirectory(
@@ -284,10 +349,12 @@ private fun documentDirectory(): String {
             error = null,
         )
         requireNotNull(documentDirectory?.path).also {
-            Napier.d(tag = "Database") { "Document directory path: $it" }
+            Napier.d(tag = ROOM_DB_LOG_TAG) { "Document directory path: $it" }
         }
     } catch (e: Exception) {
-        Napier.e(tag = "Database", throwable = e) { "Failed to get document directory" }
+        Napier.e(tag = ROOM_DB_LOG_TAG, throwable = e) { "Failed to get document directory" }
         throw e
     }
 }
+
+private fun databasePath(): String = documentDirectory() + "/$ROOM_DB_NAME"

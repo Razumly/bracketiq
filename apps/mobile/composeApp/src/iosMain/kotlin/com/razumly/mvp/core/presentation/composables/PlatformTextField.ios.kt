@@ -105,9 +105,10 @@ actual fun PlatformTextField(
     } else {
         MaterialTheme.colorScheme.outline
     }
-    val textUIColor = MaterialTheme.colorScheme.onSurface.toUIColor()
-    val disabledTextUIColor = readableDisabled.toUIColor()
-    val placeholderUIColor = readablePlaceholder.toUIColor()
+    // Use system semantic colors for native text rendering so typed text stays visible.
+    val textUIColor = UIColor.labelColor
+    val disabledTextUIColor = UIColor.secondaryLabelColor
+    val placeholderUIColor = UIColor.secondaryLabelColor
     val fillUIColor = fillColor.toUIColor()
     val disabledFillUIColor = disabledFillColor.toUIColor()
     val borderUIColor = borderColor.toUIColor()
@@ -175,6 +176,35 @@ actual fun PlatformTextField(
                         )
                     )
                 }
+            } else if (!platformTextFieldVisible) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(fieldHeight)
+                        .background(
+                            fillColor,
+                            RoundedCornerShape(cornerRadius)
+                        )
+                        .border(
+                            1.dp,
+                            borderColor,
+                            RoundedCornerShape(cornerRadius)
+                        )
+                        .padding(horizontal = 12.dp),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    Text(
+                        text = value.ifEmpty { placeholder },
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontSize = actualFontSize,
+                            color = when {
+                                !enabled -> readableDisabled
+                                value.isEmpty() -> readablePlaceholder
+                                else -> MaterialTheme.colorScheme.onSurface
+                            }
+                        )
+                    )
+                }
             } else {
                 // For interactive fields, use UITextField - SIMPLIFIED!
                 UIKitView(
@@ -201,12 +231,7 @@ actual fun PlatformTextField(
                             borderColor = borderUIColor,
                             cornerRadius = cornerRadius.value.toDouble(),
                             onImeAction = onImeAction,
-                        ).also { textField ->
-                            textField.hidden = !platformTextFieldVisible
-                            if (!platformTextFieldVisible) {
-                                textField.resignFirstResponder()
-                            }
-                        }
+                        )
                     },
                     modifier = Modifier
                         .weight(1f)
@@ -232,10 +257,6 @@ actual fun PlatformTextField(
                             borderColor = borderUIColor,
                             cornerRadius = cornerRadius.value.toDouble(),
                         )
-                        textField.hidden = !platformTextFieldVisible
-                        if (!platformTextFieldVisible) {
-                            textField.resignFirstResponder()
-                        }
                     }
                 )
             }
@@ -352,8 +373,11 @@ fun updateSimpleUITextField(
     cornerRadius: Double,
 ) {
     val displayText = toDisplayText(text, keyboardType)
+    val isFocused = textField.isFirstResponder()
     // Only update text if different to avoid cursor jumping
-    if (textField.text != displayText) {
+    // Avoid overwriting active iOS text input while the user is editing.
+    // UIKit can report intermediate text states that should remain while focused.
+    if (!isFocused && textField.text != displayText) {
         textField.text = displayText
     }
 

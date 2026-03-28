@@ -51,7 +51,7 @@ class DefaultProfileDetailsComponent(
     override val message = _message.asStateFlow()
 
     override val currentUser = userRepository.currentUser
-        .map { result -> result.getOrThrow() }
+        .map { result -> result.getOrNull() ?: UserData() }
         .stateIn(
             scope = scope,
             started = SharingStarted.Eagerly,

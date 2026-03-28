@@ -9,11 +9,14 @@ import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
 import com.razumly.mvp.core.presentation.INavigationHandler
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -31,6 +34,7 @@ interface EventManagementComponent {
     fun loadMoreEvents()
 }
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class DefaultEventManagementComponent(
     componentContext: ComponentContext,
     private val eventRepository: IEventRepository,
@@ -38,13 +42,21 @@ class DefaultEventManagementComponent(
     navigationHandler: INavigationHandler
 ) : ComponentContext by componentContext, EventManagementComponent {
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
-    private val currentUserId = userRepository.currentUser.value.getOrThrow().id
+    private val currentUserId = userRepository.currentUser
+        .map { result -> result.getOrNull()?.id?.trim().orEmpty() }
+        .stateIn(scope, SharingStarted.Eagerly, "")
 
     override val onEventSelected = navigationHandler::navigateToEvent
     override val onBack = navigationHandler::navigateBack
 
     override val events: StateFlow<List<Event>> =
-        eventRepository.getEventsByHostFlow(currentUserId).map { result ->
+        currentUserId.flatMapLatest { hostId ->
+            if (hostId.isBlank()) {
+                flowOf(Result.success(emptyList()))
+            } else {
+                eventRepository.getEventsByHostFlow(hostId)
+            }
+        }.map { result ->
             result.getOrElse {
                 _errorState.value = ErrorMessage("Failed to load events: ${it.message}")
                 emptyList()

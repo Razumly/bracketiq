@@ -4,8 +4,10 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.EventOfficial
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
+import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
+import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -100,6 +102,49 @@ class EventDtosTest {
         val dto = event.toUpdateDto()
 
         assertNull(dto.leagueScoringConfig)
+    }
+
+    @Test
+    fun to_update_dto_includes_inline_fields_and_time_slots_when_overrides_are_provided() {
+        val event = Event(
+            name = "Inline Payload Event",
+            eventType = EventType.LEAGUE,
+            hostId = "host-inline",
+            start = Instant.fromEpochMilliseconds(1_700_000_000_000),
+            end = Instant.fromEpochMilliseconds(1_700_003_600_000),
+        )
+        val fields = listOf(
+            Field(
+                fieldNumber = 1,
+                divisions = listOf("open"),
+                organizationId = "org-inline",
+                id = "field-inline-1",
+            ),
+        )
+        val timeSlots = listOf(
+            TimeSlot(
+                id = "slot-inline-1",
+                dayOfWeek = 1,
+                daysOfWeek = listOf(1),
+                divisions = listOf("open"),
+                startTimeMinutes = 600,
+                endTimeMinutes = 660,
+                startDate = Instant.fromEpochMilliseconds(1_700_000_000_000),
+                repeating = true,
+                endDate = null,
+                scheduledFieldId = "field-inline-1",
+                scheduledFieldIds = listOf("field-inline-1"),
+                price = null,
+            ),
+        )
+
+        val dto = event.toUpdateDto(
+            fieldsOverride = fields,
+            timeSlotsOverride = timeSlots,
+        )
+
+        assertEquals(fields, dto.fields)
+        assertEquals(timeSlots, dto.timeSlots)
     }
 
     @Test

@@ -174,7 +174,7 @@ class DefaultCreateEventComponent(
         MutableStateFlow(
             EventWithRelations(
                 initialEventDraft,
-                userRepository.currentUser.value.getOrThrow()
+                userRepository.currentUser.value.getOrNull() ?: UserData()
             )
         )
 
@@ -192,7 +192,7 @@ class DefaultCreateEventComponent(
 
     private val _addUserToEvent = MutableStateFlow(false)
 
-    override val currentUser = userRepository.currentUser.map { it.getOrThrow() }
+    override val currentUser = userRepository.currentUser.map { it.getOrNull() }
         .stateIn(scope, SharingStarted.Eagerly, null)
     private val _suggestedUsers = MutableStateFlow<List<UserData>>(emptyList())
     override val suggestedUsers = _suggestedUsers.asStateFlow()
@@ -242,8 +242,14 @@ class DefaultCreateEventComponent(
         applyRentalDefaults()
         loadSports()
         scope.launch {
-            userRepository.currentUser.collect { currentUser ->
-                updateHostId(currentUser.getOrThrow().id)
+            userRepository.currentUser.collect { result ->
+                result.getOrNull()?.let { user ->
+                    updateHostId(user.id)
+                    defaultEvent.value = defaultEvent.value.copy(
+                        host = user,
+                        event = defaultEvent.value.event.copy(hostId = user.id),
+                    )
+                }
             }
         }
         scope.launch {
@@ -738,7 +744,12 @@ class DefaultCreateEventComponent(
     override fun addUserToEvent(add: Boolean) {
         _addUserToEvent.value = add
         if (add) {
-            updateEventField { copy(userIds = listOf(currentUser.value?.id!!)) }
+            val userId = currentUser.value?.id?.trim().orEmpty()
+            if (userId.isNotEmpty()) {
+                updateEventField { copy(userIds = listOf(userId)) }
+            } else {
+                _errorState.value = ErrorMessage("Unable to add current user before profile is ready.")
+            }
         } else {
             updateEventField { copy(userIds = listOf()) }
         }
@@ -985,7 +996,8 @@ class DefaultCreateEventComponent(
                 runCatching {
                     setPaymentIntent(intent)
                     val account = userRepository.currentAccount.value.getOrThrow()
-                    val user = userRepository.currentUser.value.getOrThrow()
+                    val user = currentUser.value ?: userRepository.currentUser.value.getOrNull()
+                        ?: error("Current user is not available yet.")
                     loadingHandler.showLoading("Waiting for payment completion...")
                     presentPaymentSheet(account.email, user.fullName)
                 }.onFailure { throwable ->
@@ -1005,7 +1017,7 @@ class DefaultCreateEventComponent(
 
     private suspend fun createEventAfterPayment(eventDraft: Event) {
         loadingHandler.showLoading("Creating event...")
-        val eventWithFields = prepareEventForCreation(eventDraft).getOrElse { error ->
+        val preparedEvent = prepareEventForCreation(eventDraft).getOrElse { error ->
             releaseRentalCheckoutLocks()
             _errorState.value = ErrorMessage(error.message ?: "Failed to prepare event setup.")
             loadingHandler.hideLoading()
@@ -1013,7 +1025,7 @@ class DefaultCreateEventComponent(
         }
 
         if (_isRentalFlow.value) {
-            val overlappingEvents = findOverlappingRentalEvents(eventWithFields)
+            val overlappingEvents = findOverlappingRentalEvents(preparedEvent.event)
                 .getOrElse { throwable ->
                     releaseRentalCheckoutLocks()
                     _errorState.value = ErrorMessage(
@@ -1032,10 +1044,12 @@ class DefaultCreateEventComponent(
         }
 
         eventRepository.createEvent(
-            eventWithFields,
+            preparedEvent.event,
             requiredTemplateIds = rentalRequiredTemplateIds(),
             leagueScoringConfig = _leagueScoringConfig.value
-                .takeIf { eventWithFields.eventType == EventType.LEAGUE },
+                .takeIf { preparedEvent.event.eventType == EventType.LEAGUE },
+            fields = preparedEvent.fields,
+            timeSlots = preparedEvent.timeSlots,
         )
             .onSuccess { createdEvent ->
                 val syncedEvent = syncEventStaffAssignments(createdEvent)
@@ -1081,8 +1095,16 @@ class DefaultCreateEventComponent(
         }
     }
 
-    private suspend fun prepareEventForCreation(eventDraft: Event): Result<Event> = runCatching {
+    private data class PreparedEventForCreation(
+        val event: Event,
+        val fields: List<Field>,
+        val timeSlots: List<TimeSlot>,
+    )
+
+    private suspend fun prepareEventForCreation(eventDraft: Event): Result<PreparedEventForCreation> = runCatching {
         var preparedEvent = eventDraft
+        var preparedFields = emptyList<Field>()
+        var preparedTimeSlots = emptyList<TimeSlot>()
 
         val shouldManageLocalFields = !_isRentalFlow.value &&
             (preparedEvent.eventType == EventType.LEAGUE || preparedEvent.eventType == EventType.TOURNAMENT) &&
@@ -1090,20 +1112,15 @@ class DefaultCreateEventComponent(
 
         val fieldIdReplacements = mutableMapOf<String, String>()
         if (shouldManageLocalFields) {
-            val fieldDrafts = buildFieldDrafts(preparedEvent, _fieldCount.value)
-            val createdFields = mutableListOf<Field>()
-            fieldDrafts.forEach { draft ->
-                val createdField = fieldRepository.createField(draft).getOrElse { error ->
-                    throw IllegalStateException(
-                        error.message ?: "Failed to create field ${draft.name ?: draft.fieldNumber}.",
-                        error
-                    )
+            val existingFields = _localFields.value.take(_fieldCount.value.coerceAtLeast(0))
+            preparedFields = buildFieldDrafts(preparedEvent, _fieldCount.value)
+            existingFields.zip(preparedFields).forEach { (existingField, preparedField) ->
+                if (existingField.id.isNotBlank()) {
+                    fieldIdReplacements[existingField.id] = preparedField.id
                 }
-                createdFields += createdField
-                fieldIdReplacements[draft.id] = createdField.id
             }
             preparedEvent = preparedEvent.copy(
-                fieldIds = createdFields.map { it.id },
+                fieldIds = preparedFields.map { it.id },
             )
         }
 
@@ -1111,29 +1128,19 @@ class DefaultCreateEventComponent(
             !_isRentalFlow.value &&
             (preparedEvent.eventType == EventType.LEAGUE || preparedEvent.eventType == EventType.TOURNAMENT)
         ) {
-            val slotDrafts = buildLeagueSlotDrafts(
+            preparedTimeSlots = buildLeagueSlotDrafts(
                 event = preparedEvent,
                 fieldIdReplacements = fieldIdReplacements,
             )
 
-            if (slotDrafts.isNotEmpty()) {
-                val createdSlots = mutableListOf<TimeSlot>()
-                slotDrafts.forEach { slotDraft ->
-                    val createdSlot = fieldRepository.createTimeSlot(slotDraft).getOrElse { error ->
-                        throw IllegalStateException(
-                            error.message ?: "Failed to create a schedule timeslot.",
-                            error
-                        )
-                    }
-                    createdSlots += createdSlot
-                }
-                preparedEvent = preparedEvent.copy(timeSlotIds = createdSlots.map { it.id })
-            } else {
-                preparedEvent = preparedEvent.copy(timeSlotIds = emptyList())
-            }
+            preparedEvent = preparedEvent.copy(timeSlotIds = preparedTimeSlots.map { it.id })
         }
 
-        preparedEvent
+        PreparedEventForCreation(
+            event = preparedEvent,
+            fields = preparedFields,
+            timeSlots = preparedTimeSlots,
+        )
     }
 
     private fun buildFieldDrafts(event: Event, targetCount: Int): List<Field> {

@@ -82,15 +82,26 @@ class DefaultChatGroupComponent(
     private val _messageInput = MutableStateFlow("")
     override val messageInput: StateFlow<String> = _messageInput
 
-    override val currentUser = userRepository.currentUser.value.getOrThrow()
+    private val currentUserState = userRepository.currentUser
+        .map { result -> result.getOrNull() ?: UserData() }
+        .stateIn(scope, SharingStarted.Eagerly, UserData())
+    override val currentUser: UserData
+        get() = currentUserState.value
     init {
         scope.launch {
-            _friends.value = currentUser.friendIds.let { friends ->
-                userRepository.getUsers(friends).getOrElse {
-                    _errorState.value = it.message
-                    emptyList()
+            currentUserState
+                .map { user -> user.friendIds }
+                .distinctUntilChanged()
+                .collect { friendIds ->
+                    _friends.value = if (friendIds.isEmpty()) {
+                        emptyList()
+                    } else {
+                        userRepository.getUsers(friendIds).getOrElse {
+                            _errorState.value = it.message
+                            emptyList()
+                        }
+                    }
                 }
-            }
         }
         scope.launch {
             chatGroup
@@ -118,10 +129,12 @@ class DefaultChatGroupComponent(
                 .distinctUntilChanged()
                 .collect { chatId ->
                     if (chatId.isBlank()) return@collect
+                    val currentUserId = currentUser.id.trim()
+                    if (currentUserId.isEmpty()) return@collect
                     messagesRepository.getMessagesInChatGroup(chatId).onFailure { error ->
                         Napier.w("Failed to load messages for opened chat $chatId: ${error.message}")
                     }
-                    messagesRepository.markMessagesRead(chatId, currentUser.id).onFailure { error ->
+                    messagesRepository.markMessagesRead(chatId, currentUserId).onFailure { error ->
                         Napier.w("Failed to mark messages as read for chat $chatId: ${error.message}")
                     }
                     chatGroupRepository.refreshChatGroupsAndMessages().onFailure { error ->

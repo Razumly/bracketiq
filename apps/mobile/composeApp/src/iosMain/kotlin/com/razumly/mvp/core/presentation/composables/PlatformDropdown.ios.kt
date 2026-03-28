@@ -3,15 +3,21 @@
 package com.razumly.mvp.core.presentation.composables
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -55,6 +61,7 @@ actual fun PlatformDropdown(
     height: Dp?,
     contentPadding: PaddingValues?
 ) {
+    val platformTextFieldVisible = LocalPlatformTextFieldVisible.current
     val fieldHeight = height ?: 44.dp
     val readablePlaceholder = if (isSystemInDarkTheme()) {
         MaterialTheme.colorScheme.onSurfaceVariant
@@ -96,50 +103,88 @@ actual fun PlatformDropdown(
             )
         }
 
-        // Native iOS dropdown using UIButton + UIMenu
-        UIKitView(
-            factory = {
-                createNativeDropdownButton(
-                    selectedValue = if (multiSelect) selectedValues.joinToString(", ") else selectedValue,
-                    placeholder = placeholder,
-                    options = options,
-                    enabled = enabled,
-                    multiSelect = multiSelect,
-                    selectedValues = selectedValues,
-                    onSingleSelectionChange = onSelectionChange,
-                    onMultiSelectionChange = onMultiSelectionChange,
-                    textColor = textUIColor,
-                    placeholderColor = placeholderUIColor,
-                    disabledTextColor = disabledTextUIColor,
-                    fillColor = fillUIColor,
-                    disabledFillColor = disabledFillUIColor,
-                    borderColor = borderUIColor,
-                )
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(fieldHeight)
-                .clip(RoundedCornerShape(9.dp)),
-            update = { button ->
-                updateNativeDropdownButton(
-                    button = button,
-                    selectedValue = if (multiSelect) selectedValues.joinToString(", ") else selectedValue,
-                    placeholder = placeholder,
-                    options = options,
-                    enabled = enabled,
-                    multiSelect = multiSelect,
-                    selectedValues = selectedValues,
-                    onSingleSelectionChange = onSelectionChange,
-                    onMultiSelectionChange = onMultiSelectionChange,
-                    textColor = textUIColor,
-                    placeholderColor = placeholderUIColor,
-                    disabledTextColor = disabledTextUIColor,
-                    fillColor = fillUIColor,
-                    disabledFillColor = disabledFillUIColor,
-                    borderColor = borderUIColor,
-                )
+        if (!platformTextFieldVisible) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(fieldHeight)
+                    .background(fillColor, RoundedCornerShape(8.dp))
+                    .border(1.dp, borderColor, RoundedCornerShape(8.dp))
+                    .padding(horizontal = 12.dp),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        text = if (multiSelect) {
+                            selectedValues.joinToString(", ").ifBlank { placeholder }
+                        } else {
+                            selectedValue.ifBlank { placeholder }
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = when {
+                            !enabled -> readableDisabled
+                            ((if (multiSelect) selectedValues.isEmpty() else selectedValue.isBlank())) -> readablePlaceholder
+                            else -> MaterialTheme.colorScheme.onSurface
+                        },
+                        maxLines = 1,
+                    )
+                    Text(
+                        text = "⌄",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = if (enabled) readablePlaceholder else readableDisabled,
+                    )
+                }
             }
-        )
+        } else {
+            // Native iOS dropdown using UIButton + UIMenu
+            UIKitView(
+                factory = {
+                    createNativeDropdownButton(
+                        selectedValue = if (multiSelect) selectedValues.joinToString(", ") else selectedValue,
+                        placeholder = placeholder,
+                        options = options,
+                        enabled = enabled,
+                        multiSelect = multiSelect,
+                        selectedValues = selectedValues,
+                        onSingleSelectionChange = onSelectionChange,
+                        onMultiSelectionChange = onMultiSelectionChange,
+                        textColor = textUIColor,
+                        placeholderColor = placeholderUIColor,
+                        disabledTextColor = disabledTextUIColor,
+                        fillColor = fillUIColor,
+                        disabledFillColor = disabledFillUIColor,
+                        borderColor = borderUIColor,
+                    )
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(fieldHeight)
+                    .clip(RoundedCornerShape(9.dp)),
+                update = { button ->
+                    updateNativeDropdownButton(
+                        button = button,
+                        selectedValue = if (multiSelect) selectedValues.joinToString(", ") else selectedValue,
+                        placeholder = placeholder,
+                        options = options,
+                        enabled = enabled,
+                        multiSelect = multiSelect,
+                        selectedValues = selectedValues,
+                        onSingleSelectionChange = onSelectionChange,
+                        onMultiSelectionChange = onMultiSelectionChange,
+                        textColor = textUIColor,
+                        placeholderColor = placeholderUIColor,
+                        disabledTextColor = disabledTextUIColor,
+                        fillColor = fillUIColor,
+                        disabledFillColor = disabledFillUIColor,
+                        borderColor = borderUIColor,
+                    )
+                }
+            )
+        }
 
         // Supporting text below the field
         if (supportingText.isNotEmpty()) {

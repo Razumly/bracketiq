@@ -306,7 +306,7 @@ fun Event.syncOfficialStaffing(
     val resolvedPositions = when {
         replacePositionsWithSportDefaults && sportDefaults.isNotEmpty() -> sportDefaults
         officialPositions.isNotEmpty() -> officialPositions.normalizedForEvent(id)
-        sportDefaults.isNotEmpty() -> sportDefaults
+        officialIds.isNotEmpty() && sportDefaults.isNotEmpty() -> sportDefaults
         officialIds.isNotEmpty() -> listOf(
             EventOfficialPosition(
                 id = buildEventOfficialPositionId(id, 0, "Official"),
@@ -500,6 +500,7 @@ fun Event.removeOfficialPosition(
     return copy(
         officialPositions = updatedPositions,
         eventOfficials = updatedOfficials,
+        officialIds = updatedOfficials.map(EventOfficial::userId),
     ).syncOfficialStaffing(sport = sport)
 }
 

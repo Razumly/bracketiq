@@ -7,13 +7,13 @@ import cocoapods.GoogleSignIn.GIDSignIn
 import cocoapods.GoogleSignIn.GIDSignInResult
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.UserRepository
+import com.razumly.mvp.core.presentation.util.topViewController
 import com.razumly.mvp.core.util.AppSecrets
 import io.github.aakira.napier.Napier
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
 import platform.Foundation.NSError
-import platform.UIKit.UIApplication
 import platform.UIKit.UIViewController
 
 
@@ -31,8 +31,8 @@ suspend fun IUserRepository.oauth2Login(): Result<Unit> {
             ),
         )
 
-    val rootViewController = UIApplication.sharedApplication.keyWindow?.rootViewController
-        ?: return Result.failure(IllegalStateException("Unable to find root view controller for Google sign-in."))
+    val rootViewController = topViewController()
+        ?: return Result.failure(IllegalStateException("Unable to find a presenting view controller for Google sign-in."))
 
     return runCatching {
         GIDSignIn.sharedInstance.configuration = GIDConfiguration(clientID = clientId)

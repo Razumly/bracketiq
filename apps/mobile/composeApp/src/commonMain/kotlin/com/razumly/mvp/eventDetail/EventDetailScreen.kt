@@ -112,6 +112,7 @@ import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.removeOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.removeOfficialUser
+import com.razumly.mvp.core.data.dataTypes.syncOfficialStaffing
 import com.razumly.mvp.core.data.dataTypes.updateOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.updateOfficialUserPositions
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
@@ -2224,6 +2225,14 @@ fun EventDetailScreen(
                             onUpdateOfficialSchedulingMode = { mode ->
                                 component.editEventField {
                                     copy(officialSchedulingMode = mode)
+                                }
+                            },
+                            onLoadOfficialPositionDefaults = {
+                                component.editEventField {
+                                    syncOfficialStaffing(
+                                        sport = sports.firstOrNull { sport -> sport.id == sportId },
+                                        replacePositionsWithSportDefaults = true,
+                                    )
                                 }
                             },
                             onAddOfficialPosition = {

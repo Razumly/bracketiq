@@ -16,6 +16,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -47,7 +49,11 @@ class DefaultChatListComponent(
     ComponentContext by componentContext {
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
 
-    override val currentUser = userRepository.currentUser.value.getOrThrow()
+    private val currentUserState = userRepository.currentUser
+        .map { result -> result.getOrNull() ?: UserData() }
+        .stateIn(scope, SharingStarted.Eagerly, UserData())
+    override val currentUser: UserData
+        get() = currentUserState.value
 
     private val _newChat = MutableStateFlow(
         ChatGroupWithRelations(
@@ -81,12 +87,19 @@ class DefaultChatListComponent(
 
     init {
         scope.launch {
-            _friends.value = currentUser.friendIds.let { friends ->
-                userRepository.getUsers(friends).getOrElse {
-                    _errorState.value = it.message
-                    emptyList()
+            currentUserState
+                .map { user -> user.friendIds }
+                .distinctUntilChanged()
+                .collect { friendIds ->
+                    _friends.value = if (friendIds.isEmpty()) {
+                        emptyList()
+                    } else {
+                        userRepository.getUsers(friendIds).getOrElse {
+                            _errorState.value = it.message
+                            emptyList()
+                        }
+                    }
                 }
-            }
         }
     }
 

@@ -104,11 +104,9 @@ class IOSNativeViewFactory: NativeViewFactory {
                         epochMilliseconds: Int64(date.timeIntervalSince1970 * 1000)
                     )
                     onDateSelected(instant)
-                    presentingViewController.dismiss(animated: true)
                 },
                 onDismiss: {
                     onDismissRequest()
-                    presentingViewController.dismiss(animated: true)
                 }
             )
 

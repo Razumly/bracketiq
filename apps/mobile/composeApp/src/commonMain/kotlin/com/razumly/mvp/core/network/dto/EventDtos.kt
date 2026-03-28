@@ -11,6 +11,7 @@ import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.EventOfficial
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
+import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.core.data.util.normalizeDivisionDetails
@@ -463,6 +464,8 @@ data class EventUpdateDto(
     val sportId: String? = null,
     val timeSlotIds: List<String>? = null,
     val fieldIds: List<String>? = null,
+    val fields: List<Field>? = null,
+    val timeSlots: List<TimeSlot>? = null,
     val teamIds: List<String>? = null,
     val userIds: List<String>? = null,
     val leagueScoringConfigId: String? = null,
@@ -495,6 +498,8 @@ data class UpdateEventRequestDto(
 fun Event.toUpdateDto(
     requiredTemplateIdsOverride: List<String>? = null,
     leagueScoringConfigOverride: LeagueScoringConfigDTO? = null,
+    fieldsOverride: List<Field>? = null,
+    timeSlotsOverride: List<TimeSlot>? = null,
 ): EventUpdateDto {
     val sourceRequiredTemplateIds = requiredTemplateIdsOverride ?: requiredTemplateIds
     val resolvedRequiredTemplateIds = sourceRequiredTemplateIds
@@ -634,6 +639,8 @@ fun Event.toUpdateDto(
         sportId = sportId,
         timeSlotIds = timeSlotIds,
         fieldIds = fieldIds,
+        fields = fieldsOverride,
+        timeSlots = timeSlotsOverride,
         teamIds = teamIds,
         userIds = userIds,
         leagueScoringConfigId = leagueScoringConfigId,
