@@ -65,18 +65,26 @@ private fun isLocalHostUrl(url: String): Boolean {
 }
 
 private fun resolveStripeRedirectBaseUrl(resolvedApiBaseUrl: String): String {
+    val runningOnSimulator = isIosSimulator()
     val normalizedApi = resolvedApiBaseUrl.trim().trimEnd('/')
     val remoteConfigured = AppSecrets.mvpApiBaseUrlRemote.trim().trimEnd('/')
-    val webConfigured = AppSecrets.mvpWebBaseUrl.trim().trimEnd()
+    val webConfigured = AppSecrets.mvpWebBaseUrl.trim().trimEnd('/')
         .takeUnless { it.equals(UNSET_WEB_BASE_URL, ignoreCase = true) }
         .orEmpty()
 
     if (webConfigured.isNotBlank()) {
-        Napier.i("stripeRedirectBaseUrl(iOS): using mvpWebBaseUrl=$webConfigured")
-        return webConfigured
+        val webIsNgrok = isLikelyNgrokUrl(webConfigured)
+        if (runningOnSimulator || !webIsNgrok) {
+            Napier.i("stripeRedirectBaseUrl(iOS): using mvpWebBaseUrl=$webConfigured")
+            return webConfigured
+        }
+        Napier.i(
+            "stripeRedirectBaseUrl(iOS): ignoring ngrok mvpWebBaseUrl on physical device; " +
+                "using live API origin instead."
+        )
     }
 
-    if (isLikelyNgrokUrl(remoteConfigured) && isLocalHostUrl(normalizedApi)) {
+    if (runningOnSimulator && isLikelyNgrokUrl(remoteConfigured) && isLocalHostUrl(normalizedApi)) {
         Napier.i("stripeRedirectBaseUrl(iOS): using ngrok remote endpoint $remoteConfigured")
         return remoteConfigured
     }

@@ -69,6 +69,7 @@ private fun resolveStripeRedirectBaseUrl(
     remoteBaseUrl: String,
     webBaseUrl: String,
 ): String {
+    val runningOnEmulator = isEmulator()
     val normalizedApi = resolvedApiBaseUrl.trim().trimEnd('/')
     val normalizedRemote = remoteBaseUrl.trim().trimEnd('/')
     val normalizedWeb = webBaseUrl.trim().trimEnd('/')
@@ -76,8 +77,15 @@ private fun resolveStripeRedirectBaseUrl(
         .orEmpty()
 
     if (normalizedWeb.isNotBlank()) {
-        Napier.i("stripeRedirectBaseUrl(android): using MVP_WEB_BASE_URL=$normalizedWeb")
-        return normalizedWeb
+        val webIsNgrok = isLikelyNgrokUrl(normalizedWeb)
+        if (runningOnEmulator || !webIsNgrok) {
+            Napier.i("stripeRedirectBaseUrl(android): using MVP_WEB_BASE_URL=$normalizedWeb")
+            return normalizedWeb
+        }
+        Napier.i(
+            "stripeRedirectBaseUrl(android): ignoring ngrok MVP_WEB_BASE_URL on physical device; " +
+                "using live API origin instead."
+        )
     }
 
     if (isLikelyNgrokUrl(normalizedRemote) && isLocalHostUrl(normalizedApi)) {
