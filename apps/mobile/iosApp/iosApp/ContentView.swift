@@ -9,10 +9,10 @@ struct ComposeView: UIViewControllerRepresentable {
         self.deepLinkUrl = deepLinkUrl
     }
 
-    func makeCoordinator() -> KeyboardAvoidanceCoordinator {
-        KeyboardAvoidanceCoordinator()
+    func makeCoordinator() -> KeyboardDismissCoordinator {
+        KeyboardDismissCoordinator()
     }
-    
+
     func makeUIViewController(context: Context) -> UIViewController {
         let deepLinkNav = deepLinkUrl?.extractDeepLinkNav()
         let composeController = MainViewControllerKt.MainViewController(
@@ -21,12 +21,12 @@ struct ComposeView: UIViewControllerRepresentable {
         )
 
         composeController.view.backgroundColor = UIColor.systemBackground
-        context.coordinator.attach(to: composeController)
+        context.coordinator.attach(to: composeController.view)
         return composeController
     }
     
     func updateUIViewController(_ uiViewController: UIViewController, context: Context) {
-        context.coordinator.attach(to: uiViewController)
+        context.coordinator.attach(to: uiViewController.view)
         if let url = deepLinkUrl {
             _ = url.extractDeepLinkNav()
             // Since we can't call methods on the generated UIViewController,
@@ -36,15 +36,28 @@ struct ComposeView: UIViewControllerRepresentable {
     }
 }
 
-final class KeyboardAvoidanceCoordinator {
-    private weak var viewController: UIViewController?
-    private var observers: [NSObjectProtocol] = []
+final class KeyboardDismissCoordinator: NSObject, UIGestureRecognizerDelegate {
+    private weak var rootView: UIView?
+    private weak var tapRecognizer: UITapGestureRecognizer?
+    private weak var panRecognizer: UIPanGestureRecognizer?
 
-    func attach(to viewController: UIViewController) {
-        guard self.viewController !== viewController else { return }
+    func attach(to view: UIView) {
+        guard rootView !== view else { return }
         detach()
-        self.viewController = viewController
-        registerKeyboardObservers()
+
+        rootView = view
+
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
+        tap.cancelsTouchesInView = false
+        tap.delegate = self
+        view.addGestureRecognizer(tap)
+        tapRecognizer = tap
+
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+        pan.cancelsTouchesInView = false
+        pan.delegate = self
+        view.addGestureRecognizer(pan)
+        panRecognizer = pan
     }
 
     deinit {
@@ -52,100 +65,51 @@ final class KeyboardAvoidanceCoordinator {
     }
 
     private func detach() {
-        observers.forEach(NotificationCenter.default.removeObserver)
-        observers.removeAll()
-        resetTransform()
-        viewController = nil
-    }
-
-    private func registerKeyboardObservers() {
-        let center = NotificationCenter.default
-        observers.append(
-            center.addObserver(
-                forName: UIResponder.keyboardWillChangeFrameNotification,
-                object: nil,
-                queue: .main
-            ) { [weak self] notification in
-                self?.handleKeyboardFrameChange(notification)
-            }
-        )
-        observers.append(
-            center.addObserver(
-                forName: UIResponder.keyboardWillHideNotification,
-                object: nil,
-                queue: .main
-            ) { [weak self] notification in
-                self?.resetTransform(animatedWith: notification)
-            }
-        )
-    }
-
-    private func handleKeyboardFrameChange(_ notification: Notification) {
-        guard
-            let controllerView = viewController?.view,
-            let window = controllerView.window,
-            let userInfo = notification.userInfo,
-            let keyboardFrameValue = userInfo[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue
-        else { return }
-
-        let keyboardFrame = window.convert(keyboardFrameValue.cgRectValue, from: nil)
-        let keyboardTop = keyboardFrame.minY
-        let focusedView = controllerView.findFirstResponder()
-
-        var targetOffset: CGFloat = 0
-        if let focusedView {
-            let focusedFrame = focusedView.convert(focusedView.bounds, to: window)
-            let desiredGap: CGFloat = 12
-            let overlap = (focusedFrame.maxY + desiredGap) - keyboardTop
-            if overlap > 0 {
-                targetOffset = -overlap
-            }
+        if let tapRecognizer {
+            tapRecognizer.view?.removeGestureRecognizer(tapRecognizer)
         }
-
-        animateTransform(
-            to: targetOffset,
-            using: notification
-        )
+        if let panRecognizer {
+            panRecognizer.view?.removeGestureRecognizer(panRecognizer)
+        }
+        tapRecognizer = nil
+        panRecognizer = nil
+        rootView = nil
     }
 
-    private func resetTransform() {
-        viewController?.view.transform = .identity
+    @objc
+    private func handleTap(_ gesture: UITapGestureRecognizer) {
+        guard gesture.state == .ended else { return }
+        rootView?.endEditing(true)
     }
 
-    private func resetTransform(animatedWith notification: Notification) {
-        animateTransform(to: 0, using: notification)
+    @objc
+    private func handlePan(_ gesture: UIPanGestureRecognizer) {
+        guard gesture.state == .began else { return }
+        rootView?.endEditing(true)
     }
 
-    private func animateTransform(to yOffset: CGFloat, using notification: Notification) {
-        guard let controllerView = viewController?.view else { return }
-        let userInfo = notification.userInfo
-        let duration = (userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber)?.doubleValue ?? 0.25
-        let curveRaw = (userInfo?[UIResponder.keyboardAnimationCurveUserInfoKey] as? NSNumber)?.uintValue
-            ?? UInt(UIView.AnimationCurve.easeInOut.rawValue)
-        let curveOptions = UIView.AnimationOptions(rawValue: curveRaw << 16)
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        true
+    }
 
-        UIView.animate(
-            withDuration: duration,
-            delay: 0,
-            options: [curveOptions, .beginFromCurrentState, .allowUserInteraction],
-            animations: {
-                controllerView.transform = CGAffineTransform(translationX: 0, y: yOffset)
-            }
-        )
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        !touch.isInsideTextInput()
     }
 }
 
-private extension UIView {
-    func findFirstResponder() -> UIView? {
-        if isFirstResponder {
-            return self
-        }
-        for subview in subviews {
-            if let responder = subview.findFirstResponder() {
-                return responder
+private extension UITouch {
+    func isInsideTextInput() -> Bool {
+        var currentView: UIView? = self.view
+        while let view = currentView {
+            if view is UITextField || view is UITextView {
+                return true
             }
+            currentView = view.superview
         }
-        return nil
+        return false
     }
 }
 

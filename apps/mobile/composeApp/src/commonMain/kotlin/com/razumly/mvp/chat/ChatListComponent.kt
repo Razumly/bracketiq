@@ -55,12 +55,19 @@ class DefaultChatListComponent(
     override val currentUser: UserData
         get() = currentUserState.value
 
-    private val _newChat = MutableStateFlow(
-        ChatGroupWithRelations(
-            ChatGroup(newId(), "", listOf(currentUser.id), currentUser.id),
+    private fun createEmptyDraftChat(currentUserId: String): ChatGroupWithRelations {
+        val normalizedUserId = currentUserId.trim()
+        val hostId = normalizedUserId.ifBlank { "" }
+        val memberIds = if (normalizedUserId.isBlank()) emptyList() else listOf(normalizedUserId)
+        return ChatGroupWithRelations(
+            ChatGroup(newId(), "", memberIds, hostId),
             users = listOf(),
             messages = listOf(),
         )
+    }
+
+    private val _newChat = MutableStateFlow(
+        createEmptyDraftChat(currentUser.id)
     )
     override val newChat = _newChat.asStateFlow()
 
@@ -101,6 +108,29 @@ class DefaultChatListComponent(
                     }
                 }
         }
+        scope.launch {
+            currentUserState
+                .map { user -> user.id.trim() }
+                .distinctUntilChanged()
+                .collect { currentUserId ->
+                    if (currentUserId.isBlank()) return@collect
+
+                    val currentDraft = _newChat.value
+                    val normalizedUserIds = currentDraft.chatGroup.userIds
+                        .map { userId -> userId.trim() }
+                        .filter(String::isNotBlank)
+                    val shouldHydrateDraft =
+                        currentDraft.chatGroup.hostId.isBlank() || !normalizedUserIds.contains(currentUserId)
+                    if (!shouldHydrateDraft) return@collect
+
+                    _newChat.value = currentDraft.copy(
+                        chatGroup = currentDraft.chatGroup.copy(
+                            hostId = currentUserId,
+                            userIds = (normalizedUserIds + currentUserId).distinct(),
+                        )
+                    )
+                }
+        }
     }
 
     override fun onChatSelected(chat: ChatGroupWithRelations) {
@@ -113,24 +143,35 @@ class DefaultChatListComponent(
 
     override fun onChatCreated() {
         scope.launch {
+            val currentUserId = currentUser.id.trim()
+            if (currentUserId.isBlank()) {
+                _errorState.value = "Unable to create chat until your user profile is loaded."
+                return@launch
+            }
+
+            val normalizedUserIds = (newChat.value.chatGroup.userIds + currentUserId)
+                .map { userId -> userId.trim() }
+                .filter(String::isNotBlank)
+                .distinct()
             val chatToCreate = newChat.value.copy(
                 chatGroup = newChat.value.chatGroup.copy(
-                    userIds = (newChat.value.chatGroup.userIds + currentUser.id).distinct()
+                    userIds = normalizedUserIds,
+                    hostId = currentUserId,
                 ),
                 users = newChat.value.users
-                    .filterNot { it.id == currentUser.id }
+                    .filterNot { it.id == currentUserId }
                     .distinctBy { it.id }
             )
 
-            chatGroupRepository.createChatGroup(chatToCreate).onFailure {
+            val created = chatGroupRepository.createChatGroup(chatToCreate)
+            if (created.isFailure) {
+                _errorState.value = created.exceptionOrNull()?.userMessage()
+                return@launch
+            }
+            chatGroupRepository.refreshChatGroupsAndMessages().onFailure {
                 _errorState.value = it.userMessage()
             }
-            _newChat.value =
-                ChatGroupWithRelations(
-                    ChatGroup(newId(), "", listOf(currentUser.id), currentUser.id),
-                    users = listOf(),
-                    messages = listOf(),
-                )
+            _newChat.value = createEmptyDraftChat(currentUserId)
         }
     }
 

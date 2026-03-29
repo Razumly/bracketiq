@@ -45,6 +45,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -69,6 +70,7 @@ class RootComponent(
             "We couldn't restore your session in time. Please log in."
         private const val PUSH_TARGET_REGISTRATION_ATTEMPTS = 3
         private const val PUSH_TARGET_REGISTRATION_RETRY_DELAY_MS = 2_000L
+        private const val CHAT_REFRESH_INTERVAL_MS = 30_000L
     }
 
     private val navigation = StackNavigation<AppConfig>()
@@ -101,6 +103,9 @@ class RootComponent(
     private var pendingInviteCountJob: Job? = null
     private var pushRegistrationRetryJob: Job? = null
     private var deepLinkNavigationJob: Job? = null
+    private var chatStartupSyncJob: Job? = null
+    private var chatRefreshJob: Job? = null
+    private var activeChatRefreshUserId: String? = null
 
     private val _selectedPage = MutableStateFlow<AppConfig>(AppConfig.Search())
     val selectedPage: StateFlow<AppConfig> = _selectedPage.asStateFlow()
@@ -172,14 +177,17 @@ class RootComponent(
                         if (userData.id.isNotBlank()) {
                             registerPushTargetIfNeeded(userData.id)
                             refreshChatsOnStartupIfNeeded(userData.id)
+                            startChatRefreshLoopIfNeeded(userData.id)
                         } else {
                             clearPushTargetIfNeeded()
                             clearChatStartupSyncState()
+                            clearChatRefreshLoop()
                         }
                     },
                     onFailure = {
                         clearPushTargetIfNeeded()
                         clearChatStartupSyncState()
+                        clearChatRefreshLoop()
                     }
                 )
             }
@@ -338,17 +346,46 @@ class RootComponent(
     }
 
     private fun refreshChatsOnStartupIfNeeded(userId: String) {
-        if (syncedChatUserId == userId) return
-        syncedChatUserId = userId
-        scope.launch(Dispatchers.Default) {
-            chatGroupRepository.refreshChatGroupsAndMessages().onFailure {
-                Napier.w("Startup chat refresh failed: ${it.message}")
-            }
+        if (syncedChatUserId == userId || chatStartupSyncJob?.isActive == true) return
+        chatStartupSyncJob = scope.launch(Dispatchers.Default) {
+            chatGroupRepository.refreshChatGroupsAndMessages()
+                .onSuccess {
+                    syncedChatUserId = userId
+                }
+                .onFailure {
+                    if (syncedChatUserId == userId) {
+                        syncedChatUserId = null
+                    }
+                    Napier.w("Startup chat refresh failed: ${it.message}")
+                }
         }
     }
 
     private fun clearChatStartupSyncState() {
+        chatStartupSyncJob?.cancel()
+        chatStartupSyncJob = null
         syncedChatUserId = null
+    }
+
+    private fun startChatRefreshLoopIfNeeded(userId: String) {
+        if (activeChatRefreshUserId == userId && chatRefreshJob?.isActive == true) return
+
+        chatRefreshJob?.cancel()
+        activeChatRefreshUserId = userId
+        chatRefreshJob = scope.launch(Dispatchers.Default) {
+            while (isActive && activeChatRefreshUserId == userId) {
+                chatGroupRepository.refreshChatGroupsAndMessages().onFailure { throwable ->
+                    Napier.w("Periodic chat refresh failed for user $userId: ${throwable.message}")
+                }
+                delay(CHAT_REFRESH_INTERVAL_MS)
+            }
+        }
+    }
+
+    private fun clearChatRefreshLoop() {
+        activeChatRefreshUserId = null
+        chatRefreshJob?.cancel()
+        chatRefreshJob = null
     }
 
     private suspend fun refreshPendingInviteCount(userId: String) {

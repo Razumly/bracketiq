@@ -20,12 +20,15 @@ data class ChatGroupApiDto(
 ) {
     fun toChatGroupOrNull(): ChatGroup? {
         val resolvedId = id ?: legacyId
-        val resolvedHostId = hostId
+        val resolvedHostId = hostId?.trim()
+        val normalizedUserIds = (userIds ?: emptyList()).map { userId -> userId.trim() }
         if (resolvedId.isNullOrBlank() || resolvedHostId.isNullOrBlank()) return null
+        if (normalizedUserIds.isEmpty() || normalizedUserIds.any(String::isBlank)) return null
+        if (!normalizedUserIds.contains(resolvedHostId)) return null
         return ChatGroup(
             id = resolvedId,
             name = name ?: "",
-            userIds = userIds ?: emptyList(),
+            userIds = normalizedUserIds.distinct(),
             hostId = resolvedHostId,
         ).apply {
             this.teamId = teamId?.trim()?.takeIf(String::isNotBlank)

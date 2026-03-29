@@ -166,7 +166,7 @@ class DefaultCreateEventComponent(
 ) : CreateEventComponent, PaymentProcessor(), ComponentContext by componentContext {
     private val navigation = StackNavigation<Config>()
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
-    private val initialEventDraft = createInitialEventDraft()
+    private val initialEventDraft = createInitialEventDraft(initialHostId = resolveCurrentUserId())
 
     private val _newEventState: MutableStateFlow<Event> = MutableStateFlow(initialEventDraft)
     override val newEventState = _newEventState.asStateFlow()
@@ -245,10 +245,17 @@ class DefaultCreateEventComponent(
         scope.launch {
             userRepository.currentUser.collect { result ->
                 result.getOrNull()?.let { user ->
-                    updateHostId(user.id)
+                    val normalizedUserId = user.id.trim()
+                    if (normalizedUserId.isNotEmpty()) {
+                        val currentDraft = _newEventState.value
+                        val syncedDraft = currentDraft.withRequiredHost(normalizedUserId)
+                        if (syncedDraft != currentDraft) {
+                            _newEventState.value = syncedDraft
+                        }
+                    }
                     defaultEvent.value = defaultEvent.value.copy(
                         host = user,
-                        event = defaultEvent.value.event.copy(hostId = user.id),
+                        event = defaultEvent.value.event.withRequiredHost(user.id),
                     )
                 }
             }
@@ -304,8 +311,17 @@ class DefaultCreateEventComponent(
 
     override fun createEvent() {
         scope.launch {
+            val currentUserId = resolveCurrentUserId()
+            if (currentUserId.isBlank()) {
+                _errorState.value = ErrorMessage("Unable to create event until your user profile is ready.")
+                return@launch
+            }
+            val hostSyncedDraft = newEventState.value.withRequiredHost(currentUserId)
+            if (hostSyncedDraft != newEventState.value) {
+                _newEventState.value = hostSyncedDraft
+            }
             val eventDraft = applyRentalConstraints(
-                newEventState.value.applyCreateSelectionRules(_isRentalFlow.value)
+                hostSyncedDraft.applyCreateSelectionRules(_isRentalFlow.value)
             )
             if (_isRentalFlow.value) {
                 processRentalPaymentBeforeCreate(eventDraft)
@@ -1649,11 +1665,40 @@ class DefaultCreateEventComponent(
         return firstStart < secondEnd && secondStart < firstEnd
     }
 
-    private fun createInitialEventDraft(now: Instant = Clock.System.now()): Event {
+    private fun resolveCurrentUserId(): String =
+        userRepository.currentUser.value.getOrNull()?.id?.trim().orEmpty()
+
+    private fun Event.withRequiredHost(hostUserId: String): Event {
+        val normalizedHostId = hostUserId.trim()
+        if (normalizedHostId.isEmpty()) {
+            return this
+        }
+        val normalizedAssistantHostIds = assistantHostIds
+            .normalizeDistinctIds()
+            .filterNot { assistantHostId -> assistantHostId == normalizedHostId }
+        val currentNormalizedHostId = hostId.trim()
+        val currentNormalizedAssistantHostIds = assistantHostIds.normalizeDistinctIds()
+        if (
+            currentNormalizedHostId == normalizedHostId &&
+            currentNormalizedAssistantHostIds == normalizedAssistantHostIds
+        ) {
+            return this
+        }
+        return copy(
+            hostId = normalizedHostId,
+            assistantHostIds = normalizedAssistantHostIds,
+        )
+    }
+
+    private fun createInitialEventDraft(
+        now: Instant = Clock.System.now(),
+        initialHostId: String = "",
+    ): Event {
         val start = roundedStartAtLeastOneHourFrom(now)
         return Event(
             start = start,
             end = defaultEventEnd(start),
+            hostId = initialHostId.trim(),
         )
     }
 
