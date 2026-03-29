@@ -35,6 +35,7 @@ class EventDtosTest {
 
         assertEquals(listOf("template-a", "template-b"), dto.requiredTemplateIds)
         assertEquals(true, dto.noFixedEndDateTime)
+        assertNull(dto.end)
         assertEquals(true, dto.teamOfficialsMaySwap)
     }
 

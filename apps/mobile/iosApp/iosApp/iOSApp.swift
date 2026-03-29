@@ -31,18 +31,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         Messaging.messaging().delegate = self
         UNUserNotificationCenter.current().delegate = self
         
-        // ADD: Configure IQKeyboardManager globally
-        IQKeyboardManager.shared.isEnabled = true
-        IQKeyboardManager.shared.resignOnTouchOutside = false
-        IQKeyboardManager.shared.keyboardDistance = 0
-        if let hostingControllerClass = NSClassFromString("UIHostingController") as? UIViewController.Type,
-           !IQKeyboardManager.shared.disabledDistanceHandlingClasses.contains(where: { $0 == hostingControllerClass }) {
-            IQKeyboardManager.shared.disabledDistanceHandlingClasses.append(hostingControllerClass)
-        }
-        if let hostingControllerClass = NSClassFromString("UIHostingController") as? UIViewController.Type,
-           !IQKeyboardManager.shared.disabledToolbarClasses.contains(where: { $0 == hostingControllerClass }) {
-            IQKeyboardManager.shared.disabledToolbarClasses.append(hostingControllerClass)
-        }
+        // Compose handles its own input/viewport behavior. Keep IQKeyboardManager disabled
+        // so the root app view is not shifted when the keyboard appears.
+        IQKeyboardManager.shared.isEnabled = false
 
         NotifierManager.shared.initialize(configuration: NotificationPlatformConfigurationIos(
             showPushNotification: false,
@@ -215,6 +206,7 @@ struct iOSApp: App {
 
                 ComposeView(deepLinkUrl: deepLinkUrl)
                     .ignoresSafeArea(.container, edges: [.top, .bottom])
+                    .ignoresSafeArea(.keyboard, edges: .bottom)
                     .id(deepLinkId) // Use the ID instead of URL string
                     .onAppear {
                         if let pendingUrl = AppDelegate.pendingDeepLink {

@@ -31,12 +31,12 @@ interface RefundManagerComponent {
 
 class DefaultRefundManagerComponent(
     private val componentContext: ComponentContext,
-    private val userRepository: IUserRepository,
+    @Suppress("UNUSED_PARAMETER")
+    userRepository: IUserRepository,
     private val billingRepository: IBillingRepository,
     private val navigationHandler: INavigationHandler,
 ) : ComponentContext by componentContext, RefundManagerComponent {
 
-    private val scopeMain = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private val scopeIO = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
     private val _errorState = MutableStateFlow<ErrorMessage?>(null)

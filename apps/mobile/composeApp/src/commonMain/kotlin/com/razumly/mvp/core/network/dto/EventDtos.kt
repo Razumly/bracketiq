@@ -587,7 +587,7 @@ fun Event.toUpdateDto(
     return EventUpdateDto(
         name = name,
         start = start.toString(),
-        end = end.toString(),
+        end = if (noFixedEndDateTime) null else end.toString(),
         description = description,
         divisions = normalizedDivisions,
         divisionDetails = normalizedDivisionDetailsForPayload,

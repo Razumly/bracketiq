@@ -22,7 +22,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
@@ -66,7 +65,8 @@ class DefaultTeamManagementComponent(
     private val sportsRepository: ISportsRepository,
     private val teamRepository: ITeamRepository,
     private val userRepository: IUserRepository,
-    private val _legacyFreeAgents: List<String>,
+    @Suppress("UNUSED_PARAMETER")
+    _legacyFreeAgents: List<String>,
     override val selectedEvent: Event?,
     override val selectedFreeAgentId: String?,
     private val navigationHandler: INavigationHandler

@@ -48,6 +48,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -75,7 +76,6 @@ import coil3.compose.AsyncImage
 import com.kmpalette.loader.rememberNetworkLoader
 import com.kmpalette.rememberDominantColorState
 import com.materialkolor.scheme.DynamicScheme
-import com.razumly.mvp.core.data.dataTypes.EventOfficial
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
@@ -131,7 +131,6 @@ import com.razumly.mvp.core.presentation.util.getImageUrl
 import com.razumly.mvp.core.presentation.util.getScreenHeight
 import com.razumly.mvp.core.presentation.util.getScreenWidth
 import com.razumly.mvp.core.presentation.util.moneyFormat
-import com.razumly.mvp.core.presentation.util.MoneyInputUtils
 import com.razumly.mvp.core.presentation.util.toEnumTitleCase
 import com.razumly.mvp.core.presentation.util.toNameCase
 import com.razumly.mvp.core.presentation.util.teamSizeFormat
@@ -278,7 +277,6 @@ fun EventDetails(
     var showUploadImagePicker by rememberSaveable { mutableStateOf(false) }
     var editLocationButtonCenter by remember { mutableStateOf(Offset.Zero) }
     // Validation states
-    var isNameValid by remember { mutableStateOf(editEvent.name.isNotBlank()) }
     var isPriceValid by remember { mutableStateOf(editEvent.priceCents >= 0) }
     var isMaxParticipantsValid by remember { mutableStateOf(editEvent.maxParticipants > 1) }
     var isTeamSizeValid by remember { mutableStateOf(editEvent.teamSizeLimit >= 1) }
@@ -1129,7 +1127,6 @@ fun EventDetails(
             )
         }
 
-        isNameValid = result.isNameValid
         isPriceValid = result.isPriceValid
         isMaxParticipantsValid = result.isMaxParticipantsValid
         isTeamSizeValid = result.isTeamSizeValid
@@ -1532,10 +1529,14 @@ fun EventDetails(
     val heroHeight = (getScreenHeight() * heroHeightFraction).dp
     val heroSpacerHeight = (getScreenHeight() * heroSpacerFraction).dp
     val heroSpacerHeightPx = with(LocalDensity.current) { heroSpacerHeight.toPx() }
-    val heroParallaxOffset = if (lazyListState.firstVisibleItemIndex == 0) {
-        lazyListState.firstVisibleItemScrollOffset.toFloat().coerceAtMost(heroSpacerHeightPx)
-    } else {
-        heroSpacerHeightPx
+    val heroParallaxOffset by remember(lazyListState, heroSpacerHeightPx) {
+        derivedStateOf {
+            if (lazyListState.firstVisibleItemIndex == 0) {
+                lazyListState.firstVisibleItemScrollOffset.toFloat().coerceAtMost(heroSpacerHeightPx)
+            } else {
+                heroSpacerHeightPx
+            }
+        }
     }
 
     CompositionLocalProvider(localImageScheme provides imageScheme) {
@@ -1878,10 +1879,10 @@ fun EventDetails(
                                         onEditEvent {
                                             copy(
                                                 noFixedEndDateTime = checked,
-                                                end = if (!checked && end <= start) {
-                                                    minimumFixedEnd
-                                                } else {
-                                                    end
+                                                end = when {
+                                                    checked -> start
+                                                    end <= start -> minimumFixedEnd
+                                                    else -> end
                                                 },
                                             )
                                         }
@@ -3174,19 +3175,17 @@ fun EventDetails(
                         verticalAlignment = Alignment.Top,
                     ) {
                         MoneyInputField(
-                            value = MoneyInputUtils.centsToDisplayValue(
-                                if (editEvent.singleDivision) {
-                                    editEvent.priceCents.coerceAtLeast(0)
-                                } else {
-                                    divisionEditor.priceCents.coerceAtLeast(0)
-                                },
-                            ),
+                            value = if (editEvent.singleDivision) {
+                                editEvent.priceCents.coerceAtLeast(0).toString()
+                            } else {
+                                divisionEditor.priceCents.coerceAtLeast(0).toString()
+                            },
                             onValueChange = { value ->
                                 if (!divisionEditorReady || editEvent.singleDivision || !hostHasAccount) {
                                     return@MoneyInputField
                                 }
                                 divisionEditor = divisionEditor.copy(
-                                    priceCents = MoneyInputUtils.displayValueToCents(value).coerceAtLeast(0),
+                                    priceCents = value.filter(Char::isDigit).toIntOrNull()?.coerceAtLeast(0) ?: 0,
                                     error = null,
                                 )
                             },
@@ -3946,7 +3945,11 @@ fun EventDetails(
                                 fields = editableFields,
                                 slots = leagueTimeSlots,
                                 eventStart = editEvent.start,
-                                eventEnd = editEvent.end.takeIf { it > editEvent.start },
+                                eventEnd = if (editEvent.noFixedEndDateTime) {
+                                    null
+                                } else {
+                                    editEvent.end.takeIf { it > editEvent.start }
+                                },
                                 onFieldCountChange = { count ->
                                     fieldCount = count
                                     onSelectFieldCount(count)

@@ -4,7 +4,6 @@ import com.razumly.mvp.core.network.userMessage
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.chat.data.IChatGroupRepository
-import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.util.ErrorMessage
@@ -26,6 +25,7 @@ interface PlayerInteractionComponent {
 class DefaultPlayerInteractionComponent(
     componentContext: ComponentContext,
     private val userRepository: IUserRepository,
+    @Suppress("unused")
     private val chatRepository: IChatGroupRepository
 ) : PlayerInteractionComponent, ComponentContext by componentContext {
 

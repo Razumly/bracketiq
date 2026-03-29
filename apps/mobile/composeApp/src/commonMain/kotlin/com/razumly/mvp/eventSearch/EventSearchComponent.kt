@@ -231,9 +231,9 @@ class DefaultEventSearchComponent(
                         refreshRentals(force = false)
                     }
                 }
-            } catch (deniedAlwaysException: DeniedAlwaysException) {
+            } catch (_: DeniedAlwaysException) {
                 handleLocationPermissionDenied(alwaysDenied = true)
-            } catch (deniedException: DeniedException) {
+            } catch (_: DeniedException) {
                 handleLocationPermissionDenied(alwaysDenied = false)
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -581,13 +581,6 @@ class DefaultEventSearchComponent(
         return distanceFiltered
     }
 
-    private fun fieldDisplayLabel(field: Field): String {
-        if (!field.name.isNullOrBlank()) {
-            return field.name
-        }
-        return "Field ${field.fieldNumber}"
-    }
-
     private fun applyDistanceFilter(organizations: List<Organization>): List<Organization> {
         val currentLocation = _currentLocation.value ?: return organizations
         val radiusMiles = _currentRadius.value
@@ -612,9 +605,9 @@ class DefaultEventSearchComponent(
         try {
             locationTracker.startTracking()
             _isLocationSearchEnabled.value = true
-        } catch (deniedAlwaysException: DeniedAlwaysException) {
+        } catch (_: DeniedAlwaysException) {
             handleLocationPermissionDenied(alwaysDenied = true)
-        } catch (deniedException: DeniedException) {
+        } catch (_: DeniedException) {
             handleLocationPermissionDenied(alwaysDenied = false)
         } catch (cancelled: CancellationException) {
             throw cancelled

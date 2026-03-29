@@ -106,7 +106,7 @@ class DefaultMatchContentComponent(
         eventRepository.getEventWithRelationsFlow(selectedMatch.match.eventId)
             .distinctUntilChanged()
             .map { eventResult ->
-                eventResult.map { it.event as Event }.getOrElse {
+                eventResult.map { it.event }.getOrElse {
                     _errorState.value = it.userMessage()
                     selectedEvent
                 }

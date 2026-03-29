@@ -101,7 +101,7 @@ class DefaultAuthComponent(
                     Napier.w("Auth: email login returned user with blank id for $maskedEmail")
                     _loginState.value = LoginState.Error("Invalid email or password")
                 } else {
-                    Napier.i("Auth: email login succeeded for userId=${currentUser?.id}")
+                    Napier.i("Auth: email login succeeded for userId=${currentUser.id}")
                     _loginState.value = LoginState.Success
                     // Navigation will be handled by RootComponent automatically
                 }

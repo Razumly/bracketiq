@@ -1100,6 +1100,17 @@ class DefaultEventDetailComponent(
         }
     }
 
+    private suspend fun refreshLeagueStandingsAfterSchedule(event: Event) {
+        if (event.eventType != EventType.LEAGUE) return
+        val divisionId = resolveLeagueStandingsDivisionId() ?: return
+        loadLeagueDivisionStandings(
+            eventId = event.id,
+            divisionId = divisionId,
+            showLoading = false,
+            reportErrors = false,
+        )
+    }
+
     private fun resolveLeagueStandingsDivisionId(): String? =
         _leagueDivisionStandings.value?.divisionId
             ?.normalizeDivisionIdentifier()
@@ -2346,8 +2357,9 @@ class DefaultEventDetailComponent(
                     timeSlots = prepared.timeSlots,
                     leagueScoringConfig = prepared.leagueScoringConfig,
                 ).getOrThrow()
-                eventRepository.scheduleEvent(updated.id).getOrThrow()
+                val scheduledEvent = eventRepository.scheduleEvent(updated.id).getOrThrow()
                 matchRepository.getMatchesOfTournament(updated.id).getOrThrow()
+                refreshLeagueStandingsAfterSchedule(scheduledEvent)
                 shouldExitEditMode = true
             }.onFailure { throwable ->
                 _errorState.value = ErrorMessage(
@@ -2378,7 +2390,7 @@ class DefaultEventDetailComponent(
                     maxParticipants > 0
                 }
                 matchRepository.deleteMatchesOfTournament(updated.id).getOrThrow()
-                eventRepository.scheduleEvent(updated.id, participantCount).getOrThrow()
+                val scheduledEvent = eventRepository.scheduleEvent(updated.id, participantCount).getOrThrow()
 
                 val scheduledMatches = matchRepository.getMatchesOfTournament(updated.id).getOrThrow()
                 val bracketMatches = scheduledMatches.filter { match ->
@@ -2391,6 +2403,7 @@ class DefaultEventDetailComponent(
                 }
 
                 matchRepository.getMatchesOfTournament(updated.id).getOrThrow()
+                refreshLeagueStandingsAfterSchedule(scheduledEvent)
                 shouldExitEditMode = true
             }.onFailure { throwable ->
                 _errorState.value = ErrorMessage(
@@ -2913,8 +2926,10 @@ class DefaultEventDetailComponent(
             val slotStartDate = slot.startDate.takeUnless { it == Instant.DISTANT_PAST } ?: event.start
             val repeatingEndDate = if (event.eventType == EventType.WEEKLY_EVENT) {
                 null
+            } else if (event.noFixedEndDateTime) {
+                null
             } else {
-                event.end.takeIf { end -> end > event.start }
+                slot.endDate
             }
             slot.copy(
                 id = slot.id.ifBlank { newId() },
@@ -3023,6 +3038,8 @@ class DefaultEventDetailComponent(
         val event = _editedEvent.value
         val startDate = if (event.start == Instant.DISTANT_PAST) Clock.System.now() else event.start
         val endDate = if (event.eventType == EventType.WEEKLY_EVENT) {
+            null
+        } else if (event.noFixedEndDateTime) {
             null
         } else {
             event.end.takeIf { end -> end > event.start }

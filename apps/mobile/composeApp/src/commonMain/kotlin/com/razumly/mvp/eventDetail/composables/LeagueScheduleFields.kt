@@ -3,7 +3,6 @@ package com.razumly.mvp.eventDetail.composables
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -78,7 +77,7 @@ private val dayOptions = listOf(
 )
 
 @Composable
-fun ColumnScope.LeagueScheduleFields(
+fun LeagueScheduleFields(
     fieldCount: Int,
     fields: List<Field>,
     slots: List<TimeSlot>,
@@ -521,7 +520,7 @@ private fun TimeSlot.toggleRepeating(eventStart: Instant, eventEnd: Instant?): T
     return if (repeating) {
         toOneTimeSlot(eventStart = eventStart, eventEnd = eventEnd)
     } else {
-        toRepeatingSlot(eventStart = eventStart, eventEnd = eventEnd)
+        toRepeatingSlot(eventStart = eventStart)
     }
 }
 
@@ -549,7 +548,7 @@ private fun TimeSlot.toOneTimeSlot(eventStart: Instant, eventEnd: Instant?): Tim
 }
 
 @OptIn(ExperimentalTime::class)
-private fun TimeSlot.toRepeatingSlot(eventStart: Instant, eventEnd: Instant?): TimeSlot {
+private fun TimeSlot.toRepeatingSlot(eventStart: Instant): TimeSlot {
     val effectiveStart = startDate.takeUnless { it == Instant.DISTANT_PAST } ?: eventStart
     val day = effectiveStart.toMondayFirstDay()
     val resolvedStartMinutes = startTimeMinutes ?: effectiveStart.toMinutesOfDay()

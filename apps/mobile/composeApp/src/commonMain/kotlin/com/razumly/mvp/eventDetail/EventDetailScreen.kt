@@ -100,7 +100,6 @@ import androidx.compose.ui.unit.dp
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.ktx.DynamicScheme
-import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.addOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.addOfficialUser
 import com.razumly.mvp.core.data.dataTypes.Event
@@ -408,7 +407,6 @@ private fun List<BracketDivisionOption>.resolveSelectedDivisionId(preferredId: S
 private fun buildWeeklySessionOptions(
     event: Event,
     timeSlots: List<TimeSlot>,
-    weeks: Int = 3,
 ): List<WeeklySessionOption> {
     if (event.eventType != EventType.WEEKLY_EVENT || timeSlots.isEmpty()) {
         return emptyList()
@@ -421,7 +419,7 @@ private fun buildWeeklySessionOptions(
         .filter(String::isNotBlank)
         .distinct()
     val sessions = mutableListOf<WeeklySessionOption>()
-    val safeWeekCount = weeks.coerceAtLeast(1)
+    val safeWeekCount = 3
 
     timeSlots.forEach { slot ->
         val normalizedDays = slot.normalizedDaysOfWeek()
@@ -1834,7 +1832,6 @@ fun EventDetailScreen(
             buildWeeklySessionOptions(
                 event = selectedEvent.event,
                 timeSlots = selectedEvent.timeSlots,
-                weeks = 3,
             )
         }
     }
@@ -2807,6 +2804,7 @@ fun EventDetailScreen(
                                     }
                                 }
                             }
+                            @Suppress("RedundantQualifierName")
                             androidx.compose.animation.AnimatedVisibility(
                                 visible = showFab,
                                 modifier = Modifier.align(Alignment.BottomCenter)

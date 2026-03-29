@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -212,7 +213,7 @@ fun TournamentBracketView(
 
                 maxHeightInRowDp = maxSize.dp * cardContainerHeight
 
-                val rawBoxHeight = maxHeightInRowDp + navBarPadding + 16.dp
+                val rawBoxHeight = maxHeightInRowDp + 16.dp
                 val minBoxHeight = if (viewportHeightPx > 0) {
                     with(density) { viewportHeightPx.toDp() }
                 } else {
@@ -299,7 +300,10 @@ fun TournamentBracketView(
 
     Column(
         Modifier.fillMaxSize()
-            .onSizeChanged { viewportHeightPx = it.height }
+            .onSizeChanged { size ->
+                val navBarPaddingPx = with(density) { navBarPadding.roundToPx() }
+                viewportHeightPx = (size.height - navBarPaddingPx).coerceAtLeast(0)
+            }
             .verticalScroll(columnScrollState)
             .background(MaterialTheme.colorScheme.background)
     ) {
@@ -523,6 +527,7 @@ fun TournamentBracketView(
                     }
                 }
             }
+            Spacer(modifier = Modifier.height(navBarPadding + 16.dp))
         }
     }
 }

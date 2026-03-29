@@ -2,7 +2,6 @@ package com.razumly.mvp.eventDetail.composables
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -28,7 +27,7 @@ private val bestOfOptions = listOf(
 )
 
 @Composable
-fun ColumnScope.LeagueConfigurationFields(
+fun LeagueConfigurationFields(
     leagueConfig: LeagueConfig,
     onLeagueConfigChange: (LeagueConfig) -> Unit,
 ) {
@@ -194,7 +193,7 @@ fun ColumnScope.LeagueConfigurationFields(
 }
 
 @Composable
-fun ColumnScope.LeaguePlayoffConfigurationFields(
+fun LeaguePlayoffConfigurationFields(
     leagueConfig: LeagueConfig,
     playoffConfig: TournamentConfig,
     onPlayoffConfigChange: (TournamentConfig) -> Unit,

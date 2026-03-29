@@ -376,9 +376,9 @@ class RootComponent(
         scope.launch {
             try {
                 permissionsController.providePermission(Permission.LOCATION)
-            } catch (deniedAlwaysException: DeniedAlwaysException) {
+            } catch (_: DeniedAlwaysException) {
                 Napier.w("Location permission always denied")
-            } catch (denied: DeniedException) {
+            } catch (_: DeniedException) {
                 Napier.w("Location permission denied")
             } catch (e: Throwable) {
                 Napier.w("Location permission failed: ${e.message}")
@@ -386,9 +386,9 @@ class RootComponent(
 
             try {
                 permissionsController.providePermission(Permission.REMOTE_NOTIFICATION)
-            } catch (deniedAlwaysException: DeniedAlwaysException) {
+            } catch (_: DeniedAlwaysException) {
                 Napier.w("Notification permission always denied")
-            } catch (denied: DeniedException) {
+            } catch (_: DeniedException) {
                 Napier.w("Notification permission denied")
             } catch (e: Throwable) {
                 Napier.w("Notification permission failed: ${e.message}")
