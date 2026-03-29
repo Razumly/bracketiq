@@ -32,7 +32,7 @@ compose.resources {
     generateResClass = always
 }
 
-val mvpVersion = "1.1.5"
+val mvpVersion = "1.1.6"
 val mvpVersionCode = 20
 kotlin {
     compilerOptions {
