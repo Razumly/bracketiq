@@ -1,5 +1,6 @@
 package com.razumly.mvp.organizationDetail
 
+import com.razumly.mvp.core.network.userMessage
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.Event
@@ -178,7 +179,7 @@ class DefaultOrganizationDetailComponent(
                     _organization.value = loadedOrganization
                 }
                 .onFailure { error ->
-                    _errorState.value = ErrorMessage("Failed to load organization: ${error.message}")
+                    _errorState.value = ErrorMessage("Failed to load organization: ${error.userMessage()}")
                     _organization.value = null
                 }
             _isLoadingOrganization.value = false
@@ -203,7 +204,7 @@ class DefaultOrganizationDetailComponent(
                     _events.value = loadedEvents
                 }
                 .onFailure { error ->
-                    _errorState.value = ErrorMessage("Failed to load organization events: ${error.message}")
+                    _errorState.value = ErrorMessage("Failed to load organization events: ${error.userMessage()}")
                     _events.value = emptyList()
                 }
             _isLoadingEvents.value = false
@@ -234,7 +235,7 @@ class DefaultOrganizationDetailComponent(
                     _teams.value = teamsWithPlayers
                 }
                 .onFailure { error ->
-                    _errorState.value = ErrorMessage("Failed to load organization teams: ${error.message}")
+                    _errorState.value = ErrorMessage("Failed to load organization teams: ${error.userMessage()}")
                     _teams.value = emptyList()
                 }
             _isLoadingTeams.value = false
@@ -253,7 +254,7 @@ class DefaultOrganizationDetailComponent(
                     _products.value = loadedProducts
                 }
                 .onFailure { error ->
-                    _errorState.value = ErrorMessage("Failed to load organization products: ${error.message}")
+                    _errorState.value = ErrorMessage("Failed to load organization products: ${error.userMessage()}")
                     _products.value = emptyList()
                 }
             _isLoadingProducts.value = false
@@ -316,7 +317,7 @@ class DefaultOrganizationDetailComponent(
                     showPaymentSheet(intent, account?.email.orEmpty(), user.fullName)
                 }
                 .onFailure { error ->
-                    _errorState.value = ErrorMessage("Unable to start checkout: ${error.message}")
+                    _errorState.value = ErrorMessage("Unable to start checkout: ${error.userMessage()}")
                     if (::loadingHandler.isInitialized) {
                         loadingHandler.hideLoading()
                     }
@@ -361,7 +362,7 @@ class DefaultOrganizationDetailComponent(
             _message.value = "Subscription started for ${product.name}."
             refreshProducts(force = true)
         }.onFailure { error ->
-            _errorState.value = ErrorMessage("Failed to start subscription: ${error.message}")
+            _errorState.value = ErrorMessage("Failed to start subscription: ${error.userMessage()}")
         }
         pendingProductPurchase = null
         if (::loadingHandler.isInitialized) {
@@ -395,7 +396,7 @@ class DefaultOrganizationDetailComponent(
                 _rentalFieldOptions.value = options
             }
             .onFailure { error ->
-                _errorState.value = ErrorMessage("Failed to load rental field options: ${error.message}")
+                _errorState.value = ErrorMessage("Failed to load rental field options: ${error.userMessage()}")
             }
     }
 
@@ -406,7 +407,7 @@ class DefaultOrganizationDetailComponent(
             }
             .onFailure { error ->
                 _rentalBusyBlocks.value = emptyList()
-                _errorState.value = ErrorMessage("Failed to load existing field events: ${error.message}")
+                _errorState.value = ErrorMessage("Failed to load existing field events: ${error.userMessage()}")
             }
     }
 }

@@ -21,6 +21,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -97,20 +98,44 @@ fun ColumnScope.LeagueScheduleFields(
 ) {
     var fieldsExpanded by rememberSaveable { mutableStateOf(true) }
     var slotsExpanded by rememberSaveable { mutableStateOf(true) }
+    var pendingFieldCountInput by rememberSaveable(fieldCount) {
+        mutableStateOf(if (fieldCount <= 0) "" else fieldCount.toString())
+    }
+    val parsedPendingFieldCount = pendingFieldCountInput.toIntOrNull()
+    val canApplyFieldCount = parsedPendingFieldCount != null &&
+        parsedPendingFieldCount > 0 &&
+        parsedPendingFieldCount != fieldCount
 
-    PlatformTextField(
-        value = if (fieldCount <= 0) "" else fieldCount.toString(),
-        onValueChange = { value ->
-            if (value.all(Char::isDigit)) {
-                onFieldCountChange(value.toIntOrNull() ?: 0)
-            }
-        },
-        label = "Field Count",
-        placeholder = "Enter number of fields",
-        keyboardType = "number",
-        isError = fieldCountError != null,
-        supportingText = fieldCountError ?: "Fields are created with the names below.",
-    )
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        PlatformTextField(
+            modifier = Modifier.weight(1f),
+            value = pendingFieldCountInput,
+            onValueChange = { value ->
+                if (value.all(Char::isDigit)) {
+                    pendingFieldCountInput = value
+                }
+            },
+            label = "Field Count",
+            placeholder = "Enter number of fields",
+            keyboardType = "number",
+            isError = fieldCountError != null,
+            supportingText = fieldCountError ?: "Enter a value and tap Set Count.",
+        )
+        Button(
+            modifier = Modifier.padding(top = 8.dp),
+            onClick = {
+                val count = parsedPendingFieldCount ?: return@Button
+                onFieldCountChange(count)
+            },
+            enabled = canApplyFieldCount,
+        ) {
+            Text("Set Count")
+        }
+    }
 
     if (fields.isNotEmpty()) {
         val visibleFieldRows = min(fields.size, MAX_VISIBLE_FIELD_ROWS)
@@ -169,9 +194,15 @@ fun ColumnScope.LeagueScheduleFields(
             )
         }
     }
+    HorizontalDivider(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp, bottom = 8.dp),
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f),
+    )
 
     Row(
-        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -423,14 +454,26 @@ private fun TimeslotCard(
                         isError = slot.startTimeMinutes == null,
                     )
                     TimeOfDayPickerField(
-                        label = "End Time",
+                        label = "End Time (Optional)",
                         minutes = slot.endTimeMinutes,
                         onMinutesSelected = { minutes ->
                             onUpdateSlot(index, slot.copy(endTimeMinutes = minutes))
                         },
                         modifier = Modifier.weight(1f),
-                        isError = slot.endTimeMinutes == null,
+                        isError = slot.startTimeMinutes != null &&
+                            slot.endTimeMinutes != null &&
+                            slot.endTimeMinutes <= slot.startTimeMinutes,
                     )
+                }
+                if (slot.endTimeMinutes != null) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(onClick = { onUpdateSlot(index, slot.copy(endTimeMinutes = null)) }) {
+                            Text("Clear end time")
+                        }
+                    }
                 }
             } else {
                 DateTimePickerField(

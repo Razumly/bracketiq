@@ -35,44 +35,14 @@ fun ColumnScope.LeagueConfigurationFields(
     val currentSets = normalizeSetCount(leagueConfig.setsPerMatch)
 
     Text("League Configuration", style = MaterialTheme.typography.titleMedium)
-
-    LabeledCheckbox(
-        checked = leagueConfig.usesSets,
-        label = "Use set-based scoring",
-        onCheckedChange = { checked ->
-            if (checked) {
-                onLeagueConfigChange(
-                    leagueConfig.copy(
-                        usesSets = true,
-                        setsPerMatch = currentSets,
-                        setDurationMinutes = leagueConfig.setDurationMinutes ?: 20,
-                        pointsToVictory = normalizePoints(
-                            leagueConfig.pointsToVictory,
-                            currentSets
-                        ),
-                        matchDurationMinutes = 60,
-                    )
-                )
-            } else {
-                onLeagueConfigChange(
-                    leagueConfig.copy(
-                        usesSets = false,
-                        setDurationMinutes = null,
-                        setsPerMatch = null,
-                        pointsToVictory = emptyList(),
-                        matchDurationMinutes = leagueConfig.matchDurationMinutes,
-                    )
-                )
-            }
-        },
-    )
-
-    Text("League Scoring", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
     Text(
-        text = if (leagueConfig.usesSets) "Set-based scoring enabled." else "Timed match scoring enabled.",
+        text = if (leagueConfig.usesSets) {
+            "Set-based scoring is determined by the selected sport."
+        } else {
+            "Timed match scoring is determined by the selected sport."
+        },
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(bottom = 4.dp),
     )
 
     Row(

@@ -1,6 +1,6 @@
 Pod::Spec.new do |spec|
     spec.name                     = 'composeApp'
-    spec.version                  = '1.1.4'
+    spec.version                  = '1.1.5'
     spec.homepage                 = 'https://example.com'
     spec.source                   = { :http=> ''}
     spec.authors                  = ''
@@ -40,6 +40,15 @@ Pod::Spec.new do |spec|
                 fi
                 set -ev
                 REPO_ROOT="$PODS_TARGET_SRCROOT"
+                JAVA_17_HOME="$(
+                    /usr/libexec/java_home -v 17 2>/dev/null || true
+                )"
+                if [ -z "$JAVA_17_HOME" ]; then
+                    echo "Java 17 is required for Kotlin/Gradle syncFramework. Install JDK 17 and retry." >&2
+                    exit 1
+                fi
+                export JAVA_HOME="$JAVA_17_HOME"
+                export PATH="$JAVA_HOME/bin:$PATH"
                 "$REPO_ROOT/../gradlew" -p "$REPO_ROOT" $KOTLIN_PROJECT_PATH:syncFramework \
                     -Pkotlin.native.cocoapods.platform=$PLATFORM_NAME \
                     -Pkotlin.native.cocoapods.archs="$ARCHS" \
@@ -47,5 +56,5 @@ Pod::Spec.new do |spec|
             SCRIPT
         }
     ]
-    spec.resources = ['build\compose\cocoapods\compose-resources']
+    spec.resources = ['build/compose/cocoapods/compose-resources']
 end

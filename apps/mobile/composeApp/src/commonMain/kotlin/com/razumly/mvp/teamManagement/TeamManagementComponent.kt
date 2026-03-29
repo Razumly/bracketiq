@@ -1,8 +1,8 @@
 package com.razumly.mvp.teamManagement
 
+import com.razumly.mvp.core.network.userMessage
 import com.arkivanov.decompose.ComponentContext
 import com.razumly.mvp.core.data.dataTypes.Event
-import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
@@ -30,7 +30,6 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 interface TeamManagementComponent {
@@ -41,7 +40,6 @@ interface TeamManagementComponent {
     val sports: StateFlow<List<Sport>>
     val friends: StateFlow<List<UserData>>
     val currentTeams: StateFlow<List<TeamWithPlayers>>
-    val teamInvites: StateFlow<List<TeamInvite>>
     val selectedTeam: StateFlow<TeamWithPlayers?>
     val staffUsersById: StateFlow<Map<String, UserData>>
     val suggestedPlayers: StateFlow<List<UserData>>
@@ -58,15 +56,8 @@ interface TeamManagementComponent {
     fun deleteTeam(team: TeamWithPlayers)
     fun searchPlayers(query: String)
     fun inviteUserToRole(teamId: String, userId: String, roleInviteType: String)
-    fun acceptTeamInvite(invite: TeamInvite)
-    fun declineTeamInvite(invite: TeamInvite)
     suspend fun ensureUserByEmail(email: String): Result<UserData>
 }
-
-data class TeamInvite(
-    val invite: Invite,
-    val team: TeamWithPlayers?
-)
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class DefaultTeamManagementComponent(
@@ -113,13 +104,10 @@ class DefaultTeamManagementComponent(
             }
         }.map { team ->
             team.getOrElse {
-                _errorState.value = it.message
+                _errorState.value = it.userMessage()
                 emptyList()
             }
         }.stateIn(scope, SharingStarted.Eagerly, emptyList())
-
-    private val _teamInvites = MutableStateFlow<List<TeamInvite>>(emptyList())
-    override val teamInvites = _teamInvites.asStateFlow()
 
     private val _selectedTeam = MutableStateFlow<TeamWithPlayers?>(null)
     override val selectedTeam = _selectedTeam.asStateFlow()
@@ -146,7 +134,7 @@ class DefaultTeamManagementComponent(
                 }
 
                 val inviteFreeAgents = teamRepository.getInviteFreeAgents(teamId).getOrElse {
-                    _errorState.value = it.message
+                    _errorState.value = it.userMessage()
                     emptyList()
                 }
                 val filteredFreeAgents = inviteFreeAgents.filterNot { it.id in playerIdsToExclude }
@@ -181,7 +169,7 @@ class DefaultTeamManagementComponent(
 
     override val enableDeleteTeam = combine(selectedTeam, hostEventsFlow) { team, eventsResult ->
         val hostEvents = eventsResult.getOrElse {
-            _errorState.value = it.message
+            _errorState.value = it.userMessage()
             emptyList()
         }
         val teamAssigned =
@@ -199,7 +187,7 @@ class DefaultTeamManagementComponent(
                         emptyList()
                     } else {
                         userRepository.getUsers(friendIds).getOrElse {
-                            _errorState.value = it.message
+                            _errorState.value = it.userMessage()
                             emptyList()
                         }
                     }
@@ -207,7 +195,7 @@ class DefaultTeamManagementComponent(
             }
         scope.launch {
             _sports.value = sportsRepository.getSports().getOrElse {
-                _errorState.value = it.message
+                _errorState.value = it.userMessage()
                 emptyList()
             }
         }
@@ -221,7 +209,6 @@ class DefaultTeamManagementComponent(
                 }
             }
         }
-        scope.launch { refreshInvites() }
     }
 
     override fun setLoadingHandler(handler: LoadingHandler) {
@@ -249,7 +236,7 @@ class DefaultTeamManagementComponent(
                 )
 
                 createResult.onFailure {
-                    _errorState.value = it.message
+                    _errorState.value = it.userMessage()
                     return@launch
                 }
 
@@ -264,7 +251,7 @@ class DefaultTeamManagementComponent(
 
                 if (teamIdsToRefresh.isNotEmpty()) {
                     teamRepository.getTeamsWithPlayers(teamIdsToRefresh).onFailure {
-                        _errorState.value = it.message
+                        _errorState.value = it.userMessage()
                     }
                 }
             } finally {
@@ -276,7 +263,7 @@ class DefaultTeamManagementComponent(
     override fun joinTeam(team: Team) {
         scope.launch {
             teamRepository.addPlayerToTeam(team, currentUser).onFailure {
-                _errorState.value = it.message
+                _errorState.value = it.userMessage()
             }
         }
     }
@@ -284,7 +271,7 @@ class DefaultTeamManagementComponent(
     override fun updateTeam(team: Team) {
         scope.launch {
             teamRepository.updateTeam(team).onFailure {
-                _errorState.value = it.message
+                _errorState.value = it.userMessage()
             }
         }
         deselectTeam()
@@ -298,7 +285,7 @@ class DefaultTeamManagementComponent(
     override fun deleteTeam(team: TeamWithPlayers) {
         scope.launch {
             teamRepository.deleteTeam(team).onFailure {
-                _errorState.value = it.message
+                _errorState.value = it.userMessage()
             }
         }
     }
@@ -306,7 +293,7 @@ class DefaultTeamManagementComponent(
     override fun searchPlayers(query: String) {
         scope.launch {
             _suggestedPlayers.value = userRepository.searchPlayers(search = query).getOrElse {
-                _errorState.value = it.message
+                _errorState.value = it.userMessage()
                 emptyList()
             }.filterNot { user ->
                 currentUser.id == user.id
@@ -322,65 +309,14 @@ class DefaultTeamManagementComponent(
                 createdBy = currentUser.id,
                 inviteType = roleInviteType,
             ).onFailure {
-                _errorState.value = it.message
+                _errorState.value = it.userMessage()
                 return@launch
             }
-            refreshInvites()
-        }
-    }
-
-    override fun acceptTeamInvite(invite: TeamInvite) {
-        scope.launch {
-            val teamId = invite.invite.teamId
-            if (teamId.isNullOrBlank()) {
-                _errorState.value = "Invite is missing teamId"
-                return@launch
-            }
-
-            teamRepository.acceptTeamInvite(invite.invite.id, teamId).onFailure {
-                _errorState.value = it.message
-                return@launch
-            }
-            refreshInvites()
-        }
-    }
-
-    override fun declineTeamInvite(invite: TeamInvite) {
-        scope.launch {
-            userRepository.declineInvite(invite.invite.id).onFailure {
-                _errorState.value = it.message
-                return@launch
-            }
-            refreshInvites()
         }
     }
 
     override suspend fun ensureUserByEmail(email: String): Result<UserData> {
         return userRepository.ensureUserByEmail(email)
-    }
-
-    private suspend fun refreshInvites() {
-        val currentUserId = currentUser.id.trim()
-        if (currentUserId.isBlank()) {
-            _teamInvites.value = emptyList()
-            return
-        }
-
-        val invites = teamRepository.listTeamInvites(currentUserId).getOrElse {
-            _errorState.value = it.message
-            emptyList()
-        }
-        val teamIds = invites.mapNotNull { it.teamId }
-        val teams = teamRepository.getTeamsWithPlayers(teamIds).getOrElse {
-            _errorState.value = it.message
-            emptyList()
-        }
-        val teamMap = teams.associateBy { it.team.id }
-        _teamInvites.update {
-            invites.map { invite ->
-                TeamInvite(invite = invite, team = invite.teamId?.let(teamMap::get))
-            }
-        }
     }
 
     private fun refreshSelectedTeamStaffUsers(team: TeamWithPlayers?) {
@@ -408,7 +344,7 @@ class DefaultTeamManagementComponent(
                 userIds = missingUserIds,
                 visibilityContext = UserVisibilityContext(teamId = selectedTeamId),
             ).getOrElse {
-                _errorState.value = it.message
+                _errorState.value = it.userMessage()
                 emptyList()
             }
             if (_selectedTeam.value?.team?.id != selectedTeamId) {

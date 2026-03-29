@@ -1,5 +1,6 @@
 package com.razumly.mvp.eventDetail
 
+import com.razumly.mvp.core.network.userMessage
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
@@ -35,6 +37,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -78,6 +82,7 @@ import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
+import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Invite
@@ -114,9 +119,11 @@ import com.razumly.mvp.core.data.util.toDivisionDisplayLabels
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import com.razumly.mvp.core.presentation.composables.MoneyInputField
+import com.razumly.mvp.core.presentation.composables.NetworkAvatar
 import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
 import com.razumly.mvp.core.presentation.composables.PlatformDropdown
 import com.razumly.mvp.core.presentation.composables.PlatformTextField
+import com.razumly.mvp.core.presentation.composables.PlayerCardWithActions
 import com.razumly.mvp.core.presentation.composables.StripeButton
 import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
@@ -248,6 +255,12 @@ fun EventDetails(
     onRemoveInstallmentRow: (Int) -> Unit = {},
     onUploadSelected: (GalleryPhotoResult) -> Unit,
     onDeleteImage: (String) -> Unit,
+    currentUserForHostActions: UserData? = null,
+    onHostMessageUser: (UserData) -> Unit = {},
+    onHostSendFriendRequest: (UserData) -> Unit = {},
+    onHostFollowUser: (UserData) -> Unit = {},
+    onHostUnfollowUser: (UserData) -> Unit = {},
+    onHostFollowOrganization: (Organization) -> Unit = {},
     onMapRevealCenterChange: (Offset) -> Unit = {},
     onFloatingDockVisibilityChange: (Boolean) -> Unit = {},
     onValidationChange: (Boolean, List<String>) -> Unit = { _, _ -> },
@@ -1168,21 +1181,16 @@ fun EventDetails(
         }
     }
 
-    val dateRangeText = remember(event.start, event.end) {
-        val startDate = event.start.toLocalDateTime(TimeZone.currentSystemDefault()).date
-        val endDate = event.end.toLocalDateTime(TimeZone.currentSystemDefault()).date
-        val startStr = startDate.format(dateFormat)
-        if (startDate != endDate) {
-            val endStr = endDate.format(dateFormat)
-            "$startStr - $endStr"
-        } else {
-            startStr
-        }
+    val eventTimeZone = remember { TimeZone.currentSystemDefault() }
+    val startDateTime = remember(event.start, eventTimeZone) {
+        event.start.toLocalDateTime(eventTimeZone)
     }
-    val eventMetaLine = remember(event.location, event.start) {
-        val localDateTime = event.start.toLocalDateTime(TimeZone.currentSystemDefault())
-        val dateText = localDateTime.date.format(dateFormat)
-        val timeText = localDateTime.time.format(timeFormat)
+    val endDateTime = remember(event.end, eventTimeZone) {
+        event.end.toLocalDateTime(eventTimeZone)
+    }
+    val eventMetaLine = remember(event.location, startDateTime) {
+        val dateText = startDateTime.date.format(dateFormat)
+        val timeText = startDateTime.time.format(timeFormat)
         listOf(event.location, "$dateText - $timeText").filter { it.isNotBlank() }.joinToString(" - ")
     }
     val eventSportName = remember(eventWithRelations.sport, sports, event.sportId) {
@@ -1227,7 +1235,7 @@ fun EventDetails(
         }
         lastAutoLoadedOfficialDefaultsSportId = selectedSportId
     }
-    val hostDisplayName = remember(host, eventWithRelations.organization) {
+    val hostDisplayName = remember(host, eventWithRelations.organization, isOrganizationEvent) {
         val organizationName = eventWithRelations.organization?.name.orEmpty()
         val hostName = buildString {
             val firstName = host?.firstName?.toNameCase().orEmpty()
@@ -1241,9 +1249,53 @@ fun EventDetails(
             }
         }.trim()
         when {
+            isOrganizationEvent && organizationName.isNotBlank() -> organizationName
             hostName.isNotBlank() -> hostName
             organizationName.isNotBlank() -> organizationName
             else -> "Hosted by organizer"
+        }
+    }
+    val startDateLabel = remember(startDateTime) {
+        startDateTime.date.format(dateFormat)
+    }
+    val endDateLabel = remember(endDateTime) {
+        endDateTime.date.format(dateFormat)
+    }
+    val sameDayDateRange = remember(startDateTime, endDateTime) {
+        startDateTime.date == endDateTime.date
+    }
+    val readOnlyDateRows = remember(startDateTime, endDateTime, startDateLabel, endDateLabel, sameDayDateRange) {
+        if (sameDayDateRange) {
+            listOf(
+                DetailRowSpec(
+                    label = "Start Date & Time",
+                    value = startDateTime.format(dateTimeFormat),
+                ),
+                DetailRowSpec(
+                    label = "End Time",
+                    value = endDateTime.time.format(timeFormat),
+                ),
+            )
+        } else {
+            listOf(
+                DetailRowSpec(label = "Start Date", value = startDateLabel),
+                DetailRowSpec(label = "End Date", value = endDateLabel),
+            )
+        }
+    }
+    val basicDateSummary = remember(startDateLabel, endDateLabel, startDateTime, endDateTime, sameDayDateRange) {
+        if (sameDayDateRange) {
+            "$startDateLabel, ${startDateTime.time.format(timeFormat)}-${endDateTime.time.format(timeFormat)}"
+        } else {
+            "$startDateLabel - $endDateLabel"
+        }
+    }
+    val readOnlyBasicsRows = remember(event.location, event.eventType, eventSportName, readOnlyDateRows) {
+        buildList {
+            addAll(readOnlyDateRows)
+            add(DetailRowSpec(label = "Location", value = event.location))
+            add(DetailRowSpec(label = "Type", value = event.eventType.name.toEnumTitleCase()))
+            add(DetailRowSpec(label = "Sport", value = eventSportName))
         }
     }
     LaunchedEffect(host, eventWithRelations.players, userSuggestions) {
@@ -1378,8 +1430,8 @@ fun EventDetails(
     val priceSummary = remember(event.teamSignup, event.price) {
         if (event.teamSignup) "${event.price.moneyFormat()} / team" else "${event.price.moneyFormat()} / player"
     }
-    val basicsSummaryLine = remember(event.location, dateRangeText, hostDisplayName) {
-        listOf(hostDisplayName, event.location, dateRangeText)
+    val basicsSummaryLine = remember(event.location, basicDateSummary, hostDisplayName) {
+        listOf(hostDisplayName, event.location, basicDateSummary)
             .filter { it.isNotBlank() }
             .joinToString(" - ")
     }
@@ -1685,14 +1737,24 @@ fun EventDetails(
                     isEditMode = editView,
                     animationDelay = 100,
                     viewContent = {
+                        HostedByReadOnlyRow(
+                            host = host,
+                            organization = eventWithRelations.organization,
+                            isOrganizationEvent = isOrganizationEvent,
+                            fallbackHostDisplayName = hostDisplayName,
+                            currentUser = currentUserForHostActions,
+                            onMessageUser = onHostMessageUser,
+                            onSendFriendRequest = onHostSendFriendRequest,
+                            onFollowUser = onHostFollowUser,
+                            onUnfollowUser = onHostUnfollowUser,
+                            onFollowOrganization = onHostFollowOrganization,
+                        )
+                        HorizontalDivider(
+                            color = MaterialTheme.colorScheme.outlineVariant,
+                            thickness = 1.dp,
+                        )
                         DetailKeyValueList(
-                            rows = listOf(
-                                DetailRowSpec(label = "Hosted by", value = hostDisplayName),
-                                DetailRowSpec(label = "Season dates", value = dateRangeText),
-                                DetailRowSpec(label = "Location", value = event.location),
-                                DetailRowSpec(label = "Type", value = event.eventType.name.toEnumTitleCase()),
-                                DetailRowSpec(label = "Sport", value = eventSportName),
-                            ),
+                            rows = readOnlyBasicsRows,
                         )
                         if (event.description.isNotBlank()) {
                             Spacer(modifier = Modifier.height(4.dp))
@@ -1738,6 +1800,7 @@ fun EventDetails(
                                 modifier = Modifier.fillMaxWidth(),
                             )
                         }
+                        FormSectionDivider()
 
                         val supportsNoFixedEndDateTime =
                             editEvent.eventType == EventType.LEAGUE ||
@@ -1899,6 +1962,7 @@ fun EventDetails(
                             label = "Event Type",
                             modifier = Modifier.fillMaxWidth(),
                         )
+                        FormSectionDivider()
 
                         val teamCapacityInputs: @Composable () -> Unit = {
                             Row(
@@ -2042,6 +2106,7 @@ fun EventDetails(
                             teamCapacityInputs()
                             leaguePlayoffInputs()
                         }
+                        FormSectionDivider()
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -2073,6 +2138,7 @@ fun EventDetails(
                                 isError = false,
                             )
                         }
+                        FormSectionDivider()
 
                         if (!hostHasAccount) {
                             StripeButton(
@@ -2156,7 +2222,7 @@ fun EventDetails(
                             )
                         }
 
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                        FormSectionDivider()
                         if (isNewEvent) {
                             Text(
                                 text = "Payment plans can be configured on the web version.",
@@ -2367,6 +2433,7 @@ fun EventDetails(
                                 label = "Scheduling mode",
                                 modifier = Modifier.fillMaxWidth(),
                             )
+                            FormSectionDivider()
                             Text(
                                 text = "Event official positions",
                                 style = MaterialTheme.typography.titleSmall,
@@ -2594,7 +2661,7 @@ fun EventDetails(
                                             draftInviteOfficial = false
                                             draftInviteAssistantHost = false
                                         }.onFailure { error ->
-                                            staffEditorError = error.message ?: "Unable to add staff invite."
+                                            staffEditorError = error.userMessage("Unable to add staff invite.")
                                         }
                                     }
                                 },
@@ -3099,6 +3166,7 @@ fun EventDetails(
                             enabled = divisionEditorReady,
                         )
                     }
+                    FormSectionDivider()
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -3496,7 +3564,7 @@ fun EventDetails(
                         collapsibleInViewMode = true,
                         viewSummary = facilitiesSummaryLine,
                         defaultExpandedInViewMode = false,
-                        defaultExpandedInEditMode = false,
+                        defaultExpandedInEditMode = !isNewEvent,
                         requiredMissingCount = scheduleMissingRequiredCount,
                         isEditMode = editView,
                         animationDelay = 450,
@@ -3528,6 +3596,16 @@ fun EventDetails(
                                         onEditEvent { withLeagueConfig(updated) }
                                     },
                                 )
+                                if (editEvent.includePlayoffs) {
+                                    FormSectionDivider()
+                                    LeaguePlayoffConfigurationFields(
+                                        leagueConfig = editEvent.toLeagueConfig(),
+                                        playoffConfig = editEvent.toTournamentConfig(),
+                                        onPlayoffConfigChange = { updated ->
+                                            onEditTournament { withTournamentConfig(updated) }
+                                        },
+                                    )
+                                }
                                 if (!isLeagueGamesValid) {
                                     Text(
                                         "Games per opponent must be at least 1.",
@@ -3563,56 +3641,14 @@ fun EventDetails(
                             }
 
                             if (editEvent.eventType == EventType.TOURNAMENT) {
-                                LabeledCheckboxRow(
-                                    checked = editEvent.usesSets,
-                                    label = "Use set-based scoring",
-                                    onCheckedChange = { checked ->
-                                        onEditTournament {
-                                            val winnerSets = when (winnerSetCount) {
-                                                1, 3, 5 -> winnerSetCount
-                                                else -> 1
-                                            }
-                                            val loserSets = when (loserSetCount) {
-                                                1, 3, 5 -> loserSetCount
-                                                else -> 1
-                                            }
-                                            if (checked) {
-                                                copy(
-                                                    usesSets = true,
-                                                    setDurationMinutes = setDurationMinutes ?: 20,
-                                                    matchDurationMinutes = matchDurationMinutes ?: 60,
-                                                    winnerSetCount = winnerSets,
-                                                    loserSetCount = loserSets,
-                                                    winnerBracketPointsToVictory = winnerBracketPointsToVictory
-                                                        .take(winnerSets)
-                                                        .toMutableList()
-                                                        .apply {
-                                                            while (size < winnerSets) add(21)
-                                                        },
-                                                    loserBracketPointsToVictory = loserBracketPointsToVictory
-                                                        .take(loserSets)
-                                                        .toMutableList()
-                                                        .apply {
-                                                            while (size < loserSets) add(21)
-                                                        },
-                                                )
-                                            } else {
-                                                copy(
-                                                    usesSets = false,
-                                                    setDurationMinutes = null,
-                                                    matchDurationMinutes = (matchDurationMinutes ?: 60).coerceAtLeast(15),
-                                                    winnerSetCount = 1,
-                                                    loserSetCount = 1,
-                                                    winnerBracketPointsToVictory = winnerBracketPointsToVictory
-                                                        .take(1)
-                                                        .ifEmpty { listOf(21) },
-                                                    loserBracketPointsToVictory = loserBracketPointsToVictory
-                                                        .take(1)
-                                                        .ifEmpty { listOf(21) },
-                                                )
-                                            }
-                                        }
+                                Text(
+                                    text = if (editEvent.usesSets) {
+                                        "Set-based scoring is determined by the selected sport."
+                                    } else {
+                                        "Timed match scoring is determined by the selected sport."
                                     },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
 
                                 Row(
@@ -3899,6 +3935,12 @@ fun EventDetails(
                                 }
                             }
 
+                            if (
+                                editEvent.eventType == EventType.LEAGUE ||
+                                    editEvent.eventType == EventType.TOURNAMENT
+                            ) {
+                                FormSectionDivider()
+                            }
                             LeagueScheduleFields(
                                 fieldCount = fieldCount,
                                 fields = editableFields,
@@ -3928,15 +3970,6 @@ fun EventDetails(
                                     null
                                 },
                             )
-                            if (editEvent.eventType == EventType.LEAGUE && editEvent.includePlayoffs) {
-                                LeaguePlayoffConfigurationFields(
-                                    leagueConfig = editEvent.toLeagueConfig(),
-                                    playoffConfig = editEvent.toTournamentConfig(),
-                                    onPlayoffConfigChange = { updated ->
-                                        onEditTournament { withTournamentConfig(updated) }
-                                    },
-                                )
-                            }
                             if (
                                 !isLeagueSlotsValid &&
                                 (
@@ -3953,6 +3986,7 @@ fun EventDetails(
                         },
                     )
                 }
+
             }
         }
     }
@@ -4208,7 +4242,15 @@ fun LazyListScope.animatedCardSection(
                 ) {
                     if (sectionTitle != null) {
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .let { baseModifier ->
+                                    if (isCollapsible) {
+                                        baseModifier.clickable { expanded = !expanded }
+                                    } else {
+                                        baseModifier
+                                    }
+                                },
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
@@ -4233,7 +4275,9 @@ fun LazyListScope.animatedCardSection(
                                 }
                             }
                             if (isCollapsible) {
-                                TextButton(onClick = { expanded = !expanded }) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
                                     if (requiredMissingCount > 0) {
                                         Box(
                                             modifier = Modifier
@@ -4411,6 +4455,168 @@ private data class DetailRowSpec(
     val value: String?,
 )
 
+@Composable
+private fun HostedByReadOnlyRow(
+    host: UserData?,
+    organization: Organization?,
+    isOrganizationEvent: Boolean,
+    fallbackHostDisplayName: String,
+    currentUser: UserData?,
+    onMessageUser: (UserData) -> Unit,
+    onSendFriendRequest: (UserData) -> Unit,
+    onFollowUser: (UserData) -> Unit,
+    onUnfollowUser: (UserData) -> Unit,
+    onFollowOrganization: (Organization) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .padding(vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "Hosted by",
+            modifier = Modifier.widthIn(min = 84.dp, max = 108.dp),
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            ),
+        )
+
+        Box(
+            modifier = Modifier.weight(1f),
+            contentAlignment = Alignment.CenterEnd,
+        ) {
+            when {
+                isOrganizationEvent && organization != null -> {
+                    OrganizationHostCardWithMenu(
+                        organization = organization,
+                        onFollowOrganization = onFollowOrganization,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+
+                host != null && currentUser != null && currentUser.id.isNotBlank() -> {
+                    PlayerCardWithActions(
+                        player = host,
+                        currentUser = currentUser,
+                        modifier = Modifier.fillMaxWidth(),
+                        onMessage = onMessageUser,
+                        onSendFriendRequest = onSendFriendRequest,
+                        onFollow = onFollowUser,
+                        onUnfollow = onUnfollowUser,
+                    )
+                }
+
+                else -> {
+                    Text(
+                        text = fallbackHostDisplayName,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        textAlign = TextAlign.End,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OrganizationHostCardWithMenu(
+    organization: Organization,
+    onFollowOrganization: (Organization) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var showMenu by remember(organization.id) { mutableStateOf(false) }
+    val organizationName = organization.name.ifBlank { "Organization" }
+
+    Box(
+        modifier = modifier,
+        contentAlignment = Alignment.TopEnd,
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { showMenu = true },
+            shape = RoundedCornerShape(10.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            ),
+            border = BorderStroke(
+                1.dp,
+                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+            ),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                NetworkAvatar(
+                    displayName = organizationName,
+                    imageRef = organization.logoId,
+                    size = 32.dp,
+                    contentDescription = "$organizationName logo",
+                )
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = organizationName,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontWeight = FontWeight.SemiBold,
+                        ),
+                    )
+                    organization.location
+                        ?.takeIf(String::isNotBlank)
+                        ?.let { location ->
+                            Text(
+                                text = location,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                            )
+                        }
+                }
+            }
+        }
+
+        DropdownMenu(
+            expanded = showMenu,
+            onDismissRequest = { showMenu = false },
+        ) {
+            DropdownMenuItem(
+                text = { Text("Follow") },
+                onClick = {
+                    onFollowOrganization(organization)
+                    showMenu = false
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun FormSectionDivider(
+    modifier: Modifier = Modifier,
+) {
+    HorizontalDivider(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f),
+        thickness = 1.dp,
+    )
+}
+
 private data class DetailGridItem(
     val label: String,
     val value: String?,
@@ -4549,7 +4755,9 @@ private fun ReadOnlyDivisionsList(
     Spacer(modifier = Modifier.height(8.dp))
     var expanded by rememberSaveable(event.id) { mutableStateOf(false) }
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { expanded = !expanded },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
@@ -4558,7 +4766,7 @@ private fun ReadOnlyDivisionsList(
             style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.onSurface,
         )
-        TextButton(onClick = { expanded = !expanded }) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Text(if (expanded) "Hide" else "Show")
             Spacer(modifier = Modifier.size(4.dp))
             Icon(
@@ -5542,12 +5750,9 @@ private fun computeEventValidationResult(
     }
 
     val isFieldCountValid = if (
-        isNewEvent &&
-        (
-            editEvent.eventType == EventType.LEAGUE ||
-                editEvent.eventType == EventType.TOURNAMENT ||
-                editEvent.eventType == EventType.WEEKLY_EVENT
-            )
+        editEvent.eventType == EventType.LEAGUE ||
+        editEvent.eventType == EventType.TOURNAMENT ||
+        editEvent.eventType == EventType.WEEKLY_EVENT
     ) {
         fieldCount > 0
     } else {
@@ -5853,8 +6058,7 @@ internal fun computeLeagueSlotErrors(
             fieldIds.isEmpty() -> "Select at least one field."
             days.isEmpty() -> "Select at least one day."
             start == null -> "Select a start time."
-            end == null -> "Select an end time."
-            end <= start -> "Timeslot must end after it starts."
+            end != null && end <= start -> "Timeslot must end after it starts."
             else -> null
         }
         if (requiredMissing != null) {
@@ -5878,7 +6082,8 @@ internal fun computeLeagueSlotErrors(
             val otherStart = other.startTimeMinutes
             val otherEnd = other.endTimeMinutes
             if (otherStart == null || otherEnd == null || otherEnd <= otherStart) return@any false
-            slotsOverlap(start!!, end!!, otherStart, otherEnd)
+            val currentEnd = end ?: return@any false
+            slotsOverlap(start!!, currentEnd, otherStart, otherEnd)
         }
 
         if (hasOverlap) {

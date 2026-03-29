@@ -2,6 +2,7 @@
 
 package com.razumly.mvp.eventCreate
 
+import com.razumly.mvp.core.network.userMessage
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.decompose.router.stack.ChildStack
 import com.arkivanov.decompose.router.stack.StackNavigation
@@ -377,7 +378,7 @@ class DefaultCreateEventComponent(
                     copy(imageId = uploadedImageId)
                 }
             } catch (error: Throwable) {
-                _errorState.value = ErrorMessage(error.message ?: "Failed to upload image.")
+                _errorState.value = ErrorMessage(error.userMessage("Failed to upload image."))
             } finally {
                 loadingHandler.hideLoading()
             }
@@ -390,7 +391,7 @@ class DefaultCreateEventComponent(
                 url = onboardingUrl,
             )
         }.onFailure { error ->
-            _errorState.value = ErrorMessage(error.message ?: "")
+            _errorState.value = ErrorMessage(error.userMessage())
         }
     }
 
@@ -601,7 +602,7 @@ class DefaultCreateEventComponent(
         scope.launch {
             _suggestedUsers.value = userRepository.searchPlayers(normalizedQuery)
                 .getOrElse { error ->
-                    _errorState.value = ErrorMessage(error.message ?: "Unable to search users.")
+                    _errorState.value = ErrorMessage(error.userMessage("Unable to search users."))
                     emptyList()
                 }
         }
@@ -615,7 +616,7 @@ class DefaultCreateEventComponent(
 
         return userRepository.ensureUserByEmail(normalizedEmail)
             .onFailure { error ->
-                _errorState.value = ErrorMessage(error.message ?: "Unable to invite by email.")
+                _errorState.value = ErrorMessage(error.userMessage("Unable to invite by email."))
             }
     }
 
@@ -663,7 +664,7 @@ class DefaultCreateEventComponent(
             draft = normalizedDraft,
         )
     }.onFailure { error ->
-        _errorState.value = ErrorMessage(error.message ?: "Unable to add staff invite.")
+        _errorState.value = ErrorMessage(error.userMessage("Unable to add staff invite."))
     }
 
     override fun removePendingStaffInvite(email: String, role: EventStaffRole?) {
@@ -975,7 +976,7 @@ class DefaultCreateEventComponent(
             .getOrElse { throwable ->
                 releaseRentalCheckoutLocks()
                 _errorState.value = ErrorMessage(
-                    throwable.message ?: "Unable to verify field availability."
+                    throwable.userMessage("Unable to verify field availability.")
                 )
                 loadingHandler.hideLoading()
                 return
@@ -1004,13 +1005,13 @@ class DefaultCreateEventComponent(
                     awaitingRentalPayment.value = false
                     pendingEventAfterPayment.value = null
                     releaseRentalCheckoutLocks()
-                    _errorState.value = ErrorMessage(throwable.message ?: "Unable to start payment.")
+                    _errorState.value = ErrorMessage(throwable.userMessage("Unable to start payment."))
                     loadingHandler.hideLoading()
                 }
             }
             .onFailure { throwable ->
                 releaseRentalCheckoutLocks()
-                _errorState.value = ErrorMessage(throwable.message ?: "Unable to create rental payment.")
+                _errorState.value = ErrorMessage(throwable.userMessage("Unable to create rental payment."))
                 loadingHandler.hideLoading()
             }
     }
@@ -1019,7 +1020,7 @@ class DefaultCreateEventComponent(
         loadingHandler.showLoading("Creating event...")
         val preparedEvent = prepareEventForCreation(eventDraft).getOrElse { error ->
             releaseRentalCheckoutLocks()
-            _errorState.value = ErrorMessage(error.message ?: "Failed to prepare event setup.")
+            _errorState.value = ErrorMessage(error.userMessage("Failed to prepare event setup."))
             loadingHandler.hideLoading()
             return
         }
@@ -1029,7 +1030,7 @@ class DefaultCreateEventComponent(
                 .getOrElse { throwable ->
                     releaseRentalCheckoutLocks()
                     _errorState.value = ErrorMessage(
-                        throwable.message ?: "Unable to recheck field availability."
+                        throwable.userMessage("Unable to recheck field availability.")
                     )
                     loadingHandler.hideLoading()
                     return
@@ -1055,7 +1056,7 @@ class DefaultCreateEventComponent(
                 val syncedEvent = syncEventStaffAssignments(createdEvent)
                     .onFailure { error ->
                         _errorState.value = ErrorMessage(
-                            error.message ?: "Event created, but staff invites failed to sync.",
+                            error.userMessage("Event created, but staff invites failed to sync."),
                         )
                     }
                     .getOrDefault(createdEvent)
@@ -1065,7 +1066,7 @@ class DefaultCreateEventComponent(
             }
             .onFailure {
                 releaseRentalCheckoutLocks()
-                _errorState.value = ErrorMessage(it.message ?: "")
+                _errorState.value = ErrorMessage(it.userMessage())
                 loadingHandler.hideLoading()
             }
     }
@@ -1227,10 +1228,10 @@ class DefaultCreateEventComponent(
                 )
             }
 
-            if (normalizedDays.isEmpty() || startMinutes == null || endMinutes == null) {
+            if (normalizedDays.isEmpty() || startMinutes == null) {
                 return@mapNotNull null
             }
-            if (endMinutes <= startMinutes) {
+            if (endMinutes != null && endMinutes <= startMinutes) {
                 return@mapNotNull null
             }
             val slotStartDate = slot.startDate.takeUnless { it == Instant.DISTANT_PAST } ?: event.start
@@ -1292,7 +1293,7 @@ class DefaultCreateEventComponent(
                     )
                 }
                 .onFailure { error ->
-                    _errorState.value = ErrorMessage(error.message ?: "Failed to load sports.")
+                    _errorState.value = ErrorMessage(error.userMessage("Failed to load sports."))
                 }
         }
     }
@@ -1598,7 +1599,7 @@ class DefaultCreateEventComponent(
             EventType.LEAGUE, EventType.TOURNAMENT -> {
                 val matches = matchRepository.getMatchesOfTournament(scheduledEvent.id).getOrElse { error ->
                     throw IllegalStateException(
-                        "Failed to load matches for ${scheduledEvent.name.ifBlank { "event" }}: ${error.message}",
+                        "Failed to load matches for ${scheduledEvent.name.ifBlank { "event" }}: ${error.userMessage()}",
                         error
                     )
                 }

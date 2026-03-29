@@ -2,6 +2,7 @@
 
 package com.razumly.mvp.eventDetail
 
+import com.razumly.mvp.core.network.userMessage
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.backhandler.BackCallback
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
@@ -11,9 +12,11 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventOfficial
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
+import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfig
+import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
@@ -150,6 +153,8 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val suggestedUsers: StateFlow<List<UserData>>
     val pendingStaffInvites: StateFlow<List<PendingStaffInviteDraft>>
     val editableLeagueTimeSlots: StateFlow<List<TimeSlot>>
+    val editableFields: StateFlow<List<Field>>
+    val editableLeagueScoringConfig: StateFlow<LeagueScoringConfigDTO>
 
 
     fun onNavigateToChat(user: UserData)
@@ -206,6 +211,8 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun selectPlace(place: MVPPlace?)
     fun onTypeSelected(type: EventType)
     fun selectFieldCount(count: Int)
+    fun updateLocalFieldName(index: Int, name: String)
+    fun updateLeagueScoringConfig(update: LeagueScoringConfigDTO.() -> LeagueScoringConfigDTO)
     fun addLeagueTimeSlot()
     fun updateLeagueTimeSlot(index: Int, update: TimeSlot.() -> TimeSlot)
     fun removeLeagueTimeSlot(index: Int)
@@ -498,6 +505,10 @@ class DefaultEventDetailComponent(
     private val _fieldCount = MutableStateFlow(0)
     private val _editableLeagueTimeSlots = MutableStateFlow<List<TimeSlot>>(emptyList())
     override val editableLeagueTimeSlots = _editableLeagueTimeSlots.asStateFlow()
+    private val _editableFields = MutableStateFlow<List<Field>>(emptyList())
+    override val editableFields = _editableFields.asStateFlow()
+    private val _editableLeagueScoringConfig = MutableStateFlow(LeagueScoringConfigDTO())
+    override val editableLeagueScoringConfig = _editableLeagueScoringConfig.asStateFlow()
 
     override val backCallback = BackCallback {
         if (isEditing.value) {
@@ -533,7 +544,7 @@ class DefaultEventDetailComponent(
     private val eventRelations: StateFlow<EventWithRelations> =
         eventRepository.getEventWithRelationsFlow(event.id).map { result ->
             result.getOrElse {
-                _errorState.value = ErrorMessage(it.message ?: "")
+                _errorState.value = ErrorMessage(it.userMessage())
                 EventWithRelations(event, null)
             }
         }.stateIn(
@@ -585,13 +596,13 @@ class DefaultEventDetailComponent(
             matchRepository.getMatchesOfTournamentFlow(relations.event.id).map { result ->
                 result.getOrElse {
                     _errorState.value =
-                        ErrorMessage("Error loading matches: ${it.message}"); emptyList()
+                        ErrorMessage("Error loading matches: ${it.userMessage()}"); emptyList()
                 }
             },
             teamRepository.getTeamsFlow(relations.event.teamIds).map { result ->
                 result.getOrElse {
                     _errorState.value =
-                        ErrorMessage("Failed to load teams: ${it.message}"); emptyList()
+                        ErrorMessage("Failed to load teams: ${it.userMessage()}"); emptyList()
                 }
             },
             _sports,
@@ -881,10 +892,22 @@ class DefaultEventDetailComponent(
                         _editableLeagueTimeSlots.value = event.timeSlots.sortedBy { slot ->
                             slot.startTimeMinutes ?: Int.MAX_VALUE
                         }
+                        val refreshedFields = buildEditableFieldDrafts(
+                            event = event.event,
+                            sourceFields = eventFields.value.map { relation -> relation.field },
+                        )
+                        _editableFields.value = refreshedFields
+                        _fieldCount.value = refreshedFields.size
                     } else if (!_isEditing.value) {
                         _editableLeagueTimeSlots.value = event.timeSlots.sortedBy { slot ->
                             slot.startTimeMinutes ?: Int.MAX_VALUE
                         }
+                        val refreshedFields = buildEditableFieldDrafts(
+                            event = event.event,
+                            sourceFields = eventFields.value.map { relation -> relation.field },
+                        )
+                        _editableFields.value = refreshedFields
+                        _fieldCount.value = refreshedFields.size
                     }
                     _isUserInEvent.value = checkIsUserInEvent(event.event)
                     _isUserInWaitlist.value = checkIsUserWaitListed(event.event)
@@ -913,6 +936,23 @@ class DefaultEventDetailComponent(
                         selectDivision(divisionId)
                     }
                 }
+        }
+        scope.launch {
+            combine(eventWithRelations, eventFields, _isEditing) { relations, fieldsWithMatches, editing ->
+                Triple(relations, fieldsWithMatches.map { relation -> relation.field }, editing)
+            }.collect { (relations, fields, editing) ->
+                if (!editing) {
+                    val refreshedFields = buildEditableFieldDrafts(
+                        event = relations.event,
+                        sourceFields = fields,
+                    )
+                    _editableFields.value = refreshedFields
+                    _fieldCount.value = refreshedFields.size
+                    _editableLeagueScoringConfig.value = relations.leagueScoringConfig?.toDto()
+                        ?: LeagueScoringConfigDTO()
+                    _editedEvent.value = relations.event.copy(fieldIds = refreshedFields.map { field -> field.id })
+                }
+            }
         }
         scope.launch {
             selectedDivision.collect { _ ->
@@ -966,7 +1006,7 @@ class DefaultEventDetailComponent(
                     }
                 }
                 .onFailure {
-                    _errorState.value = ErrorMessage("Failed to load sports: ${it.message ?: ""}")
+                    _errorState.value = ErrorMessage("Failed to load sports: ${it.userMessage()}")
                 }
         }
     }
@@ -989,7 +1029,7 @@ class DefaultEventDetailComponent(
                 Napier.w("Failed to load templates for organization $organizationId.", throwable)
                 _organizationTemplates.value = emptyList()
                 _organizationTemplatesError.value =
-                    throwable.message?.takeIf(String::isNotBlank) ?: "Failed to load templates."
+                    throwable.userMessage("Failed to load templates.")
             }
         _organizationTemplatesLoading.value = false
     }
@@ -1051,7 +1091,7 @@ class DefaultEventDetailComponent(
             .onFailure { throwable ->
                 if (reportErrors) {
                     _errorState.value = ErrorMessage(
-                        throwable.message ?: "Failed to load league standings.",
+                        throwable.userMessage("Failed to load league standings."),
                     )
                 }
             }
@@ -1113,7 +1153,7 @@ class DefaultEventDetailComponent(
                 )
             }.onFailure { throwable ->
                 _errorState.value = ErrorMessage(
-                    throwable.message ?: "Failed to confirm standings.",
+                    throwable.userMessage("Failed to confirm standings."),
                 )
             }
 
@@ -1130,7 +1170,7 @@ class DefaultEventDetailComponent(
                     url = onBoardingUrl,
                 )
             }.onFailure {
-                _errorState.value = ErrorMessage(it.message ?: "")
+                _errorState.value = ErrorMessage(it.userMessage())
             }
             loadingHandler.hideLoading()
         }
@@ -1230,7 +1270,7 @@ class DefaultEventDetailComponent(
                     navigationHandler.navigateToEvent(latestEvent)
                 }.onFailure { throwable ->
                     _errorState.value = ErrorMessage(
-                        throwable.message ?: "Failed to load weekly session."
+                        throwable.userMessage("Failed to load weekly session.")
                     )
                 }
             } finally {
@@ -1386,7 +1426,7 @@ class DefaultEventDetailComponent(
                     listOfNotNull(message, warning).joinToString(" ")
                 )
             }.onFailure { throwable ->
-                _errorState.value = ErrorMessage(throwable.message ?: "Failed to register child.")
+                _errorState.value = ErrorMessage(throwable.userMessage("Failed to register child."))
             }
         } finally {
             loadingHandler.hideLoading()
@@ -1492,7 +1532,7 @@ class DefaultEventDetailComponent(
                 },
             )
         }.onFailure { throwable ->
-            _errorState.value = ErrorMessage(throwable.message ?: "")
+            _errorState.value = ErrorMessage(throwable.userMessage())
         }
     }
 
@@ -1532,7 +1572,7 @@ class DefaultEventDetailComponent(
                 }
                 val registrationFailure = registrationResult.exceptionOrNull()
                 if (registrationFailure != null && !registrationFailure.isAlreadyRegisteredJoinError()) {
-                    _errorState.value = ErrorMessage(registrationFailure.message ?: "")
+                    _errorState.value = ErrorMessage(registrationFailure.userMessage())
                     return
                 }
                 if (registration?.requiresParentApproval == true || registration?.joinedWaitlist == true) {
@@ -1564,7 +1604,7 @@ class DefaultEventDetailComponent(
                     if (joinedByThisFlow) {
                         rollbackUserJoinAfterBillingFailure(selectedEvent.value)
                     }
-                    _errorState.value = ErrorMessage(throwable.message ?: "")
+                    _errorState.value = ErrorMessage(throwable.userMessage())
                 }
                 return
             }
@@ -1587,7 +1627,7 @@ class DefaultEventDetailComponent(
                         }
                     }
                 }.onFailure {
-                    _errorState.value = ErrorMessage(it.message ?: "")
+                    _errorState.value = ErrorMessage(it.userMessage())
                 }
             } else {
                 loadingHandler.showLoading("Creating Purchase Request ...")
@@ -1598,7 +1638,7 @@ class DefaultEventDetailComponent(
                     .onSuccess { purchaseIntent ->
                         processPurchaseIntent(purchaseIntent)
                     }.onFailure {
-                        _errorState.value = ErrorMessage(it.message ?: "")
+                        _errorState.value = ErrorMessage(it.userMessage())
                     }
             }
         } finally {
@@ -1634,7 +1674,7 @@ class DefaultEventDetailComponent(
                 }
                 val joinFailure = joinResult.exceptionOrNull()
                 if (joinFailure != null && !joinFailure.isAlreadyRegisteredJoinError()) {
-                    _errorState.value = ErrorMessage(joinFailure.message ?: "")
+                    _errorState.value = ErrorMessage(joinFailure.userMessage())
                     return
                 }
 
@@ -1661,7 +1701,7 @@ class DefaultEventDetailComponent(
                     if (joinedByThisFlow) {
                         rollbackTeamJoinAfterBillingFailure(selectedEvent.value, team)
                     }
-                    _errorState.value = ErrorMessage(throwable.message ?: "")
+                    _errorState.value = ErrorMessage(throwable.userMessage())
                 }
                 return
             }
@@ -1675,7 +1715,7 @@ class DefaultEventDetailComponent(
                     loadingHandler.showLoading("Reloading Event")
                     eventRepository.getEvent(selectedEvent.value.id)
                 }.onFailure {
-                    _errorState.value = ErrorMessage(it.message ?: "")
+                    _errorState.value = ErrorMessage(it.userMessage())
                 }
             } else {
                 loadingHandler.showLoading("Creating Purchase Request ...")
@@ -1687,7 +1727,7 @@ class DefaultEventDetailComponent(
                     .onSuccess { purchaseIntent ->
                         processPurchaseIntent(purchaseIntent)
                     }.onFailure {
-                        _errorState.value = ErrorMessage(it.message ?: "")
+                        _errorState.value = ErrorMessage(it.userMessage())
                     }
             }
         } finally {
@@ -1751,7 +1791,7 @@ class DefaultEventDetailComponent(
         ).onFailure { throwable ->
             Napier.e("Failed to load required signing documents.", throwable)
             _errorState.value = ErrorMessage(
-                "Unable to load required documents: ${throwable.message ?: "Unknown error"}"
+                "Unable to load required documents: ${throwable.userMessage("Unknown error")}"
             )
         }.onSuccess { allSteps ->
             val pendingSteps = allSteps.filterNot { step ->
@@ -1840,7 +1880,7 @@ class DefaultEventDetailComponent(
             billingRepository.pollBoldSignOperation(operationId).onFailure { throwable ->
                 Napier.e("Failed to poll BoldSign operation.", throwable)
                 _errorState.value = ErrorMessage(
-                    throwable.message ?: "Failed to confirm signature status."
+                    throwable.userMessage("Failed to confirm signature status.")
                 )
                 clearPendingSignatureFlow()
             }.onSuccess {
@@ -1955,7 +1995,7 @@ class DefaultEventDetailComponent(
                 reason = reason,
                 targetUserId = normalizedTargetUserId,
             ).onFailure {
-                _errorState.value = ErrorMessage(it.message ?: "")
+                _errorState.value = ErrorMessage(it.userMessage())
             }.onSuccess {
                 eventRepository.getEvent(event.id)
             }
@@ -2028,7 +2068,7 @@ class DefaultEventDetailComponent(
                 }
             }
 
-            result.onFailure { _errorState.value = ErrorMessage(it.message ?: "") }
+            result.onFailure { _errorState.value = ErrorMessage(it.userMessage()) }
             result.onSuccess {
                 loadingHandler.showLoading("Reloading Event")
                 eventRepository.getEvent(event.id)
@@ -2073,7 +2113,7 @@ class DefaultEventDetailComponent(
                 eventRepository.getEvent(eventId).onFailure { throwable ->
                     if (requestToken != eventDetailHydrationToken) return@onFailure
                     _errorState.value = ErrorMessage(
-                        throwable.message ?: "Failed to load teams and participants.",
+                        throwable.userMessage("Failed to load teams and participants."),
                     )
                 }
                 if (requestToken != eventDetailHydrationToken) return@launch
@@ -2083,7 +2123,7 @@ class DefaultEventDetailComponent(
                 matchRepository.getMatchesOfTournament(eventId).onFailure { throwable ->
                     if (requestToken != eventDetailHydrationToken) return@onFailure
                     _errorState.value = ErrorMessage(
-                        throwable.message ?: "Failed to load schedule matches.",
+                        throwable.userMessage("Failed to load schedule matches."),
                     )
                 }
 
@@ -2123,7 +2163,7 @@ class DefaultEventDetailComponent(
         }
         // Initialize or reset the draft from the latest selected event when mode changes.
         val selected = selectedEvent.value
-        _editedEvent.value = if (enabled && _sports.value.isNotEmpty()) {
+        val seededEvent = if (enabled && _sports.value.isNotEmpty()) {
             syncOfficialStaffingForSportTransition(
                 previous = selected,
                 updated = selected.withSportRules(),
@@ -2131,6 +2171,15 @@ class DefaultEventDetailComponent(
         } else {
             selected
         }
+        val seededEditableFields = buildEditableFieldDrafts(
+            event = seededEvent,
+            sourceFields = eventFields.value.map { relation -> relation.field },
+        )
+        _editableLeagueScoringConfig.value = eventWithRelations.value.leagueScoringConfig?.toDto()
+            ?: LeagueScoringConfigDTO()
+        _editedEvent.value = seededEvent.copy(fieldIds = seededEditableFields.map { field -> field.id })
+        _editableFields.value = seededEditableFields
+        _fieldCount.value = seededEditableFields.size
         _editableLeagueTimeSlots.value = eventWithRelations.value.timeSlots.sortedBy { slot ->
             slot.startTimeMinutes ?: Int.MAX_VALUE
         }
@@ -2171,7 +2220,7 @@ class DefaultEventDetailComponent(
         scope.launch {
             _suggestedUsers.value = userRepository.searchPlayers(normalizedQuery)
                 .getOrElse { error ->
-                    _errorState.value = ErrorMessage(error.message ?: "Unable to search users.")
+                    _errorState.value = ErrorMessage(error.userMessage("Unable to search users."))
                     emptyList()
                 }
         }
@@ -2221,7 +2270,7 @@ class DefaultEventDetailComponent(
             draft = normalizedDraft,
         )
     }.onFailure { error ->
-        _errorState.value = ErrorMessage(error.message ?: "Unable to add staff invite.")
+        _errorState.value = ErrorMessage(error.userMessage("Unable to add staff invite."))
     }
 
     override fun removePendingStaffInvite(email: String, role: EventStaffRole?) {
@@ -2249,10 +2298,12 @@ class DefaultEventDetailComponent(
         scope.launch {
             loadingHandler.showLoading("Saving event...")
             runCatching {
-                val (eventDraft, timeSlotsDraft) = prepareEventForUpdate()
+                val prepared = prepareEventForUpdate()
                 val updated = eventRepository.updateEvent(
-                    newEvent = eventDraft,
-                    timeSlots = timeSlotsDraft,
+                    newEvent = prepared.event,
+                    fields = prepared.fields,
+                    timeSlots = prepared.timeSlots,
+                    leagueScoringConfig = prepared.leagueScoringConfig,
                 ).getOrThrow()
                 val saveOutcome = reconcileEventStaffInvites(
                     userRepository = userRepository,
@@ -2278,7 +2329,7 @@ class DefaultEventDetailComponent(
                 cancelEditingEvent()
             }.onFailure { error ->
                 loadingHandler.hideLoading()
-                _errorState.value = ErrorMessage(error.message ?: "Unable to save event.")
+                _errorState.value = ErrorMessage(error.userMessage("Unable to save event."))
             }
         }
     }
@@ -2288,17 +2339,19 @@ class DefaultEventDetailComponent(
             loadingHandler.showLoading("Rescheduling event...")
             var shouldExitEditMode = false
             runCatching {
-                val (eventDraft, timeSlotsDraft) = prepareEventForUpdate()
+                val prepared = prepareEventForUpdate()
                 val updated = eventRepository.updateEvent(
-                    newEvent = eventDraft,
-                    timeSlots = timeSlotsDraft,
+                    newEvent = prepared.event,
+                    fields = prepared.fields,
+                    timeSlots = prepared.timeSlots,
+                    leagueScoringConfig = prepared.leagueScoringConfig,
                 ).getOrThrow()
                 eventRepository.scheduleEvent(updated.id).getOrThrow()
                 matchRepository.getMatchesOfTournament(updated.id).getOrThrow()
                 shouldExitEditMode = true
             }.onFailure { throwable ->
                 _errorState.value = ErrorMessage(
-                    throwable.message ?: "Failed to reschedule event.",
+                    throwable.userMessage("Failed to reschedule event."),
                 )
             }
             loadingHandler.hideLoading()
@@ -2314,10 +2367,12 @@ class DefaultEventDetailComponent(
             loadingHandler.showLoading("Building bracket(s)...")
             var shouldExitEditMode = false
             runCatching {
-                val (eventDraft, timeSlotsDraft) = prepareEventForUpdate()
+                val prepared = prepareEventForUpdate()
                 val updated = eventRepository.updateEvent(
-                    newEvent = eventDraft,
-                    timeSlots = timeSlotsDraft,
+                    newEvent = prepared.event,
+                    fields = prepared.fields,
+                    timeSlots = prepared.timeSlots,
+                    leagueScoringConfig = prepared.leagueScoringConfig,
                 ).getOrThrow()
                 val participantCount = updated.maxParticipants.takeIf { maxParticipants ->
                     maxParticipants > 0
@@ -2339,7 +2394,7 @@ class DefaultEventDetailComponent(
                 shouldExitEditMode = true
             }.onFailure { throwable ->
                 _errorState.value = ErrorMessage(
-                    throwable.message ?: "Failed to build bracket(s).",
+                    throwable.userMessage("Failed to build bracket(s)."),
                 )
             }
             loadingHandler.hideLoading()
@@ -2402,7 +2457,7 @@ class DefaultEventDetailComponent(
                     _errorState.value = ErrorMessage("Template created and added to your templates.")
                 }
                 .onFailure {
-                    _errorState.value = ErrorMessage(it.message ?: "Failed to create template.")
+                    _errorState.value = ErrorMessage(it.userMessage("Failed to create template."))
                 }
 
             loadingHandler.hideLoading()
@@ -2418,7 +2473,7 @@ class DefaultEventDetailComponent(
             loadingHandler.showLoading("Publishing event...")
             eventRepository.updateEvent(currentEvent.copy(state = "PUBLISHED"))
                 .onFailure { error ->
-                    _errorState.value = ErrorMessage(error.message ?: "Failed to publish event.")
+                    _errorState.value = ErrorMessage(error.userMessage("Failed to publish event."))
                 }
             eventRepository.getEvent(currentEvent.id)
             loadingHandler.hideLoading()
@@ -2452,7 +2507,7 @@ class DefaultEventDetailComponent(
                 }
                 .onFailure { throwable ->
                     _errorState.value = ErrorMessage(
-                        throwable.message ?: "Failed to remove team participant.",
+                        throwable.userMessage("Failed to remove team participant."),
                     )
                 }
             loadingHandler.hideLoading()
@@ -2474,7 +2529,7 @@ class DefaultEventDetailComponent(
                 }
                 .onFailure { throwable ->
                     _errorState.value = ErrorMessage(
-                        throwable.message ?: "Failed to remove participant.",
+                        throwable.userMessage("Failed to remove participant."),
                     )
                 }
             loadingHandler.hideLoading()
@@ -2654,7 +2709,58 @@ class DefaultEventDetailComponent(
     }
 
     override fun selectFieldCount(count: Int) {
-        _fieldCount.value = count
+        val normalized = count.coerceAtLeast(0)
+        _fieldCount.value = normalized
+
+        val currentEvent = _editedEvent.value
+        val resized = _editableFields.value
+            .take(normalized)
+            .mapIndexed { index, field ->
+                field.copy(
+                    id = if (field.id.isBlank()) newId() else field.id,
+                    fieldNumber = index + 1,
+                    divisions = field.divisions
+                        .normalizeDivisionIdentifiers()
+                        .ifEmpty { defaultFieldDivisions(currentEvent) },
+                    organizationId = currentEvent.organizationId,
+                )
+            }
+            .toMutableList()
+
+        while (resized.size < normalized) {
+            val fieldNumber = resized.size + 1
+            resized += Field(
+                fieldNumber = fieldNumber,
+                organizationId = currentEvent.organizationId,
+                id = newId(),
+            ).copy(
+                name = "Field $fieldNumber",
+                divisions = defaultFieldDivisions(currentEvent),
+            )
+        }
+
+        _editableFields.value = resized
+        _editedEvent.value = currentEvent.copy(fieldIds = resized.map { field -> field.id })
+
+        val validFieldIds = resized.map { field -> field.id }.toSet()
+        _editableLeagueTimeSlots.value = _editableLeagueTimeSlots.value.map { slot ->
+            val remainingFieldIds = slot.normalizedScheduledFieldIds().filter(validFieldIds::contains)
+            slot.copy(
+                scheduledFieldId = remainingFieldIds.firstOrNull(),
+                scheduledFieldIds = remainingFieldIds,
+            )
+        }
+    }
+
+    override fun updateLocalFieldName(index: Int, name: String) {
+        val fields = _editableFields.value.toMutableList()
+        if (index !in fields.indices) return
+        fields[index] = fields[index].copy(name = name)
+        _editableFields.value = fields
+    }
+
+    override fun updateLeagueScoringConfig(update: LeagueScoringConfigDTO.() -> LeagueScoringConfigDTO) {
+        _editableLeagueScoringConfig.value = _editableLeagueScoringConfig.value.update()
     }
 
     override fun addLeagueTimeSlot() {
@@ -2675,18 +2781,71 @@ class DefaultEventDetailComponent(
         _editableLeagueTimeSlots.value = slots
     }
 
-    private fun prepareEventForUpdate(): Pair<Event, List<TimeSlot>?> {
+    private data class PreparedEventForUpdate(
+        val event: Event,
+        val fields: List<Field>? = null,
+        val timeSlots: List<TimeSlot>? = null,
+        val leagueScoringConfig: LeagueScoringConfigDTO? = null,
+    )
+
+    private fun prepareEventForUpdate(): PreparedEventForUpdate {
         val eventDraft = _editedEvent.value
+        val shouldPersistFields = eventDraft.eventType == EventType.LEAGUE ||
+            eventDraft.eventType == EventType.TOURNAMENT ||
+            eventDraft.eventType == EventType.WEEKLY_EVENT
+        val preparedFields = if (shouldPersistFields) {
+            buildFieldDrafts(eventDraft)
+        } else {
+            null
+        }
+        val preparedEventWithFields = if (preparedFields != null) {
+            eventDraft.copy(fieldIds = preparedFields.map { field -> field.id })
+        } else {
+            eventDraft
+        }
+        val preparedLeagueScoringConfig = if (eventDraft.eventType == EventType.LEAGUE) {
+            _editableLeagueScoringConfig.value
+        } else {
+            null
+        }
         val shouldPersistTimeSlots = eventDraft.eventType == EventType.LEAGUE ||
             eventDraft.eventType == EventType.TOURNAMENT ||
             eventDraft.eventType == EventType.WEEKLY_EVENT
         if (!shouldPersistTimeSlots) {
-            return eventDraft to null
+            return PreparedEventForUpdate(
+                event = preparedEventWithFields,
+                fields = preparedFields,
+                timeSlots = null,
+                leagueScoringConfig = preparedLeagueScoringConfig,
+            )
         }
 
-        val preparedTimeSlots = buildLeagueSlotDrafts(eventDraft)
-        val preparedEvent = eventDraft.copy(timeSlotIds = preparedTimeSlots.map { slot -> slot.id })
-        return preparedEvent to preparedTimeSlots
+        val preparedTimeSlots = buildLeagueSlotDrafts(preparedEventWithFields)
+        val preparedEvent = preparedEventWithFields.copy(timeSlotIds = preparedTimeSlots.map { slot -> slot.id })
+        return PreparedEventForUpdate(
+            event = preparedEvent,
+            fields = preparedFields,
+            timeSlots = preparedTimeSlots,
+            leagueScoringConfig = preparedLeagueScoringConfig,
+        )
+    }
+
+    private fun buildFieldDrafts(event: Event): List<Field> {
+        val drafts = _editableFields.value.mapIndexed { index, field ->
+            field.copy(
+                id = if (field.id.isBlank()) newId() else field.id,
+                fieldNumber = index + 1,
+                name = field.name?.takeIf(String::isNotBlank) ?: "Field ${index + 1}",
+                divisions = field.divisions
+                    .normalizeDivisionIdentifiers()
+                    .ifEmpty { defaultFieldDivisions(event) },
+                organizationId = event.organizationId,
+            )
+        }
+        _editableFields.value = drafts
+        _fieldCount.value = drafts.size
+        _editedEvent.value = _editedEvent.value.copy(fieldIds = drafts.map { field -> field.id })
+        return drafts
     }
 
     private fun buildLeagueSlotDrafts(event: Event): List<TimeSlot> {
@@ -2744,7 +2903,10 @@ class DefaultEventDetailComponent(
             val normalizedDays = slot.normalizedDaysOfWeek()
             val startMinutes = slot.startTimeMinutes
             val endMinutes = slot.endTimeMinutes
-            if (normalizedDays.isEmpty() || startMinutes == null || endMinutes == null || endMinutes <= startMinutes) {
+            if (normalizedDays.isEmpty() || startMinutes == null) {
+                return@mapNotNull null
+            }
+            if (endMinutes != null && endMinutes <= startMinutes) {
                 return@mapNotNull null
             }
 
@@ -2768,6 +2930,95 @@ class DefaultEventDetailComponent(
         }
     }
 
+    private fun buildEditableFieldDrafts(
+        event: Event,
+        sourceFields: List<Field>,
+    ): List<Field> {
+        val sourceById = sourceFields.associateBy { field -> field.id.trim() }
+        val orderedEventFieldIds = event.fieldIds
+            .map { fieldId -> fieldId.trim() }
+            .filter(String::isNotBlank)
+            .distinct()
+        val baseFields = if (orderedEventFieldIds.isNotEmpty()) {
+            orderedEventFieldIds.mapIndexed { index, fieldId ->
+                sourceById[fieldId] ?: Field(
+                    fieldNumber = index + 1,
+                    organizationId = event.organizationId,
+                    id = fieldId,
+                ).copy(name = "Field ${index + 1}")
+            }
+        } else {
+            sourceFields
+                .sortedBy { field -> field.fieldNumber }
+                .ifEmpty {
+                    emptyList()
+                }
+        }
+
+        return baseFields.mapIndexed { index, field ->
+            field.copy(
+                id = field.id.trim().takeIf(String::isNotBlank) ?: newId(),
+                fieldNumber = index + 1,
+                name = field.name?.takeIf(String::isNotBlank) ?: "Field ${index + 1}",
+                divisions = field.divisions
+                    .normalizeDivisionIdentifiers()
+                    .ifEmpty { defaultFieldDivisions(event) },
+                organizationId = event.organizationId,
+            )
+        }
+    }
+
+    private fun defaultFieldDivisions(event: Event): List<String> {
+        val eventDivisions = event.divisions.normalizeDivisionIdentifiers()
+        return eventDivisions.ifEmpty { listOf(DEFAULT_DIVISION) }
+    }
+
+    private fun LeagueScoringConfig.toDto(): LeagueScoringConfigDTO = LeagueScoringConfigDTO(
+        pointsForWin = pointsForWin,
+        pointsForDraw = pointsForDraw,
+        pointsForLoss = pointsForLoss,
+        pointsForForfeitWin = pointsForForfeitWin,
+        pointsForForfeitLoss = pointsForForfeitLoss,
+        pointsPerSetWin = pointsPerSetWin,
+        pointsPerSetLoss = pointsPerSetLoss,
+        pointsPerGameWin = pointsPerGameWin,
+        pointsPerGameLoss = pointsPerGameLoss,
+        pointsPerGoalScored = pointsPerGoalScored,
+        pointsPerGoalConceded = pointsPerGoalConceded,
+        maxGoalBonusPoints = maxGoalBonusPoints,
+        minGoalBonusThreshold = minGoalBonusThreshold,
+        pointsForShutout = pointsForShutout,
+        pointsForCleanSheet = pointsForCleanSheet,
+        applyShutoutOnlyIfWin = applyShutoutOnlyIfWin,
+        pointsPerGoalDifference = pointsPerGoalDifference,
+        maxGoalDifferencePoints = maxGoalDifferencePoints,
+        pointsPenaltyPerGoalDifference = pointsPenaltyPerGoalDifference,
+        pointsForParticipation = pointsForParticipation,
+        pointsForNoShow = pointsForNoShow,
+        pointsForWinStreakBonus = pointsForWinStreakBonus,
+        winStreakThreshold = winStreakThreshold,
+        pointsForOvertimeWin = pointsForOvertimeWin,
+        pointsForOvertimeLoss = pointsForOvertimeLoss,
+        overtimeEnabled = overtimeEnabled,
+        pointsPerRedCard = pointsPerRedCard,
+        pointsPerYellowCard = pointsPerYellowCard,
+        pointsPerPenalty = pointsPerPenalty,
+        maxPenaltyDeductions = maxPenaltyDeductions,
+        maxPointsPerMatch = maxPointsPerMatch,
+        minPointsPerMatch = minPointsPerMatch,
+        goalDifferenceTiebreaker = goalDifferenceTiebreaker,
+        headToHeadTiebreaker = headToHeadTiebreaker,
+        totalGoalsTiebreaker = totalGoalsTiebreaker,
+        enableBonusForComebackWin = enableBonusForComebackWin,
+        bonusPointsForComebackWin = bonusPointsForComebackWin,
+        enableBonusForHighScoringMatch = enableBonusForHighScoringMatch,
+        highScoringThreshold = highScoringThreshold,
+        bonusPointsForHighScoringMatch = bonusPointsForHighScoringMatch,
+        enablePenaltyForUnsportingBehavior = enablePenaltyForUnsportingBehavior,
+        penaltyPointsForUnsportingBehavior = penaltyPointsForUnsportingBehavior,
+        pointPrecision = pointPrecision,
+    )
+
     private fun createDefaultLeagueSlot(): TimeSlot {
         val event = _editedEvent.value
         val startDate = if (event.start == Instant.DISTANT_PAST) Clock.System.now() else event.start
@@ -2780,9 +3031,7 @@ class DefaultEventDetailComponent(
             id = newId(),
             dayOfWeek = null,
             daysOfWeek = emptyList(),
-            divisions = event.divisions
-                .normalizeDivisionIdentifiers()
-                .ifEmpty { listOf(DEFAULT_DIVISION) },
+            divisions = defaultFieldDivisions(event),
             startTimeMinutes = null,
             endTimeMinutes = null,
             startDate = startDate,
@@ -2905,7 +3154,7 @@ class DefaultEventDetailComponent(
                     .onSuccess {
                         deleted = true
                     }.onFailure {
-                        _errorState.value = ErrorMessage(it.message ?: "")
+                        _errorState.value = ErrorMessage(it.userMessage())
                     }
             } else {
                 loadingHandler.showLoading("Deleting Event and Refunding ...")
@@ -2913,7 +3162,7 @@ class DefaultEventDetailComponent(
                     .onSuccess {
                         deleted = true
                     }.onFailure {
-                        _errorState.value = ErrorMessage(it.message ?: "")
+                        _errorState.value = ErrorMessage(it.userMessage())
                     }
             }
             if (deleted) {
@@ -2955,7 +3204,7 @@ class DefaultEventDetailComponent(
             }
             result.onFailure { throwable ->
                 _errorState.value = ErrorMessage(
-                    throwable.message ?: "Unable to open directions.",
+                    throwable.userMessage("Unable to open directions."),
                 )
             }
         }
@@ -3220,7 +3469,7 @@ class DefaultEventDetailComponent(
             ).onFailure { throwable ->
                 Napier.e("Failed to record signature.", throwable)
                 _errorState.value = ErrorMessage(
-                    throwable.message ?: "Failed to record signature."
+                    throwable.userMessage("Failed to record signature.")
                 )
             }.onSuccess {
                 completedSignatureKeys += signatureCompletionKey(
@@ -3513,7 +3762,7 @@ class DefaultEventDetailComponent(
                 pendingCreateMatchId = null
                 loadingHandler.hideLoading()
             } catch (e: Exception) {
-                _errorState.value = ErrorMessage(e.message ?: "Failed to update matches")
+                _errorState.value = ErrorMessage(e.userMessage("Failed to update matches"))
                 loadingHandler.hideLoading()
             }
         }
@@ -3734,7 +3983,7 @@ class DefaultEventDetailComponent(
             notificationsRepository.sendEventNotification(
                 eventWithRelations.value.event.id, title, message, true
             ).onFailure {
-                _errorState.value = ErrorMessage(("Failed to send message: " + it.message))
+                _errorState.value = ErrorMessage("Failed to send message: ${it.userMessage()}")
             }
         }
     }

@@ -82,6 +82,27 @@ class LeagueSlotValidationTest {
         assertEquals(emptyMap(), errors)
     }
 
+    @Test
+    fun repeating_slot_allows_null_end_time() {
+        val slot = buildSlot(
+            id = "slot-open-ended",
+            repeating = true,
+            dayOfWeek = 2,
+            daysOfWeek = listOf(2),
+            startTimeMinutes = 540,
+            endTimeMinutes = null,
+            scheduledFieldId = "field-1",
+        )
+
+        val errors = computeLeagueSlotErrors(
+            slots = listOf(slot),
+            singleDivision = false,
+            selectedDivisionIds = emptyList(),
+        )
+
+        assertEquals(emptyMap(), errors)
+    }
+
     private fun buildSlot(
         id: String,
         repeating: Boolean,

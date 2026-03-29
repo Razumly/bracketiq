@@ -1,5 +1,6 @@
 package com.razumly.mvp.profile.profileDetails
 
+import com.razumly.mvp.core.network.userMessage
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.AuthAccount
@@ -91,7 +92,7 @@ class DefaultProfileDetailsComponent(
             loadingHandler.showLoading("Updating Profile...")
             userRepository.updateProfile(firstName, lastName, email, currentPassword, newPassword, userName)
                 .onFailure { error ->
-                    _errorState.value = ErrorMessage("Failed to update profile: ${error.message}")
+                    _errorState.value = ErrorMessage("Failed to update profile: ${error.userMessage()}")
                 }
                 .onSuccess {
                     _message.value = "Profile updated successfully"

@@ -344,7 +344,12 @@ internal class CreateEvent_FakeEventRepository(
     override suspend fun scheduleEvent(eventId: String, participantCount: Int?): Result<Event> =
         Result.failure(IllegalStateException("unused"))
 
-    override suspend fun updateEvent(newEvent: Event): Result<Event> = runCatching {
+    override suspend fun updateEvent(
+        newEvent: Event,
+        fields: List<Field>?,
+        timeSlots: List<TimeSlot>?,
+        leagueScoringConfig: LeagueScoringConfigDTO?,
+    ): Result<Event> = runCatching {
         updateEventCalls += newEvent
         newEvent
     }

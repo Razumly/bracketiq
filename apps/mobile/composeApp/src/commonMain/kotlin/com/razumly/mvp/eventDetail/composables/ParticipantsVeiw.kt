@@ -1,5 +1,6 @@
 package com.razumly.mvp.eventDetail.composables
 
+import com.razumly.mvp.core.network.userMessage
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -336,7 +337,7 @@ fun ParticipantsView(
                         }
                 }
                 .onFailure { throwable ->
-                    refundError = throwable.message ?: "Failed to load billing details."
+                    refundError = throwable.userMessage("Failed to load billing details.")
                 }
             refundLoading = false
         }
@@ -718,8 +719,7 @@ fun ParticipantsView(
                                                                     popUpHandler.showPopup("Refund processed.")
                                                                     loadRefundSnapshot(context)
                                                                 }.onFailure { throwable ->
-                                                                    refundError = throwable.message
-                                                                        ?: "Failed to process refund."
+                                                                    refundError = throwable.userMessage("Failed to process refund.")
                                                                 }
                                                                 refundingPaymentId = null
                                                             }
@@ -923,7 +923,7 @@ fun ParticipantsView(
                                 popUpHandler.showPopup("Bill created successfully.")
                                 billContext = null
                             }.onFailure { throwable ->
-                                createBillError = throwable.message ?: "Failed to create bill."
+                                createBillError = throwable.userMessage("Failed to create bill.")
                             }
                             creatingBill = false
                         }

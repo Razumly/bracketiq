@@ -6,13 +6,14 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MailOutline
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -49,6 +50,7 @@ data class NavigationItem(
 fun MVPBottomNavBar(
     selectedPage: AppConfig,
     unreadChatMessageCount: Int,
+    pendingInviteCount: Int,
     onPageSelected: (AppConfig) -> Unit,
     showNavBar: Boolean = true,
     content: @Composable (PaddingValues) -> Unit
@@ -58,12 +60,13 @@ fun MVPBottomNavBar(
         NavigationItem(AppConfig.Search(), "search", "Discover"),
         NavigationItem(AppConfig.ChatList, "messages", "Messages"),
         NavigationItem(AppConfig.Create(), "add", "Create"),
-        NavigationItem(AppConfig.ProfileHome, "person", "Profile")
+        NavigationItem(AppConfig.ProfileHome, "home", "Home")
     )
 
     var navBarHeight by remember { mutableStateOf(0.dp) }
     val localDensity = LocalDensity.current
     val unreadBadgeText = if (unreadChatMessageCount > 99) "99+" else unreadChatMessageCount.toString()
+    val inviteBadgeText = if (pendingInviteCount > 99) "99+" else pendingInviteCount.toString()
     val iconSize = if (isIos) 22.dp else 24.dp
     val labelStyle = if (isIos) {
         MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp)
@@ -83,9 +86,11 @@ fun MVPBottomNavBar(
     val minContentHeight = iconContainerHeight + 4.dp + labelTextHeightDp + 10.dp
     val navBarMinHeight = if (minContentHeight > 72.dp) minContentHeight else 72.dp
     val navBarInsets = if (isIos) {
-        WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)
+        // iOS does not need additional bottom lift for system controls; keep only side safe-area.
+        WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)
     } else {
-        NavigationBarDefaults.windowInsets
+        // Android devices may have gesture/3-button controls; respect the nav bar bottom inset.
+        WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)
     }
     val navItemColors = NavigationBarItemDefaults.colors(
         selectedIconColor = MaterialTheme.colorScheme.primary,
@@ -148,11 +153,24 @@ fun MVPBottomNavBar(
                                         contentDescription = item.titleResId,
                                         modifier = Modifier.size(iconSize),
                                     )
-                                    "person" -> Icon(
-                                        Icons.Default.Person,
-                                        contentDescription = item.titleResId,
-                                        modifier = Modifier.size(iconSize),
-                                    )
+                                    "home" -> BadgedBox(
+                                        badge = {
+                                            if (pendingInviteCount > 0) {
+                                                Badge(
+                                                    containerColor = MaterialTheme.colorScheme.primary,
+                                                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                                                ) {
+                                                    Text(inviteBadgeText)
+                                                }
+                                            }
+                                        }
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Home,
+                                            contentDescription = item.titleResId,
+                                            modifier = Modifier.size(iconSize),
+                                        )
+                                    }
                                 }
                             },
                             label = {

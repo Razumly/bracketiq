@@ -125,6 +125,7 @@ import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.data.util.resolveParticipantCapacity
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
+import com.razumly.mvp.core.presentation.PlayerInteractionComponent
 import com.razumly.mvp.core.presentation.composables.EmbeddedWebModal
 import com.razumly.mvp.core.presentation.composables.PlatformTextField
 import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
@@ -170,6 +171,8 @@ import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.minus
 import kotlinx.datetime.plus
 import kotlinx.datetime.toLocalDateTime
+import org.koin.core.parameter.parametersOf
+import org.koin.mp.KoinPlatform.getKoin
 
 val LocalTournamentComponent =
     compositionLocalOf<EventDetailComponent> { error("No tournament provided") }
@@ -1575,6 +1578,9 @@ fun EventDetailScreen(
     val selectedEvent by component.eventWithRelations.collectAsState()
     val sports by component.sports.collectAsState()
     val currentUser by component.currentUser.collectAsState()
+    val playerInteractionComponent = remember {
+        getKoin().get<PlayerInteractionComponent> { parametersOf(component) }
+    }
     val scheduleTrackedUserIds by component.scheduleTrackedUserIds.collectAsState()
     val validTeams by component.validTeams.collectAsState()
     val showDetails by component.showDetails.collectAsState()
@@ -1605,6 +1611,8 @@ fun EventDetailScreen(
     val suggestedUsers by component.suggestedUsers.collectAsState()
     val pendingStaffInvites by component.pendingStaffInvites.collectAsState()
     val editableLeagueTimeSlots by component.editableLeagueTimeSlots.collectAsState()
+    val editableFieldsForDetails by component.editableFields.collectAsState()
+    val editableLeagueScoringConfig by component.editableLeagueScoringConfig.collectAsState()
 
     var isRefundAutomatic by remember { mutableStateOf(false) }
     val isHost by component.isHost.collectAsState()
@@ -2027,11 +2035,6 @@ fun EventDetailScreen(
             selectedJoinOptionDivisionId = null
         }
     }
-    val editableFieldsForDetails = remember(eventFields) {
-        eventFields
-            .map { relation -> relation.field }
-            .sortedBy { field -> field.fieldNumber }
-    }
     val joinOptions = remember(
         isUserInEvent,
         isEventFull,
@@ -2113,6 +2116,15 @@ fun EventDetailScreen(
     LaunchedEffect(Unit) {
         component.setLoadingHandler(loadingHandler)
         component.errorState.collect { error ->
+            if (error != null) {
+                popupHandler.showPopup(error)
+            }
+        }
+    }
+
+    LaunchedEffect(playerInteractionComponent, loadingHandler, popupHandler) {
+        playerInteractionComponent.setLoadingHandler(loadingHandler)
+        playerInteractionComponent.errorState.collect { error ->
             if (error != null) {
                 popupHandler.showPopup(error)
             }
@@ -2274,14 +2286,37 @@ fun EventDetailScreen(
                             },
                             editableFields = editableFieldsForDetails,
                             leagueTimeSlots = editableLeagueTimeSlots,
+                            leagueScoringConfig = editableLeagueScoringConfig,
                             onAddLeagueTimeSlot = component::addLeagueTimeSlot,
                             onUpdateLeagueTimeSlot = { index, updated ->
                                 component.updateLeagueTimeSlot(index) { updated }
                             },
                             onRemoveLeagueTimeSlot = component::removeLeagueTimeSlot,
                             onSelectFieldCount = component::selectFieldCount,
+                            onUpdateLocalFieldName = component::updateLocalFieldName,
+                            onLeagueScoringConfigChange = { updated ->
+                                component.updateLeagueScoringConfig { updated }
+                            },
                             onUploadSelected = component::onUploadSelected,
                             onDeleteImage = component::deleteImage,
+                            currentUserForHostActions = currentUser,
+                            onHostMessageUser = component::onNavigateToChat,
+                            onHostSendFriendRequest = { user ->
+                                playerInteractionComponent.sendFriendRequest(user)
+                            },
+                            onHostFollowUser = { user ->
+                                playerInteractionComponent.followUser(user)
+                            },
+                            onHostUnfollowUser = { user ->
+                                playerInteractionComponent.unfollowUser(user)
+                            },
+                            onHostFollowOrganization = { _ ->
+                                popupHandler.showPopup(
+                                    com.razumly.mvp.core.util.ErrorMessage(
+                                        "Follow for organizations is not available yet.",
+                                    ),
+                                )
+                            },
                             onMapRevealCenterChange = { center ->
                                 mapRevealCenter = center
                             },

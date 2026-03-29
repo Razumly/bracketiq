@@ -72,6 +72,7 @@ fun App(root: RootComponent) {
     val childStack by root.childStack.subscribeAsState()
     val selectedPage by root.selectedPage.collectAsState()
     val unreadChatMessageCount by root.unreadChatMessageCount.collectAsState()
+    val pendingInviteCount by root.pendingInviteCount.collectAsState()
 
     val popupHandler = remember { PopupHandlerImpl() }
     val loadingHandler = remember { LoadingHandlerImpl() }
@@ -136,6 +137,7 @@ fun App(root: RootComponent) {
                 MVPBottomNavBar(
                     selectedPage = selectedPage,
                     unreadChatMessageCount = unreadChatMessageCount,
+                    pendingInviteCount = pendingInviteCount,
                     onPageSelected = { root.onTabSelected(it) },
                     showNavBar = shouldShowBottomNav
                 ) { paddingValues ->

@@ -2,6 +2,7 @@
 
 package com.razumly.mvp.eventSearch
 
+import com.razumly.mvp.core.network.userMessage
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.backhandler.BackCallback
 import com.arkivanov.essenty.instancekeeper.InstanceKeeper
@@ -200,7 +201,7 @@ class DefaultEventSearchComponent(
                 eventRepository.getEvent(eventId).onSuccess {
                     navigationHandler.navigateToEvent(it)
                 }.onFailure { e ->
-                    _errorState.value = ErrorMessage("Failed to fetch event: ${e.message}")
+                    _errorState.value = ErrorMessage("Failed to fetch event: ${e.userMessage()}")
                 }
             }
         }
@@ -299,7 +300,7 @@ class DefaultEventSearchComponent(
                         events.sortedByDescending { event -> event.start }
                     }
                 }.onFailure { e ->
-                    _errorState.value = ErrorMessage("Failed to fetch events: ${e.message}")
+                    _errorState.value = ErrorMessage("Failed to fetch events: ${e.userMessage()}")
                 }
         }
     }
@@ -331,7 +332,7 @@ class DefaultEventSearchComponent(
                 }
                 _suggestedOrganizations.value = baseList.take(SEARCH_SUGGESTION_LIMIT)
             }.onFailure { e ->
-                _errorState.value = ErrorMessage("Failed to fetch organizations: ${e.message}")
+                _errorState.value = ErrorMessage("Failed to fetch organizations: ${e.userMessage()}")
             }
         }
     }
@@ -362,7 +363,7 @@ class DefaultEventSearchComponent(
                         _events.value = applyEventFilter(_rawEvents.value, activeFilter)
                     }
                     .onFailure { e ->
-                        _errorState.value = ErrorMessage("Failed to load more events: ${e.message}")
+                        _errorState.value = ErrorMessage("Failed to load more events: ${e.userMessage()}")
                     }
             } finally {
                 _isLoadingMore.value = false
@@ -414,7 +415,7 @@ class DefaultEventSearchComponent(
                     _rentalFieldOptions.value = options
                 }
                 .onFailure { e ->
-                    _errorState.value = ErrorMessage("Failed to fetch rental field options: ${e.message}")
+                    _errorState.value = ErrorMessage("Failed to fetch rental field options: ${e.userMessage()}")
                 }
 
             _isLoadingRentalFields.value = false
@@ -429,7 +430,7 @@ class DefaultEventSearchComponent(
                 }
                 .onFailure { error ->
                     _rentalBusyBlocks.value = emptyList()
-                    _errorState.value = ErrorMessage("Failed to load existing field events: ${error.message}")
+                    _errorState.value = ErrorMessage("Failed to load existing field events: ${error.userMessage()}")
                 }
         }
     }
@@ -565,7 +566,7 @@ class DefaultEventSearchComponent(
                 organizations = response
             }
             .onFailure { e ->
-                _errorState.value = ErrorMessage("Failed to fetch organizations: ${e.message}")
+                _errorState.value = ErrorMessage("Failed to fetch organizations: ${e.userMessage()}")
                 organizations = emptyList()
             }
 

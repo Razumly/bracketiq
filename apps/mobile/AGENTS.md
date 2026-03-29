@@ -33,6 +33,7 @@ Any save flow that updates multiple related records (for example event match edi
 
 ## Coding Style & Naming Conventions
 Follow the Kotlin style guide: 4-space indents, prefer `val`, and lean on focused data classes. Compose surfaces use PascalCase suffixed with `Screen`, `Presenter`, or `UnifiedCard`, mirroring the feature folders under `com/razumly/mvp`. Cross-platform extensions belong in `core/` and should be grouped by capability (e.g., `LocationExtensions.kt`). Hoist state out of composables and run `.\gradlew :composeApp:lint` (or IDE inspections) before a PR.
+For shared Compose logo resources, keep explicit imports for `mvp.composeapp.generated.resources.mvp_logo` and `mvp.composeapp.generated.resources.mvp_logo_white_bg` when logo rendering is present. Do not replace usage with `Res.drawable.*` or remove these imports as "unused" in logo-bearing files.
 
 ## Testing Guidelines
 Name tests with `given_when_then` phrasing and keep them beside the feature they cover (e.g., `EventSearchPresenterTest`). Shared logic lives in `commonTest`, Android helpers in `androidUnitTest`, and Swift interop checks in `iosTest`. Mock platform APIs through MockMP utilities already defined in `composeApp/build.gradle.kts`. When Room entities move, run `.\gradlew :composeApp:roomGenerateSchema` and review diffs under `composeApp/schemas/`. Add screenshots or snapshots for UI-heavy work so both platforms can verify behavior.

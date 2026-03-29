@@ -1,5 +1,6 @@
 package com.razumly.mvp.core.presentation
 
+import com.razumly.mvp.core.network.userMessage
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.chat.data.IChatGroupRepository
@@ -42,7 +43,7 @@ class DefaultPlayerInteractionComponent(
         scope.launch {
             _loadingHandler.showLoading("Sending Friend Request ...")
             userRepository.sendFriendRequest(user).onFailure {
-               _errorState.value = ErrorMessage(it.message ?: "")
+               _errorState.value = ErrorMessage(it.userMessage())
             }
             _loadingHandler.hideLoading()
         }
@@ -52,7 +53,7 @@ class DefaultPlayerInteractionComponent(
         scope.launch {
             _loadingHandler.showLoading("Following User ...")
             userRepository.followUser(user.id).onFailure {
-                _errorState.value = ErrorMessage(it.message ?: "")
+                _errorState.value = ErrorMessage(it.userMessage())
             }
             _loadingHandler.hideLoading()
         }
@@ -62,7 +63,7 @@ class DefaultPlayerInteractionComponent(
         scope.launch {
             _loadingHandler.showLoading("Unfollowing User ...")
             userRepository.unfollowUser(user.id).onFailure {
-                _errorState.value = ErrorMessage(it.message ?: "")
+                _errorState.value = ErrorMessage(it.userMessage())
             }
             _loadingHandler.hideLoading()
         }

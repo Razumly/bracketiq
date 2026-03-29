@@ -1,5 +1,6 @@
 package com.razumly.mvp.chat
 
+import com.razumly.mvp.core.network.userMessage
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.chat.data.IChatGroupRepository
@@ -73,7 +74,7 @@ class DefaultChatGroupComponent(
     override val chatGroup =
         chatGroupRepository.getChatGroupFlow(messageUser, initialChatGroup).map { result ->
             val chatGroup = result.getOrElse {
-                _errorState.value = it.message
+                _errorState.value = it.userMessage()
                 null
             }
             chatGroup?.copy(messages = chatGroup.messages.sortedBy { it.sentTime })
@@ -97,7 +98,7 @@ class DefaultChatGroupComponent(
                         emptyList()
                     } else {
                         userRepository.getUsers(friendIds).getOrElse {
-                            _errorState.value = it.message
+                            _errorState.value = it.userMessage()
                             emptyList()
                         }
                     }
@@ -116,7 +117,7 @@ class DefaultChatGroupComponent(
                     chatGroupRepository.getCurrentUserMuteStatus(chatId).onSuccess { muted ->
                         _isChatMuted.value = muted
                     }.onFailure {
-                        _errorState.value = it.message
+                        _errorState.value = it.userMessage()
                         _isChatMuted.value = false
                     }
                 }
@@ -171,13 +172,13 @@ class DefaultChatGroupComponent(
             scope.launch {
                 val createResult = messagesRepository.createMessage(message)
                 if (createResult.isFailure) {
-                    _errorState.value = createResult.exceptionOrNull()?.message
+                    _errorState.value = createResult.exceptionOrNull()?.userMessage()
                     return@launch
                 }
                 pushNotificationsRepository.sendChatGroupNotification(
                     chatGroup.value!!.chatGroup.id, "New message from ${currentUser.fullName}", text
                 ).onFailure {
-                    _errorState.value = it.message
+                    _errorState.value = it.userMessage()
                 }
             }
         }
@@ -194,7 +195,7 @@ class DefaultChatGroupComponent(
                 pushNotificationsRepository.setActiveChat(null)
                 navigationHandler.navigateBack()
             }.onFailure {
-                _errorState.value = it.message ?: "Failed to delete chat."
+                _errorState.value = it.userMessage("Failed to delete chat.")
             }
         }
     }
@@ -210,7 +211,7 @@ class DefaultChatGroupComponent(
                 pushNotificationsRepository.setActiveChat(null)
                 navigationHandler.navigateBack()
             }.onFailure {
-                _errorState.value = it.message ?: "Failed to leave chat."
+                _errorState.value = it.userMessage("Failed to leave chat.")
             }
         }
     }
@@ -218,7 +219,7 @@ class DefaultChatGroupComponent(
     override fun searchPlayers(query: String) {
         scope.launch {
             _suggestedPlayers.value = userRepository.searchPlayers(query).getOrElse {
-                _errorState.value = it.message
+                _errorState.value = it.userMessage()
                 emptyList()
             }.filterNot { user -> user.id == currentUser.id }
         }
@@ -234,7 +235,7 @@ class DefaultChatGroupComponent(
 
         scope.launch {
             chatGroupRepository.addUserToChatGroup(currentChat, user.id).onFailure {
-                _errorState.value = it.message ?: "Failed to add user to chat."
+                _errorState.value = it.userMessage("Failed to add user to chat.")
             }
         }
     }
@@ -253,7 +254,7 @@ class DefaultChatGroupComponent(
 
         scope.launch {
             chatGroupRepository.deleteUserFromChatGroup(currentChat, user.id).onFailure {
-                _errorState.value = it.message ?: "Failed to remove user from chat."
+                _errorState.value = it.userMessage("Failed to remove user from chat.")
             }
         }
     }
@@ -265,7 +266,7 @@ class DefaultChatGroupComponent(
             chatGroupRepository.setCurrentUserMuteStatus(currentChat.id, nextMuted).onSuccess { muted ->
                 _isChatMuted.value = muted
             }.onFailure {
-                _errorState.value = it.message ?: "Failed to update mute setting."
+                _errorState.value = it.userMessage("Failed to update mute setting.")
             }
         }
     }

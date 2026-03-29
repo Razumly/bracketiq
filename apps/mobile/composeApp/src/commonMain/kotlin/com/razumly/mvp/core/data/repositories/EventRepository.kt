@@ -80,7 +80,12 @@ interface IEventRepository : IMVPRepository {
         slotId: String? = null,
     ): Result<Event>
     suspend fun scheduleEvent(eventId: String, participantCount: Int? = null): Result<Event>
-    suspend fun updateEvent(newEvent: Event, timeSlots: List<TimeSlot>? = null): Result<Event>
+    suspend fun updateEvent(
+        newEvent: Event,
+        fields: List<Field>? = null,
+        timeSlots: List<TimeSlot>? = null,
+        leagueScoringConfig: LeagueScoringConfigDTO? = null,
+    ): Result<Event>
     suspend fun updateLocalEvent(newEvent: Event): Result<Event>
     fun getEventsInBoundsFlow(bounds: Bounds): Flow<Result<List<Event>>>
     suspend fun getEventsInBounds(bounds: Bounds): Result<Pair<List<Event>, Boolean>>
@@ -441,12 +446,21 @@ class EventRepository(
             onReturn = { event -> event },
         )
 
-    override suspend fun updateEvent(newEvent: Event, timeSlots: List<TimeSlot>?): Result<Event> =
+    override suspend fun updateEvent(
+        newEvent: Event,
+        fields: List<Field>?,
+        timeSlots: List<TimeSlot>?,
+        leagueScoringConfig: LeagueScoringConfigDTO?,
+    ): Result<Event> =
         singleResponse(networkCall = {
             val updated = api.patch<UpdateEventRequestDto, EventApiDto>(
                 path = "api/events/${newEvent.id}",
                 body = UpdateEventRequestDto(
-                    event = newEvent.toUpdateDto(timeSlotsOverride = timeSlots),
+                    event = newEvent.toUpdateDto(
+                        leagueScoringConfigOverride = leagueScoringConfig,
+                        fieldsOverride = fields,
+                        timeSlotsOverride = timeSlots,
+                    ),
                 ),
             ).toEventOrNull() ?: error("Update event response missing event")
             updated

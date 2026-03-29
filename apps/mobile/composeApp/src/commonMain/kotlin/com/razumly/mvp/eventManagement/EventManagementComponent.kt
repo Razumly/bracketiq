@@ -1,5 +1,6 @@
 package com.razumly.mvp.eventManagement
 
+import com.razumly.mvp.core.network.userMessage
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.Event
@@ -58,7 +59,7 @@ class DefaultEventManagementComponent(
             }
         }.map { result ->
             result.getOrElse {
-                _errorState.value = ErrorMessage("Failed to load events: ${it.message}")
+                _errorState.value = ErrorMessage("Failed to load events: ${it.userMessage()}")
                 emptyList()
             }
         }.stateIn(scope, SharingStarted.Eagerly, emptyList())

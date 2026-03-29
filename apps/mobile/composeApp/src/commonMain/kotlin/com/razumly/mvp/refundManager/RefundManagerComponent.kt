@@ -1,5 +1,6 @@
 package com.razumly.mvp.refundManager
 
+import com.razumly.mvp.core.network.userMessage
 import com.arkivanov.decompose.ComponentContext
 import com.razumly.mvp.core.data.dataTypes.RefundRequest
 import com.razumly.mvp.core.data.dataTypes.RefundRequestWithRelations
@@ -63,7 +64,7 @@ class DefaultRefundManagerComponent(
             billingRepository.getRefundsWithRelations().onSuccess {
                 _refundsWithRelations.value = it
             }.onFailure {
-                _errorState.value = ErrorMessage(it.message ?: "Error getting refunds")
+                _errorState.value = ErrorMessage(it.userMessage("Error getting refunds"))
             }
             _isLoading.value = false
         }
@@ -85,7 +86,7 @@ class DefaultRefundManagerComponent(
                     it.refundRequest.id != refundRequest.id
                 }
             }.onFailure {
-                _errorState.value = ErrorMessage(it.message ?: "Error approving refund")
+                _errorState.value = ErrorMessage(it.userMessage("Error approving refund"))
             }
             loadingHandler.hideLoading()
         }
@@ -97,7 +98,7 @@ class DefaultRefundManagerComponent(
             billingRepository.rejectRefund(refundId).onSuccess {
                 _refundsWithRelations.value = _refundsWithRelations.value.filter { it.refundRequest.id != refundId }
             }.onFailure {
-                _errorState.value = ErrorMessage(it.message ?: "Error rejecting refund")
+                _errorState.value = ErrorMessage(it.userMessage("Error rejecting refund"))
             }
             loadingHandler.hideLoading()
         }

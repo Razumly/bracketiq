@@ -12,4 +12,11 @@ actual fun PlatformBackButton(
     tintColor: Color,
     arrow: Boolean
 ) {
+    BackButton(
+        onBack = onBack,
+        modifier = modifier,
+        text = text,
+        tintColor = tintColor,
+        arrow = arrow
+    )
 }

@@ -160,7 +160,12 @@ private object BillingRepositoryHttp_UnusedEventRepository : IEventRepository {
         slotId: String?,
     ): Result<Event> = error("unused")
     override suspend fun scheduleEvent(eventId: String, participantCount: Int?): Result<Event> = error("unused")
-    override suspend fun updateEvent(newEvent: Event): Result<Event> = error("unused")
+    override suspend fun updateEvent(
+        newEvent: Event,
+        fields: List<com.razumly.mvp.core.data.dataTypes.Field>?,
+        timeSlots: List<com.razumly.mvp.core.data.dataTypes.TimeSlot>?,
+        leagueScoringConfig: com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO?,
+    ): Result<Event> = error("unused")
     override suspend fun updateLocalEvent(newEvent: Event): Result<Event> = error("unused")
     override fun getEventsInBoundsFlow(bounds: com.razumly.mvp.core.data.dataTypes.Bounds): Flow<Result<List<Event>>> = error("unused")
     override suspend fun getEventsInBounds(bounds: com.razumly.mvp.core.data.dataTypes.Bounds): Result<Pair<List<Event>, Boolean>> = error("unused")

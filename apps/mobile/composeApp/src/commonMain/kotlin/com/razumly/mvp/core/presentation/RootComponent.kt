@@ -1,5 +1,6 @@
 package com.razumly.mvp.core.presentation
 
+import com.razumly.mvp.core.network.userMessage
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.decompose.router.stack.ChildStack
 import com.arkivanov.decompose.router.stack.StackNavigation
@@ -97,6 +98,7 @@ class RootComponent(
     private var syncedChatUserId: String? = null
     private var startupDecisionMade = false
     private var unreadCountJob: Job? = null
+    private var pendingInviteCountJob: Job? = null
     private var pushRegistrationRetryJob: Job? = null
     private var deepLinkNavigationJob: Job? = null
 
@@ -106,6 +108,8 @@ class RootComponent(
     val navigationAnimationDirection: StateFlow<Int> = _navigationAnimationDirection.asStateFlow()
     private val _unreadChatMessageCount = MutableStateFlow(0)
     val unreadChatMessageCount: StateFlow<Int> = _unreadChatMessageCount.asStateFlow()
+    private val _pendingInviteCount = MutableStateFlow(0)
+    val pendingInviteCount: StateFlow<Int> = _pendingInviteCount.asStateFlow()
     private val _isStartupInProgress = MutableStateFlow(true)
     val isStartupInProgress: StateFlow<Boolean> = _isStartupInProgress.asStateFlow()
     private val _startupNotice = MutableStateFlow<String?>(null)
@@ -197,6 +201,21 @@ class RootComponent(
                 }
             }
         }
+
+        scope.launch {
+            userRepository.currentUser.collect { userResult ->
+                val userId = userResult.getOrNull()?.id?.takeIf(String::isNotBlank)
+                pendingInviteCountJob?.cancel()
+                if (userId == null) {
+                    _pendingInviteCount.value = 0
+                    return@collect
+                }
+
+                pendingInviteCountJob = launch {
+                    refreshPendingInviteCount(userId)
+                }
+            }
+        }
     }
 
     fun onStartupNoticeShown() {
@@ -248,7 +267,7 @@ class RootComponent(
                 }
                 .onFailure { throwable ->
                     Napier.w("Failed to resolve deep-linked event $eventId: ${throwable.message}")
-                    _startupNotice.value = throwable.message ?: "Couldn't open that event link."
+                    _startupNotice.value = throwable.userMessage("Couldn't open that event link.")
                     setDefaultNavigationDirection()
                     navigation.replaceAll(AppConfig.Search())
                     _selectedPage.value = AppConfig.Search()
@@ -330,6 +349,19 @@ class RootComponent(
 
     private fun clearChatStartupSyncState() {
         syncedChatUserId = null
+    }
+
+    private suspend fun refreshPendingInviteCount(userId: String) {
+        userRepository.listInvites(userId)
+            .onSuccess { invites ->
+                _pendingInviteCount.value = invites.count { invite ->
+                    invite.status?.equals("DECLINED", ignoreCase = true) != true
+                }
+            }
+            .onFailure { throwable ->
+                Napier.w("Failed to refresh invite count for user $userId: ${throwable.message}")
+                _pendingInviteCount.value = 0
+            }
     }
 
     fun onBackClicked() {
@@ -423,6 +455,10 @@ class RootComponent(
     override fun navigateBack() {
         setDefaultNavigationDirection()
         navigation.pop()
+    }
+
+    override fun onPendingInviteCountUpdated(count: Int) {
+        _pendingInviteCount.value = count.coerceAtLeast(0)
     }
 
     private fun onEventCreated(createdEvent: Event) {

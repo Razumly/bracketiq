@@ -3,7 +3,7 @@
     <string name="navMenuSearch">Search</string>
     <string name="navMenuFollowing">Following</string>
     <string name="navMenuCreate">Create</string>
-    <string name="navMenuProfile">Profile</string>
+    <string name="navMenuProfile">Home</string>
     <string name="not_official_check_in_message">You are not the official for this match. Would you like to officiate this match?</string>
     <string name="official_checkin_message">Would you like to check in and start this match?</string>
     <string name="official_check_in_title">Official Check-In</string>

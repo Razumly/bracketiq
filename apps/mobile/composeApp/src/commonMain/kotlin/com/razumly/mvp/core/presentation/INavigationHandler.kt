@@ -21,4 +21,5 @@ interface INavigationHandler {
     fun navigateToRefunds()
     fun navigateToLogin()
     fun navigateBack()
+    fun onPendingInviteCountUpdated(count: Int) {}
 }

@@ -1,5 +1,6 @@
 package com.razumly.mvp.teamManagement
 
+import com.razumly.mvp.core.network.userMessage
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -681,7 +682,7 @@ fun CreateOrEditTeamDialog(
                                     }
                                 }
                             }
-                            .onFailure { inviteError = it.message ?: "Invite failed" }
+                            .onFailure { inviteError = it.userMessage("Invite failed") }
                     }
                 }
             },

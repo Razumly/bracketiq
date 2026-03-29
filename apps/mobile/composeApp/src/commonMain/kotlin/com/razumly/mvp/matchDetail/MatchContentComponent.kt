@@ -2,6 +2,7 @@
 
 package com.razumly.mvp.matchDetail
 
+import com.razumly.mvp.core.network.userMessage
 import com.arkivanov.decompose.ComponentContext
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
@@ -106,7 +107,7 @@ class DefaultMatchContentComponent(
             .distinctUntilChanged()
             .map { eventResult ->
                 eventResult.map { it.event as Event }.getOrElse {
-                    _errorState.value = it.message
+                    _errorState.value = it.userMessage()
                     selectedEvent
                 }
             }.stateIn(scope, SharingStarted.Eagerly, selectedEvent)
@@ -120,7 +121,7 @@ class DefaultMatchContentComponent(
             matchRepository.getMatchFlow(selectedMatch.match.id).distinctUntilChanged()
                 .flatMapLatest { dbResult ->
                     val baseMatch = dbResult.getOrElse {
-                        _errorState.value = it.message
+                        _errorState.value = it.userMessage()
                         selectedMatch
                     }
 
@@ -187,7 +188,7 @@ class DefaultMatchContentComponent(
             }
         }.map { teamResults ->
             teamResults.getOrElse {
-                _errorState.value = it.message
+                _errorState.value = it.userMessage()
                 emptyList()
             }
         }.stateIn(scope, SharingStarted.Eagerly, emptyList())
@@ -292,7 +293,7 @@ class DefaultMatchContentComponent(
                     _officialCheckedIn.value = true
                     _isOfficial.value = true
                 }.onFailure {
-                    _errorState.value = it.message
+                    _errorState.value = it.userMessage()
                 }
                 return@launch
             }
@@ -314,7 +315,7 @@ class DefaultMatchContentComponent(
                 _officialCheckedIn.value = false
                 _showOfficialCheckInDialog.value = true
             }.onFailure {
-                _errorState.value = it.message
+                _errorState.value = it.userMessage()
             }
         }
     }
@@ -473,7 +474,7 @@ class DefaultMatchContentComponent(
                 matchRepository.updateMatchFinished(updatedScoringMatch, endTime).onSuccess {
                     _optimisticMatch.value = null // Clear optimistic state
                 }.onFailure { error ->
-                    _errorState.value = "Failed to finish match: ${error.message}"
+                    _errorState.value = "Failed to finish match: ${error.userMessage()}"
                 }
             } else {
                 if (currentSet.value + 1 < maxSets) {
@@ -506,7 +507,7 @@ class DefaultMatchContentComponent(
 
             latestUpdate?.let { match ->
                 matchRepository.updateMatch(match).onFailure { error ->
-                    _errorState.value = "Failed to update score: ${error.message}"
+                    _errorState.value = "Failed to update score: ${error.userMessage()}"
                     // Revert optimistic update on failure
                     _optimisticMatch.value = null
                 }
@@ -525,7 +526,7 @@ class DefaultMatchContentComponent(
                 // Clear optimistic state since database is now up to date
                 _optimisticMatch.value = null
             }.onFailure { error ->
-                _errorState.value = "Failed to sync match: ${error.message}"
+                _errorState.value = "Failed to sync match: ${error.userMessage()}"
                 // Keep optimistic state on failure
             }
         }

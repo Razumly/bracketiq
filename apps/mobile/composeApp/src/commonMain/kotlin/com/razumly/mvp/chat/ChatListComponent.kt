@@ -1,5 +1,6 @@
 package com.razumly.mvp.chat
 
+import com.razumly.mvp.core.network.userMessage
 import com.arkivanov.decompose.ComponentContext
 import com.razumly.mvp.chat.data.ChatGroupSummary
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
@@ -78,7 +79,7 @@ class DefaultChatListComponent(
 
     override val chatGroups = chatGroupRepository.chatGroupsFlow.map { result ->
         result.getOrElse {
-            _errorState.value = it.message
+            _errorState.value = it.userMessage()
             emptyList()
         }
     }.stateIn(scope, SharingStarted.Eagerly, listOf())
@@ -95,7 +96,7 @@ class DefaultChatListComponent(
                         emptyList()
                     } else {
                         userRepository.getUsers(friendIds).getOrElse {
-                            _errorState.value = it.message
+                            _errorState.value = it.userMessage()
                             emptyList()
                         }
                     }
@@ -123,7 +124,7 @@ class DefaultChatListComponent(
             )
 
             chatGroupRepository.createChatGroup(chatToCreate).onFailure {
-                _errorState.value = it.message
+                _errorState.value = it.userMessage()
             }
             _newChat.value =
                 ChatGroupWithRelations(
@@ -165,7 +166,7 @@ class DefaultChatListComponent(
     override fun searchPlayers(query: String) {
         scope.launch {
             _suggestedPlayers.value = userRepository.searchPlayers(search = query).getOrElse {
-                _errorState.value = it.message
+                _errorState.value = it.userMessage()
                 emptyList()
             }.filterNot { user ->
                 currentUser.id == user.id

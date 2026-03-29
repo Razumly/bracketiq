@@ -4,6 +4,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
@@ -11,6 +12,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -23,8 +27,6 @@ import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CenterAlignedTopAppBar
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -36,6 +38,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -52,6 +55,10 @@ import com.razumly.mvp.icons.ProfileActionPayments
 import com.razumly.mvp.icons.ProfileActionRefunds
 import com.razumly.mvp.icons.ProfileActionTeams
 import com.razumly.mvp.icons.Groups
+import mvp.composeapp.generated.resources.Res
+import mvp.composeapp.generated.resources.mvp_logo
+import mvp.composeapp.generated.resources.mvp_logo_white_bg
+import org.jetbrains.compose.resources.painterResource
 
 private data class ProfileAction(
     val title: String,
@@ -61,14 +68,15 @@ private data class ProfileAction(
     val badgeCount: Int = 0,
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileHomeScreen(component: ProfileComponent) {
     val navPadding = LocalNavBarPadding.current
+    val isDarkTheme = isSystemInDarkTheme()
     val showChildrenTab by component.showChildrenTab.collectAsState()
     val hasStripeAccount by component.isStripeAccountConnected.collectAsState()
     val pushTargetDebugState by component.pushTargetDebugState.collectAsState()
     val pendingInviteCount by component.pendingInviteCount.collectAsState()
+    val headerLogo = if (isDarkTheme) Res.drawable.mvp_logo else Res.drawable.mvp_logo_white_bg
     val actions = remember(component, showChildrenTab, hasStripeAccount, pendingInviteCount) {
         buildList {
             add(
@@ -77,6 +85,30 @@ fun ProfileHomeScreen(component: ProfileComponent) {
                     description = "Update profile and password",
                     icon = MVPIcons.ProfileActionDetails,
                     onClick = component::navigateToProfileDetails,
+                ),
+            )
+            add(
+                ProfileAction(
+                    title = "My Schedule",
+                    description = "Events and matches I attend",
+                    icon = Icons.Default.DateRange,
+                    onClick = component::navigateToMySchedule,
+                ),
+            )
+            add(
+                ProfileAction(
+                    title = "Event Management",
+                    description = "Manage your events",
+                    icon = MVPIcons.ProfileActionEvents,
+                    onClick = component::manageEvents,
+                ),
+            )
+            add(
+                ProfileAction(
+                    title = "Teams",
+                    description = "Manage your teams",
+                    icon = MVPIcons.ProfileActionTeams,
+                    onClick = component::manageTeams,
                 ),
             )
             add(
@@ -156,30 +188,6 @@ fun ProfileHomeScreen(component: ProfileComponent) {
             )
             add(
                 ProfileAction(
-                    title = "My Schedule",
-                    description = "Events and matches I attend",
-                    icon = Icons.Default.DateRange,
-                    onClick = component::navigateToMySchedule,
-                ),
-            )
-            add(
-                ProfileAction(
-                    title = "Teams",
-                    description = "Team management",
-                    icon = MVPIcons.ProfileActionTeams,
-                    onClick = component::manageTeams,
-                ),
-            )
-            add(
-                ProfileAction(
-                    title = "Event Management",
-                    description = "Event management",
-                    icon = MVPIcons.ProfileActionEvents,
-                    onClick = component::manageEvents,
-                ),
-            )
-            add(
-                ProfileAction(
                     title = "Refund Requests",
                     description = "Refund moderation",
                     icon = MVPIcons.ProfileActionRefunds,
@@ -199,9 +207,20 @@ fun ProfileHomeScreen(component: ProfileComponent) {
 
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("Profile") },
-            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .height(72.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    painter = painterResource(headerLogo),
+                    contentDescription = "Home",
+                    modifier = Modifier.fillMaxHeight(),
+                    tint = Color.Unspecified,
+                )
+            }
         },
     ) { innerPadding ->
         LazyVerticalGrid(
@@ -211,7 +230,7 @@ fun ProfileHomeScreen(component: ProfileComponent) {
                 .padding(innerPadding),
             contentPadding = PaddingValues(
                 start = 16.dp,
-                top = 16.dp,
+                top = 12.dp,
                 end = 16.dp,
                 bottom = 16.dp + navPadding.calculateBottomPadding(),
             ),

@@ -36,6 +36,7 @@ import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.data.repositories.SignerContext
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.network.ApiException
+import com.razumly.mvp.core.network.userMessage
 import com.razumly.mvp.core.network.apiBaseUrl
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.IPaymentProcessor
@@ -462,7 +463,7 @@ class DefaultProfileComponent(
                 if (currentUser == null) {
                     childrenTabVisibilityUserId = null
                     _showChildrenTab.value = true
-                    _pendingInviteCount.value = 0
+                    updatePendingInviteCount(0)
                     _invitesState.value = ProfileInvitesState()
                 } else if (childrenTabVisibilityUserId != currentUser.id) {
                     childrenTabVisibilityUserId = currentUser.id
@@ -551,7 +552,7 @@ class DefaultProfileComponent(
     override fun onLogout() {
         scope.launch {
             userRepository.logout().onFailure {
-                _errorState.value = ErrorMessage(it.message ?: "")
+                _errorState.value = ErrorMessage(it.userMessage())
             }
             navigationHandler.navigateToLogin()
         }
@@ -594,7 +595,7 @@ class DefaultProfileComponent(
                 .onFailure { throwable ->
                     _pushTargetDebugState.value = _pushTargetDebugState.value.copy(
                         isLoading = false,
-                        error = throwable.message ?: "Failed to load push target debug status.",
+                        error = throwable.userMessage("Failed to load push target debug status."),
                         lastCheckedAt = Clock.System.now().toString(),
                     )
                 }
@@ -653,7 +654,7 @@ class DefaultProfileComponent(
                 }.onFailure { throwable ->
                     _eventTemplatesState.value = _eventTemplatesState.value.copy(
                         isLoading = false,
-                        error = throwable.message ?: "Failed to load event templates.",
+                        error = throwable.userMessage("Failed to load event templates."),
                     )
                 }
             }
@@ -685,7 +686,7 @@ class DefaultProfileComponent(
                 .onFailure { throwable ->
                     _myScheduleState.value = _myScheduleState.value.copy(
                         isLoading = false,
-                        error = throwable.message ?: "Failed to load schedule.",
+                        error = throwable.userMessage("Failed to load schedule."),
                     )
                 }
         }
@@ -700,7 +701,7 @@ class DefaultProfileComponent(
                     invites = emptyList(),
                     error = "Unable to load invites for the current user.",
                 )
-                _pendingInviteCount.value = 0
+                updatePendingInviteCount(0)
                 return@launch
             }
 
@@ -748,15 +749,15 @@ class DefaultProfileComponent(
                         activeInviteId = null,
                         activeInviteAction = null,
                     )
-                    _pendingInviteCount.value = pendingInvites.size
+                    updatePendingInviteCount(pendingInvites.size)
                 }
                 .onFailure { throwable ->
                     _invitesState.value = ProfileInvitesState(
                         isLoading = false,
                         invites = emptyList(),
-                        error = throwable.message ?: "Failed to load invites.",
+                        error = throwable.userMessage("Failed to load invites."),
                     )
-                    _pendingInviteCount.value = 0
+                    updatePendingInviteCount(0)
                 }
         }
     }
@@ -788,7 +789,7 @@ class DefaultProfileComponent(
                     _invitesState.value = _invitesState.value.copy(
                         activeInviteId = null,
                         activeInviteAction = null,
-                        error = throwable.message ?: "Failed to accept invite.",
+                        error = throwable.userMessage("Failed to accept invite."),
                     )
                 }
         }
@@ -817,7 +818,7 @@ class DefaultProfileComponent(
                     _invitesState.value = _invitesState.value.copy(
                         activeInviteId = null,
                         activeInviteAction = null,
-                        error = throwable.message ?: "Failed to decline invite.",
+                        error = throwable.userMessage("Failed to decline invite."),
                     )
                 }
         }
@@ -843,7 +844,7 @@ class DefaultProfileComponent(
             billingRepository.createAccount().onSuccess { onboardingUrl ->
                 urlHandler?.openUrlInWebView(url = onboardingUrl)
             }.onFailure {
-                _errorState.value = ErrorMessage(it.message ?: "")
+                _errorState.value = ErrorMessage(it.userMessage())
             }
             loadingHandler?.hideLoading()
         }
@@ -855,10 +856,10 @@ class DefaultProfileComponent(
             billingRepository.getOnboardingLink().onSuccess { onboardingUrl ->
                 urlHandler?.openUrlInWebView(url = onboardingUrl)
                     ?.onFailure {
-                        _errorState.value = ErrorMessage(it.message ?: "")
+                        _errorState.value = ErrorMessage(it.userMessage())
                     }
             }.onFailure {
-                    _errorState.value = ErrorMessage(it.message ?: "")
+                    _errorState.value = ErrorMessage(it.userMessage())
             }
             loadingHandler?.hideLoading()
         }
@@ -868,21 +869,27 @@ class DefaultProfileComponent(
         scope.launch {
             val currentUserId = userRepository.currentUser.value.getOrNull()?.id
             if (currentUserId.isNullOrBlank()) {
-                _pendingInviteCount.value = 0
+                updatePendingInviteCount(0)
                 return@launch
             }
 
             userRepository.listInvites(currentUserId)
                 .onSuccess { invites ->
-                    _pendingInviteCount.value = invites.count { invite ->
+                    updatePendingInviteCount(invites.count { invite ->
                         invite.status?.equals("DECLINED", ignoreCase = true) != true
-                    }
+                    })
                 }
                 .onFailure { throwable ->
                     Napier.w("Failed to refresh invite count for user $currentUserId", throwable)
-                    _pendingInviteCount.value = 0
+                    updatePendingInviteCount(0)
                 }
         }
+    }
+
+    private fun updatePendingInviteCount(count: Int) {
+        val normalizedCount = count.coerceAtLeast(0)
+        _pendingInviteCount.value = normalizedCount
+        navigationHandler.onPendingInviteCountUpdated(normalizedCount)
     }
 
     private fun openEventById(
@@ -907,7 +914,7 @@ class DefaultProfileComponent(
                     navigationHandler.navigateToEvent(event)
                 }
                 .onFailure {
-                    _errorState.value = ErrorMessage(it.message ?: "Unable to open event.")
+                    _errorState.value = ErrorMessage(it.userMessage("Unable to open event."))
                 }
         }
     }
@@ -935,7 +942,7 @@ class DefaultProfileComponent(
                     _paymentPlansState.value = ProfilePaymentPlansState(
                         isLoading = false,
                         plans = emptyList(),
-                        error = it.message ?: "Failed to load bills.",
+                        error = it.userMessage("Failed to load bills."),
                     )
                     return@launch
                 }
@@ -1009,12 +1016,12 @@ class DefaultProfileComponent(
                 }.onFailure {
                     _activeBillPaymentId.value = null
                     loadingHandler?.hideLoading()
-                    _errorState.value = ErrorMessage(it.message ?: "Unable to start payment sheet.")
+                    _errorState.value = ErrorMessage(it.userMessage("Unable to start payment sheet."))
                 }
             }.onFailure {
                 _activeBillPaymentId.value = null
                 loadingHandler?.hideLoading()
-                _errorState.value = ErrorMessage(it.message ?: "Unable to create payment intent.")
+                _errorState.value = ErrorMessage(it.userMessage("Unable to create payment intent."))
             }
         }
     }
@@ -1041,7 +1048,7 @@ class DefaultProfileComponent(
                     _membershipsState.value = ProfileMembershipsState(
                         isLoading = false,
                         memberships = emptyList(),
-                        error = it.message ?: "Failed to load memberships.",
+                        error = it.userMessage("Failed to load memberships."),
                     )
                     return@launch
                 }
@@ -1081,7 +1088,7 @@ class DefaultProfileComponent(
             _activeMembershipActionId.value = membership.subscription.id
             billingRepository.cancelSubscription(membership.subscription.id)
                 .onFailure {
-                    _errorState.value = ErrorMessage(it.message ?: "Unable to cancel membership.")
+                    _errorState.value = ErrorMessage(it.userMessage("Unable to cancel membership."))
                 }
                 .onSuccess { cancelled ->
                     if (!cancelled) {
@@ -1099,7 +1106,7 @@ class DefaultProfileComponent(
             _activeMembershipActionId.value = membership.subscription.id
             billingRepository.restartSubscription(membership.subscription.id)
                 .onFailure {
-                    _errorState.value = ErrorMessage(it.message ?: "Unable to restart membership.")
+                    _errorState.value = ErrorMessage(it.userMessage("Unable to restart membership."))
                 }
                 .onSuccess { restarted ->
                     if (!restarted) {
@@ -1132,7 +1139,7 @@ class DefaultProfileComponent(
                     _childrenState.value = _childrenState.value.copy(
                         isLoading = false,
                         children = emptyList(),
-                        error = it.message ?: "Failed to load children.",
+                        error = it.userMessage("Failed to load children."),
                     )
                 }
         }
@@ -1157,7 +1164,7 @@ class DefaultProfileComponent(
                     _childrenState.value = _childrenState.value.copy(
                         isLoadingJoinRequests = false,
                         joinRequests = emptyList(),
-                        joinRequestsError = it.message ?: "Failed to load child join requests.",
+                        joinRequestsError = it.userMessage("Failed to load child join requests."),
                     )
                 }
         }
@@ -1212,7 +1219,7 @@ class DefaultProfileComponent(
                 refreshDocuments()
             }.onFailure {
                 _childrenState.value = _childrenState.value.copy(
-                    joinRequestsError = it.message ?: "Failed to update join request.",
+                    joinRequestsError = it.userMessage("Failed to update join request."),
                 )
             }
 
@@ -1241,19 +1248,19 @@ class DefaultProfileComponent(
 
             var failureMessage: String? = null
             val friends = userRepository.getUsers(currentUser.friendIds).getOrElse { throwable ->
-                if (failureMessage == null) failureMessage = throwable.message ?: "Failed to load friends."
+                if (failureMessage == null) failureMessage = throwable.userMessage("Failed to load friends.")
                 emptyList()
             }
             val following = userRepository.getUsers(currentUser.followingIds).getOrElse { throwable ->
-                if (failureMessage == null) failureMessage = throwable.message ?: "Failed to load following users."
+                if (failureMessage == null) failureMessage = throwable.userMessage("Failed to load following users.")
                 emptyList()
             }
             val incomingFriendRequests = userRepository.getUsers(currentUser.friendRequestIds).getOrElse { throwable ->
-                if (failureMessage == null) failureMessage = throwable.message ?: "Failed to load incoming friend requests."
+                if (failureMessage == null) failureMessage = throwable.userMessage("Failed to load incoming friend requests.")
                 emptyList()
             }
             val outgoingFriendRequests = userRepository.getUsers(currentUser.friendRequestSentIds).getOrElse { throwable ->
-                if (failureMessage == null) failureMessage = throwable.message ?: "Failed to load outgoing friend requests."
+                if (failureMessage == null) failureMessage = throwable.userMessage("Failed to load outgoing friend requests.")
                 emptyList()
             }
 
@@ -1316,7 +1323,7 @@ class DefaultProfileComponent(
                     _connectionsState.value = _connectionsState.value.copy(
                         isSearching = false,
                         searchResults = emptyList(),
-                        error = throwable.message ?: "Failed to search users.",
+                        error = throwable.userMessage("Failed to search users."),
                     )
                 }
         }
@@ -1405,7 +1412,7 @@ class DefaultProfileComponent(
             }.onFailure { throwable ->
                 _connectionsState.value = _connectionsState.value.copy(
                     activeUserId = null,
-                    error = throwable.message ?: "Failed to update connection.",
+                    error = throwable.userMessage("Failed to update connection."),
                 )
             }
         }
@@ -1430,7 +1437,7 @@ class DefaultProfileComponent(
                 .onFailure { throwable ->
                     _documentsState.value = _documentsState.value.copy(
                         isLoading = false,
-                        error = throwable.message ?: "Failed to load documents.",
+                        error = throwable.userMessage("Failed to load documents."),
                     )
                 }
         }
@@ -1512,13 +1519,13 @@ class DefaultProfileComponent(
                         refreshDocuments()
                     }.onFailure { throwable ->
                         _errorState.value = ErrorMessage(
-                            throwable.message ?: "Failed to confirm signature status.",
+                            throwable.userMessage("Failed to confirm signature status."),
                         )
                     }
                 }
             }.onFailure { throwable ->
                 _errorState.value = ErrorMessage(
-                    throwable.message ?: "Unable to load signing links.",
+                    throwable.userMessage("Unable to load signing links."),
                 )
             }
 
@@ -1591,7 +1598,7 @@ class DefaultProfileComponent(
                 refreshDocuments()
             }.onFailure { throwable ->
                 _errorState.value = ErrorMessage(
-                    throwable.message ?: "Failed to record signature.",
+                    throwable.userMessage("Failed to record signature."),
                 )
             }
 
@@ -1664,7 +1671,7 @@ class DefaultProfileComponent(
             }.onFailure {
                 _childrenState.value = _childrenState.value.copy(
                     isCreatingChild = false,
-                    createError = it.message ?: "Failed to create child.",
+                    createError = it.userMessage("Failed to create child."),
                 )
             }
         }
@@ -1726,7 +1733,7 @@ class DefaultProfileComponent(
             }.onFailure {
                 _childrenState.value = _childrenState.value.copy(
                     isUpdatingChild = false,
-                    updateError = it.message ?: "Failed to update child.",
+                    updateError = it.userMessage("Failed to update child."),
                 )
             }
         }
@@ -1766,7 +1773,7 @@ class DefaultProfileComponent(
             }.onFailure {
                 _childrenState.value = _childrenState.value.copy(
                     isLinkingChild = false,
-                    linkError = it.message ?: "Failed to link child.",
+                    linkError = it.userMessage("Failed to link child."),
                 )
             }
         }

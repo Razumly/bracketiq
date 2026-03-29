@@ -7,6 +7,7 @@ import com.razumly.mvp.core.data.repositories.SignupProfileConflict
 import com.razumly.mvp.core.data.repositories.SignupProfileConflictException
 import com.razumly.mvp.core.data.repositories.SignupProfileSelection
 import com.razumly.mvp.core.network.ApiException
+import com.razumly.mvp.core.network.userMessage
 import com.razumly.mvp.core.network.dto.RegisterConflictResponseDto
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.util.jsonMVP
@@ -93,7 +94,7 @@ class DefaultAuthComponent(
             _loginState.value = LoginState.Loading
             userRepository.login(email, password).onFailure { throwable ->
                 logAuthFailure("email login", throwable)
-                _loginState.value = LoginState.Error(throwable.message.toString())
+                _loginState.value = LoginState.Error(throwable.userMessage())
             }.onSuccess {
                 val currentUser = userRepository.currentUser.value.getOrNull()
                 if (currentUser?.id.isNullOrBlank()) {
@@ -227,10 +228,7 @@ class DefaultAuthComponent(
             }
         }
 
-        return throwable.message
-            ?.trim()
-            ?.takeIf(String::isNotBlank)
-            ?: "Failed to signup"
+        return throwable.userMessage("Failed to signup")
     }
 
     private fun maskEmail(email: String): String {
