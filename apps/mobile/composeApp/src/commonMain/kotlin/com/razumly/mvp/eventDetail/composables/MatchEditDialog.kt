@@ -56,7 +56,7 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.normalizedMatchOfficialAssignments
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
-import com.razumly.mvp.core.presentation.composables.PlatformTextField
+import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.presentation.util.toTeamDisplayLabel
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
 import com.razumly.mvp.eventDetail.MatchCreateContext
@@ -725,7 +725,7 @@ fun IndividualScoreInputSection(
                         mutableStateOf(team1Scores[index].toString())
                     }
 
-                    PlatformTextField(
+                    StandardTextField(
                         value = scoreText,
                         onValueChange = { newText ->
                             scoreText = newText
@@ -779,7 +779,7 @@ fun IndividualScoreInputSection(
                         mutableStateOf(team2Scores[index].toString())
                     }
 
-                    PlatformTextField(
+                    StandardTextField(
                         value = scoreText,
                         onValueChange = { newText ->
                             scoreText = newText
@@ -910,7 +910,7 @@ private fun EventOfficialSelectionField(
         expanded = expanded,
         onExpandedChange = { expanded = !expanded },
     ) {
-        PlatformTextField(
+        StandardTextField(
             value = selectedOption?.label ?: "Unassigned",
             onValueChange = {},
             modifier = Modifier
@@ -961,7 +961,7 @@ fun TeamSelectionField(
     ExposedDropdownMenuBox(
         expanded = expanded, onExpandedChange = onExpandedChange, modifier = modifier
     ) {
-        PlatformTextField(
+        StandardTextField(
             value = selectedTeam?.toTeamDisplayLabel() ?: "Select ${label.lowercase()}",
             onValueChange = {},
             modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable, true)
@@ -1008,7 +1008,7 @@ private fun MatchLinkSelectionField(
         expanded = expanded,
         onExpandedChange = onExpandedChange,
     ) {
-        PlatformTextField(
+        StandardTextField(
             value = selectedLabel,
             onValueChange = {},
             modifier = Modifier
@@ -1044,7 +1044,7 @@ fun TimePickerField(
 ) {
     var showTimePicker by remember { mutableStateOf(false) }
 
-    PlatformTextField(
+    StandardTextField(
         value = selectedTime?.toLocalDateTime(TimeZone.currentSystemDefault())
             ?.format(dateTimeFormat) ?: "Select time",
         onValueChange = {},
@@ -1086,7 +1086,7 @@ fun FieldSelectionField(
     ExposedDropdownMenuBox(
         expanded = expanded, onExpandedChange = onExpandedChange
     ) {
-        PlatformTextField(
+        StandardTextField(
             value = selectedField?.field?.fieldNumber?.toString() ?: "Select field",
             onValueChange = {},
             modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable, true)

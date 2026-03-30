@@ -26,7 +26,7 @@ fun PasswordField(
 ) {
     var passwordVisible by remember { mutableStateOf(false) }
 
-    PlatformTextField(
+    StandardTextField(
         value = value,
         onValueChange = onValueChange,
         modifier = modifier,

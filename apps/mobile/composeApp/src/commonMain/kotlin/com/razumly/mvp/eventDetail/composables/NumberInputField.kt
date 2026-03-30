@@ -4,7 +4,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import com.razumly.mvp.core.presentation.composables.PlatformTextField
+import com.razumly.mvp.core.presentation.composables.StandardTextField
 
 @Composable
 fun NumberInputField(
@@ -19,7 +19,7 @@ fun NumberInputField(
     enabled: Boolean = true
 ) {
     Column(modifier = modifier) {
-        PlatformTextField(
+        StandardTextField(
             value = if (value == "0") "" else value,
             onValueChange = onValueChange,
             modifier = Modifier.fillMaxWidth(),

@@ -9,7 +9,7 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.unit.dp
-import com.razumly.mvp.core.presentation.composables.PlatformTextField
+import com.razumly.mvp.core.presentation.composables.StandardTextField
 
 
 @Composable
@@ -23,7 +23,7 @@ fun PointsTextField(
     isError: Boolean = false,
     errorMessage: String = ""
 ) {
-    PlatformTextField(
+    StandardTextField(
         value = value,
         onValueChange = onValueChange,
         modifier = modifier

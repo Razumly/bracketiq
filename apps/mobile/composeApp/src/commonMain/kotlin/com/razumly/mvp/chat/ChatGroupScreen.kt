@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -57,7 +56,7 @@ import com.razumly.mvp.core.data.dataTypes.MessageMVP
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.presentation.composables.InvitePlayerCard
 import com.razumly.mvp.core.presentation.composables.PlatformBackButton
-import com.razumly.mvp.core.presentation.composables.PlatformTextField
+import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.SearchPlayerDialog
 import com.razumly.mvp.core.presentation.util.timeFormat
@@ -224,23 +223,33 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
             // Input area - fixed at bottom
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shadowElevation = 8.dp,
                 color = MaterialTheme.colorScheme.surface
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .imePadding()
-                        .padding(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 24.dp),
+                        .padding(
+                            start = 16.dp,
+                            top = 8.dp,
+                            end = 16.dp,
+                            bottom = 32.dp,
+                        ),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    PlatformTextField(
+                    StandardTextField(
                         value = input,
                         onValueChange = component::onMessageInputChange,
                         modifier = Modifier.weight(1f),
                         placeholder = "Type a message...",
-                        imeAction = ImeAction.Default,
+                        imeAction = ImeAction.Send,
+                        onImeAction = {
+                            if (input.isNotBlank()) {
+                                component.sendMessage()
+                                focusManager.clearFocus()
+                                keyboardController?.hide()
+                            }
+                        }
                     )
 
                     Button(

@@ -51,7 +51,7 @@ import com.razumly.mvp.core.presentation.composables.DropdownOption
 import com.razumly.mvp.core.presentation.composables.NetworkAvatar
 import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
 import com.razumly.mvp.core.presentation.composables.PlatformDropdown
-import com.razumly.mvp.core.presentation.composables.PlatformTextField
+import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.presentation.composables.PullToRefreshContainer
 import com.razumly.mvp.core.presentation.util.MoneyInputUtils
 import com.razumly.mvp.core.presentation.util.dateTimeFormat
@@ -516,26 +516,26 @@ fun ProfileChildrenScreen(component: ProfileComponent) {
                         )
                     }
 
-                    PlatformTextField(
+                    StandardTextField(
                         modifier = Modifier.fillMaxWidth(),
                         value = childFirstName,
                         onValueChange = { childFirstName = it },
                         label = "First name",
                     )
-                    PlatformTextField(
+                    StandardTextField(
                         modifier = Modifier.fillMaxWidth(),
                         value = childLastName,
                         onValueChange = { childLastName = it },
                         label = "Last name",
                     )
-                    PlatformTextField(
+                    StandardTextField(
                         modifier = Modifier.fillMaxWidth(),
                         value = childEmail,
                         onValueChange = { childEmail = it },
                         label = "Email (optional)",
                         keyboardType = "email",
                     )
-                    PlatformTextField(
+                    StandardTextField(
                         modifier = Modifier.fillMaxWidth(),
                         value = childDateOfBirth,
                         onValueChange = {},
@@ -628,13 +628,13 @@ fun ProfileChildrenScreen(component: ProfileComponent) {
                     )
                 }
 
-                PlatformTextField(
+                StandardTextField(
                     value = linkChildEmail,
                     onValueChange = { linkChildEmail = it },
                     label = "Child email",
                     keyboardType = "email",
                 )
-                PlatformTextField(
+                StandardTextField(
                     value = linkChildUserId,
                     onValueChange = { linkChildUserId = it },
                     label = "Child user ID",
@@ -838,7 +838,7 @@ fun ProfileConnectionsScreen(component: ProfileComponent) {
         isRefreshing = state.isLoading,
     ) {
         SectionHeaderRow(title = "Find users")
-        PlatformTextField(
+        StandardTextField(
             modifier = Modifier.fillMaxWidth(),
             value = state.searchQuery,
             onValueChange = component::searchConnections,

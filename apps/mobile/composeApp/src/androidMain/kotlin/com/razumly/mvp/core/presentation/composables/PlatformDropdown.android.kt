@@ -64,7 +64,7 @@ actual fun PlatformDropdown(
         onExpandedChange = { expanded = it && enabled },
         modifier = modifier
     ) {
-        PlatformTextField(
+        StandardTextField(
             value = displayValue,
             onValueChange = { },
             modifier = Modifier

@@ -48,7 +48,7 @@ import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import com.razumly.mvp.core.presentation.composables.PlatformDropdown
-import com.razumly.mvp.core.presentation.composables.PlatformTextField
+import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.util.Platform
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atStartOfDayIn
@@ -110,7 +110,7 @@ fun LeagueScheduleFields(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.Top,
     ) {
-        PlatformTextField(
+        StandardTextField(
             modifier = Modifier.weight(1f),
             value = pendingFieldCountInput,
             onValueChange = { value ->
@@ -587,7 +587,7 @@ private fun TimeOfDayPickerField(
         }
     }
 
-    PlatformTextField(
+    StandardTextField(
         value = minutes?.toTimeLabel() ?: "Select time",
         onValueChange = {},
         modifier = modifier,
@@ -668,7 +668,7 @@ private fun DatePickerField(
     supportingText: String = "",
 ) {
     var showPicker by remember { mutableStateOf(false) }
-    PlatformTextField(
+    StandardTextField(
         value = value.toDateLabel(),
         onValueChange = {},
         modifier = modifier,
@@ -709,7 +709,7 @@ private fun OptionalDatePickerField(
     supportingText: String = "",
 ) {
     var showPicker by remember { mutableStateOf(false) }
-    PlatformTextField(
+    StandardTextField(
         value = value?.toDateLabel() ?: "",
         onValueChange = {},
         modifier = modifier,
@@ -750,7 +750,7 @@ private fun DateTimePickerField(
     isError: Boolean = false,
 ) {
     var showPicker by remember { mutableStateOf(false) }
-    PlatformTextField(
+    StandardTextField(
         value = value?.toDateTimeLabel() ?: "Select date and time",
         onValueChange = {},
         modifier = modifier,

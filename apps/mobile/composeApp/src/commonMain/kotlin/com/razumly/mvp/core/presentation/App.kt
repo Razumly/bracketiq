@@ -30,6 +30,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusManager
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChanged
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.arkivanov.decompose.ExperimentalDecomposeApi
@@ -79,6 +85,7 @@ fun App(root: RootComponent) {
     val loadingState by loadingHandler.loadingState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
+    val composeFocusManager = LocalFocusManager.current
     val allFocusManagers = remember { MutableObjectList<PlatformFocusManager>() }
 
 
@@ -127,6 +134,7 @@ fun App(root: RootComponent) {
                 modifier = Modifier
                     .fillMaxSize()
                     .background(MaterialTheme.colorScheme.background)
+                    .dismissKeyboardOnBackgroundInteraction(composeFocusManager)
             ) {
                 val currentChild = childStack.active.instance
 
@@ -165,6 +173,24 @@ fun App(root: RootComponent) {
                         modifier = Modifier.fillMaxSize()
                     )
                 }
+            }
+        }
+    }
+}
+
+private fun Modifier.dismissKeyboardOnBackgroundInteraction(
+    focusManager: FocusManager
+): Modifier = pointerInput(focusManager) {
+    awaitPointerEventScope {
+        while (true) {
+            val event = awaitPointerEvent(PointerEventPass.Final)
+            val changes = event.changes
+            if (changes.any { it.positionChanged() && it.isConsumed }) {
+                focusManager.clearFocus(force = true)
+                continue
+            }
+            if (changes.any { it.changedToUpIgnoreConsumed() } && changes.none { it.isConsumed }) {
+                focusManager.clearFocus(force = true)
             }
         }
     }

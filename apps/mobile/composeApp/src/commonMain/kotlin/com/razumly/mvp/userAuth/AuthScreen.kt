@@ -37,7 +37,7 @@ import com.razumly.mvp.core.data.repositories.SignupProfileSelection
 import com.razumly.mvp.core.presentation.composables.EmailSignInButton
 import com.razumly.mvp.core.presentation.composables.GoogleSignInButton
 import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
-import com.razumly.mvp.core.presentation.composables.PlatformTextField
+import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.presentation.composables.rememberPlatformFocusManager
 import com.razumly.mvp.core.presentation.util.platformImePadding
 import io.github.aakira.napier.Napier
@@ -130,7 +130,7 @@ fun AuthScreenBase(component: AuthComponent, onOauth2: () -> Unit?) {
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     if (isSignup) {
-                        PlatformTextField(
+                        StandardTextField(
                             value = firstName,
                             onValueChange = { firstName = it },
                             modifier = Modifier.fillMaxWidth(),
@@ -139,7 +139,7 @@ fun AuthScreenBase(component: AuthComponent, onOauth2: () -> Unit?) {
                             externalFocusManager = firstNameFocusManager
                         )
 
-                        PlatformTextField(
+                        StandardTextField(
                             value = lastName,
                             onValueChange = { lastName = it },
                             modifier = Modifier.fillMaxWidth(),
@@ -148,7 +148,7 @@ fun AuthScreenBase(component: AuthComponent, onOauth2: () -> Unit?) {
                             externalFocusManager = lastNameFocusManager
                         )
 
-                        PlatformTextField(
+                        StandardTextField(
                             value = userName,
                             onValueChange = { userName = it },
                             modifier = Modifier.fillMaxWidth(),
@@ -157,7 +157,7 @@ fun AuthScreenBase(component: AuthComponent, onOauth2: () -> Unit?) {
                             externalFocusManager = userNameFocusManager
                         )
 
-                        PlatformTextField(
+                        StandardTextField(
                             value = dateOfBirth,
                             onValueChange = {},
                             modifier = Modifier.fillMaxWidth(),
@@ -168,7 +168,7 @@ fun AuthScreenBase(component: AuthComponent, onOauth2: () -> Unit?) {
                         )
                     }
 
-                    PlatformTextField(
+                    StandardTextField(
                         value = email,
                         onValueChange = { email = it },
                         modifier = Modifier.fillMaxWidth(),
@@ -178,7 +178,7 @@ fun AuthScreenBase(component: AuthComponent, onOauth2: () -> Unit?) {
                         externalFocusManager = emailFocusManager
                     )
 
-                    PlatformTextField(
+                    StandardTextField(
                         value = password,
                         onValueChange = { password = it },
                         label = "Password",
@@ -191,7 +191,7 @@ fun AuthScreenBase(component: AuthComponent, onOauth2: () -> Unit?) {
                     )
 
                     if (isSignup) {
-                        PlatformTextField(
+                        StandardTextField(
                             value = confirmPassword,
                             onValueChange = { confirmPassword = it },
                             label = "Confirm Password",

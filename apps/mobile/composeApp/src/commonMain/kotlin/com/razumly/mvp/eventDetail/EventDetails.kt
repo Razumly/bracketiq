@@ -122,7 +122,7 @@ import com.razumly.mvp.core.presentation.composables.MoneyInputField
 import com.razumly.mvp.core.presentation.composables.NetworkAvatar
 import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
 import com.razumly.mvp.core.presentation.composables.PlatformDropdown
-import com.razumly.mvp.core.presentation.composables.PlatformTextField
+import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.presentation.composables.PlayerCardWithActions
 import com.razumly.mvp.core.presentation.composables.StripeButton
 import com.razumly.mvp.core.presentation.util.dateFormat
@@ -1654,7 +1654,7 @@ fun EventDetails(
                             ) { editMode ->
                                 if (editMode) {
                                     val hasNameError = eventNameInput.isBlank()
-                                    PlatformTextField(
+                                    StandardTextField(
                                         value = eventNameInput,
                                         onValueChange = { eventNameInput = it },
                                         label = "Event Name",
@@ -1813,7 +1813,7 @@ fun EventDetails(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
-                                PlatformTextField(
+                                StandardTextField(
                                     value = editEvent.start.toLocalDateTime(
                                         TimeZone.currentSystemDefault()
                                     ).format(dateTimeFormat),
@@ -1827,7 +1827,7 @@ fun EventDetails(
                                         }
                                     },
                                 )
-                                PlatformTextField(
+                                StandardTextField(
                                     value = if (supportsNoFixedEndDateTime && editEvent.noFixedEndDateTime) {
                                         ""
                                     } else {
@@ -1847,7 +1847,7 @@ fun EventDetails(
                                 )
                             }
                         } else {
-                            PlatformTextField(
+                            StandardTextField(
                                 value = editEvent.start.toLocalDateTime(
                                     TimeZone.currentSystemDefault()
                                 ).format(dateTimeFormat),
@@ -2299,7 +2299,7 @@ fun EventDetails(
                                             },
                                             modifier = Modifier.weight(1f),
                                         )
-                                        PlatformTextField(
+                                        StandardTextField(
                                             value = dueDate,
                                             onValueChange = {},
                                             label = "Due Date",
@@ -2474,7 +2474,7 @@ fun EventDetails(
                                                     .padding(12.dp),
                                                 verticalArrangement = Arrangement.spacedBy(8.dp),
                                             ) {
-                                                PlatformTextField(
+                                                StandardTextField(
                                                     value = position.name,
                                                     onValueChange = { newName ->
                                                         onUpdateOfficialPositionName(position.id, newName)
@@ -2523,7 +2523,7 @@ fun EventDetails(
                                 style = MaterialTheme.typography.titleSmall,
                                 color = Color(localImageScheme.current.onSurface),
                             )
-                            PlatformTextField(
+                            StandardTextField(
                                 value = staffSearchQuery,
                                 onValueChange = { newValue ->
                                     staffSearchQuery = newValue
@@ -2604,20 +2604,20 @@ fun EventDetails(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
-                                PlatformTextField(
+                                StandardTextField(
                                     value = staffInviteFirstName,
                                     onValueChange = { staffInviteFirstName = it },
                                     label = "First Name",
                                     modifier = Modifier.weight(1f),
                                 )
-                                PlatformTextField(
+                                StandardTextField(
                                     value = staffInviteLastName,
                                     onValueChange = { staffInviteLastName = it },
                                     label = "Last Name",
                                     modifier = Modifier.weight(1f),
                                 )
                             }
-                            PlatformTextField(
+                            StandardTextField(
                                 value = staffInviteEmail,
                                 onValueChange = { staffInviteEmail = it },
                                 label = "Email",
@@ -3153,7 +3153,7 @@ fun EventDetails(
                             label = "Age Division",
                             placeholder = "Select age division",
                         )
-                        PlatformTextField(
+                        StandardTextField(
                             value = divisionEditor.name,
                             onValueChange = { value ->
                                 divisionEditor = divisionEditor.copy(
@@ -3310,7 +3310,7 @@ fun EventDetails(
                                         },
                                         modifier = Modifier.weight(1f),
                                     )
-                                    PlatformTextField(
+                                    StandardTextField(
                                         value = dueDate,
                                         onValueChange = {},
                                         label = "Due Date",
@@ -3673,7 +3673,7 @@ fun EventDetails(
                                     Box(modifier = Modifier.weight(1f))
                                 }
 
-                                PlatformTextField(
+                                StandardTextField(
                                     value = editEvent.prize,
                                     onValueChange = {
                                         if (it.length <= 50) onEditTournament {

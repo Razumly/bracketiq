@@ -37,7 +37,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
-import com.razumly.mvp.core.presentation.composables.PlatformTextField
+import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
 import com.razumly.mvp.core.util.emailAddressRegex
@@ -134,7 +134,7 @@ fun ProfileDetailsScreen(
                 modifier = Modifier.padding(top = 16.dp)
             )
 
-            PlatformTextField(
+            StandardTextField(
                 value = userName,
                 onValueChange = { userName = it },
                 label = "Username",
@@ -142,7 +142,7 @@ fun ProfileDetailsScreen(
                 supportingText = if (userName.isBlank()) "Required" else ""
             )
 
-            PlatformTextField(
+            StandardTextField(
                 value = email,
                 onValueChange = { email = it },
                 label = "Email",
@@ -157,7 +157,7 @@ fun ProfileDetailsScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                PlatformTextField(
+                StandardTextField(
                     value = firstName,
                     onValueChange = { firstName = it },
                     label = "First Name",
@@ -166,7 +166,7 @@ fun ProfileDetailsScreen(
                     supportingText = if (!isFirstNameValid && firstName.isNotBlank()) "Required" else ""
                 )
 
-                PlatformTextField(
+                StandardTextField(
                     value = lastName,
                     onValueChange = { lastName = it },
                     label = "Last Name",

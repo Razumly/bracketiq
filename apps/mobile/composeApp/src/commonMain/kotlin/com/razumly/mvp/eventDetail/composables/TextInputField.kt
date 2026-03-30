@@ -4,7 +4,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import com.razumly.mvp.core.presentation.composables.PlatformTextField
+import com.razumly.mvp.core.presentation.composables.StandardTextField
 
 @Composable
 fun TextInputField(
@@ -18,7 +18,7 @@ fun TextInputField(
     placeholder: String? = null,
 ) {
     Column(modifier = modifier) {
-        PlatformTextField(
+        StandardTextField(
             value = value,
             onValueChange = onValueChange,
             modifier = Modifier.fillMaxWidth(),

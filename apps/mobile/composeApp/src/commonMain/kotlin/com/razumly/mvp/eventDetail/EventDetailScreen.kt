@@ -126,7 +126,7 @@ import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.PlayerInteractionComponent
 import com.razumly.mvp.core.presentation.composables.EmbeddedWebModal
-import com.razumly.mvp.core.presentation.composables.PlatformTextField
+import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
 import com.razumly.mvp.core.presentation.composables.PullToRefreshContainer
 import com.razumly.mvp.core.presentation.composables.StripeButton
@@ -3762,7 +3762,7 @@ fun RefundReasonDialog(
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(bottom = 8.dp)
             )
-            PlatformTextField(
+            StandardTextField(
                 value = currentReason,
                 onValueChange = onReasonChange,
                 modifier = Modifier.fillMaxWidth(),

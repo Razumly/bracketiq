@@ -17,7 +17,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.razumly.mvp.core.presentation.composables.PlatformTextField
+import com.razumly.mvp.core.presentation.composables.StandardTextField
 
 @Composable
 fun SendNotificationDialog(
@@ -41,7 +41,7 @@ fun SendNotificationDialog(
                 modifier = Modifier.padding(bottom = 8.dp)
             )
 
-            PlatformTextField(
+            StandardTextField(
                 value = title,
                 onValueChange = {
                     title = it
@@ -52,7 +52,7 @@ fun SendNotificationDialog(
             )
 
             Column {
-                PlatformTextField(
+                StandardTextField(
                     value = message,
                     onValueChange = { newValue ->
                         if (newValue.length <= maxMessageLength) {

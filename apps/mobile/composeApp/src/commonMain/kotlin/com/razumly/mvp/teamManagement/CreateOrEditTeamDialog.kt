@@ -55,7 +55,7 @@ import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import com.razumly.mvp.core.presentation.composables.InvitePlayerCard
 import com.razumly.mvp.core.presentation.composables.PlatformDropdown
-import com.razumly.mvp.core.presentation.composables.PlatformTextField
+import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.SearchPlayerDialog
 import kotlinx.coroutines.launch
@@ -353,7 +353,7 @@ fun CreateOrEditTeamDialog(
                 )
             }
 
-            PlatformTextField(
+            StandardTextField(
                 value = teamName,
                 onValueChange = {
                     teamName = it
@@ -370,7 +370,7 @@ fun CreateOrEditTeamDialog(
             )
 
             Spacer(modifier = Modifier.height(12.dp))
-            PlatformTextField(
+            StandardTextField(
                 value = teamSizeInput,
                 onValueChange = { teamSizeInput = it },
                 modifier = Modifier.fillMaxWidth(),

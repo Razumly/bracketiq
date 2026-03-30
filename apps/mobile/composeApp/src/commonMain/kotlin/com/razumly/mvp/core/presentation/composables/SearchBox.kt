@@ -95,7 +95,7 @@ fun SearchBox(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            PlatformTextField(
+            StandardTextField(
                 value = searchInput,
                 onValueChange = { newQuery ->
                     searchInput = newQuery
@@ -399,7 +399,7 @@ private fun DateFilterSection(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            PlatformTextField(
+            StandardTextField(
                 value = currentFilter.date.first.toLocalDateTime(
                     TimeZone.currentSystemDefault()
                 ).date.format(dateFormat),
@@ -409,7 +409,7 @@ private fun DateFilterSection(
                 readOnly = true,
                 onTap = onStartDateClicked
             )
-            PlatformTextField(
+            StandardTextField(
                 value = currentFilter.date.second?.toLocalDateTime(
                     TimeZone.currentSystemDefault()
                 )?.date?.format(dateFormat) ?: "Select an End Date",

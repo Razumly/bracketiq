@@ -11,7 +11,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import com.razumly.mvp.core.presentation.composables.PlatformTextField
+import com.razumly.mvp.core.presentation.composables.StandardTextField
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -28,7 +28,7 @@ fun DropdownField(
         expanded = expanded,
         onExpandedChange = { state -> expanded = state }
     ) {
-        PlatformTextField(
+        StandardTextField(
             value = value,
             onValueChange = {},
             modifier = Modifier

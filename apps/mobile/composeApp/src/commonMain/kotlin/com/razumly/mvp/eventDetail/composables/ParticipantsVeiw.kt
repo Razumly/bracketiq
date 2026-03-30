@@ -41,7 +41,7 @@ import com.razumly.mvp.core.data.repositories.UserVisibilityContext
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.PlayerInteractionComponent
 import com.razumly.mvp.core.presentation.composables.MoneyInputField
-import com.razumly.mvp.core.presentation.composables.PlatformTextField
+import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.presentation.composables.PlayerAction
 import com.razumly.mvp.core.presentation.composables.PlayerCardWithActions
 import com.razumly.mvp.core.presentation.composables.TeamCard
@@ -684,7 +684,7 @@ fun ParticipantsView(
                                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                                     verticalAlignment = Alignment.CenterVertically,
                                                 ) {
-                                                    PlatformTextField(
+                                                    StandardTextField(
                                                         value = draft,
                                                         onValueChange = { value ->
                                                             refundAmountDraftByPaymentId =
@@ -835,7 +835,7 @@ fun ParticipantsView(
                         label = "Tax",
                         placeholder = "0.00",
                     )
-                    PlatformTextField(
+                    StandardTextField(
                         value = createBillLabel,
                         onValueChange = { createBillLabel = it },
                         modifier = Modifier.fillMaxWidth(),

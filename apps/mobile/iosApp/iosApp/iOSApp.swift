@@ -205,8 +205,7 @@ struct iOSApp: App {
                     .ignoresSafeArea()
 
                 ComposeView(deepLinkUrl: deepLinkUrl)
-                    .ignoresSafeArea(.container, edges: [.top, .bottom])
-                    .ignoresSafeArea(.keyboard, edges: .bottom)
+                    .ignoresSafeArea()
                     .id(deepLinkId) // Use the ID instead of URL string
                     .onAppear {
                         if let pendingUrl = AppDelegate.pendingDeepLink {

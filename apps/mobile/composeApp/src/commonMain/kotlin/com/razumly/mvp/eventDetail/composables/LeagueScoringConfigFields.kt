@@ -10,7 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.Sport
-import com.razumly.mvp.core.presentation.composables.PlatformTextField
+import com.razumly.mvp.core.presentation.composables.StandardTextField
 
 private val integerInputPattern = Regex("^-?\\d*$")
 private val decimalInputPattern = Regex("^-?\\d*(\\.\\d*)?$")
@@ -44,7 +44,7 @@ fun LeagueScoringConfigFields(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         visibleNumericFields.forEach { field ->
-            PlatformTextField(
+            StandardTextField(
                 value = field.readValue(config),
                 onValueChange = { updated ->
                     if (field.acceptsInput(updated)) {
