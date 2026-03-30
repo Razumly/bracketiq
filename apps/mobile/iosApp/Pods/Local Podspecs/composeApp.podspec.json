@@ -1,6 +1,6 @@
 {
   "name": "composeApp",
-  "version": "1.1.6",
+  "version": "1.1.7",
   "homepage": "https://example.com",
   "source": {
     "http": ""
@@ -32,7 +32,7 @@
       "name": "Build composeApp",
       "execution_position": "before_compile",
       "shell_path": "/bin/sh",
-      "script": "                if [ \"YES\" = \"$OVERRIDE_KOTLIN_BUILD_IDE_SUPPORTED\" ]; then\n                    echo \"Skipping Gradle build task invocation due to OVERRIDE_KOTLIN_BUILD_IDE_SUPPORTED environment variable set to \"YES\"\"\n                    exit 0\n                fi\n                set -ev\n                REPO_ROOT=\"$PODS_TARGET_SRCROOT\"\n                # Xcode shells do not always inherit SDKMAN/asdf, so pin Gradle to a supported JDK.\n                if SUPPORTED_JAVA_HOME=\"$(/usr/libexec/java_home -v 17 2>/dev/null)\"; then\n                    export JAVA_HOME=\"$SUPPORTED_JAVA_HOME\"\n                elif SUPPORTED_JAVA_HOME=\"$(/usr/libexec/java_home -v 21 2>/dev/null)\"; then\n                    export JAVA_HOME=\"$SUPPORTED_JAVA_HOME\"\n                else\n                    echo \"warning: Could not locate JDK 17 or 21 via /usr/libexec/java_home; using existing JAVA_HOME=${JAVA_HOME:-<unset>}\"\n                fi\n                if [ -n \"$JAVA_HOME\" ]; then\n                    export PATH=\"$JAVA_HOME/bin:$PATH\"\n                fi\n                \"$REPO_ROOT/../gradlew\" -p \"$REPO_ROOT\" $KOTLIN_PROJECT_PATH:syncFramework                     -Pkotlin.native.cocoapods.platform=$PLATFORM_NAME                     -Pkotlin.native.cocoapods.archs=\"$ARCHS\"                     -Pkotlin.native.cocoapods.configuration=\"$CONFIGURATION\"\n"
+      "script": "                if [ \"YES\" = \"$OVERRIDE_KOTLIN_BUILD_IDE_SUPPORTED\" ]; then\n                    echo \"Skipping Gradle build task invocation due to OVERRIDE_KOTLIN_BUILD_IDE_SUPPORTED environment variable set to \"YES\"\"\n                    exit 0\n                fi\n                set -ev\n                REPO_ROOT=\"$PODS_TARGET_SRCROOT\"\n                \"$REPO_ROOT/../gradlew\" -p \"$REPO_ROOT\" $KOTLIN_PROJECT_PATH:syncFramework                     -Pkotlin.native.cocoapods.platform=$PLATFORM_NAME                     -Pkotlin.native.cocoapods.archs=\"$ARCHS\"                     -Pkotlin.native.cocoapods.configuration=\"$CONFIGURATION\"\n"
     }
   ],
   "resources": [

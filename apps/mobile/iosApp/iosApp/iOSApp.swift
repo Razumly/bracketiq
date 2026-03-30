@@ -200,31 +200,26 @@ struct iOSApp: App {
     
     var body: some Scene {
         WindowGroup {
-            ZStack {
-                Color(uiColor: .systemBackground)
-                    .ignoresSafeArea()
-
-                ComposeView(deepLinkUrl: deepLinkUrl)
-                    .ignoresSafeArea()
-                    .id(deepLinkId) // Use the ID instead of URL string
-                    .onAppear {
-                        if let pendingUrl = AppDelegate.pendingDeepLink {
-                            updateDeepLink(pendingUrl)
-                            AppDelegate.pendingDeepLink = nil
-                        }
+            ComposeView(deepLinkUrl: deepLinkUrl)
+                .ignoresSafeArea()
+                .id(deepLinkId) // Use the ID instead of URL string
+                .onAppear {
+                    if let pendingUrl = AppDelegate.pendingDeepLink {
+                        updateDeepLink(pendingUrl)
+                        AppDelegate.pendingDeepLink = nil
                     }
-                    .onReceive(NotificationCenter.default.publisher(for: .deepLinkReceived)) { notification in
-                        if let url = notification.object as? URL {
-                            updateDeepLink(url)
-                        }
-                    }
-                    .onOpenURL { url in
-                        if GIDSignIn.sharedInstance.handle(url) {
-                            return
-                        }
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .deepLinkReceived)) { notification in
+                    if let url = notification.object as? URL {
                         updateDeepLink(url)
                     }
-            }
+                }
+                .onOpenURL { url in
+                    if GIDSignIn.sharedInstance.handle(url) {
+                        return
+                    }
+                    updateDeepLink(url)
+                }
         }
     }
     

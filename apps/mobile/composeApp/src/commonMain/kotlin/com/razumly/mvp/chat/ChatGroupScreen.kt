@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -222,7 +223,9 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
 
             // Input area - fixed at bottom
             Surface(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .imePadding(),
                 color = MaterialTheme.colorScheme.surface
             ) {
                 Row(
@@ -232,7 +235,7 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
                             start = 16.dp,
                             top = 8.dp,
                             end = 16.dp,
-                            bottom = 32.dp,
+                            bottom = 24.dp,
                         ),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
