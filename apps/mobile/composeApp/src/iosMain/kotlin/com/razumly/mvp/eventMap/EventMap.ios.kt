@@ -10,11 +10,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.UIKitViewController
 import com.razumly.mvp.LocalNativeViewFactory
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
+import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.localAllFocusManagers
 import dev.icerock.moko.geo.LatLng
 
@@ -32,6 +32,8 @@ actual fun EventMap(
 ) {
     val factory = LocalNativeViewFactory.current
     val allFocusManagers = localAllFocusManagers.current
+    val closeButtonBottomPadding =
+        LocalNavBarPadding.current.calculateBottomPadding() + MAP_CLOSE_BUTTON_EXTRA_BOTTOM_PADDING
 
     Box(modifier = Modifier.fillMaxSize().pointerInput(Unit) {
         detectTapGestures {
@@ -70,7 +72,7 @@ actual fun EventMap(
                 onCloseMap = onBackPressed,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 128.dp)
+                    .padding(bottom = closeButtonBottomPadding)
             )
         }
     }

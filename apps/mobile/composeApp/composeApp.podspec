@@ -40,6 +40,11 @@ Pod::Spec.new do |spec|
                 fi
                 set -ev
                 REPO_ROOT="$PODS_TARGET_SRCROOT"
+                JAVA_17_HOME="$(/usr/libexec/java_home -v 17 2>/dev/null || true)"
+                if [ -n "$JAVA_17_HOME" ]; then
+                    export JAVA_HOME="$JAVA_17_HOME"
+                    export PATH="$JAVA_HOME/bin:$PATH"
+                fi
                 "$REPO_ROOT/../gradlew" -p "$REPO_ROOT" $KOTLIN_PROJECT_PATH:syncFramework \
                     -Pkotlin.native.cocoapods.platform=$PLATFORM_NAME \
                     -Pkotlin.native.cocoapods.archs="$ARCHS" \

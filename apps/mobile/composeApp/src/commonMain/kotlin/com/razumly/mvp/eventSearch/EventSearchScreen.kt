@@ -39,7 +39,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -104,6 +103,8 @@ import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
 import com.razumly.mvp.eventSearch.composables.EmptyDiscoverListItem
 import com.razumly.mvp.eventMap.EventMap
+import com.razumly.mvp.eventMap.MAP_ACTION_BUTTON_EXTRA_DOWN_OFFSET
+import com.razumly.mvp.eventMap.MAP_ACTION_BUTTON_NAV_PADDING
 import com.razumly.mvp.eventMap.MapComponent
 import com.razumly.mvp.eventSearch.tabs.events.composables.EventsTabContent
 import com.razumly.mvp.eventSearch.tabs.organizations.DiscoverOrganizationList
@@ -173,7 +174,6 @@ internal data class RentalBusyRange(
 )
 private val DISCOVER_FIRST_ITEM_EXTRA_TOP_GAP = 4.dp
 private val DISCOVER_PULL_INDICATOR_TOP_OFFSET = 64.dp
-private val DISCOVER_MAP_FAB_EXTRA_DOWN_OFFSET = 10.dp
 private val DISCOVER_TAB_ROW_HEIGHT = 48.dp
 
 @OptIn(ExperimentalHazeMaterialsApi::class)
@@ -193,7 +193,9 @@ fun EventSearchScreen(
     val selectedEvent by component.selectedEvent.collectAsState()
     val hazeState = rememberHazeState()
     val offsetNavPadding =
-        PaddingValues(bottom = LocalNavBarPadding.current.calculateBottomPadding().plus(32.dp))
+        PaddingValues(
+            bottom = LocalNavBarPadding.current.calculateBottomPadding().plus(MAP_ACTION_BUTTON_NAV_PADDING)
+        )
 
     val eventsListState = rememberLazyListState()
     val organizationsListState = rememberLazyListState()
@@ -286,7 +288,7 @@ fun EventSearchScreen(
     }
 
     LaunchedEffect(currentListScrollingUp, isMapVisible, showingFilter, selectedTab) {
-        showFab = isMapVisible || (currentListScrollingUp && !showingFilter)
+        showFab = !isMapVisible && currentListScrollingUp && !showingFilter
     }
 
     LaunchedEffect(currentListScrollingUp, isMapVisible, showSearchOverlay, showingFilter, searchQuery) {
@@ -400,7 +402,7 @@ fun EventSearchScreen(
                                 },
                                 modifier = Modifier
                                     .padding(offsetNavPadding)
-                                    .offset(y = DISCOVER_MAP_FAB_EXTRA_DOWN_OFFSET)
+                                    .offset(y = MAP_ACTION_BUTTON_EXTRA_DOWN_OFFSET)
                                     .onGloballyPositioned { layoutCoordinates ->
                                         val boundsInWindow = layoutCoordinates.boundsInWindow()
                                         fabOffset = boundsInWindow.center
@@ -410,9 +412,8 @@ fun EventSearchScreen(
                                     contentColor = Color.White
                                 )
                             ) {
-                                val text = if (isMapVisible) "List" else "Map"
-                                val icon =
-                                    if (isMapVisible) Icons.AutoMirrored.Filled.List else Icons.Default.Place
+                                val text = "Map"
+                                val icon = Icons.Default.Place
                                 Text(text)
                                 Icon(icon, contentDescription = "$text Button")
                             }

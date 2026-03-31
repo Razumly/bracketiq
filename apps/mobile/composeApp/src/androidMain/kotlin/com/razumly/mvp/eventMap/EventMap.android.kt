@@ -44,6 +44,7 @@ import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
+import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.util.toGoogle
 import com.razumly.mvp.eventMap.composables.MapEventCard
 import com.razumly.mvp.eventMap.composables.MapPOICard
@@ -73,6 +74,8 @@ actual fun EventMap(
     val trackedLocation by component.currentLocation.collectAsState()
     val events by component.events.collectAsState()
     val places by component.places.collectAsState()
+    val closeButtonBottomPadding =
+        LocalNavBarPadding.current.calculateBottomPadding() + MAP_CLOSE_BUTTON_EXTRA_BOTTOM_PADDING
     var searchedPlaces by remember { mutableStateOf<List<Place>>(emptyList()) }
     val defaultZoom = 12f
     val defaultDurationMs = 1000
@@ -453,7 +456,7 @@ actual fun EventMap(
                 onCloseMap = onBackPressed,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 128.dp),
+                    .padding(bottom = closeButtonBottomPadding),
             )
         }
     }
