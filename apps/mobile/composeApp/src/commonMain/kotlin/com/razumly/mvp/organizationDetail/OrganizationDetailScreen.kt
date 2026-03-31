@@ -112,9 +112,7 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
             )
         }
     }
-    val validResolvedSelections = remember(resolvedSelections) {
-        resolvedSelections.filter { it.totalPriceCents > 0 }
-    }
+    val validResolvedSelections = resolvedSelections
     val invalidSelectionCount = remember(rentalSelections, resolvedSelections) {
         rentalSelections.size - resolvedSelections.size
     }
@@ -130,10 +128,12 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
     val selectedRequiredTemplateIdsForCreate = remember(validResolvedSelections) {
         validResolvedSelections
             .flatMap { resolved ->
-                resolved.slots.flatMap { slot -> slot.requiredTemplateIds }
+                resolved.slots.flatMap { slot ->
+                    slot.requiredTemplateIds
+                        .map { templateId -> templateId.trim() }
+                        .filter { templateId -> templateId.isNotEmpty() }
+                }
             }
-            .map { templateId -> templateId.trim() }
-            .filter { templateId -> templateId.isNotEmpty() }
             .distinct()
     }
     val rentalStartInstant = remember(validResolvedSelections) {
@@ -143,22 +143,19 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
         validResolvedSelections.maxOfOrNull { resolved -> resolved.endInstant }
     }
     val canGoToConfirmation = validResolvedSelections.isNotEmpty() &&
-        invalidSelectionCount == 0 &&
-        totalRentalPriceCents > 0
+        invalidSelectionCount == 0
     val canContinueRental = organization != null &&
         rentalStartInstant != null &&
         rentalEndInstant != null &&
         selectedFieldIdsForCreate.isNotEmpty() &&
         selectedTimeSlotIdsForCreate.isNotEmpty() &&
-        invalidSelectionCount == 0 &&
-        totalRentalPriceCents > 0
+        invalidSelectionCount == 0
     val rentalValidationMessage = when {
         organization == null -> "Organization is not available."
         isLoadingRentals && rentalFieldOptions.isEmpty() -> "Loading fields and rental slots..."
         rentalFieldOptions.isEmpty() -> "No fields are configured for this organization."
         rentalSelections.isEmpty() -> "Tap any available 30-minute cell to add a rental selection."
         invalidSelectionCount > 0 -> "One or more selections are outside available rental slot ranges."
-        totalRentalPriceCents <= 0 -> "Selected rentals do not have valid pricing."
         else -> null
     }
 

@@ -61,6 +61,9 @@ data class TimeSlotDTO(
                 .distinct(),
             price = price,
             requiredTemplateIds = requiredTemplateIds
+                .map(String::trim)
+                .filter(String::isNotBlank)
+                .distinct(),
         )
 }
 
