@@ -173,6 +173,7 @@ class FieldRepository(
                 scheduledFieldIds = normalizedFieldIds.takeIf { it.isNotEmpty() },
                 price = slot.price,
                 requiredTemplateIds = slot.requiredTemplateIds,
+                hostRequiredTemplateIds = slot.hostRequiredTemplateIds,
             )
         )
     }
@@ -195,6 +196,7 @@ class FieldRepository(
                     scheduledFieldIds = payload.scheduledFieldIds,
                     price = payload.price,
                     requiredTemplateIds = payload.requiredTemplateIds,
+                    hostRequiredTemplateIds = payload.hostRequiredTemplateIds,
                 )
             )
         )
@@ -217,6 +219,7 @@ class FieldRepository(
         scheduledFieldIds = normalizedScheduledFieldIds().takeIf { it.isNotEmpty() },
         price = price,
         requiredTemplateIds = requiredTemplateIds,
+        hostRequiredTemplateIds = hostRequiredTemplateIds,
     )
 }
 
@@ -235,6 +238,7 @@ private data class CreateTimeSlotRequestDto(
     val scheduledFieldIds: List<String>? = null,
     val price: Int? = null,
     val requiredTemplateIds: List<String> = emptyList(),
+    val hostRequiredTemplateIds: List<String> = emptyList(),
 )
 
 @Serializable
@@ -256,6 +260,7 @@ private data class UpdateTimeSlotPayload(
     val scheduledFieldIds: List<String>? = null,
     val price: Int? = null,
     val requiredTemplateIds: List<String> = emptyList(),
+    val hostRequiredTemplateIds: List<String> = emptyList(),
 )
 
 @Serializable

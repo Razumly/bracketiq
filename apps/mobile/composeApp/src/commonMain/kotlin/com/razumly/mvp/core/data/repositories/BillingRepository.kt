@@ -16,6 +16,7 @@ import com.razumly.mvp.core.network.stripeRedirectBaseUrl
 import com.razumly.mvp.core.network.dto.BillingEventRefDto
 import com.razumly.mvp.core.network.dto.BillingRefundRequestDto
 import com.razumly.mvp.core.network.dto.BillingTeamRefDto
+import com.razumly.mvp.core.network.dto.BillingTimeSlotRefDto
 import com.razumly.mvp.core.network.dto.BillingUserRefDto
 import com.razumly.mvp.core.network.dto.PurchaseIntentRequestDto
 import com.razumly.mvp.core.network.dto.RefundAllRequestDto
@@ -186,6 +187,14 @@ data class EventTeamBillCreateRequest(
     val label: String? = null,
 )
 
+data class PurchaseIntentTimeSlotContext(
+    val id: String? = null,
+    val priceCents: Int? = null,
+    val startDate: String? = null,
+    val endDate: String? = null,
+    val hostRequiredTemplateIds: List<String> = emptyList(),
+)
+
 data class RecordSignatureResult(
     val operationId: String? = null,
     val syncStatus: String? = null,
@@ -215,6 +224,7 @@ interface IBillingRepository : IMVPRepository {
         event: Event,
         teamId: String? = null,
         priceCents: Int? = null,
+        timeSlotContext: PurchaseIntentTimeSlotContext? = null,
     ): Result<PurchaseIntent>
     suspend fun getRequiredSignLinks(eventId: String): Result<List<SignStep>>
     suspend fun getRequiredSignLinks(
@@ -292,6 +302,7 @@ class BillingRepository(
         event: Event,
         teamId: String?,
         priceCents: Int?,
+        timeSlotContext: PurchaseIntentTimeSlotContext?,
     ): Result<PurchaseIntent> = runCatching {
         val user = userRepository.currentUser.value.getOrThrow()
         val email = userRepository.currentAccount.value.getOrNull()?.email
@@ -314,6 +325,18 @@ class BillingRepository(
                     organizationId = event.organizationId,
                 ),
                 team = normalizedTeamId?.let { BillingTeamRefDto(id = it) },
+                timeSlot = timeSlotContext?.let { context ->
+                    BillingTimeSlotRefDto(
+                        id = context.id?.trim()?.takeIf(String::isNotBlank),
+                        priceCents = context.priceCents,
+                        startDate = context.startDate?.trim()?.takeIf(String::isNotBlank),
+                        endDate = context.endDate?.trim()?.takeIf(String::isNotBlank),
+                        hostRequiredTemplateIds = context.hostRequiredTemplateIds
+                            .map(String::trim)
+                            .filter(String::isNotBlank)
+                            .distinct(),
+                    )
+                },
             ),
         )
 

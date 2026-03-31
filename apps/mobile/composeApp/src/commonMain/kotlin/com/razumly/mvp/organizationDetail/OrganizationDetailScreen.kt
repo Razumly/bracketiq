@@ -125,11 +125,22 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
     val selectedTimeSlotIdsForCreate = remember(validResolvedSelections) {
         validResolvedSelections.flatMap { resolved -> resolved.slots.map { slot -> slot.id } }.distinct()
     }
-    val selectedRequiredTemplateIdsForCreate = remember(validResolvedSelections) {
+    val selectedParticipantTemplateIdsForCreate = remember(validResolvedSelections) {
         validResolvedSelections
             .flatMap { resolved ->
                 resolved.slots.flatMap { slot ->
                     slot.requiredTemplateIds
+                        .map { templateId -> templateId.trim() }
+                        .filter { templateId -> templateId.isNotEmpty() }
+                }
+            }
+            .distinct()
+    }
+    val selectedHostTemplateIdsForCreate = remember(validResolvedSelections) {
+        validResolvedSelections
+            .flatMap { resolved ->
+                resolved.slots.flatMap { slot ->
+                    slot.hostRequiredTemplateIds
                         .map { templateId -> templateId.trim() }
                         .filter { templateId -> templateId.isNotEmpty() }
                 }
@@ -417,7 +428,8 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                                                 organizationFieldIds = currentOrganization.fieldIds,
                                                 selectedFieldIds = selectedFieldIdsForCreate,
                                                 selectedTimeSlotIds = selectedTimeSlotIdsForCreate,
-                                                requiredTemplateIds = selectedRequiredTemplateIdsForCreate,
+                                                participantRequiredTemplateIds = selectedParticipantTemplateIdsForCreate,
+                                                hostRequiredTemplateIds = selectedHostTemplateIdsForCreate,
                                                 rentalPriceCents = totalRentalPriceCents,
                                                 startEpochMillis = start.toEpochMilliseconds(),
                                                 endEpochMillis = end.toEpochMilliseconds(),

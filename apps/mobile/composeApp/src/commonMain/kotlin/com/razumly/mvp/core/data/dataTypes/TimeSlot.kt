@@ -21,6 +21,7 @@ data class TimeSlot(
     val scheduledFieldIds: List<String>? = null,
     val price: Int?,
     val requiredTemplateIds: List<String> = emptyList(),
+    val hostRequiredTemplateIds: List<String> = emptyList(),
 )
 
 @Serializable
@@ -38,6 +39,7 @@ data class TimeSlotDTO(
     val scheduledFieldIds: List<String>? = null,
     val price: Int? = null,
     val requiredTemplateIds: List<String> = emptyList(),
+    val hostRequiredTemplateIds: List<String> = emptyList(),
 ) {
     fun toTimeSlot(id: String): TimeSlot =
         TimeSlot(
@@ -61,6 +63,10 @@ data class TimeSlotDTO(
                 .distinct(),
             price = price,
             requiredTemplateIds = requiredTemplateIds
+                .map(String::trim)
+                .filter(String::isNotBlank)
+                .distinct(),
+            hostRequiredTemplateIds = hostRequiredTemplateIds
                 .map(String::trim)
                 .filter(String::isNotBlank)
                 .distinct(),

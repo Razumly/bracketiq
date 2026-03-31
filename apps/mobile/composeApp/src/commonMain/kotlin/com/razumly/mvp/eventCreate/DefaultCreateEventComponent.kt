@@ -37,6 +37,7 @@ import com.razumly.mvp.core.data.repositories.IFieldRepository
 import com.razumly.mvp.core.data.repositories.IImagesRepository
 import com.razumly.mvp.core.data.repositories.ISportsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.data.repositories.PurchaseIntentTimeSlotContext
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentResult
 import com.razumly.mvp.core.presentation.PaymentProcessor
@@ -324,7 +325,11 @@ class DefaultCreateEventComponent(
                 hostSyncedDraft.applyCreateSelectionRules(_isRentalFlow.value)
             )
             if (_isRentalFlow.value) {
-                processRentalPaymentBeforeCreate(eventDraft)
+                if (eventDraft.priceCents > 0) {
+                    processRentalPaymentBeforeCreate(eventDraft)
+                } else {
+                    createEventAfterPayment(eventDraft)
+                }
             } else {
                 createEventAfterPayment(eventDraft)
             }
@@ -904,11 +909,7 @@ class DefaultCreateEventComponent(
             organizationId = context.organizationId,
             fieldIds = selectedFieldIds,
             timeSlotIds = selectedTimeSlotIds,
-            priceCents = if (context.rentalPriceCents > 0) {
-                context.rentalPriceCents
-            } else {
-                _newEventState.value.priceCents
-            },
+            priceCents = context.rentalPriceCents.coerceAtLeast(0),
             start = if (start == Instant.DISTANT_PAST) now else start,
             end = if (normalizedEnd == Instant.DISTANT_PAST) {
                 Instant.fromEpochMilliseconds(now.toEpochMilliseconds() + ONE_HOUR_MILLIS)
@@ -919,11 +920,39 @@ class DefaultCreateEventComponent(
     }
 
     private fun rentalRequiredTemplateIds(): List<String> {
-        return rentalContext?.requiredTemplateIds
+        return rentalContext?.participantRequiredTemplateIds
             ?.map { templateId -> templateId.trim() }
             ?.filter { templateId -> templateId.isNotEmpty() }
             ?.distinct()
             ?: emptyList()
+    }
+
+    private fun rentalHostRequiredTemplateIds(): List<String> {
+        return rentalContext?.hostRequiredTemplateIds
+            ?.map { templateId -> templateId.trim() }
+            ?.filter { templateId -> templateId.isNotEmpty() }
+            ?.distinct()
+            ?: emptyList()
+    }
+
+    private fun buildRentalTimeSlotContext(eventDraft: Event): PurchaseIntentTimeSlotContext? {
+        if (!_isRentalFlow.value) {
+            return null
+        }
+
+        val context = rentalContext ?: return null
+        val startDate = Instant.fromEpochMilliseconds(context.startEpochMillis).toString()
+        val endDate = Instant.fromEpochMilliseconds(context.endEpochMillis).toString()
+        return PurchaseIntentTimeSlotContext(
+            id = context.selectedTimeSlotIds
+                .asSequence()
+                .map(String::trim)
+                .firstOrNull(String::isNotBlank),
+            priceCents = eventDraft.priceCents,
+            startDate = startDate,
+            endDate = endDate,
+            hostRequiredTemplateIds = rentalHostRequiredTemplateIds(),
+        )
     }
 
     private fun applyRentalConstraints(event: Event): Event {
@@ -955,7 +984,7 @@ class DefaultCreateEventComponent(
             .map { slotId -> slotId.trim() }
             .filter(String::isNotEmpty)
             .distinct()
-        val lockedPrice = context.rentalPriceCents.takeIf { it > 0 } ?: event.priceCents
+        val lockedPrice = context.rentalPriceCents.coerceAtLeast(0)
 
         var next = event.copy(
             eventType = EventType.EVENT,
@@ -976,7 +1005,7 @@ class DefaultCreateEventComponent(
 
     private suspend fun processRentalPaymentBeforeCreate(eventDraft: Event) {
         if (eventDraft.priceCents <= 0) {
-            _errorState.value = ErrorMessage("Set a rental price before continuing to payment.")
+            createEventAfterPayment(eventDraft)
             return
         }
 
@@ -1005,7 +1034,10 @@ class DefaultCreateEventComponent(
         }
 
         loadingHandler.showLoading("Creating rental payment...")
-        billingRepository.createPurchaseIntent(eventDraft)
+        billingRepository.createPurchaseIntent(
+            event = eventDraft,
+            timeSlotContext = buildRentalTimeSlotContext(eventDraft),
+        )
             .onSuccess { intent ->
                 clearPaymentResult()
                 pendingEventAfterPayment.value = eventDraft

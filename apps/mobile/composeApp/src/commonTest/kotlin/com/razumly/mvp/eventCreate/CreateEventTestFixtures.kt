@@ -42,6 +42,7 @@ import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.LeagueDivisionStandings
 import com.razumly.mvp.core.data.repositories.LeagueStandingsConfirmResult
 import com.razumly.mvp.core.data.repositories.ProfileDocumentsBundle
+import com.razumly.mvp.core.data.repositories.PurchaseIntentTimeSlotContext
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.data.repositories.RecordSignatureResult
 import com.razumly.mvp.core.data.repositories.ChildRegistrationResult
@@ -512,12 +513,25 @@ internal class CreateEvent_FakeMatchRepository : IMatchRepository {
 }
 
 internal class CreateEvent_FakeBillingRepository : IBillingRepository {
+    data class PurchaseIntentCall(
+        val event: Event,
+        val timeSlotContext: PurchaseIntentTimeSlotContext?,
+    )
+
+    val purchaseIntentCalls = mutableListOf<PurchaseIntentCall>()
+
     override suspend fun createPurchaseIntent(
         event: Event,
         teamId: String?,
         priceCents: Int?,
-    ): Result<PurchaseIntent> =
-        Result.success(PurchaseIntent(paymentIntent = "pi_test", publishableKey = "pk_test"))
+        timeSlotContext: PurchaseIntentTimeSlotContext?,
+    ): Result<PurchaseIntent> {
+        purchaseIntentCalls += PurchaseIntentCall(
+            event = event,
+            timeSlotContext = timeSlotContext,
+        )
+        return Result.success(PurchaseIntent(paymentIntent = "pi_test", publishableKey = "pk_test"))
+    }
 
     override suspend fun createBill(request: CreateBillRequest): Result<Bill> = Result.success(
         Bill(

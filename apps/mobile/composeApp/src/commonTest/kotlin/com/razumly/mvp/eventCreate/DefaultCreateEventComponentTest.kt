@@ -436,7 +436,8 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
             organizationFieldIds = listOf("org-field-1"),
             selectedFieldIds = listOf(" field-a ", "field-a", "field-b"),
             selectedTimeSlotIds = listOf(" slot-a ", "slot-a"),
-            requiredTemplateIds = listOf("template-a", "template-b"),
+            participantRequiredTemplateIds = listOf("template-a", "template-b"),
+            hostRequiredTemplateIds = listOf("host-template-a"),
             rentalPriceCents = 2500,
             startEpochMillis = 1_700_000_000_000,
             endEpochMillis = 1_700_003_600_000,
@@ -476,6 +477,72 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         assertEquals(2500, constrained.priceCents)
         assertEquals(instant(1_700_000_000_000), constrained.start)
         assertEquals(instant(1_700_003_600_000), constrained.end)
+    }
+
+    @Test
+    fun given_free_rental_context_when_creating_event_then_price_is_locked_and_payment_is_skipped() = runTest(testDispatcher) {
+        val rentalContext = RentalCreateContext(
+            organizationId = "org-free",
+            organizationName = "Free Gym",
+            organizationLocation = "Court 1",
+            organizationCoordinates = listOf(-122.25, 37.78),
+            organizationFieldIds = listOf("org-field-1"),
+            selectedFieldIds = listOf("field-a"),
+            selectedTimeSlotIds = listOf("slot-a"),
+            participantRequiredTemplateIds = emptyList(),
+            hostRequiredTemplateIds = emptyList(),
+            rentalPriceCents = 0,
+            startEpochMillis = 1_700_000_000_000,
+            endEpochMillis = 1_700_003_600_000,
+        )
+        val harness = CreateEventHarness(rentalContext = rentalContext)
+        advance()
+
+        harness.component.updateEventField { copy(priceCents = 2500) }
+        advance()
+        assertEquals(0, harness.component.newEventState.value.priceCents)
+
+        harness.component.createEvent()
+        advance()
+
+        assertEquals(0, harness.billingRepository.purchaseIntentCalls.size)
+        assertEquals(1, harness.eventRepository.createEventCalls.size)
+        assertEquals(1, harness.onEventCreatedCount)
+        assertEquals(0, harness.eventRepository.createEventCalls.single().event.priceCents)
+    }
+
+    @Test
+    fun given_paid_rental_context_when_creating_event_then_checkout_sends_host_template_requirements() = runTest(testDispatcher) {
+        val rentalContext = RentalCreateContext(
+            organizationId = "org-paid",
+            organizationName = "Paid Gym",
+            organizationLocation = "Court 2",
+            organizationCoordinates = listOf(-122.25, 37.78),
+            organizationFieldIds = listOf("org-field-1"),
+            selectedFieldIds = listOf("field-a"),
+            selectedTimeSlotIds = listOf("slot-a", "slot-b"),
+            participantRequiredTemplateIds = listOf("participant-template"),
+            hostRequiredTemplateIds = listOf(" host-template-a ", "host-template-a", "host-template-b"),
+            rentalPriceCents = 3500,
+            startEpochMillis = 1_700_000_000_000,
+            endEpochMillis = 1_700_003_600_000,
+        )
+        val harness = CreateEventHarness(rentalContext = rentalContext)
+        advance()
+
+        harness.component.createEvent()
+        advance()
+
+        assertEquals(1, harness.billingRepository.purchaseIntentCalls.size)
+        val checkoutCall = harness.billingRepository.purchaseIntentCalls.single()
+        assertEquals(3500, checkoutCall.event.priceCents)
+        assertEquals("slot-a", checkoutCall.timeSlotContext?.id)
+        assertEquals(3500, checkoutCall.timeSlotContext?.priceCents)
+        assertEquals(
+            listOf("host-template-a", "host-template-b"),
+            checkoutCall.timeSlotContext?.hostRequiredTemplateIds,
+        )
+        assertEquals(0, harness.eventRepository.createEventCalls.size)
     }
 
     @Test

@@ -29,10 +29,21 @@ data class BillingTeamRefDto(
 )
 
 @Serializable
+data class BillingTimeSlotRefDto(
+    val id: String? = null,
+    @SerialName("\$id") val legacyId: String? = null,
+    @SerialName("price") val priceCents: Int? = null,
+    val startDate: String? = null,
+    val endDate: String? = null,
+    val hostRequiredTemplateIds: List<String> = emptyList(),
+)
+
+@Serializable
 data class PurchaseIntentRequestDto(
     val user: BillingUserRefDto? = null,
     val event: BillingEventRefDto? = null,
     val team: BillingTeamRefDto? = null,
+    val timeSlot: BillingTimeSlotRefDto? = null,
     val productId: String? = null,
 )
 

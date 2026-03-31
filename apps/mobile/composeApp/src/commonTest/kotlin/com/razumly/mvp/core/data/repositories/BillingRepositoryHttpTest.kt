@@ -662,6 +662,59 @@ class BillingRepositoryHttpTest {
     }
 
     @Test
+    fun createPurchaseIntent_with_timeSlotContext_includes_host_required_templates() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+        var capturedBody = ""
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/billing/purchase-intent", request.url.encodedPath)
+            assertEquals(HttpMethod.Post, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+
+            respond(
+                content = """
+                    {
+                      "paymentIntent": "pi_123_secret_rental",
+                      "publishableKey": "pk_test_123"
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = BillingRepository(api, userRepo, BillingRepositoryHttp_UnusedEventRepository, db)
+
+        val event = Event(id = "event_rental_1", hostId = "h1", priceCents = 3500, eventType = EventType.EVENT)
+        repo.createPurchaseIntent(
+            event = event,
+            timeSlotContext = PurchaseIntentTimeSlotContext(
+                id = "slot_1",
+                priceCents = 3500,
+                startDate = "2026-04-01T10:00:00Z",
+                endDate = "2026-04-01T12:00:00Z",
+                hostRequiredTemplateIds = listOf(" host_a ", "", "host_a", "host_b"),
+            ),
+        ).getOrThrow()
+
+        assertTrue(capturedBody.contains("\"timeSlot\""))
+        assertTrue(capturedBody.contains("\"id\":\"slot_1\""))
+        assertTrue(capturedBody.contains("\"price\":3500"))
+        assertTrue(capturedBody.contains("\"hostRequiredTemplateIds\":[\"host_a\",\"host_b\"]"))
+    }
+
+    @Test
     fun getRequiredSignLinks_posts_and_parses_response() = runTest {
         val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
         val userRepo = BillingRepositoryHttp_FakeUserRepository(
