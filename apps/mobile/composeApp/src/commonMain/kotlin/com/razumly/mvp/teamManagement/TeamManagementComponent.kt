@@ -39,6 +39,7 @@ interface TeamManagementComponent {
     val sports: StateFlow<List<Sport>>
     val friends: StateFlow<List<UserData>>
     val currentTeams: StateFlow<List<TeamWithPlayers>>
+    val isCurrentTeamsLoading: StateFlow<Boolean>
     val selectedTeam: StateFlow<TeamWithPlayers?>
     val staffUsersById: StateFlow<Map<String, UserData>>
     val suggestedPlayers: StateFlow<List<UserData>>
@@ -108,6 +109,15 @@ class DefaultTeamManagementComponent(
                 emptyList()
             }
         }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+    override val isCurrentTeamsLoading = currentUserIdFlow
+        .flatMapLatest { currentUserId ->
+            if (currentUserId.isBlank()) {
+                flowOf(true)
+            } else {
+                teamRepository.getTeamsWithPlayersLoadingFlow(currentUserId)
+            }
+        }
+        .stateIn(scope, SharingStarted.Eagerly, true)
 
     private val _selectedTeam = MutableStateFlow<TeamWithPlayers?>(null)
     override val selectedTeam = _selectedTeam.asStateFlow()

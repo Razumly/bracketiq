@@ -26,6 +26,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -42,6 +44,7 @@ interface ITeamRepository : IMVPRepository {
     suspend fun updateTeam(newTeam: Team): Result<Team>
     suspend fun deleteTeam(team: TeamWithPlayers): Result<Unit>
     fun getTeamsWithPlayersFlow(id: String): Flow<Result<List<TeamWithPlayers>>>
+    fun getTeamsWithPlayersLoadingFlow(id: String): Flow<Boolean> = flowOf(false)
     fun getTeamWithPlayersFlow(id: String): Flow<Result<TeamWithRelations>>
     suspend fun listTeamInvites(userId: String): Result<List<Invite>>
     suspend fun getInviteFreeAgents(teamId: String): Result<List<UserData>>
@@ -62,6 +65,7 @@ class TeamRepository(
     private val pushNotificationRepository: IPushNotificationsRepository,
 ) : ITeamRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val userTeamsLoadingState = MutableStateFlow<Map<String, Boolean>>(emptyMap())
 
     override fun getTeamsFlow(ids: List<String>): Flow<Result<List<TeamWithPlayers>>> {
         val teamIds = ids.distinct().filter(String::isNotBlank)
@@ -244,10 +248,22 @@ class TeamRepository(
         val localTeamsFlow = databaseService.getTeamDao.getTeamsForUserFlow(id).map { Result.success(it) }
 
         scope.launch {
-            fetchRemoteTeamsForUser(userId = id)
+            setTeamsLoading(userId = id, isLoading = true)
+            try {
+                fetchRemoteTeamsForUser(userId = id)
+            } finally {
+                setTeamsLoading(userId = id, isLoading = false)
+            }
         }
 
         return localTeamsFlow
+    }
+
+    override fun getTeamsWithPlayersLoadingFlow(id: String): Flow<Boolean> {
+        if (id.isBlank()) return flowOf(false)
+        return userTeamsLoadingState
+            .map { it[id] == true }
+            .distinctUntilChanged()
     }
 
     private suspend fun fetchRemoteTeamsForUser(userId: String): Result<List<Team>> {
@@ -257,6 +273,17 @@ class TeamRepository(
             saveData = { teams -> databaseService.getTeamDao.upsertTeamsWithRelations(teams) },
             deleteData = { staleIds -> databaseService.getTeamDao.deleteTeamsByIds(staleIds) },
         )
+    }
+
+    private fun setTeamsLoading(userId: String, isLoading: Boolean) {
+        if (userId.isBlank()) return
+        val current = userTeamsLoadingState.value.toMutableMap()
+        if (isLoading) {
+            current[userId] = true
+        } else {
+            current.remove(userId)
+        }
+        userTeamsLoadingState.value = current
     }
 
     override suspend fun getTeamWithPlayers(teamId: String): Result<TeamWithPlayers> =

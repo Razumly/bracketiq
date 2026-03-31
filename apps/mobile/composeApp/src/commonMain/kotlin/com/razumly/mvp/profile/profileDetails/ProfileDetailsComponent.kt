@@ -5,11 +5,14 @@ import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.AuthAccount
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.repositories.IImagesRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentProcessor
+import com.razumly.mvp.core.presentation.util.convertPhotoResultToUploadFile
 import com.razumly.mvp.core.util.ErrorMessage
 import com.razumly.mvp.core.util.LoadingHandler
+import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -25,9 +28,12 @@ interface ProfileDetailsComponent : IPaymentProcessor {
     val message: StateFlow<String?>
     val currentUser: StateFlow<UserData>
     val currentAccount: StateFlow<AuthAccount>
+    val lastUploadedImageId: StateFlow<String?>
 
     fun onBackClicked()
     fun setLoadingHandler(loadingHandler: LoadingHandler)
+    fun onUploadSelected(photo: GalleryPhotoResult)
+    fun consumeUploadedImageSelection()
 
     fun updateProfile(
         firstName: String,
@@ -35,13 +41,15 @@ interface ProfileDetailsComponent : IPaymentProcessor {
         email: String,
         currentPassword: String,
         newPassword: String,
-        userName: String
+        userName: String,
+        profileImageId: String?,
     )
 }
 
 class DefaultProfileDetailsComponent(
     private val componentContext: ComponentContext,
     private val userRepository: IUserRepository,
+    private val imageRepository: IImagesRepository,
     private val onNavigateBack: () -> Unit
 ) : ProfileDetailsComponent, PaymentProcessor(), ComponentContext by componentContext {
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
@@ -50,6 +58,9 @@ class DefaultProfileDetailsComponent(
 
     private val _message = MutableStateFlow<String?>(null)
     override val message = _message.asStateFlow()
+
+    private val _lastUploadedImageId = MutableStateFlow<String?>(null)
+    override val lastUploadedImageId = _lastUploadedImageId.asStateFlow()
 
     override val currentUser = userRepository.currentUser
         .map { result -> result.getOrNull() ?: UserData() }
@@ -80,17 +91,48 @@ class DefaultProfileDetailsComponent(
         this.loadingHandler = loadingHandler
     }
 
+    override fun onUploadSelected(photo: GalleryPhotoResult) {
+        scope.launch {
+            if (::loadingHandler.isInitialized) {
+                loadingHandler.showLoading("Uploading image...")
+            }
+            imageRepository.uploadImage(convertPhotoResultToUploadFile(photo))
+                .onFailure { error ->
+                    _errorState.value = ErrorMessage("Failed to upload image: ${error.userMessage()}")
+                }
+                .onSuccess { imageId ->
+                    _lastUploadedImageId.value = imageId
+                }
+            if (::loadingHandler.isInitialized) {
+                loadingHandler.hideLoading()
+            }
+        }
+    }
+
+    override fun consumeUploadedImageSelection() {
+        _lastUploadedImageId.value = null
+    }
+
     override fun updateProfile(
         firstName: String,
         lastName: String,
         email: String,
         currentPassword: String,
         newPassword: String,
-        userName: String
+        userName: String,
+        profileImageId: String?,
     ) {
         scope.launch {
             loadingHandler.showLoading("Updating Profile...")
-            userRepository.updateProfile(firstName, lastName, email, currentPassword, newPassword, userName)
+            userRepository.updateProfile(
+                firstName = firstName,
+                lastName = lastName,
+                email = email,
+                currentPassword = currentPassword,
+                newPassword = newPassword,
+                userName = userName,
+                profileImageId = profileImageId,
+            )
                 .onFailure { error ->
                     _errorState.value = ErrorMessage("Failed to update profile: ${error.userMessage()}")
                 }

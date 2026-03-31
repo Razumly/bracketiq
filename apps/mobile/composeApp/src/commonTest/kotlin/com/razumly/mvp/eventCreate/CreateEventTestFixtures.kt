@@ -276,6 +276,7 @@ internal class CreateEvent_FakeUserRepository : IUserRepository {
         currentPassword: String,
         newPassword: String,
         userName: String,
+        profileImageId: String?,
     ): Result<Unit> = Result.success(Unit)
 
     override suspend fun getCurrentAccount(): Result<Unit> = Result.success(Unit)

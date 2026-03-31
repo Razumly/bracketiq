@@ -223,6 +223,7 @@ private class FakeUserRepository : IUserRepository {
         currentPassword: String,
         newPassword: String,
         userName: String,
+        profileImageId: String?,
     ): Result<Unit> = error("unused")
 
     override suspend fun getCurrentAccount(): Result<Unit> = error("unused")

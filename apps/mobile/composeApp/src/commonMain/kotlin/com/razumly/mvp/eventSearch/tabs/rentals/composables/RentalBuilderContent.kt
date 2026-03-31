@@ -34,6 +34,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material3.Button
@@ -42,6 +44,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FabPosition
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBarDefaults
 import androidx.compose.material3.PrimaryTabRow
@@ -74,11 +77,6 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImagePainter
 import coil3.compose.rememberAsyncImagePainter
-import com.kizitonwose.calendar.compose.WeekCalendar
-import com.kizitonwose.calendar.compose.weekcalendar.rememberWeekCalendarState
-import com.kizitonwose.calendar.core.Week
-import com.kizitonwose.calendar.core.WeekDay
-import com.kizitonwose.calendar.core.WeekDayPosition
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.Organization
@@ -106,7 +104,6 @@ import dev.chrisbanes.haze.materials.HazeMaterials
 import dev.chrisbanes.haze.rememberHazeState
 import dev.icerock.moko.geo.LatLng
 import dev.icerock.moko.geo.compose.BindLocationTrackerEffect
-import kotlinx.datetime.DayOfWeek
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
@@ -116,6 +113,7 @@ import kotlinx.datetime.toLocalDateTime
 import kotlinx.datetime.toInstant
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlin.time.Clock
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
@@ -177,6 +175,7 @@ internal fun RentalDetailsContent(
 
                 RentalWeekSelector(
                     selectedDate = selectedDate,
+                    fieldOptions = fieldOptions,
                     onSelectedDateChange = onSelectedDateChange
                 )
 
@@ -255,18 +254,38 @@ internal fun RentalDetailsContent(
 @Composable
 private fun RentalWeekSelector(
     selectedDate: LocalDate,
+    fieldOptions: List<RentalFieldOption>,
     onSelectedDateChange: (LocalDate) -> Unit,
 ) {
-    val selectedEpochDay = remember(selectedDate) { selectedDate.toEpochDays() }
-    val weekCalendarState = rememberWeekCalendarState(
-        startDate = LocalDate.fromEpochDays(selectedEpochDay - 180),
-        endDate = LocalDate.fromEpochDays(selectedEpochDay + 180),
-        firstVisibleWeekDate = selectedDate,
-        firstDayOfWeek = DayOfWeek.MONDAY,
-    )
+    val timeZone = remember { TimeZone.currentSystemDefault() }
+    val today = remember(timeZone) { Clock.System.now().toLocalDateTime(timeZone).date }
+    val boundedSelectedDate = remember(selectedDate, today) {
+        if (selectedDate < today) today else selectedDate
+    }
+    val todayWeekStart = remember(today) { today.startOfWeekMonday() }
+    val selectedWeekStart = remember(boundedSelectedDate) { boundedSelectedDate.startOfWeekMonday() }
+    val selectedDayOffset = remember(boundedSelectedDate, selectedWeekStart) {
+        boundedSelectedDate.toEpochDays() - selectedWeekStart.toEpochDays()
+    }
+    val weekDates = remember(selectedWeekStart) {
+        List(7) { dayOffset ->
+            LocalDate.fromEpochDays(selectedWeekStart.toEpochDays() + dayOffset)
+        }
+    }
+    val datesWithRentalAvailability = remember(weekDates, fieldOptions, timeZone) {
+        weekDates.filterTo(mutableSetOf()) { date ->
+            hasRentalAvailabilityForDate(
+                date = date,
+                fieldOptions = fieldOptions,
+                timeZone = timeZone,
+            )
+        }
+    }
 
-    LaunchedEffect(selectedDate) {
-        weekCalendarState.animateScrollToDate(selectedDate)
+    LaunchedEffect(selectedDate, today) {
+        if (selectedDate < today) {
+            onSelectedDateChange(today)
+        }
     }
 
     Column(
@@ -274,74 +293,127 @@ private fun RentalWeekSelector(
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         Text(
-            text = selectedDate.format(dateFormat),
+            text = boundedSelectedDate.format(dateFormat),
             style = MaterialTheme.typography.titleSmall
         )
-        WeekCalendar(
-            state = weekCalendarState,
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            weekHeader = { week ->
-                RentalWeekHeader(week = week)
-            },
-            dayContent = { day ->
-                val isSelected = day.date == selectedDate
-                val isEnabled = day.position == WeekDayPosition.RangeDate
-                Card(
-                    modifier = Modifier
-                        .padding(horizontal = 2.dp, vertical = 4.dp)
-                        .clickable(enabled = isEnabled) {
-                            onSelectedDateChange(day.date)
-                        },
-                    colors = CardDefaults.cardColors(
-                        containerColor = when {
-                            isSelected -> MaterialTheme.colorScheme.primary
-                            else -> MaterialTheme.colorScheme.surfaceVariant
-                        },
-                        contentColor = when {
-                            isSelected -> MaterialTheme.colorScheme.onPrimary
-                            else -> MaterialTheme.colorScheme.onSurfaceVariant
-                        }
-                    )
-                ) {
-                    Column(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(
+                onClick = {
+                    val previousWeekStart = LocalDate.fromEpochDays(selectedWeekStart.toEpochDays() - 7)
+                    val shiftedDate = LocalDate.fromEpochDays(previousWeekStart.toEpochDays() + selectedDayOffset)
+                    onSelectedDateChange(if (shiftedDate < today) today else shiftedDate)
+                },
+                enabled = selectedWeekStart > todayWeekStart,
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                    contentDescription = "Previous week",
+                )
+            }
+
+            Row(
+                modifier = Modifier.weight(1f)
+            ) {
+                weekDates.forEach { date ->
+                    val isSelected = date == boundedSelectedDate
+                    val isSelectable = date >= today
+                    val hasAvailability = datesWithRentalAvailability.contains(date)
+                    Card(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 8.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                            .weight(1f)
+                            .padding(horizontal = 2.dp, vertical = 4.dp)
+                            .clickable(enabled = isSelectable) {
+                                onSelectedDateChange(date)
+                            },
+                        colors = CardDefaults.cardColors(
+                            containerColor = when {
+                                isSelected -> MaterialTheme.colorScheme.primary
+                                else -> MaterialTheme.colorScheme.surfaceVariant
+                            },
+                            contentColor = when {
+                                isSelected -> MaterialTheme.colorScheme.onPrimary
+                                isSelectable -> MaterialTheme.colorScheme.onSurfaceVariant
+                                else -> MaterialTheme.colorScheme.outline
+                            }
+                        )
                     ) {
-                        Text(
-                            text = day.date.dayOfWeek.toShortLabel(),
-                            style = MaterialTheme.typography.labelSmall
-                        )
-                        Text(
-                            text = day.date.dayOfMonth.toString(),
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Text(
+                                text = date.dayOfWeek.toShortLabel(),
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                            Text(
+                                text = date.dayOfMonth.toString(),
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Box(
+                                modifier = Modifier
+                                    .width(14.dp)
+                                    .height(2.dp)
+                                    .background(
+                                        color = when {
+                                            !hasAvailability -> Color.Transparent
+                                            isSelected -> MaterialTheme.colorScheme.onPrimary
+                                            else -> MaterialTheme.colorScheme.primary
+                                        },
+                                        shape = RoundedCornerShape(50)
+                                    )
+                            )
+                        }
                     }
                 }
             }
-        )
+
+            IconButton(
+                onClick = {
+                    val nextWeekStart = LocalDate.fromEpochDays(selectedWeekStart.toEpochDays() + 7)
+                    val shiftedDate = LocalDate.fromEpochDays(nextWeekStart.toEpochDays() + selectedDayOffset)
+                    onSelectedDateChange(shiftedDate)
+                },
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = "Next week",
+                )
+            }
+        }
     }
 }
 
-@Composable
-private fun RentalWeekHeader(week: Week) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        week.days.forEach { day ->
-            Text(
-                text = day.date.dayOfWeek.toShortLabel(),
-                modifier = Modifier.weight(1f),
-                textAlign = TextAlign.Center,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+private fun hasRentalAvailabilityForDate(
+    date: LocalDate,
+    fieldOptions: List<RentalFieldOption>,
+    timeZone: TimeZone,
+): Boolean {
+    return (RENTAL_TIMELINE_START_MINUTES until RENTAL_TIMELINE_END_MINUTES step SLOT_INTERVAL_MINUTES)
+        .any { startMinutes ->
+            val endMinutes = (startMinutes + SLOT_INTERVAL_MINUTES)
+                .coerceAtMost(RENTAL_TIMELINE_END_MINUTES)
+            fieldOptions.any { option ->
+                isRangeCoveredByRentalAvailability(
+                    option = option,
+                    date = date,
+                    startMinutes = startMinutes,
+                    endMinutes = endMinutes,
+                    timeZone = timeZone,
+                )
+            }
         }
-    }
+}
+
+private fun LocalDate.startOfWeekMonday(): LocalDate {
+    return LocalDate.fromEpochDays(toEpochDays() - dayOfWeek.toRentalDayIndex())
 }
 
 @Composable
@@ -911,4 +983,3 @@ private fun RentalBusyOverlayBlock(
         }
     }
 }
-

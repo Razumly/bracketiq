@@ -260,6 +260,7 @@ interface IUserRepository : IMVPRepository {
         currentPassword: String,
         newPassword: String,
         userName: String,
+        profileImageId: String?,
     ): Result<Unit>
 
     suspend fun getCurrentAccount(): Result<Unit>
@@ -1009,8 +1010,10 @@ class UserRepository(
         currentPassword: String,
         newPassword: String,
         userName: String,
+        profileImageId: String?,
     ): Result<Unit> = runCatching {
         val currentUserData = currentUser.value.getOrThrow()
+        val normalizedProfileImageId = profileImageId?.trim()?.takeIf(String::isNotBlank)
 
         if (newPassword.isNotBlank()) {
             if (currentPassword.isBlank()) error("Current password is required")
@@ -1021,6 +1024,7 @@ class UserRepository(
             firstName = normalizeRequiredName(firstName),
             lastName = normalizeRequiredName(lastName),
             userName = userName,
+            profileImageId = normalizedProfileImageId,
         )
 
         updateUser(updatedUser).getOrThrow()

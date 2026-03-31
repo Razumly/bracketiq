@@ -219,6 +219,7 @@ val componentModule = module {
         DefaultProfileDetailsComponent(
             componentContext = params.get(),
             userRepository = get(),
+            imageRepository = get(),
             onNavigateBack = params.get()
         )
     }

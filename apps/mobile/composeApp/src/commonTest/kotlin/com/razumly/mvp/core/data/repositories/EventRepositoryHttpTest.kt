@@ -279,6 +279,7 @@ private class EventRepositoryHttp_FakeUserRepository(
         currentPassword: String,
         newPassword: String,
         userName: String,
+        profileImageId: String?,
     ): Result<Unit> = error("unused")
     override suspend fun getCurrentAccount(): Result<Unit> = error("unused")
     override suspend fun sendFriendRequest(user: UserData): Result<Unit> = error("unused")

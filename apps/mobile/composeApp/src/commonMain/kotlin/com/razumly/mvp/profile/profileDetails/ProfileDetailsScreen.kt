@@ -1,6 +1,9 @@
 package com.razumly.mvp.profile.profileDetails
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -8,19 +11,26 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -32,15 +42,22 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import coil3.compose.AsyncImage
+import com.razumly.mvp.core.presentation.composables.NetworkAvatar
 import com.razumly.mvp.core.presentation.composables.StandardTextField
+import com.razumly.mvp.core.presentation.util.getImageUrl
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
 import com.razumly.mvp.core.util.emailAddressRegex
+import io.github.ismoy.imagepickerkmp.domain.models.MimeType
+import io.github.ismoy.imagepickerkmp.presentation.ui.components.GalleryPickerLauncher
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -52,11 +69,13 @@ fun ProfileDetailsScreen(
 
     val currentUser by component.currentUser.collectAsState()
     val currentAccount by component.currentAccount.collectAsState()
+    val lastUploadedImageId by component.lastUploadedImageId.collectAsState()
 
     // Form state
     var email by remember { mutableStateOf("") }
     var firstName by remember { mutableStateOf("") }
     var lastName by remember { mutableStateOf("") }
+    var profileImageId by remember { mutableStateOf<String?>(null) }
     var currentPassword by remember { mutableStateOf("") }
     var newPassword by remember { mutableStateOf("") }
     var userName by remember { mutableStateOf("") }
@@ -64,6 +83,20 @@ fun ProfileDetailsScreen(
     var currentPasswordVisible by remember { mutableStateOf(false) }
     var newPasswordVisible by remember { mutableStateOf(false) }
     var confirmNewPasswordVisible by remember { mutableStateOf(false) }
+    var showUploadImagePicker by remember { mutableStateOf(false) }
+
+    val uploadedImageIds = remember(currentUser.uploadedImages) {
+        currentUser.uploadedImages
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .distinct()
+    }
+    val avatarDisplayName = remember(firstName, lastName, userName) {
+        listOf(firstName.trim(), lastName.trim())
+            .filter(String::isNotBlank)
+            .joinToString(" ")
+            .ifBlank { userName.trim().ifBlank { "User" } }
+    }
 
     val isEmailValid by remember {
         derivedStateOf {
@@ -95,6 +128,15 @@ fun ProfileDetailsScreen(
         firstName = currentUser.firstName
         lastName = currentUser.lastName
         email = currentAccount.email
+        profileImageId = currentUser.profileImageId
+    }
+
+    LaunchedEffect(lastUploadedImageId) {
+        val uploadedId = lastUploadedImageId?.trim().orEmpty()
+        if (uploadedId.isNotBlank()) {
+            profileImageId = uploadedId
+            component.consumeUploadedImageSelection()
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -112,6 +154,27 @@ fun ProfileDetailsScreen(
                 popupHandler.showPopup(message)
             }
         }
+    }
+
+    if (showUploadImagePicker) {
+        GalleryPickerLauncher(
+            onPhotosSelected = { photos ->
+                showUploadImagePicker = false
+                photos.firstOrNull()?.let(component::onUploadSelected)
+            },
+            onError = {
+                showUploadImagePicker = false
+            },
+            onDismiss = {
+                showUploadImagePicker = false
+            },
+            allowMultiple = false,
+            mimeTypes = listOf(
+                MimeType.IMAGE_JPEG,
+                MimeType.IMAGE_PNG,
+                MimeType.IMAGE_WEBP,
+            ),
+        )
     }
 
     Scaffold(
@@ -173,6 +236,89 @@ fun ProfileDetailsScreen(
                     modifier = Modifier.weight(1f),
                     isError = !isLastNameValid && lastName.isNotBlank(),
                     supportingText = if (!isLastNameValid && lastName.isNotBlank()) "Required" else ""
+                )
+            }
+
+            Text(
+                "Profile Picture",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                NetworkAvatar(
+                    displayName = avatarDisplayName,
+                    imageRef = profileImageId,
+                    size = 80.dp,
+                    contentDescription = "Profile picture",
+                )
+
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Button(onClick = { showUploadImagePicker = true }) {
+                        Icon(
+                            imageVector = Icons.Default.CloudUpload,
+                            contentDescription = null,
+                        )
+                        Text("Upload Photo", modifier = Modifier.padding(start = 8.dp))
+                    }
+
+                    OutlinedButton(
+                        enabled = profileImageId?.isNotBlank() == true,
+                        onClick = { profileImageId = null },
+                    ) {
+                        Text("Remove Photo")
+                    }
+                }
+            }
+
+            if (uploadedImageIds.isNotEmpty()) {
+                Text(
+                    "Select from uploaded images",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(uploadedImageIds) { imageId ->
+                        val isSelected = imageId == profileImageId
+                        Card(
+                            modifier = Modifier
+                                .size(72.dp)
+                                .clickable { profileImageId = imageId },
+                            border = BorderStroke(
+                                width = if (isSelected) 2.dp else 1.dp,
+                                color = if (isSelected) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.outlineVariant
+                                },
+                            ),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            ),
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                AsyncImage(
+                                    model = getImageUrl(imageId, width = 160, height = 160),
+                                    contentDescription = "Uploaded profile image",
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop,
+                                )
+                            }
+                        }
+                    }
+                }
+            } else {
+                Text(
+                    "No uploaded images yet. Upload a photo to use as your profile picture.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
 
@@ -267,6 +413,7 @@ fun ProfileDetailsScreen(
                         currentPassword = currentPassword,
                         newPassword = newPassword,
                         userName = userName,
+                        profileImageId = profileImageId,
                     )
                 },
                 modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),

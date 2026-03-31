@@ -128,7 +128,15 @@ private class BillingRepositoryHttp_FakeUserRepository(
     override suspend fun updateUser(user: UserData): Result<UserData> = error("unused")
     override suspend fun updateEmail(email: String, password: String): Result<Unit> = error("unused")
     override suspend fun updatePassword(currentPassword: String, newPassword: String): Result<Unit> = error("unused")
-    override suspend fun updateProfile(firstName: String, lastName: String, email: String, currentPassword: String, newPassword: String, userName: String): Result<Unit> = error("unused")
+    override suspend fun updateProfile(
+        firstName: String,
+        lastName: String,
+        email: String,
+        currentPassword: String,
+        newPassword: String,
+        userName: String,
+        profileImageId: String?,
+    ): Result<Unit> = error("unused")
     override suspend fun getCurrentAccount(): Result<Unit> = Result.success(Unit)
     override suspend fun sendFriendRequest(user: UserData): Result<Unit> = error("unused")
     override suspend fun acceptFriendRequest(user: UserData): Result<Unit> = error("unused")

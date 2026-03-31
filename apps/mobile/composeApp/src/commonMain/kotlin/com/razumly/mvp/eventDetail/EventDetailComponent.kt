@@ -670,9 +670,19 @@ class DefaultEventDetailComponent(
     ) { fields, selected, activeDivision ->
         fields.filter {
             if (!selected.singleDivision && !activeDivision.isNullOrEmpty()) {
-                it.field.divisions.any { division ->
-                    divisionsEquivalent(division, activeDivision)
-                }
+                val normalizedActiveDivision = activeDivision.normalizeDivisionIdentifier()
+                val allowedFieldIdSet = selected.divisionDetails
+                    .firstOrNull { detail ->
+                        divisionsEquivalent(detail.id, normalizedActiveDivision) ||
+                            divisionsEquivalent(detail.key, normalizedActiveDivision)
+                    }
+                    ?.fieldIds
+                    .orEmpty()
+                    .map { fieldId -> fieldId.trim() }
+                    .filter(String::isNotBlank)
+                    .toSet()
+
+                allowedFieldIdSet.isEmpty() || allowedFieldIdSet.contains(it.field.id)
             } else {
                 true
             }
