@@ -7,6 +7,7 @@ import com.razumly.mvp.core.data.dataTypes.SportOfficialPositionTemplate
 import com.razumly.mvp.core.data.dataTypes.removeOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.syncOfficialStaffing
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.presentation.RentalCreateContext
 import com.razumly.mvp.eventDetail.EventStaffRole
 import kotlinx.datetime.TimeZone
@@ -450,6 +451,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         assertEquals("org-1", initial.organizationId)
         assertEquals(listOf("field-a", "field-b"), initial.fieldIds)
         assertEquals(listOf("slot-a"), initial.timeSlotIds)
+        assertEquals(listOf("template-a", "template-b"), initial.requiredTemplateIds)
         assertEquals(2500, initial.priceCents)
         assertEquals(instant(1_700_000_000_000), initial.start)
         assertEquals(instant(1_700_003_600_000), initial.end)
@@ -474,6 +476,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         assertEquals("org-1", constrained.organizationId)
         assertEquals(listOf("field-a", "field-b"), constrained.fieldIds)
         assertEquals(listOf("slot-a"), constrained.timeSlotIds)
+        assertEquals(listOf("template-a", "template-b"), constrained.requiredTemplateIds)
         assertEquals(2500, constrained.priceCents)
         assertEquals(instant(1_700_000_000_000), constrained.start)
         assertEquals(instant(1_700_003_600_000), constrained.end)
@@ -489,7 +492,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
             organizationFieldIds = listOf("org-field-1"),
             selectedFieldIds = listOf("field-a"),
             selectedTimeSlotIds = listOf("slot-a"),
-            participantRequiredTemplateIds = emptyList(),
+            participantRequiredTemplateIds = listOf("facility-template"),
             hostRequiredTemplateIds = emptyList(),
             rentalPriceCents = 0,
             startEpochMillis = 1_700_000_000_000,
@@ -501,14 +504,68 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         harness.component.updateEventField { copy(priceCents = 2500) }
         advance()
         assertEquals(0, harness.component.newEventState.value.priceCents)
+        assertEquals(listOf("facility-template"), harness.component.newEventState.value.requiredTemplateIds)
+        assertEquals(0, harness.billingRepository.rentalSignLinksCalls.size)
 
         harness.component.createEvent()
         advance()
 
         assertEquals(0, harness.billingRepository.purchaseIntentCalls.size)
+        assertEquals(0, harness.billingRepository.rentalSignLinksCalls.size)
         assertEquals(1, harness.eventRepository.createEventCalls.size)
         assertEquals(1, harness.onEventCreatedCount)
         assertEquals(0, harness.eventRepository.createEventCalls.single().event.priceCents)
+        assertEquals(
+            listOf("facility-template"),
+            harness.eventRepository.createEventCalls.single().requiredTemplateIds,
+        )
+    }
+
+    @Test
+    fun given_free_rental_with_host_documents_when_creating_event_then_text_signature_is_required_before_creation() = runTest(testDispatcher) {
+        val rentalContext = RentalCreateContext(
+            organizationId = "org-host-sign",
+            organizationName = "Host Sign Gym",
+            organizationLocation = "Court 3",
+            organizationCoordinates = listOf(-122.25, 37.78),
+            organizationFieldIds = listOf("org-field-1"),
+            selectedFieldIds = listOf("field-a"),
+            selectedTimeSlotIds = listOf("slot-a"),
+            participantRequiredTemplateIds = emptyList(),
+            hostRequiredTemplateIds = listOf("host-template-a"),
+            rentalPriceCents = 0,
+            startEpochMillis = 1_700_000_000_000,
+            endEpochMillis = 1_700_003_600_000,
+        )
+        val harness = CreateEventHarness(rentalContext = rentalContext)
+        harness.billingRepository.rentalSignLinksResult = listOf(
+            SignStep(
+                templateId = "host-template-a",
+                type = "TEXT",
+                title = "Host Waiver",
+                content = "Please accept host waiver.",
+                documentId = "host-doc-1",
+            ),
+        )
+        advance()
+
+        harness.component.createEvent()
+        advance()
+
+        assertEquals(1, harness.billingRepository.rentalSignLinksCalls.size)
+        assertNull(harness.billingRepository.rentalSignLinksCalls.single().eventId)
+        assertEquals(0, harness.billingRepository.purchaseIntentCalls.size)
+        assertEquals(0, harness.eventRepository.createEventCalls.size)
+        assertTrue(harness.component.textSignaturePrompt.value != null)
+
+        harness.component.confirmTextSignature()
+        advance()
+
+        assertEquals(1, harness.billingRepository.recordSignatureCalls.size)
+        assertEquals("", harness.billingRepository.recordSignatureCalls.single().eventId)
+        assertEquals(0, harness.billingRepository.purchaseIntentCalls.size)
+        assertEquals(1, harness.eventRepository.createEventCalls.size)
+        assertEquals(1, harness.onEventCreatedCount)
     }
 
     @Test

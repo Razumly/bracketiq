@@ -1008,24 +1008,13 @@ fun EventDetails(
     val requiredTemplateOptionLookup = remember(requiredTemplateOptions) {
         requiredTemplateOptions.associateBy { option -> option.value }
     }
-    val requiredTemplateOptionsWithFallback = remember(
-        requiredTemplateOptions,
-        requiredTemplateOptionLookup,
+    val selectedRequiredTemplateLabels = remember(
         selectedRequiredTemplateIds,
+        requiredTemplateOptionLookup,
     ) {
-        val options = mutableListOf<DropdownOption>()
-        options.addAll(requiredTemplateOptions)
-        selectedRequiredTemplateIds.forEach { templateId ->
-            if (!requiredTemplateOptionLookup.containsKey(templateId)) {
-                options.add(
-                    DropdownOption(
-                        value = templateId,
-                        label = "Template $templateId",
-                    ),
-                )
-            }
+        selectedRequiredTemplateIds.map { templateId ->
+            requiredTemplateOptionLookup[templateId]?.label ?: templateId
         }
-        options
     }
     val leagueSlotErrors = remember(
         leagueTimeSlots,
@@ -2176,43 +2165,18 @@ fun EventDetails(
                             },
                             modifier = Modifier.fillMaxWidth(),
                         )
-                        if (isOrganizationEvent) {
-                            PlatformDropdown(
-                                selectedValue = "",
-                                onSelectionChange = {},
-                                options = requiredTemplateOptionsWithFallback,
-                                label = "Required Documents",
-                                placeholder = if (organizationTemplatesLoading) {
-                                    "Loading templates..."
-                                } else {
-                                    "Select templates"
-                                },
-                                enabled = !organizationTemplatesLoading,
-                                multiSelect = true,
-                                selectedValues = selectedRequiredTemplateIds,
-                                onMultiSelectionChange = { values ->
-                                    val normalizedTemplateIds = values.normalizeTemplateIds()
-                                    onEditEvent { copy(requiredTemplateIds = normalizedTemplateIds) }
-                                },
-                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                            )
-                            if (!organizationTemplatesError.isNullOrBlank()) {
-                                Text(
-                                    text = organizationTemplatesError,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.error,
-                                )
-                            } else if (
-                                !organizationTemplatesLoading &&
-                                requiredTemplateOptions.isEmpty()
-                            ) {
-                                Text(
-                                    text = "No templates yet. Create one in your organization Document Templates tab.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color(localImageScheme.current.onSurfaceVariant),
-                                )
-                            }
-                        }
+                        RequiredDocumentsSection(
+                            isOrganizationEvent = isOrganizationEvent,
+                            rentalTimeLocked = rentalTimeLocked,
+                            organizationTemplatesLoading = organizationTemplatesLoading,
+                            organizationTemplatesError = organizationTemplatesError,
+                            requiredTemplateOptions = requiredTemplateOptions,
+                            selectedRequiredTemplateIds = selectedRequiredTemplateIds,
+                            selectedRequiredTemplateLabels = selectedRequiredTemplateLabels,
+                            onRequiredTemplateIdsChange = { normalizedTemplateIds ->
+                                onEditEvent { copy(requiredTemplateIds = normalizedTemplateIds) }
+                            },
+                        )
                         if (editEvent.priceCents > 0) {
                             CancellationRefundOptions(
                                 selectedOption = editEvent.cancellationRefundHours,
@@ -2441,7 +2405,7 @@ fun EventDetails(
                                 color = Color(localImageScheme.current.onSurface),
                             )
                             Text(
-                                text = "Sport defaults are copied into this event. Changes here only affect this event.",
+                                text = "Sport defaults are copied into this event.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Color(localImageScheme.current.onSurfaceVariant),
                             )
@@ -5034,6 +4998,78 @@ private fun ReadOnlyNameList(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun RequiredDocumentsSection(
+    isOrganizationEvent: Boolean,
+    rentalTimeLocked: Boolean,
+    organizationTemplatesLoading: Boolean,
+    organizationTemplatesError: String?,
+    requiredTemplateOptions: List<DropdownOption>,
+    selectedRequiredTemplateIds: List<String>,
+    selectedRequiredTemplateLabels: List<String>,
+    onRequiredTemplateIdsChange: (List<String>) -> Unit,
+) {
+    if (!isOrganizationEvent) {
+        return
+    }
+
+    if (rentalTimeLocked) {
+        Text(
+            text = "Required Documents",
+            style = MaterialTheme.typography.titleSmall,
+            color = Color(localImageScheme.current.onSurface),
+            modifier = Modifier.padding(top = 8.dp),
+        )
+        ReadOnlyNameList(
+            title = "Required Documents",
+            singularTitle = "Required Document",
+            values = selectedRequiredTemplateLabels,
+            emptyText = "Required Documents: None",
+        )
+        Text(
+            text = "Set by the rental field and cannot be changed here.",
+            style = MaterialTheme.typography.bodySmall,
+            color = Color(localImageScheme.current.onSurfaceVariant),
+        )
+        return
+    }
+
+    PlatformDropdown(
+        selectedValue = "",
+        onSelectionChange = {},
+        options = requiredTemplateOptions,
+        label = "Required Documents",
+        placeholder = if (organizationTemplatesLoading) {
+            "Loading templates..."
+        } else {
+            "Select templates"
+        },
+        enabled = !organizationTemplatesLoading,
+        multiSelect = true,
+        selectedValues = selectedRequiredTemplateIds,
+        onMultiSelectionChange = { values ->
+            onRequiredTemplateIdsChange(values.normalizeTemplateIds())
+        },
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+    )
+    if (!organizationTemplatesError.isNullOrBlank()) {
+        Text(
+            text = organizationTemplatesError,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+    } else if (
+        !organizationTemplatesLoading &&
+        requiredTemplateOptions.isEmpty()
+    ) {
+        Text(
+            text = "No templates yet. Create one in your organization Document Templates tab.",
+            style = MaterialTheme.typography.bodySmall,
+            color = Color(localImageScheme.current.onSurfaceVariant),
+        )
     }
 }
 

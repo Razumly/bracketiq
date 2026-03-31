@@ -17,6 +17,7 @@ import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
+import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
@@ -52,6 +53,8 @@ import com.razumly.mvp.eventDetail.assignedUserIdsForRole
 import com.razumly.mvp.eventDetail.conflictListLabel
 import com.razumly.mvp.eventDetail.EventStaffRole
 import com.razumly.mvp.eventDetail.PendingStaffInviteDraft
+import com.razumly.mvp.eventDetail.TextSignaturePromptState
+import com.razumly.mvp.eventDetail.WebSignaturePromptState
 import com.razumly.mvp.eventDetail.mergePendingStaffInviteDraft
 import com.razumly.mvp.eventDetail.normalizeStaffInviteEmail
 import com.razumly.mvp.eventDetail.reconcileEventStaffInvites
@@ -61,11 +64,13 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.isoDayNumber
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -87,6 +92,11 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     val eventImageUrls: StateFlow<List<String>>
     val isRentalFlow: StateFlow<Boolean>
     val sports: StateFlow<List<Sport>>
+    val organizationTemplates: StateFlow<List<OrganizationTemplateDocument>>
+    val organizationTemplatesLoading: StateFlow<Boolean>
+    val organizationTemplatesError: StateFlow<String?>
+    val textSignaturePrompt: StateFlow<TextSignaturePromptState?>
+    val webSignaturePrompt: StateFlow<WebSignaturePromptState?>
     val localFields: StateFlow<List<Field>>
     val leagueSlots: StateFlow<List<TimeSlot>>
     val leagueScoringConfig: StateFlow<LeagueScoringConfigDTO>
@@ -135,6 +145,9 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     fun removeLeagueTimeSlot(index: Int)
     fun updateLeagueScoringConfig(update: LeagueScoringConfigDTO.() -> LeagueScoringConfigDTO)
     fun createAccount()
+    fun confirmTextSignature()
+    fun dismissTextSignature()
+    fun dismissWebSignaturePrompt()
     fun onUploadSelected(photo: GalleryPhotoResult)
     fun deleteImage(url: String)
 
@@ -208,6 +221,16 @@ class DefaultCreateEventComponent(
     override val isRentalFlow = _isRentalFlow.asStateFlow()
     private val _sports = MutableStateFlow<List<Sport>>(emptyList())
     override val sports = _sports.asStateFlow()
+    private val _organizationTemplates = MutableStateFlow<List<OrganizationTemplateDocument>>(emptyList())
+    override val organizationTemplates = _organizationTemplates.asStateFlow()
+    private val _organizationTemplatesLoading = MutableStateFlow(false)
+    override val organizationTemplatesLoading = _organizationTemplatesLoading.asStateFlow()
+    private val _organizationTemplatesError = MutableStateFlow<String?>(null)
+    override val organizationTemplatesError = _organizationTemplatesError.asStateFlow()
+    private val _textSignaturePrompt = MutableStateFlow<TextSignaturePromptState?>(null)
+    override val textSignaturePrompt = _textSignaturePrompt.asStateFlow()
+    private val _webSignaturePrompt = MutableStateFlow<WebSignaturePromptState?>(null)
+    override val webSignaturePrompt = _webSignaturePrompt.asStateFlow()
     private val _localFields = MutableStateFlow<List<Field>>(emptyList())
     override val localFields = _localFields.asStateFlow()
     private val _leagueSlots = MutableStateFlow<List<TimeSlot>>(emptyList())
@@ -218,6 +241,10 @@ class DefaultCreateEventComponent(
     private val pendingEventAfterPayment = MutableStateFlow<Event?>(null)
     private val awaitingRentalPayment = MutableStateFlow(false)
     private var activeRentalLockKeys: List<String> = emptyList()
+    private var pendingRentalSignatureSteps: List<com.razumly.mvp.core.data.repositories.SignStep> = emptyList()
+    private var pendingRentalSignatureStepIndex = 0
+    private var pendingRentalSignatureEvent: Event? = null
+    private var pendingRentalPdfSignaturePollJob: Job? = null
 
     private lateinit var loadingHandler: LoadingHandler
 
@@ -243,6 +270,14 @@ class DefaultCreateEventComponent(
         childStack.subscribe {}
         applyRentalDefaults()
         loadSports()
+        scope.launch {
+            _newEventState
+                .map { draft -> draft.organizationId?.trim().orEmpty() }
+                .distinctUntilChanged()
+                .collect { organizationId ->
+                    loadOrganizationTemplates(organizationId)
+                }
+        }
         scope.launch {
             userRepository.currentUser.collect { result ->
                 result.getOrNull()?.let { user ->
@@ -325,6 +360,9 @@ class DefaultCreateEventComponent(
                 hostSyncedDraft.applyCreateSelectionRules(_isRentalFlow.value)
             )
             if (_isRentalFlow.value) {
+                if (!ensureRentalSignaturesBeforeCreate(eventDraft)) {
+                    return@launch
+                }
                 if (eventDraft.priceCents > 0) {
                     processRentalPaymentBeforeCreate(eventDraft)
                 } else {
@@ -342,6 +380,45 @@ class DefaultCreateEventComponent(
             handleStripeAccountCreation()
             loadingHandler.hideLoading()
         }
+    }
+
+    override fun confirmTextSignature() {
+        val prompt = _textSignaturePrompt.value ?: return
+        if (pendingRentalSignatureEvent == null) return
+
+        scope.launch {
+            loadingHandler.showLoading("Recording signature ...")
+
+            val documentId = prompt.step.resolvedDocumentId()
+                ?: "mobile-text-${prompt.step.templateId}-${Clock.System.now().toEpochMilliseconds()}"
+
+            billingRepository.recordSignature(
+                eventId = "",
+                templateId = prompt.step.templateId,
+                documentId = documentId,
+                type = prompt.step.type,
+            ).onFailure { throwable ->
+                _errorState.value = ErrorMessage(
+                    throwable.userMessage("Failed to record signature.")
+                )
+            }.onSuccess {
+                _textSignaturePrompt.value = null
+                pendingRentalSignatureStepIndex += 1
+                processNextRentalSignatureStep()
+            }
+
+            loadingHandler.hideLoading()
+        }
+    }
+
+    override fun dismissTextSignature() {
+        clearPendingRentalSignatureFlow()
+        _errorState.value = ErrorMessage("Document signing canceled.")
+    }
+
+    override fun dismissWebSignaturePrompt() {
+        clearPendingRentalSignatureFlow()
+        _errorState.value = ErrorMessage("Document signing canceled.")
     }
 
     override fun updateEventField(update: Event.() -> Event) {
@@ -909,6 +986,7 @@ class DefaultCreateEventComponent(
             organizationId = context.organizationId,
             fieldIds = selectedFieldIds,
             timeSlotIds = selectedTimeSlotIds,
+            requiredTemplateIds = rentalRequiredTemplateIds(),
             priceCents = context.rentalPriceCents.coerceAtLeast(0),
             start = if (start == Instant.DISTANT_PAST) now else start,
             end = if (normalizedEnd == Instant.DISTANT_PAST) {
@@ -993,6 +1071,7 @@ class DefaultCreateEventComponent(
             start = normalizedStart,
             end = normalizedEnd,
             priceCents = lockedPrice,
+            requiredTemplateIds = rentalRequiredTemplateIds(),
         )
         if (lockedFieldIds.isNotEmpty()) {
             next = next.copy(fieldIds = lockedFieldIds)
@@ -1092,9 +1171,18 @@ class DefaultCreateEventComponent(
             }
         }
 
+        val requiredTemplateIds = if (_isRentalFlow.value) {
+            rentalRequiredTemplateIds()
+        } else {
+            preparedEvent.event.requiredTemplateIds
+                .map(String::trim)
+                .filter(String::isNotBlank)
+                .distinct()
+        }
+
         eventRepository.createEvent(
             preparedEvent.event,
-            requiredTemplateIds = rentalRequiredTemplateIds(),
+            requiredTemplateIds = requiredTemplateIds,
             leagueScoringConfig = _leagueScoringConfig.value
                 .takeIf { preparedEvent.event.eventType == EventType.LEAGUE },
             fields = preparedEvent.fields,
@@ -1117,6 +1205,116 @@ class DefaultCreateEventComponent(
                 _errorState.value = ErrorMessage(it.userMessage())
                 loadingHandler.hideLoading()
             }
+    }
+
+    private suspend fun ensureRentalSignaturesBeforeCreate(eventDraft: Event): Boolean {
+        if (!_isRentalFlow.value) {
+            return true
+        }
+
+        val requiredTemplateIds = rentalHostRequiredTemplateIds()
+        if (requiredTemplateIds.isEmpty()) {
+            clearPendingRentalSignatureFlow()
+            return true
+        }
+
+        val signSteps = billingRepository.getRequiredRentalSignLinks(
+            templateIds = requiredTemplateIds,
+            eventId = null,
+            organizationId = rentalContext?.organizationId,
+        ).getOrElse { throwable ->
+            _errorState.value = ErrorMessage(
+                throwable.userMessage("Unable to load rental signing requirements.")
+            )
+            return false
+        }
+
+        if (signSteps.isEmpty()) {
+            clearPendingRentalSignatureFlow()
+            return true
+        }
+
+        pendingRentalSignatureEvent = eventDraft
+        pendingRentalSignatureSteps = signSteps
+        pendingRentalSignatureStepIndex = 0
+        processNextRentalSignatureStep()
+        return false
+    }
+
+    private suspend fun processNextRentalSignatureStep() {
+        pendingRentalPdfSignaturePollJob?.cancel()
+        pendingRentalPdfSignaturePollJob = null
+
+        val currentStep = pendingRentalSignatureSteps.getOrNull(pendingRentalSignatureStepIndex)
+        if (currentStep == null) {
+            continueCreateAfterRentalSignatures()
+            return
+        }
+
+        if (currentStep.isTextStep()) {
+            _textSignaturePrompt.value = TextSignaturePromptState(
+                step = currentStep,
+                currentStep = pendingRentalSignatureStepIndex + 1,
+                totalSteps = pendingRentalSignatureSteps.size,
+            )
+            return
+        }
+
+        val signingUrl = currentStep.resolvedSigningUrl()
+        if (signingUrl.isNullOrBlank()) {
+            clearPendingRentalSignatureFlow()
+            _errorState.value = ErrorMessage("A required document is missing a signing URL.")
+            return
+        }
+
+        _webSignaturePrompt.value = WebSignaturePromptState(
+            step = currentStep,
+            url = signingUrl,
+            currentStep = pendingRentalSignatureStepIndex + 1,
+            totalSteps = pendingRentalSignatureSteps.size,
+        )
+
+        val operationId = currentStep.operationId?.trim()?.takeIf(String::isNotBlank)
+        if (operationId == null) {
+            _errorState.value = ErrorMessage(
+                "Complete signing in the modal, then tap Create Event again."
+            )
+            return
+        }
+
+        _errorState.value = ErrorMessage("Waiting for signature sync...")
+        pendingRentalPdfSignaturePollJob = scope.launch {
+            billingRepository.pollBoldSignOperation(operationId).onFailure { throwable ->
+                _errorState.value = ErrorMessage(
+                    throwable.userMessage("Failed to confirm signature status.")
+                )
+                clearPendingRentalSignatureFlow()
+            }.onSuccess {
+                _webSignaturePrompt.value = null
+                pendingRentalSignatureStepIndex += 1
+                processNextRentalSignatureStep()
+            }
+        }
+    }
+
+    private suspend fun continueCreateAfterRentalSignatures() {
+        val eventDraft = pendingRentalSignatureEvent ?: return
+        clearPendingRentalSignatureFlow()
+        if (eventDraft.priceCents > 0) {
+            processRentalPaymentBeforeCreate(eventDraft)
+        } else {
+            createEventAfterPayment(eventDraft)
+        }
+    }
+
+    private fun clearPendingRentalSignatureFlow() {
+        pendingRentalPdfSignaturePollJob?.cancel()
+        pendingRentalPdfSignaturePollJob = null
+        pendingRentalSignatureSteps = emptyList()
+        pendingRentalSignatureStepIndex = 0
+        pendingRentalSignatureEvent = null
+        _textSignaturePrompt.value = null
+        _webSignaturePrompt.value = null
     }
 
     private suspend fun syncEventStaffAssignments(createdEvent: Event): Result<Event> = runCatching {
@@ -1344,6 +1542,27 @@ class DefaultCreateEventComponent(
                     _errorState.value = ErrorMessage(error.userMessage("Failed to load sports."))
                 }
         }
+    }
+
+    private suspend fun loadOrganizationTemplates(organizationId: String) {
+        if (organizationId.isBlank()) {
+            _organizationTemplates.value = emptyList()
+            _organizationTemplatesError.value = null
+            _organizationTemplatesLoading.value = false
+            return
+        }
+
+        _organizationTemplatesLoading.value = true
+        _organizationTemplatesError.value = null
+        billingRepository.listOrganizationTemplates(organizationId)
+            .onSuccess { templates ->
+                _organizationTemplates.value = templates
+            }
+            .onFailure { throwable ->
+                _organizationTemplates.value = emptyList()
+                _organizationTemplatesError.value = throwable.userMessage("Failed to load templates.")
+            }
+        _organizationTemplatesLoading.value = false
     }
 
     private fun usesSetScoringForSport(sportId: String?): Boolean = sportId

@@ -42,6 +42,7 @@ import com.razumly.mvp.core.data.dataTypes.updateOfficialUserPositions
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
+import com.razumly.mvp.core.presentation.composables.EmbeddedWebModal
 import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
 import com.razumly.mvp.core.presentation.util.backAnimation
 import com.razumly.mvp.core.presentation.util.CircularRevealUnderlay
@@ -49,6 +50,7 @@ import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
 import com.razumly.mvp.eventCreate.steps.Preview
 import com.razumly.mvp.eventDetail.EventDetails
+import com.razumly.mvp.eventDetail.TextSignatureDialog
 import com.razumly.mvp.eventDetail.toEventWithFullRelations
 import com.razumly.mvp.eventMap.EventMap
 import com.razumly.mvp.eventMap.MapComponent
@@ -75,11 +77,16 @@ fun CreateEventScreen(
     val eventImageUrls by component.eventImageUrls.collectAsState()
     val isRentalFlow by component.isRentalFlow.collectAsState()
     val sports by component.sports.collectAsState()
+    val organizationTemplates by component.organizationTemplates.collectAsState()
+    val organizationTemplatesLoading by component.organizationTemplatesLoading.collectAsState()
+    val organizationTemplatesError by component.organizationTemplatesError.collectAsState()
     val localFields by component.localFields.collectAsState()
     val leagueSlots by component.leagueSlots.collectAsState()
     val leagueScoringConfig by component.leagueScoringConfig.collectAsState()
     val suggestedUsers by component.suggestedUsers.collectAsState()
     val pendingStaffInvites by component.pendingStaffInvites.collectAsState()
+    val textSignaturePrompt by component.textSignaturePrompt.collectAsState()
+    val webSignaturePrompt by component.webSignaturePrompt.collectAsState()
     val showMap by mapComponent.showMap.collectAsState()
     val isEditing = true
     val currentUser by component.currentUser.collectAsState()
@@ -361,6 +368,9 @@ fun CreateEventScreen(
                             imageScheme = imageScheme,
                             imageIds = eventImageUrls,
                             sports = sports,
+                            organizationTemplates = organizationTemplates,
+                            organizationTemplatesLoading = organizationTemplatesLoading,
+                            organizationTemplatesError = organizationTemplatesError,
                             editableFields = localFields,
                             leagueTimeSlots = leagueSlots,
                             leagueScoringConfig = leagueScoringConfig,
@@ -432,6 +442,23 @@ fun CreateEventScreen(
                             component = component
                         )
                     }
+                }
+
+                textSignaturePrompt?.let { prompt ->
+                    TextSignatureDialog(
+                        prompt = prompt,
+                        onConfirm = component::confirmTextSignature,
+                        onDismiss = component::dismissTextSignature,
+                    )
+                }
+
+                webSignaturePrompt?.let { prompt ->
+                    EmbeddedWebModal(
+                        title = prompt.step?.title ?: "Sign required document",
+                        url = prompt.url,
+                        description = null,
+                        onDismiss = component::dismissWebSignaturePrompt,
+                    )
                 }
 
             }

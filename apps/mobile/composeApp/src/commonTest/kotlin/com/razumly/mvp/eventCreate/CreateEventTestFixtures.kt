@@ -517,8 +517,24 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
         val event: Event,
         val timeSlotContext: PurchaseIntentTimeSlotContext?,
     )
+    data class RentalSignLinksCall(
+        val templateIds: List<String>,
+        val eventId: String?,
+        val organizationId: String?,
+    )
+    data class RecordSignatureCall(
+        val eventId: String,
+        val templateId: String,
+        val documentId: String,
+        val type: String,
+        val signerContext: SignerContext,
+        val childUserId: String?,
+    )
 
     val purchaseIntentCalls = mutableListOf<PurchaseIntentCall>()
+    val rentalSignLinksCalls = mutableListOf<RentalSignLinksCall>()
+    val recordSignatureCalls = mutableListOf<RecordSignatureCall>()
+    var rentalSignLinksResult: List<SignStep> = emptyList()
 
     override suspend fun createPurchaseIntent(
         event: Event,
@@ -549,6 +565,19 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
     override suspend fun getRequiredSignLinks(eventId: String): Result<List<SignStep>> =
         Result.success(emptyList())
 
+    override suspend fun getRequiredRentalSignLinks(
+        templateIds: List<String>,
+        eventId: String?,
+        organizationId: String?,
+    ): Result<List<SignStep>> {
+        rentalSignLinksCalls += RentalSignLinksCall(
+            templateIds = templateIds,
+            eventId = eventId,
+            organizationId = organizationId,
+        )
+        return Result.success(rentalSignLinksResult)
+    }
+
     override suspend fun recordSignature(
         eventId: String,
         templateId: String,
@@ -556,7 +585,17 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
         type: String,
         signerContext: SignerContext,
         childUserId: String?,
-    ): Result<RecordSignatureResult> = Result.success(RecordSignatureResult())
+    ): Result<RecordSignatureResult> {
+        recordSignatureCalls += RecordSignatureCall(
+            eventId = eventId,
+            templateId = templateId,
+            documentId = documentId,
+            type = type,
+            signerContext = signerContext,
+            childUserId = childUserId,
+        )
+        return Result.success(RecordSignatureResult())
+    }
 
     override suspend fun pollBoldSignOperation(
         operationId: String,

@@ -233,6 +233,11 @@ interface IBillingRepository : IMVPRepository {
         childUserId: String? = null,
         childUserEmail: String? = null,
     ): Result<List<SignStep>> = getRequiredSignLinks(eventId)
+    suspend fun getRequiredRentalSignLinks(
+        templateIds: List<String>,
+        eventId: String? = null,
+        organizationId: String? = null,
+    ): Result<List<SignStep>>
     suspend fun recordSignature(
         eventId: String,
         templateId: String,
@@ -373,6 +378,48 @@ class BillingRepository(
                     childUserId = childUserId?.trim()?.takeIf(String::isNotBlank),
                     childEmail = childUserEmail?.trim()?.takeIf(String::isNotBlank),
                     redirectUrl = buildEmbeddedSigningRedirectUrl(eventId),
+                ),
+            )
+
+            response.error
+                ?.let(::toFriendlyBoldSignMessage)
+                ?.takeIf(String::isNotBlank)
+                ?.let { errorMessage ->
+                    throw Exception(errorMessage)
+                }
+
+            response.signLinks.filter { it.templateId.isNotBlank() }
+        } catch (throwable: Throwable) {
+            throw throwable.withFriendlyBoldSignMessage()
+        }
+    }
+
+    override suspend fun getRequiredRentalSignLinks(
+        templateIds: List<String>,
+        eventId: String?,
+        organizationId: String?,
+    ): Result<List<SignStep>> = runCatching {
+        val normalizedTemplateIds = templateIds
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .distinct()
+        if (normalizedTemplateIds.isEmpty()) {
+            return@runCatching emptyList()
+        }
+
+        try {
+            val user = userRepository.currentUser.value.getOrThrow()
+            val email = userRepository.currentAccount.value.getOrNull()?.email
+            val normalizedEventId = eventId?.trim()?.takeIf(String::isNotBlank)
+            val response = api.post<RentalSignLinksRequestDto, EventSignLinksResponseDto>(
+                path = "api/rentals/sign",
+                body = RentalSignLinksRequestDto(
+                    userId = user.id,
+                    userEmail = email,
+                    eventId = normalizedEventId,
+                    organizationId = organizationId?.trim()?.takeIf(String::isNotBlank),
+                    templateIds = normalizedTemplateIds,
+                    redirectUrl = normalizedEventId?.let(::buildEmbeddedSigningRedirectUrl),
                 ),
             )
 
@@ -956,6 +1003,16 @@ private data class EventSignLinksRequestDto(
     val signerContext: String? = null,
     val childUserId: String? = null,
     val childEmail: String? = null,
+    val redirectUrl: String? = null,
+)
+
+@Serializable
+private data class RentalSignLinksRequestDto(
+    val userId: String? = null,
+    val userEmail: String? = null,
+    val eventId: String? = null,
+    val organizationId: String? = null,
+    val templateIds: List<String> = emptyList(),
     val redirectUrl: String? = null,
 )
 
