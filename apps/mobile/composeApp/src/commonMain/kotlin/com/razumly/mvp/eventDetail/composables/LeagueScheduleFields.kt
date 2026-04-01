@@ -94,6 +94,7 @@ fun LeagueScheduleFields(
     lockSlotDivisions: Boolean = false,
     lockedDivisionIds: List<String> = emptyList(),
     fieldCountError: String? = null,
+    readOnly: Boolean = false,
 ) {
     var fieldsExpanded by rememberSaveable { mutableStateOf(true) }
     var slotsExpanded by rememberSaveable { mutableStateOf(true) }
@@ -121,6 +122,7 @@ fun LeagueScheduleFields(
             label = "Field Count",
             placeholder = "Enter number of fields",
             keyboardType = "number",
+            enabled = !readOnly,
             isError = fieldCountError != null,
             supportingText = fieldCountError ?: "Enter a value and tap Set Count.",
         )
@@ -130,7 +132,7 @@ fun LeagueScheduleFields(
                 val count = parsedPendingFieldCount ?: return@Button
                 onFieldCountChange(count)
             },
-            enabled = canApplyFieldCount,
+            enabled = !readOnly && canApplyFieldCount,
         ) {
             Text("Set Count")
         }
@@ -174,6 +176,7 @@ fun LeagueScheduleFields(
                             label = "Field ${field.fieldNumber} Name",
                             onValueChange = { onFieldNameChange(index, it) },
                             isError = false,
+                            enabled = !readOnly,
                         )
                     }
                 }
@@ -207,7 +210,10 @@ fun LeagueScheduleFields(
     ) {
         Text("Timeslots (${slots.size})", style = MaterialTheme.typography.titleMedium)
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Button(onClick = onAddSlot) {
+            Button(
+                onClick = onAddSlot,
+                enabled = !readOnly,
+            ) {
                 Icon(Icons.Default.Add, contentDescription = null)
                 Text("Add", modifier = Modifier.padding(start = 4.dp))
             }
@@ -219,12 +225,27 @@ fun LeagueScheduleFields(
             }
         }
     }
+    if (readOnly) {
+        Text(
+            text = "Timeslots are fixed by the selected rental fields.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 
     if (slots.isEmpty()) {
         Text(
-            text = "Add at least one timeslot for league scheduling.",
+            text = if (readOnly) {
+                "No rental timeslots were provided."
+            } else {
+                "Add at least one timeslot for league scheduling."
+            },
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.error,
+            color = if (readOnly) {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            } else {
+                MaterialTheme.colorScheme.error
+            },
         )
     }
 
@@ -245,6 +266,7 @@ fun LeagueScheduleFields(
                         slotErrors = slotErrors,
                         onUpdateSlot = onUpdateSlot,
                         onRemoveSlot = onRemoveSlot,
+                        readOnly = readOnly,
                     )
                 }
             }
@@ -269,6 +291,7 @@ fun LeagueScheduleFields(
                         slotErrors = slotErrors,
                         onUpdateSlot = onUpdateSlot,
                         onRemoveSlot = onRemoveSlot,
+                        readOnly = readOnly,
                     )
                 }
             }
@@ -290,6 +313,7 @@ private fun TimeslotCard(
     slotErrors: Map<Int, String>,
     onUpdateSlot: (Int, TimeSlot) -> Unit,
     onRemoveSlot: (Int) -> Unit,
+    readOnly: Boolean,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -322,7 +346,7 @@ private fun TimeslotCard(
                 Text("Timeslot ${index + 1}", style = MaterialTheme.typography.titleSmall)
                 IconButton(
                     onClick = { onRemoveSlot(index) },
-                    enabled = slots.size > 1,
+                    enabled = !readOnly && slots.size > 1,
                 ) {
                     Icon(Icons.Default.Delete, contentDescription = "Remove timeslot")
                 }
@@ -337,6 +361,9 @@ private fun TimeslotCard(
                 multiSelect = true,
                 selectedValues = selectedFieldIds,
                 onMultiSelectionChange = { selected ->
+                    if (readOnly) {
+                        return@PlatformDropdown
+                    }
                     val normalized = selected
                         .map(String::trim)
                         .filter(String::isNotBlank)
@@ -347,6 +374,7 @@ private fun TimeslotCard(
                     ))
                 },
                 isError = selectedFieldIds.isEmpty(),
+                enabled = !readOnly,
             )
 
             PlatformDropdown(
@@ -358,7 +386,7 @@ private fun TimeslotCard(
                 multiSelect = true,
                 selectedValues = effectiveDivisionIds,
                 onMultiSelectionChange = { selected ->
-                    if (lockSlotDivisions) {
+                    if (readOnly || lockSlotDivisions) {
                         return@PlatformDropdown
                     }
                     onUpdateSlot(
@@ -371,7 +399,7 @@ private fun TimeslotCard(
                 } else {
                     ""
                 },
-                enabled = !lockSlotDivisions,
+                enabled = !readOnly && !lockSlotDivisions,
             )
 
             if (repeating) {
@@ -383,8 +411,9 @@ private fun TimeslotCard(
                         onUpdateSlot(index, slot.copy(startDate = selected))
                     },
                     supportingText = "Defaults to the event start date.",
+                    enabled = !readOnly,
                 )
-                if (repeatingStartDate != eventStart) {
+                if (!readOnly && repeatingStartDate != eventStart) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End,
@@ -402,8 +431,9 @@ private fun TimeslotCard(
                         onUpdateSlot(index, slot.copy(endDate = selected))
                     },
                     supportingText = "Leave empty for no end date.",
+                    enabled = !readOnly,
                 )
-                if (slot.endDate != null) {
+                if (!readOnly && slot.endDate != null) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End,
@@ -423,6 +453,9 @@ private fun TimeslotCard(
                     multiSelect = true,
                     selectedValues = selectedDays.map(Int::toString),
                     onMultiSelectionChange = { selected ->
+                        if (readOnly) {
+                            return@PlatformDropdown
+                        }
                         val days = selected
                             .mapNotNull(String::toIntOrNull)
                             .map { ((it % 7) + 7) % 7 }
@@ -437,6 +470,7 @@ private fun TimeslotCard(
                         )
                     },
                     isError = selectedDays.isEmpty(),
+                    enabled = !readOnly,
                 )
 
                 Row(
@@ -451,6 +485,7 @@ private fun TimeslotCard(
                         },
                         modifier = Modifier.weight(1f),
                         isError = slot.startTimeMinutes == null,
+                        enabled = !readOnly,
                     )
                     TimeOfDayPickerField(
                         label = "End Time (Optional)",
@@ -462,9 +497,10 @@ private fun TimeslotCard(
                         isError = slot.startTimeMinutes != null &&
                             slot.endTimeMinutes != null &&
                             slot.endTimeMinutes <= slot.startTimeMinutes,
+                        enabled = !readOnly,
                     )
                 }
-                if (slot.endTimeMinutes != null) {
+                if (!readOnly && slot.endTimeMinutes != null) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End,
@@ -482,6 +518,7 @@ private fun TimeslotCard(
                         onUpdateSlot(index, slot.copy(startDate = selected))
                     },
                     isError = slot.startDate == Instant.DISTANT_PAST,
+                    enabled = !readOnly,
                 )
                 DateTimePickerField(
                     label = "End Date & Time",
@@ -490,17 +527,20 @@ private fun TimeslotCard(
                         onUpdateSlot(index, slot.copy(endDate = selected))
                     },
                     isError = slot.endDate == null || slot.endDate <= slot.startDate,
+                    enabled = !readOnly,
                 )
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-            ) {
-                TextButton(onClick = {
-                    onUpdateSlot(index, slot.toggleRepeating(eventStart = eventStart, eventEnd = eventEnd))
-                }) {
-                    Text(if (slot.repeating) "Repeats weekly" else "One-time slot")
+            if (!readOnly) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(onClick = {
+                        onUpdateSlot(index, slot.toggleRepeating(eventStart = eventStart, eventEnd = eventEnd))
+                    }) {
+                        Text(if (slot.repeating) "Repeats weekly" else "One-time slot")
+                    }
                 }
             }
 
@@ -572,6 +612,7 @@ private fun TimeOfDayPickerField(
     onMinutesSelected: (Int) -> Unit,
     modifier: Modifier = Modifier,
     isError: Boolean = false,
+    enabled: Boolean = true,
 ) {
     var showTimePicker by remember { mutableStateOf(false) }
     var showNativeTimePicker by remember { mutableStateOf(false) }
@@ -592,11 +633,16 @@ private fun TimeOfDayPickerField(
         onValueChange = {},
         modifier = modifier,
         label = label,
+        enabled = enabled,
         readOnly = true,
         isError = isError,
         trailingIcon = {
             IconButton(
+                enabled = enabled,
                 onClick = {
+                    if (!enabled) {
+                        return@IconButton
+                    }
                     if (Platform.isIOS) {
                         showNativeTimePicker = true
                     } else {
@@ -608,10 +654,12 @@ private fun TimeOfDayPickerField(
             }
         },
         onTap = {
-            if (Platform.isIOS) {
-                showNativeTimePicker = true
-            } else {
-                showTimePicker = true
+            if (enabled) {
+                if (Platform.isIOS) {
+                    showNativeTimePicker = true
+                } else {
+                    showTimePicker = true
+                }
             }
         },
     )
@@ -666,6 +714,7 @@ private fun DatePickerField(
     modifier: Modifier = Modifier,
     isError: Boolean = false,
     supportingText: String = "",
+    enabled: Boolean = true,
 ) {
     var showPicker by remember { mutableStateOf(false) }
     StandardTextField(
@@ -673,15 +722,27 @@ private fun DatePickerField(
         onValueChange = {},
         modifier = modifier,
         label = label,
+        enabled = enabled,
         readOnly = true,
         isError = isError,
         supportingText = supportingText,
         trailingIcon = {
-            IconButton(onClick = { showPicker = true }) {
+            IconButton(
+                enabled = enabled,
+                onClick = {
+                    if (enabled) {
+                        showPicker = true
+                    }
+                },
+            ) {
                 Icon(Icons.Default.DateRange, contentDescription = "Select date")
             }
         },
-        onTap = { showPicker = true },
+        onTap = {
+            if (enabled) {
+                showPicker = true
+            }
+        },
     )
     if (showPicker) {
         PlatformDateTimePicker(
@@ -707,6 +768,7 @@ private fun OptionalDatePickerField(
     modifier: Modifier = Modifier,
     isError: Boolean = false,
     supportingText: String = "",
+    enabled: Boolean = true,
 ) {
     var showPicker by remember { mutableStateOf(false) }
     StandardTextField(
@@ -715,15 +777,27 @@ private fun OptionalDatePickerField(
         modifier = modifier,
         label = label,
         placeholder = "Optional",
+        enabled = enabled,
         readOnly = true,
         isError = isError,
         supportingText = supportingText,
         trailingIcon = {
-            IconButton(onClick = { showPicker = true }) {
+            IconButton(
+                enabled = enabled,
+                onClick = {
+                    if (enabled) {
+                        showPicker = true
+                    }
+                },
+            ) {
                 Icon(Icons.Default.DateRange, contentDescription = "Select date")
             }
         },
-        onTap = { showPicker = true },
+        onTap = {
+            if (enabled) {
+                showPicker = true
+            }
+        },
     )
     if (showPicker) {
         PlatformDateTimePicker(
@@ -748,6 +822,7 @@ private fun DateTimePickerField(
     onDateTimeSelected: (Instant) -> Unit,
     modifier: Modifier = Modifier,
     isError: Boolean = false,
+    enabled: Boolean = true,
 ) {
     var showPicker by remember { mutableStateOf(false) }
     StandardTextField(
@@ -755,14 +830,26 @@ private fun DateTimePickerField(
         onValueChange = {},
         modifier = modifier,
         label = label,
+        enabled = enabled,
         readOnly = true,
         isError = isError,
         trailingIcon = {
-            IconButton(onClick = { showPicker = true }) {
+            IconButton(
+                enabled = enabled,
+                onClick = {
+                    if (enabled) {
+                        showPicker = true
+                    }
+                },
+            ) {
                 Icon(Icons.Default.DateRange, contentDescription = "Select date and time")
             }
         },
-        onTap = { showPicker = true },
+        onTap = {
+            if (enabled) {
+                showPicker = true
+            }
+        },
     )
     if (showPicker) {
         PlatformDateTimePicker(

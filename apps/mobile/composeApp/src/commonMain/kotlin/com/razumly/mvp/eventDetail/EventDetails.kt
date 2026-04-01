@@ -1016,6 +1016,19 @@ fun EventDetails(
             requiredTemplateOptionLookup[templateId]?.label ?: templateId
         }
     }
+    val scheduleTimeLocked = remember(
+        rentalTimeLocked,
+        editEvent.organizationId,
+        leagueTimeSlots,
+        editableFields,
+    ) {
+        isScheduleEditingLocked(
+            event = editEvent,
+            timeSlots = leagueTimeSlots,
+            fields = editableFields,
+            rentalTimeLocked = rentalTimeLocked,
+        )
+    }
     val leagueSlotErrors = remember(
         leagueTimeSlots,
         editEvent.eventType,
@@ -1451,14 +1464,26 @@ fun EventDetails(
         resolveReadOnlyFieldCount(event = event, editableFields = editableFields)
     }
     val facilitiesFieldCount = if (editView) fieldCount else readOnlyFieldCount
-    val facilitiesSummaryLine = remember(facilitiesFieldCount, eventWithRelations.timeSlots, editEvent.eventType) {
+    val supportsScheduleConfig = remember(editEvent.eventType, scheduleTimeLocked) {
+        editEvent.eventType == EventType.LEAGUE ||
+            editEvent.eventType == EventType.TOURNAMENT ||
+            editEvent.eventType == EventType.WEEKLY_EVENT ||
+            (scheduleTimeLocked && editEvent.eventType == EventType.EVENT)
+    }
+    val facilitiesSummaryLine = remember(
+        facilitiesFieldCount,
+        eventWithRelations.timeSlots,
+        editEvent.eventType,
+        scheduleTimeLocked,
+    ) {
         val fieldSummary = "${facilitiesFieldCount.coerceAtLeast(0)} fields"
         val slotSummary = if (
             editEvent.eventType == EventType.LEAGUE ||
                 editEvent.eventType == EventType.TOURNAMENT ||
-                editEvent.eventType == EventType.WEEKLY_EVENT
+                editEvent.eventType == EventType.WEEKLY_EVENT ||
+                (scheduleTimeLocked && editEvent.eventType == EventType.EVENT)
         ) {
-            "${eventWithRelations.timeSlots.size} weekly slots"
+            "${eventWithRelations.timeSlots.size} slots"
         } else {
             null
         }
@@ -1811,7 +1836,7 @@ fun EventDetails(
                                     label = "Start Date & Time",
                                     readOnly = true,
                                     onTap = {
-                                        if (!rentalTimeLocked) {
+                                        if (!scheduleTimeLocked) {
                                             showStartPicker = true
                                         }
                                     },
@@ -1829,7 +1854,7 @@ fun EventDetails(
                                     label = "End Date & Time",
                                     readOnly = true,
                                     onTap = {
-                                        if (!rentalTimeLocked && !(supportsNoFixedEndDateTime && editEvent.noFixedEndDateTime)) {
+                                        if (!scheduleTimeLocked && !(supportsNoFixedEndDateTime && editEvent.noFixedEndDateTime)) {
                                             showEndPicker = true
                                         }
                                     },
@@ -1845,7 +1870,7 @@ fun EventDetails(
                                 label = "Start Date & Time",
                                 readOnly = true,
                                 onTap = {
-                                    if (!rentalTimeLocked) {
+                                    if (!scheduleTimeLocked) {
                                         showStartPicker = true
                                     }
                                 },
@@ -1863,7 +1888,7 @@ fun EventDetails(
                             ) {
                                 Checkbox(
                                     checked = editEvent.noFixedEndDateTime,
-                                    enabled = !rentalTimeLocked,
+                                    enabled = !scheduleTimeLocked,
                                     onCheckedChange = { checked ->
                                         onEditEvent {
                                             copy(
@@ -1892,9 +1917,13 @@ fun EventDetails(
                             }
                         }
 
-                        if (rentalTimeLocked) {
+                        if (scheduleTimeLocked) {
                             Text(
-                                text = "Rental-selected start and end times are fixed and cannot be changed.",
+                                text = if (rentalTimeLocked) {
+                                    "Rental-selected start and end times are fixed and cannot be changed."
+                                } else {
+                                    "Facility-managed timeslots lock the event time range in mobile edit mode."
+                                },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Color(localImageScheme.current.onSurface),
                             )
@@ -3515,11 +3544,7 @@ fun EventDetails(
                     )
                 }
 
-                if (
-                    editEvent.eventType == EventType.LEAGUE ||
-                        editEvent.eventType == EventType.TOURNAMENT ||
-                        editEvent.eventType == EventType.WEEKLY_EVENT
-                ) {
+                if (supportsScheduleConfig) {
                     animatedCardSection(
                         sectionId = "facility_schedule",
                         sectionTitle = if (editView) "Schedule Config" else "Schedule",
@@ -3926,7 +3951,8 @@ fun EventDetails(
                                 showSlotEditor = (
                                     editEvent.eventType == EventType.LEAGUE ||
                                         editEvent.eventType == EventType.TOURNAMENT ||
-                                        editEvent.eventType == EventType.WEEKLY_EVENT
+                                        editEvent.eventType == EventType.WEEKLY_EVENT ||
+                                        (scheduleTimeLocked && editEvent.eventType == EventType.EVENT)
                                     ),
                                 slotDivisionOptions = slotDivisionOptions,
                                 lockSlotDivisions = editEvent.singleDivision,
@@ -3936,6 +3962,7 @@ fun EventDetails(
                                 } else {
                                     null
                                 },
+                                readOnly = scheduleTimeLocked,
                             )
                             if (
                                 !isLeagueSlotsValid &&
@@ -3972,7 +3999,7 @@ fun EventDetails(
             showStartPicker = false
         },
         onDismissRequest = { showStartPicker = false },
-        showPicker = showStartPicker && !rentalTimeLocked,
+        showPicker = showStartPicker && !scheduleTimeLocked,
         getTime = true,
         canSelectPast = false,
         initialDate = editEvent.start,
@@ -3985,7 +4012,7 @@ fun EventDetails(
             showEndPicker = false
         },
         onDismissRequest = { showEndPicker = false },
-        showPicker = showEndPicker && !rentalTimeLocked,
+        showPicker = showEndPicker && !scheduleTimeLocked,
         getTime = true,
         canSelectPast = false,
         initialDate = editEvent.end,
@@ -5071,6 +5098,36 @@ private fun RequiredDocumentsSection(
             color = Color(localImageScheme.current.onSurfaceVariant),
         )
     }
+}
+
+internal fun isScheduleEditingLocked(
+    event: Event,
+    timeSlots: List<TimeSlot>,
+    fields: List<Field>,
+    rentalTimeLocked: Boolean,
+): Boolean {
+    if (rentalTimeLocked) {
+        return true
+    }
+    if (timeSlots.isEmpty()) {
+        return false
+    }
+    val eventOrganizationId = event.organizationId?.trim().orEmpty()
+    val fieldOrganizationById = fields
+        .asSequence()
+        .mapNotNull { field ->
+            val fieldId = field.id.trim().takeIf(String::isNotEmpty) ?: return@mapNotNull null
+            fieldId to field.organizationId?.trim().orEmpty()
+        }
+        .toMap()
+    return timeSlots
+        .asSequence()
+        .flatMap { slot -> slot.normalizedScheduledFieldIds().asSequence() }
+        .distinct()
+        .any { fieldId ->
+            val fieldOrganizationId = fieldOrganizationById[fieldId].orEmpty()
+            fieldOrganizationId.isNotEmpty() && fieldOrganizationId != eventOrganizationId
+        }
 }
 
 private fun buildScheduleTimeslotGroups(slots: List<TimeSlot>): List<Pair<Int, List<TimeSlot>>> {

@@ -1,0 +1,126 @@
+package com.razumly.mvp.eventDetail
+
+import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.Field
+import com.razumly.mvp.core.data.dataTypes.TimeSlot
+import kotlin.test.Test
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
+import kotlin.time.Instant
+
+class EventDetailsScheduleLockingTest {
+
+    @Test
+    fun rental_lock_always_locks_schedule_editing() {
+        val locked = isScheduleEditingLocked(
+            event = Event(organizationId = "org-1"),
+            timeSlots = emptyList(),
+            fields = emptyList(),
+            rentalTimeLocked = true,
+        )
+
+        assertTrue(locked)
+    }
+
+    @Test
+    fun slot_field_from_different_organization_locks_schedule_editing() {
+        val event = Event(organizationId = "org-1")
+        val slot = buildSlot(fieldId = "field-1")
+        val fields = listOf(
+            Field(
+                id = "field-1",
+                fieldNumber = 1,
+                organizationId = "org-2",
+            ),
+        )
+
+        val locked = isScheduleEditingLocked(
+            event = event,
+            timeSlots = listOf(slot),
+            fields = fields,
+            rentalTimeLocked = false,
+        )
+
+        assertTrue(locked)
+    }
+
+    @Test
+    fun matching_event_and_field_organization_keeps_schedule_editable() {
+        val event = Event(organizationId = "org-1")
+        val slot = buildSlot(fieldId = "field-1")
+        val fields = listOf(
+            Field(
+                id = "field-1",
+                fieldNumber = 1,
+                organizationId = "org-1",
+            ),
+        )
+
+        val locked = isScheduleEditingLocked(
+            event = event,
+            timeSlots = listOf(slot),
+            fields = fields,
+            rentalTimeLocked = false,
+        )
+
+        assertFalse(locked)
+    }
+
+    @Test
+    fun user_owned_event_with_facility_field_locks_schedule_editing() {
+        val event = Event(organizationId = null)
+        val slot = buildSlot(fieldId = "field-1")
+        val fields = listOf(
+            Field(
+                id = "field-1",
+                fieldNumber = 1,
+                organizationId = "org-facility",
+            ),
+        )
+
+        val locked = isScheduleEditingLocked(
+            event = event,
+            timeSlots = listOf(slot),
+            fields = fields,
+            rentalTimeLocked = false,
+        )
+
+        assertTrue(locked)
+    }
+
+    @Test
+    fun empty_or_unmapped_slot_fields_do_not_force_lock() {
+        val event = Event(organizationId = "org-1")
+        val slot = buildSlot(fieldId = "unknown-field")
+        val fields = emptyList<Field>()
+
+        val locked = isScheduleEditingLocked(
+            event = event,
+            timeSlots = listOf(slot),
+            fields = fields,
+            rentalTimeLocked = false,
+        )
+
+        assertFalse(locked)
+    }
+
+    private fun buildSlot(fieldId: String): TimeSlot {
+        return TimeSlot(
+            id = "slot-1",
+            dayOfWeek = 1,
+            daysOfWeek = listOf(1),
+            divisions = listOf("open"),
+            startTimeMinutes = 600,
+            endTimeMinutes = 660,
+            startDate = instant(1_700_000_000_000),
+            repeating = false,
+            endDate = instant(1_700_003_600_000),
+            scheduledFieldId = fieldId,
+            scheduledFieldIds = listOf(fieldId),
+            price = null,
+        )
+    }
+
+    private fun instant(epochMillis: Long): Instant = Instant.fromEpochMilliseconds(epochMillis)
+}
+

@@ -54,12 +54,15 @@ fun SelectEventImage(
     onSelectedImage: (Event.() -> Event) -> Unit,
     onDeleteImage: (String) -> Unit,
     imageIds: List<String>,
+    initialSelectedImageId: String? = null,
     onUploadSelected: () -> Unit,
     onConfirm: () -> Unit,
     onCancel: () -> Unit
 ) {
     val columnCount = 3
-    var selected by remember { mutableStateOf<String?>(null) }
+    var selected by remember(initialSelectedImageId) {
+        mutableStateOf(initialSelectedImageId?.trim()?.takeIf(String::isNotBlank))
+    }
     var showUploadError by remember { mutableStateOf<String?>(null) }
 
     val loadingHandler = LocalLoadingHandler.current

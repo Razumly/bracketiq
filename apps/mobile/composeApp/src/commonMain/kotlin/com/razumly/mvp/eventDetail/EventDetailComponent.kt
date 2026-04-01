@@ -2988,7 +2988,7 @@ class DefaultEventDetailComponent(
                 divisions = field.divisions
                     .normalizeDivisionIdentifiers()
                     .ifEmpty { defaultFieldDivisions(event) },
-                organizationId = event.organizationId,
+                organizationId = field.organizationId?.trim()?.takeIf(String::isNotBlank) ?: event.organizationId,
             )
         }
     }

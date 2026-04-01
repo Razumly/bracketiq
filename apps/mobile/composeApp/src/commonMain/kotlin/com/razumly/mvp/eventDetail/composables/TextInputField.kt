@@ -16,6 +16,7 @@ fun TextInputField(
     errorMessage: String? = null,
     supportingText: String? = null,
     placeholder: String? = null,
+    enabled: Boolean = true,
 ) {
     Column(modifier = modifier) {
         StandardTextField(
@@ -24,6 +25,7 @@ fun TextInputField(
             modifier = Modifier.fillMaxWidth(),
             label = label,
             placeholder = placeholder ?: "",
+            enabled = enabled,
             isError = isError
             ,
             supportingText =
