@@ -258,8 +258,6 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
                     Button(
                         onClick = {
                             component.sendMessage()
-                            focusManager.clearFocus()
-                            keyboardController?.hide()
                         },
                         enabled = input.isNotBlank()
                     ) {

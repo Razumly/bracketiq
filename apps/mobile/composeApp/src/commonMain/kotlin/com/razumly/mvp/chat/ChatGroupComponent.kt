@@ -5,6 +5,7 @@ import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.chat.data.IChatGroupRepository
 import com.razumly.mvp.chat.data.IMessageRepository
+import com.razumly.mvp.chat.data.isUnreadFor
 import com.razumly.mvp.core.data.dataTypes.ChatGroupWithRelations
 import com.razumly.mvp.core.data.dataTypes.MessageMVP
 import com.razumly.mvp.core.data.dataTypes.UserData
@@ -19,6 +20,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -129,17 +131,38 @@ class DefaultChatGroupComponent(
                 .distinctUntilChanged()
                 .collect { chatId ->
                     if (chatId.isBlank()) return@collect
-                    val currentUserId = currentUser.id.trim()
-                    if (currentUserId.isEmpty()) return@collect
                     messagesRepository.getMessagesInChatGroup(chatId).onFailure { error ->
                         Napier.w("Failed to load messages for opened chat $chatId: ${error.message}")
                     }
-                    messagesRepository.markMessagesRead(chatId, currentUserId).onFailure { error ->
-                        Napier.w("Failed to mark messages as read for chat $chatId: ${error.message}")
+                }
+        }
+        scope.launch {
+            combine(chatGroup, currentUserState) { group, user ->
+                val chatId = group?.chatGroup?.id?.trim().orEmpty()
+                val currentUserId = user.id.trim()
+                val unreadSignature = group
+                    ?.messages
+                    ?.asSequence()
+                    ?.filter { message -> message.isUnreadFor(currentUserId) }
+                    ?.map { message -> message.id.ifBlank { "${message.userId}-${message.sentTime}" } }
+                    ?.sorted()
+                    ?.joinToString("|")
+                    .orEmpty()
+                ChatUnreadSnapshot(
+                    chatId = chatId,
+                    currentUserId = currentUserId,
+                    unreadSignature = unreadSignature,
+                )
+            }
+                .distinctUntilChanged()
+                .collect { snapshot ->
+                    if (snapshot.chatId.isBlank() ||
+                        snapshot.currentUserId.isEmpty() ||
+                        snapshot.unreadSignature.isEmpty()
+                    ) {
+                        return@collect
                     }
-                    chatGroupRepository.refreshChatGroupsAndMessages().onFailure { error ->
-                        Napier.w("Failed to refresh chat summaries after mark-read for chat $chatId: ${error.message}")
-                    }
+                    markCurrentChatMessagesRead(snapshot.chatId, snapshot.currentUserId)
                 }
         }
     }
@@ -269,4 +292,19 @@ class DefaultChatGroupComponent(
             }
         }
     }
+
+    private suspend fun markCurrentChatMessagesRead(chatId: String, currentUserId: String) {
+        messagesRepository.markMessagesRead(chatId, currentUserId).onFailure { error ->
+            Napier.w("Failed to mark messages as read for chat $chatId: ${error.message}")
+        }
+        chatGroupRepository.refreshChatGroupsAndMessages().onFailure { error ->
+            Napier.w("Failed to refresh chat summaries after mark-read for chat $chatId: ${error.message}")
+        }
+    }
+
+    private data class ChatUnreadSnapshot(
+        val chatId: String,
+        val currentUserId: String,
+        val unreadSignature: String,
+    )
 }
