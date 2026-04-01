@@ -34,6 +34,7 @@ interface ProfileDetailsComponent : IPaymentProcessor {
     fun setLoadingHandler(loadingHandler: LoadingHandler)
     fun onUploadSelected(photo: GalleryPhotoResult)
     fun consumeUploadedImageSelection()
+    fun deleteImage(imageId: String)
 
     fun updateProfile(
         firstName: String,
@@ -111,6 +112,24 @@ class DefaultProfileDetailsComponent(
 
     override fun consumeUploadedImageSelection() {
         _lastUploadedImageId.value = null
+    }
+
+    override fun deleteImage(imageId: String) {
+        scope.launch {
+            if (::loadingHandler.isInitialized) {
+                loadingHandler.showLoading("Deleting image...")
+            }
+            imageRepository.deleteImage(imageId)
+                .onFailure { error ->
+                    _errorState.value = ErrorMessage("Failed to delete image: ${error.userMessage()}")
+                }
+                .onSuccess {
+                    _message.value = "Image deleted"
+                }
+            if (::loadingHandler.isInitialized) {
+                loadingHandler.hideLoading()
+            }
+        }
     }
 
     override fun updateProfile(
