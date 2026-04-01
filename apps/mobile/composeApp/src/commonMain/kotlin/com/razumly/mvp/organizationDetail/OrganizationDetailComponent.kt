@@ -371,14 +371,6 @@ class DefaultOrganizationDetailComponent(
     }
 
     private suspend fun resolveOrganizationFieldIds(organization: Organization): List<String> {
-        val directFieldIds = organization.fieldIds
-            .map { id -> id.trim() }
-            .filter(String::isNotBlank)
-            .distinct()
-        if (directFieldIds.isNotEmpty()) {
-            return directFieldIds
-        }
-
         return fieldRepository.listFields()
             .getOrElse { error ->
                 Napier.w("Failed to load fields for organization rentals: ${error.message}")

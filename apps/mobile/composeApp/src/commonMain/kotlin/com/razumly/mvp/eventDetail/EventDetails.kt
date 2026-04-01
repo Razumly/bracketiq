@@ -1114,6 +1114,7 @@ fun EventDetails(
         leagueTimeSlots,
         isColorLoaded,
         isNewEvent,
+        scheduleTimeLocked,
     ) {
         // Coalesce rapid keystrokes so validation work does not contend with typing.
         delay(80)
@@ -1126,6 +1127,7 @@ fun EventDetails(
                 leagueSlotErrors = leagueSlotErrors,
                 divisionDetailsForSettings = divisionDetailsForSettings,
                 isColorLoaded = isColorLoaded,
+                scheduleTimeLocked = scheduleTimeLocked,
             )
         }
 
@@ -5120,10 +5122,21 @@ internal fun isScheduleEditingLocked(
             fieldId to field.organizationId?.trim().orEmpty()
         }
         .toMap()
-    return timeSlots
+    val slotFieldIds = timeSlots
         .asSequence()
         .flatMap { slot -> slot.normalizedScheduledFieldIds().asSequence() }
         .distinct()
+        .toList()
+    if (eventOrganizationId.isNotEmpty()) {
+        val hasUnknownFieldOwnership = slotFieldIds.any { fieldId ->
+            fieldOrganizationById[fieldId].isNullOrBlank()
+        }
+        if (hasUnknownFieldOwnership) {
+            return true
+        }
+    }
+    return slotFieldIds
+        .asSequence()
         .any { fieldId ->
             val fieldOrganizationId = fieldOrganizationById[fieldId].orEmpty()
             fieldOrganizationId.isNotEmpty() && fieldOrganizationId != eventOrganizationId
@@ -5818,6 +5831,7 @@ private fun computeEventValidationResult(
     leagueSlotErrors: Map<Int, String>,
     divisionDetailsForSettings: List<DivisionDetail>,
     isColorLoaded: Boolean,
+    scheduleTimeLocked: Boolean,
 ): EventValidationResult {
     val isNameValid = editEvent.name.isNotBlank()
     val isPriceValid = editEvent.priceCents >= 0
@@ -5826,19 +5840,17 @@ private fun computeEventValidationResult(
     val isLocationValid = editEvent.location.isNotBlank() && editEvent.lat != 0.0 && editEvent.long != 0.0
     val isSkillLevelValid = editEvent.eventType == EventType.LEAGUE || editEvent.divisions.isNotEmpty()
     val isSportValid = !isNewEvent || !editEvent.sportId.isNullOrBlank()
-    val requiresFixedEndValidation = (
-        editEvent.eventType == EventType.LEAGUE ||
-            editEvent.eventType == EventType.TOURNAMENT ||
-            editEvent.eventType == EventType.WEEKLY_EVENT
-        ) && !editEvent.noFixedEndDateTime
+    val requiresFixedEndValidation = requiresFixedEndRangeValidation(
+        event = editEvent,
+        scheduleTimeLocked = scheduleTimeLocked,
+    )
     val isFixedEndDateRangeValid = !requiresFixedEndValidation || editEvent.end > editEvent.start
     val isLeagueSlotsValid = if (
-        isNewEvent &&
-        (
-            editEvent.eventType == EventType.LEAGUE ||
-                editEvent.eventType == EventType.TOURNAMENT ||
-                editEvent.eventType == EventType.WEEKLY_EVENT
-            )
+        requiresScheduleInputValidation(
+            eventType = editEvent.eventType,
+            isNewEvent = isNewEvent,
+            scheduleTimeLocked = scheduleTimeLocked,
+        )
     ) {
         leagueTimeSlots.isNotEmpty() && leagueSlotErrors.isEmpty()
     } else {
@@ -5846,9 +5858,10 @@ private fun computeEventValidationResult(
     }
 
     val isFieldCountValid = if (
-        editEvent.eventType == EventType.LEAGUE ||
-        editEvent.eventType == EventType.TOURNAMENT ||
-        editEvent.eventType == EventType.WEEKLY_EVENT
+        requiresFieldCountValidation(
+            eventType = editEvent.eventType,
+            scheduleTimeLocked = scheduleTimeLocked,
+        )
     ) {
         fieldCount > 0
     } else {
@@ -5958,7 +5971,7 @@ private fun computeEventValidationResult(
         if (!isSportValid) {
             add("Select a sport to continue.")
         }
-        if (!isFixedEndDateRangeValid) {
+        if (!scheduleTimeLocked && !isFixedEndDateRangeValid) {
             add("End date/time must be after start date/time when no fixed end date/time is disabled.")
         }
         if (!isPriceValid) {
@@ -5982,7 +5995,7 @@ private fun computeEventValidationResult(
         if (!isLocationValid) {
             add("Select a location.")
         }
-        if (!isFieldCountValid) {
+        if (!scheduleTimeLocked && !isFieldCountValid) {
             add("Field count must be at least 1.")
         }
         if (!isWinnerSetCountValid) {
@@ -6021,7 +6034,7 @@ private fun computeEventValidationResult(
                 },
             )
         }
-        if (!isLeagueSlotsValid) {
+        if (!scheduleTimeLocked && !isLeagueSlotsValid) {
             add(
                 if (leagueTimeSlots.isEmpty()) {
                     "Add at least one timeslot for scheduling."
@@ -6067,6 +6080,45 @@ private fun computeEventValidationResult(
         validationErrors = validationErrors,
         isValid = isValid,
     )
+}
+
+internal fun requiresScheduleInputValidation(
+    eventType: EventType,
+    isNewEvent: Boolean,
+    scheduleTimeLocked: Boolean,
+): Boolean {
+    return !scheduleTimeLocked &&
+        isNewEvent &&
+        (
+            eventType == EventType.LEAGUE ||
+                eventType == EventType.TOURNAMENT ||
+                eventType == EventType.WEEKLY_EVENT
+            )
+}
+
+internal fun requiresFieldCountValidation(
+    eventType: EventType,
+    scheduleTimeLocked: Boolean,
+): Boolean {
+    return !scheduleTimeLocked &&
+        (
+            eventType == EventType.LEAGUE ||
+                eventType == EventType.TOURNAMENT ||
+                eventType == EventType.WEEKLY_EVENT
+            )
+}
+
+internal fun requiresFixedEndRangeValidation(
+    event: Event,
+    scheduleTimeLocked: Boolean,
+): Boolean {
+    return !scheduleTimeLocked &&
+        !event.noFixedEndDateTime &&
+        (
+            event.eventType == EventType.LEAGUE ||
+                event.eventType == EventType.TOURNAMENT ||
+                event.eventType == EventType.WEEKLY_EVENT
+            )
 }
 
 @Composable

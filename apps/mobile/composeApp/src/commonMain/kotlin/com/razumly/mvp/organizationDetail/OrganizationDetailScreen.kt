@@ -123,6 +123,17 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
     val selectedFieldIdsForCreate = remember(validResolvedSelections) {
         validResolvedSelections.map { resolved -> resolved.field.id }.distinct()
     }
+    val organizationFieldIdsForCreate = remember(rentalFieldOptions, selectedFieldIdsForCreate) {
+        val fromOptions = rentalFieldOptions
+            .map { option -> option.field.id }
+            .filter { fieldId -> fieldId.isNotBlank() }
+            .distinct()
+        if (fromOptions.isNotEmpty()) {
+            fromOptions
+        } else {
+            selectedFieldIdsForCreate
+        }
+    }
     val selectedTimeSlotIdsForCreate = remember(validResolvedSelections) {
         validResolvedSelections.flatMap { resolved -> resolved.slots.map { slot -> slot.id } }.distinct()
     }
@@ -452,7 +463,7 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                                         organizationLocation = currentOrganization.location,
                                         organizationAddress = currentOrganization.address,
                                         organizationCoordinates = currentOrganization.coordinates,
-                                        organizationFieldIds = currentOrganization.fieldIds,
+                                        organizationFieldIds = organizationFieldIdsForCreate,
                                         selectedFieldIds = selectedFieldIdsForCreate,
                                         selectedTimeSlotIds = selectedTimeSlotIdsForCreate,
                                         lockedSelections = lockedSelectionsForCreate,

@@ -2361,6 +2361,7 @@ class DefaultEventDetailComponent(
             var shouldExitEditMode = false
             runCatching {
                 val prepared = prepareEventForUpdate()
+                logPreparedFieldOwnership("reschedule", prepared)
                 val updated = eventRepository.updateEvent(
                     newEvent = prepared.event,
                     fields = prepared.fields,
@@ -2390,6 +2391,7 @@ class DefaultEventDetailComponent(
             var shouldExitEditMode = false
             runCatching {
                 val prepared = prepareEventForUpdate()
+                logPreparedFieldOwnership("build_brackets", prepared)
                 val updated = eventRepository.updateEvent(
                     newEvent = prepared.event,
                     fields = prepared.fields,
@@ -2745,7 +2747,10 @@ class DefaultEventDetailComponent(
                     divisions = field.divisions
                         .normalizeDivisionIdentifiers()
                         .ifEmpty { defaultFieldDivisions(currentEvent) },
-                    organizationId = currentEvent.organizationId,
+                    organizationId = resolveFieldOrganizationId(
+                        fieldOrganizationId = field.organizationId,
+                        eventOrganizationId = currentEvent.organizationId,
+                    ),
                 )
             }
             .toMutableList()
@@ -2862,7 +2867,10 @@ class DefaultEventDetailComponent(
                 divisions = field.divisions
                     .normalizeDivisionIdentifiers()
                     .ifEmpty { defaultFieldDivisions(event) },
-                organizationId = event.organizationId,
+                organizationId = resolveFieldOrganizationId(
+                    fieldOrganizationId = field.organizationId,
+                    eventOrganizationId = event.organizationId,
+                ),
             )
         }
         _editableFields.value = drafts
@@ -2996,6 +3004,30 @@ class DefaultEventDetailComponent(
     private fun defaultFieldDivisions(event: Event): List<String> {
         val eventDivisions = event.divisions.normalizeDivisionIdentifiers()
         return eventDivisions.ifEmpty { listOf(DEFAULT_DIVISION) }
+    }
+
+    private fun resolveFieldOrganizationId(
+        fieldOrganizationId: String?,
+        eventOrganizationId: String?,
+    ): String? {
+        return fieldOrganizationId
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?: eventOrganizationId?.trim()?.takeIf(String::isNotBlank)
+    }
+
+    private fun logPreparedFieldOwnership(action: String, prepared: PreparedEventForUpdate) {
+        val eventOrgId = prepared.event.organizationId?.trim()?.takeIf(String::isNotBlank)
+        val fieldOwnership = prepared.fields
+            .orEmpty()
+            .joinToString(separator = ", ") { field ->
+                val fieldOrg = field.organizationId?.trim()?.takeIf(String::isNotBlank) ?: "null"
+                "${field.id}:$fieldOrg"
+            }
+        Napier.i(
+            "Event ownership payload [$action] eventId=${prepared.event.id} " +
+                "eventOrg=${eventOrgId ?: "null"} fieldOwnership=[$fieldOwnership]",
+        )
     }
 
     private fun LeagueScoringConfig.toDto(): LeagueScoringConfigDTO = LeagueScoringConfigDTO(

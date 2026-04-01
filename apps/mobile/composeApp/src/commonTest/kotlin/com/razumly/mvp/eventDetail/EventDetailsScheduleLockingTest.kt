@@ -1,6 +1,7 @@
 package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.EventType
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import kotlin.test.Test
@@ -89,7 +90,7 @@ class EventDetailsScheduleLockingTest {
     }
 
     @Test
-    fun empty_or_unmapped_slot_fields_do_not_force_lock() {
+    fun unmapped_slot_fields_lock_organization_events() {
         val event = Event(organizationId = "org-1")
         val slot = buildSlot(fieldId = "unknown-field")
         val fields = emptyList<Field>()
@@ -101,7 +102,57 @@ class EventDetailsScheduleLockingTest {
             rentalTimeLocked = false,
         )
 
+        assertTrue(locked)
+    }
+
+    @Test
+    fun unmapped_slot_fields_do_not_force_lock_for_user_owned_events() {
+        val event = Event(organizationId = null)
+        val slot = buildSlot(fieldId = "unknown-field")
+        val fields = emptyList<Field>()
+
+        val locked = isScheduleEditingLocked(
+            event = event,
+            timeSlots = listOf(slot),
+            fields = fields,
+            rentalTimeLocked = false,
+        )
+
         assertFalse(locked)
+    }
+
+    @Test
+    fun schedule_input_validation_is_skipped_when_schedule_is_locked() {
+        val shouldValidate = requiresScheduleInputValidation(
+            eventType = EventType.TOURNAMENT,
+            isNewEvent = true,
+            scheduleTimeLocked = true,
+        )
+
+        assertFalse(shouldValidate)
+    }
+
+    @Test
+    fun field_count_validation_is_skipped_when_schedule_is_locked() {
+        val shouldValidate = requiresFieldCountValidation(
+            eventType = EventType.LEAGUE,
+            scheduleTimeLocked = true,
+        )
+
+        assertFalse(shouldValidate)
+    }
+
+    @Test
+    fun fixed_end_validation_is_skipped_when_schedule_is_locked() {
+        val shouldValidate = requiresFixedEndRangeValidation(
+            event = Event(
+                eventType = EventType.WEEKLY_EVENT,
+                noFixedEndDateTime = false,
+            ),
+            scheduleTimeLocked = true,
+        )
+
+        assertFalse(shouldValidate)
     }
 
     private fun buildSlot(fieldId: String): TimeSlot {
@@ -123,4 +174,3 @@ class EventDetailsScheduleLockingTest {
 
     private fun instant(epochMillis: Long): Instant = Instant.fromEpochMilliseconds(epochMillis)
 }
-

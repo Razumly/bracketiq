@@ -321,19 +321,27 @@ class DefaultEventSearchComponent(
                 SEARCH_SUGGESTION_LIMIT
             }
 
-            billingRepository.searchOrganizations(
+            val organizationsResult = billingRepository.searchOrganizations(
                 query = normalizedQuery,
                 limit = requestLimit,
-            ).onSuccess { organizations ->
-                val baseList = if (rentalsOnly) {
-                    organizations.filter { organization -> organization.fieldIds.isNotEmpty() }
-                } else {
-                    organizations
-                }
-                _suggestedOrganizations.value = baseList.take(SEARCH_SUGGESTION_LIMIT)
-            }.onFailure { e ->
-                _errorState.value = ErrorMessage("Failed to fetch organizations: ${e.userMessage()}")
+            )
+            if (organizationsResult.isFailure) {
+                val e = organizationsResult.exceptionOrNull()
+                _errorState.value = ErrorMessage("Failed to fetch organizations: ${e?.userMessage() ?: "Unknown error"}")
+                return@launch
             }
+            val organizations = organizationsResult.getOrNull().orEmpty()
+            val organizationsWithResolvedFieldIds = if (rentalsOnly) {
+                resolveOrganizationsWithFieldIds(organizations, forceFieldRefresh = false)
+            } else {
+                organizations
+            }
+            val baseList = if (rentalsOnly) {
+                organizationsWithResolvedFieldIds.filter { organization -> organization.fieldIds.isNotEmpty() }
+            } else {
+                organizationsWithResolvedFieldIds
+            }
+            _suggestedOrganizations.value = baseList.take(SEARCH_SUGGESTION_LIMIT)
         }
     }
 
@@ -499,44 +507,10 @@ class DefaultEventSearchComponent(
         } else {
             loadOrganizations(force = true)
         }
-        val normalizedOrganizations = organizations.map { organization ->
-            organization.copy(
-                fieldIds = organization.fieldIds
-                    .distinct()
-                    .filter(String::isNotBlank)
-            )
-        }
-
-        val missingFieldIds = normalizedOrganizations.any { organization ->
-            organization.fieldIds.isEmpty()
-        }
-        val organizationFieldIdsFromFields = if (missingFieldIds) {
-            if (organizationFieldIdsFromFieldsCache.isEmpty() || force) {
-                organizationFieldIdsFromFieldsCache = fieldRepository.listFields()
-                    .getOrElse { emptyList() }
-                    .filter { field -> !field.organizationId.isNullOrBlank() }
-                    .groupBy { field -> field.organizationId!! }
-                    .mapValues { (_, fields) ->
-                        fields.map { field -> field.id }
-                            .distinct()
-                            .filter(String::isNotBlank)
-                    }
-            }
-            organizationFieldIdsFromFieldsCache
-        } else {
-            emptyMap()
-        }
-
-        val rentals = normalizedOrganizations
-            .map { organization ->
-                if (organization.fieldIds.isNotEmpty()) {
-                    organization
-                } else {
-                    organization.copy(
-                        fieldIds = organizationFieldIdsFromFields[organization.id].orEmpty()
-                    )
-                }
-            }
+        val rentals = resolveOrganizationsWithFieldIds(
+            organizations = organizations,
+            forceFieldRefresh = force,
+        )
             .filter { organization -> organization.fieldIds.isNotEmpty() }
             .sortedBy { organization -> organization.name.lowercase() }
 
@@ -579,6 +553,55 @@ class DefaultEventSearchComponent(
         organizationsLoaded = true
         _isLoadingOrganizations.value = false
         return distanceFiltered
+    }
+
+    private suspend fun resolveOrganizationsWithFieldIds(
+        organizations: List<Organization>,
+        forceFieldRefresh: Boolean,
+    ): List<Organization> {
+        val normalizedOrganizations = organizations.map { organization ->
+            organization.copy(
+                fieldIds = organization.fieldIds
+                    .distinct()
+                    .filter(String::isNotBlank)
+            )
+        }
+        val missingFieldIds = normalizedOrganizations.any { organization -> organization.fieldIds.isEmpty() }
+        if (!missingFieldIds && !forceFieldRefresh) {
+            return normalizedOrganizations
+        }
+
+        val fieldIdsByOrganizationId = resolveFieldIdsByOrganization(force = forceFieldRefresh)
+        return normalizedOrganizations.map { organization ->
+            val resolvedFieldIds = if (organization.fieldIds.isNotEmpty()) {
+                organization.fieldIds
+            } else {
+                fieldIdsByOrganizationId[organization.id].orEmpty()
+            }
+            organization.copy(fieldIds = resolvedFieldIds)
+        }
+    }
+
+    private suspend fun resolveFieldIdsByOrganization(force: Boolean): Map<String, List<String>> {
+        if (organizationFieldIdsFromFieldsCache.isNotEmpty() && !force) {
+            return organizationFieldIdsFromFieldsCache
+        }
+
+        val mapFromFields = fieldRepository.listFields()
+            .getOrElse { error ->
+                Napier.w("Failed to load organization fields: ${error.message}")
+                emptyList()
+            }
+            .filter { field -> !field.organizationId.isNullOrBlank() }
+            .groupBy { field -> field.organizationId!! }
+            .mapValues { (_, fields) ->
+                fields.map { field -> field.id }
+                    .distinct()
+                    .filter(String::isNotBlank)
+            }
+
+        organizationFieldIdsFromFieldsCache = mapFromFields
+        return mapFromFields
     }
 
     private fun applyDistanceFilter(organizations: List<Organization>): List<Organization> {
