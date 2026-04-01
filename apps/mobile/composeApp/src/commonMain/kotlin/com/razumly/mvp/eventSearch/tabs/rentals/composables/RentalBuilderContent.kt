@@ -38,10 +38,9 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Place
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FabPosition
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -138,24 +137,26 @@ internal fun RentalDetailsContent(
 ) {
     val verticalScrollState = rememberScrollState()
     var viewportBoundsInWindow by remember { mutableStateOf<Rect?>(null) }
-    Column(
+    val fabBottomPadding = bottomPadding + 16.dp
+    val scrollContentBottomPadding = bottomPadding + 96.dp
+
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .padding(
                 start = 16.dp,
                 end = 16.dp,
-                top = 0.dp,
-                bottom = bottomPadding + 16.dp
+                top = 0.dp
             )
             .onGloballyPositioned { coordinates ->
                 viewportBoundsInWindow = coordinates.boundsInWindow()
             },
-        verticalArrangement = Arrangement.SpaceBetween
     ) {
         Column(
             modifier = Modifier
-                .weight(1f, fill = false)
-                .verticalScroll(verticalScrollState),
+                .fillMaxSize()
+                .verticalScroll(verticalScrollState)
+                .padding(bottom = scrollContentBottomPadding),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Column(
@@ -235,19 +236,36 @@ internal fun RentalDetailsContent(
             }
         }
 
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 12.dp),
-            horizontalArrangement = Arrangement.End
-        ) {
-            Button(
-                onClick = onNext,
-                enabled = canGoNext,
-            ) {
+        ExtendedFloatingActionButton(
+            text = {
                 Text("Next")
-            }
-        }
+            },
+            icon = {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null
+                )
+            },
+            onClick = {
+                if (canGoNext) {
+                    onNext()
+                }
+            },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(bottom = fabBottomPadding),
+            containerColor = if (canGoNext) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.surfaceVariant
+            },
+            contentColor = if (canGoNext) {
+                MaterialTheme.colorScheme.onPrimary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+            expanded = true,
+        )
     }
 }
 
@@ -574,16 +592,20 @@ private fun RentalFieldTimelineColumn(
                             .fillMaxWidth()
                             .height(RENTAL_TIMELINE_ROW_HEIGHT)
                             .border(
-                                width = 1.dp,
-                                color = MaterialTheme.colorScheme.outlineVariant
+                                width = if (isAvailable || isBusy) 1.dp else 0.dp,
+                                color = if (isAvailable || isBusy) {
+                                    MaterialTheme.colorScheme.outlineVariant
+                                } else {
+                                    Color.Transparent
+                                }
                             )
                             .background(
                                 if (isBusy) {
                                     MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f)
                                 } else if (isAvailable) {
-                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
-                                } else {
                                     MaterialTheme.colorScheme.surface
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f)
                                 }
                             )
                             .clickable(enabled = isAvailable && !isBusy) {

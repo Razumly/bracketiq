@@ -35,6 +35,8 @@ data class BillingTimeSlotRefDto(
     @SerialName("price") val priceCents: Int? = null,
     val startDate: String? = null,
     val endDate: String? = null,
+    val scheduledFieldId: String? = null,
+    val scheduledFieldIds: List<String> = emptyList(),
     val hostRequiredTemplateIds: List<String> = emptyList(),
 )
 

@@ -4,7 +4,8 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 
 internal fun Event.applyCreateSelectionRules(isRentalFlow: Boolean): Event {
-    val normalizedType = if (isRentalFlow) EventType.EVENT else eventType
+    // Rental flows support all event types; keep the selected type intact.
+    val normalizedType = if (isRentalFlow) eventType else eventType
     val typeNormalizedEvent = when (normalizedType) {
         EventType.LEAGUE, EventType.TOURNAMENT, EventType.WEEKLY_EVENT -> copy(
             eventType = normalizedType,

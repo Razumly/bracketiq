@@ -87,16 +87,19 @@ class CreateEventSelectionRulesTest {
     }
 
     @Test
-    fun rental_flow_forces_event_type() {
+    fun rental_flow_preserves_league_type() {
         val draft = Event(eventType = EventType.LEAGUE)
 
         val updated = draft.applyCreateSelectionRules(isRentalFlow = true)
 
-        assertEquals(EventType.EVENT, updated.eventType)
+        assertEquals(EventType.LEAGUE, updated.eventType)
+        assertTrue(updated.teamSignup)
+        assertTrue(updated.singleDivision)
+        assertTrue(updated.noFixedEndDateTime)
     }
 
     @Test
-    fun rental_flow_forces_event_type_and_mobile_defaults() {
+    fun rental_flow_preserves_tournament_type_and_mobile_defaults() {
         val start = Instant.fromEpochMilliseconds(15_000L)
         val end = Instant.fromEpochMilliseconds(20_000L)
         val draft = Event(
@@ -109,10 +112,10 @@ class CreateEventSelectionRulesTest {
 
         val updated = draft.applyCreateSelectionRules(isRentalFlow = true)
 
-        assertEquals(EventType.EVENT, updated.eventType)
-        assertFalse(updated.teamSignup)
+        assertEquals(EventType.TOURNAMENT, updated.eventType)
+        assertTrue(updated.teamSignup)
         assertTrue(updated.singleDivision)
-        assertFalse(updated.noFixedEndDateTime)
+        assertTrue(updated.noFixedEndDateTime)
         assertFalse(updated.allowPaymentPlans == true)
         assertEquals(end, updated.end)
     }

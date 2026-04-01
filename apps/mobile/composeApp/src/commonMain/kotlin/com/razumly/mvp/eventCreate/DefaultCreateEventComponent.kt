@@ -40,6 +40,7 @@ import com.razumly.mvp.core.data.repositories.ISportsRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.PurchaseIntentTimeSlotContext
 import com.razumly.mvp.core.presentation.IPaymentProcessor
+import com.razumly.mvp.core.presentation.LockedRentalSelection
 import com.razumly.mvp.core.presentation.PaymentResult
 import com.razumly.mvp.core.presentation.PaymentProcessor
 import com.razumly.mvp.core.presentation.RentalCreateContext
@@ -968,33 +969,140 @@ class DefaultCreateEventComponent(
     private fun applyRentalDefaults() {
         val context = rentalContext ?: return
         val now = Clock.System.now()
-        val start = Instant.fromEpochMilliseconds(context.startEpochMillis)
-        val end = Instant.fromEpochMilliseconds(context.endEpochMillis)
-        val selectedFieldIds = context.selectedFieldIds.ifEmpty { context.organizationFieldIds }
-        val selectedTimeSlotIds = context.selectedTimeSlotIds
-        val normalizedEnd = if (end > start) {
-            end
+        val requestedStart = Instant.fromEpochMilliseconds(context.startEpochMillis)
+        val selectedFieldIds = context.selectedFieldIds
+            .ifEmpty { context.organizationFieldIds }
+            .normalizeDistinctIds()
+        val start = if (requestedStart == Instant.DISTANT_PAST) now else requestedStart
+        val requestedEnd = Instant.fromEpochMilliseconds(context.endEpochMillis)
+        val end = if (requestedEnd > start) {
+            requestedEnd
         } else {
-            Instant.fromEpochMilliseconds(context.startEpochMillis + ONE_HOUR_MILLIS)
+            Instant.fromEpochMilliseconds(start.toEpochMilliseconds() + ONE_HOUR_MILLIS)
         }
+        val selectedTimeSlotIds = context.selectedTimeSlotIds
+        val lockedSlots = buildLockedRentalSlots(
+            context = context,
+            fallbackFieldIds = selectedFieldIds,
+            fallbackStart = start,
+            fallbackEnd = end,
+        )
 
         _newEventState.value = applyRentalConstraints(_newEventState.value.copy(
             name = _newEventState.value.name.ifBlank { "${context.organizationName} Rental Event" },
             location = context.organizationLocation ?: _newEventState.value.location,
             address = context.organizationAddress ?: _newEventState.value.address,
             coordinates = context.organizationCoordinates ?: _newEventState.value.coordinates,
-            organizationId = context.organizationId,
+            // Rentals created from mobile are always user-owned events.
+            organizationId = null,
             fieldIds = selectedFieldIds,
             timeSlotIds = selectedTimeSlotIds,
             requiredTemplateIds = rentalRequiredTemplateIds(),
             priceCents = context.rentalPriceCents.coerceAtLeast(0),
-            start = if (start == Instant.DISTANT_PAST) now else start,
-            end = if (normalizedEnd == Instant.DISTANT_PAST) {
-                Instant.fromEpochMilliseconds(now.toEpochMilliseconds() + ONE_HOUR_MILLIS)
-            } else {
-                normalizedEnd
-            },
+            start = start,
+            end = end,
         ).applyCreateSelectionRules(_isRentalFlow.value))
+
+        seedRentalFields(
+            selectedFieldIds = selectedFieldIds,
+            lockedSelections = context.lockedSelections,
+        )
+        _leagueSlots.value = lockedSlots
+    }
+
+    private fun seedRentalFields(
+        selectedFieldIds: List<String>,
+        lockedSelections: List<LockedRentalSelection>,
+    ) {
+        val normalizedFieldIds = selectedFieldIds.normalizeDistinctIds()
+        _fieldCount.value = normalizedFieldIds.size
+        if (normalizedFieldIds.isEmpty()) {
+            _localFields.value = emptyList()
+            return
+        }
+
+        val fieldNameById = lockedSelections
+            .asSequence()
+            .mapNotNull { selection ->
+                val fieldId = selection.fieldId.trim().takeIf(String::isNotEmpty) ?: return@mapNotNull null
+                val fieldName = selection.fieldName?.trim()?.takeIf(String::isNotEmpty) ?: return@mapNotNull null
+                fieldId to fieldName
+            }
+            .toMap()
+        val defaultDivisions = defaultFieldDivisions(_newEventState.value)
+        _localFields.value = normalizedFieldIds.mapIndexed { index, fieldId ->
+            Field(
+                fieldNumber = index + 1,
+                id = fieldId,
+                name = fieldNameById[fieldId] ?: "Field ${index + 1}",
+                divisions = defaultDivisions,
+                organizationId = null,
+            )
+        }
+    }
+
+    private fun buildLockedRentalSlots(
+        context: RentalCreateContext,
+        fallbackFieldIds: List<String>,
+        fallbackStart: Instant,
+        fallbackEnd: Instant,
+    ): List<TimeSlot> {
+        val defaultDivisions = defaultFieldDivisions(_newEventState.value)
+        val explicitSlots = context.lockedSelections.mapNotNull { selection ->
+            val fieldId = selection.fieldId.trim().takeIf(String::isNotEmpty) ?: return@mapNotNull null
+            val requestedStart = Instant.fromEpochMilliseconds(selection.startEpochMillis)
+            val slotStart = if (requestedStart == Instant.DISTANT_PAST) fallbackStart else requestedStart
+            val requestedEnd = Instant.fromEpochMilliseconds(selection.endEpochMillis)
+            val slotEnd = if (requestedEnd > slotStart) {
+                requestedEnd
+            } else {
+                Instant.fromEpochMilliseconds(slotStart.toEpochMilliseconds() + ONE_HOUR_MILLIS)
+            }
+            val slotDay = slotStart.toMondayFirstDay()
+            TimeSlot(
+                id = newId(),
+                dayOfWeek = slotDay,
+                daysOfWeek = listOf(slotDay),
+                divisions = defaultDivisions,
+                startTimeMinutes = slotStart.toMinutesOfDay(),
+                endTimeMinutes = slotEnd.toMinutesOfDay(),
+                startDate = slotStart,
+                repeating = false,
+                endDate = slotEnd,
+                scheduledFieldId = fieldId,
+                scheduledFieldIds = listOf(fieldId),
+                price = null,
+                requiredTemplateIds = selection.requiredTemplateIds.normalizeDistinctIds(),
+                hostRequiredTemplateIds = selection.hostRequiredTemplateIds.normalizeDistinctIds(),
+            )
+        }
+        if (explicitSlots.isNotEmpty()) {
+            return explicitSlots
+        }
+
+        val normalizedFallbackFieldIds = fallbackFieldIds.normalizeDistinctIds()
+        if (normalizedFallbackFieldIds.isEmpty()) {
+            return emptyList()
+        }
+        val slotDay = fallbackStart.toMondayFirstDay()
+        return normalizedFallbackFieldIds.map { fieldId ->
+            TimeSlot(
+                id = newId(),
+                dayOfWeek = slotDay,
+                daysOfWeek = listOf(slotDay),
+                divisions = defaultDivisions,
+                startTimeMinutes = fallbackStart.toMinutesOfDay(),
+                endTimeMinutes = fallbackEnd.toMinutesOfDay(),
+                startDate = fallbackStart,
+                repeating = false,
+                endDate = fallbackEnd,
+                scheduledFieldId = fieldId,
+                scheduledFieldIds = listOf(fieldId),
+                price = null,
+                requiredTemplateIds = context.participantRequiredTemplateIds.normalizeDistinctIds(),
+                hostRequiredTemplateIds = context.hostRequiredTemplateIds.normalizeDistinctIds(),
+            )
+        }
     }
 
     private fun rentalRequiredTemplateIds(): List<String> {
@@ -1021,14 +1129,25 @@ class DefaultCreateEventComponent(
         val context = rentalContext ?: return null
         val startDate = Instant.fromEpochMilliseconds(context.startEpochMillis).toString()
         val endDate = Instant.fromEpochMilliseconds(context.endEpochMillis).toString()
+        val scheduledFieldIds = eventDraft.fieldIds
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .distinct()
+        val checkoutSourceSlotId = context.lockedSelections
+            .asSequence()
+            .flatMap { selection -> selection.sourceTimeSlotIds.asSequence() }
+            .map(String::trim)
+            .firstOrNull(String::isNotBlank)
         return PurchaseIntentTimeSlotContext(
-            id = context.selectedTimeSlotIds
+            id = checkoutSourceSlotId ?: context.selectedTimeSlotIds
                 .asSequence()
                 .map(String::trim)
                 .firstOrNull(String::isNotBlank),
             priceCents = eventDraft.priceCents,
             startDate = startDate,
             endDate = endDate,
+            scheduledFieldId = scheduledFieldIds.firstOrNull(),
+            scheduledFieldIds = scheduledFieldIds,
             hostRequiredTemplateIds = rentalHostRequiredTemplateIds(),
         )
     }
@@ -1058,16 +1177,16 @@ class DefaultCreateEventComponent(
             .map { fieldId -> fieldId.trim() }
             .filter(String::isNotEmpty)
             .distinct()
-        val lockedTimeSlotIds = context.selectedTimeSlotIds
-            .map { slotId -> slotId.trim() }
-            .filter(String::isNotEmpty)
-            .distinct()
+        val lockedTimeSlotIds = context.lockedSelections
+            .flatMap { selection -> selection.sourceTimeSlotIds }
+            .normalizeDistinctIds()
+            .ifEmpty { context.selectedTimeSlotIds.normalizeDistinctIds() }
         val lockedPrice = context.rentalPriceCents.coerceAtLeast(0)
 
         var next = event.copy(
-            eventType = EventType.EVENT,
             noFixedEndDateTime = false,
-            organizationId = context.organizationId,
+            // Rentals created from mobile are always user-owned events.
+            organizationId = null,
             start = normalizedStart,
             end = normalizedEnd,
             priceCents = lockedPrice,
@@ -1371,10 +1490,14 @@ class DefaultCreateEventComponent(
             )
         }
 
-        if (
-            !_isRentalFlow.value &&
-            (preparedEvent.eventType == EventType.LEAGUE || preparedEvent.eventType == EventType.TOURNAMENT)
-        ) {
+        val shouldPersistManagedSlots = if (_isRentalFlow.value) {
+            preparedEvent.eventType == EventType.EVENT ||
+                preparedEvent.eventType == EventType.LEAGUE ||
+                preparedEvent.eventType == EventType.TOURNAMENT
+        } else {
+            preparedEvent.eventType == EventType.LEAGUE || preparedEvent.eventType == EventType.TOURNAMENT
+        }
+        if (shouldPersistManagedSlots) {
             preparedTimeSlots = buildLeagueSlotDrafts(
                 event = preparedEvent,
                 fieldIdReplacements = fieldIdReplacements,
@@ -1751,7 +1874,7 @@ class DefaultCreateEventComponent(
             return true
         }
 
-        val organizationId = eventDraft.organizationId?.trim().orEmpty()
+        val organizationId = resolveRentalOrganizationId(eventDraft)
         val fieldIds = eventDraft.fieldIds
             .map { fieldId -> fieldId.trim() }
             .filter(String::isNotBlank)
@@ -1801,7 +1924,7 @@ class DefaultCreateEventComponent(
     }
 
     private suspend fun findOverlappingRentalEvents(eventDraft: Event): Result<List<Event>> {
-        val organizationId = eventDraft.organizationId?.trim().orEmpty()
+        val organizationId = resolveRentalOrganizationId(eventDraft)
         if (organizationId.isEmpty()) {
             return Result.success(emptyList())
         }
@@ -1832,6 +1955,14 @@ class DefaultCreateEventComponent(
                     selectedEnd = eventDraft.end,
                 )
             }
+        }
+    }
+
+    private fun resolveRentalOrganizationId(eventDraft: Event): String {
+        return if (_isRentalFlow.value) {
+            rentalContext?.organizationId?.trim().orEmpty()
+        } else {
+            eventDraft.organizationId?.trim().orEmpty()
         }
     }
 

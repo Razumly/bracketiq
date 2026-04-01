@@ -125,12 +125,6 @@ fun CreateEventScreen(
         )
     }
 
-    LaunchedEffect(isRentalFlow, newEventState.eventType) {
-        if (isRentalFlow && newEventState.eventType != EventType.EVENT) {
-            component.onTypeSelected(EventType.EVENT)
-        }
-    }
-
     val eventWithRelations = remember(defaultEvent, newEventState) {
         defaultEvent
             .toEventWithFullRelations(listOf(), listOf())
@@ -165,7 +159,7 @@ fun CreateEventScreen(
 
     val onEventTypeSelected: (EventType) -> Unit = remember(component, isRentalFlow) {
         { selectedType ->
-            val normalizedType = if (isRentalFlow) EventType.EVENT else selectedType
+            val normalizedType = selectedType
             component.onTypeSelected(normalizedType)
             if (normalizedType == EventType.LEAGUE || normalizedType == EventType.TOURNAMENT) {
                 component.updateEventField {

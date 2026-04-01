@@ -712,6 +712,7 @@ class BillingRepositoryHttpTest {
                 priceCents = 3500,
                 startDate = "2026-04-01T10:00:00Z",
                 endDate = "2026-04-01T12:00:00Z",
+                scheduledFieldIds = listOf(" field_1 ", "", "field_1", "field_2"),
                 hostRequiredTemplateIds = listOf(" host_a ", "", "host_a", "host_b"),
             ),
         ).getOrThrow()
@@ -719,6 +720,8 @@ class BillingRepositoryHttpTest {
         assertTrue(capturedBody.contains("\"timeSlot\""))
         assertTrue(capturedBody.contains("\"id\":\"slot_1\""))
         assertTrue(capturedBody.contains("\"price\":3500"))
+        assertTrue(capturedBody.contains("\"scheduledFieldId\":\"field_1\""))
+        assertTrue(capturedBody.contains("\"scheduledFieldIds\":[\"field_1\",\"field_2\"]"))
         assertTrue(capturedBody.contains("\"hostRequiredTemplateIds\":[\"host_a\",\"host_b\"]"))
     }
 

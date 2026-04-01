@@ -192,6 +192,8 @@ data class PurchaseIntentTimeSlotContext(
     val priceCents: Int? = null,
     val startDate: String? = null,
     val endDate: String? = null,
+    val scheduledFieldId: String? = null,
+    val scheduledFieldIds: List<String> = emptyList(),
     val hostRequiredTemplateIds: List<String> = emptyList(),
 )
 
@@ -331,11 +333,21 @@ class BillingRepository(
                 ),
                 team = normalizedTeamId?.let { BillingTeamRefDto(id = it) },
                 timeSlot = timeSlotContext?.let { context ->
+                    val normalizedScheduledFieldIds = context.scheduledFieldIds
+                        .map(String::trim)
+                        .filter(String::isNotBlank)
+                        .distinct()
+                    val normalizedScheduledFieldId = context.scheduledFieldId
+                        ?.trim()
+                        ?.takeIf(String::isNotBlank)
+                        ?: normalizedScheduledFieldIds.firstOrNull()
                     BillingTimeSlotRefDto(
                         id = context.id?.trim()?.takeIf(String::isNotBlank),
                         priceCents = context.priceCents,
                         startDate = context.startDate?.trim()?.takeIf(String::isNotBlank),
                         endDate = context.endDate?.trim()?.takeIf(String::isNotBlank),
+                        scheduledFieldId = normalizedScheduledFieldId,
+                        scheduledFieldIds = normalizedScheduledFieldIds,
                         hostRequiredTemplateIds = context.hostRequiredTemplateIds
                             .map(String::trim)
                             .filter(String::isNotBlank)

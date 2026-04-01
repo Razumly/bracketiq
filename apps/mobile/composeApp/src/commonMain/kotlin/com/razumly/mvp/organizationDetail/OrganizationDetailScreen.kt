@@ -45,6 +45,7 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.Product
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
+import com.razumly.mvp.core.presentation.LockedRentalSelection
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.OrganizationDetailTab
 import com.razumly.mvp.core.presentation.RentalCreateContext
@@ -124,6 +125,33 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
     }
     val selectedTimeSlotIdsForCreate = remember(validResolvedSelections) {
         validResolvedSelections.flatMap { resolved -> resolved.slots.map { slot -> slot.id } }.distinct()
+    }
+    val lockedSelectionsForCreate = remember(validResolvedSelections) {
+        validResolvedSelections.map { resolved ->
+            LockedRentalSelection(
+                fieldId = resolved.field.id,
+                fieldName = resolved.field.name,
+                sourceTimeSlotIds = resolved.slots
+                    .map { slot -> slot.id }
+                    .distinct(),
+                requiredTemplateIds = resolved.slots
+                    .flatMap { slot ->
+                        slot.requiredTemplateIds
+                            .map { templateId -> templateId.trim() }
+                            .filter { templateId -> templateId.isNotEmpty() }
+                    }
+                    .distinct(),
+                hostRequiredTemplateIds = resolved.slots
+                    .flatMap { slot ->
+                        slot.hostRequiredTemplateIds
+                            .map { templateId -> templateId.trim() }
+                            .filter { templateId -> templateId.isNotEmpty() }
+                    }
+                    .distinct(),
+                startEpochMillis = resolved.startInstant.toEpochMilliseconds(),
+                endEpochMillis = resolved.endInstant.toEpochMilliseconds(),
+            )
+        }
     }
     val selectedParticipantTemplateIdsForCreate = remember(validResolvedSelections) {
         validResolvedSelections
@@ -414,29 +442,27 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                             canContinue = canContinueRental,
                             onBack = { rentalDetailsStep = RentalDetailsStep.BUILDER },
                             onContinue = {
-                                if (canContinueRental) {
-                                    val start = rentalStartInstant
-                                    val end = rentalEndInstant
-                                    if (start != null && end != null) {
-                                        component.startRentalCreate(
-                                            RentalCreateContext(
-                                                organizationId = currentOrganization.id,
-                                                organizationName = currentOrganization.name,
-                                                organizationLocation = currentOrganization.location,
-                                                organizationAddress = currentOrganization.address,
-                                                organizationCoordinates = currentOrganization.coordinates,
-                                                organizationFieldIds = currentOrganization.fieldIds,
-                                                selectedFieldIds = selectedFieldIdsForCreate,
-                                                selectedTimeSlotIds = selectedTimeSlotIdsForCreate,
-                                                participantRequiredTemplateIds = selectedParticipantTemplateIdsForCreate,
-                                                hostRequiredTemplateIds = selectedHostTemplateIdsForCreate,
-                                                rentalPriceCents = totalRentalPriceCents,
-                                                startEpochMillis = start.toEpochMilliseconds(),
-                                                endEpochMillis = end.toEpochMilliseconds(),
-                                            )
-                                        )
-                                    }
-                                }
+                                if (!canContinueRental) return@RentalConfirmationContent
+                                val start = rentalStartInstant
+                                val end = rentalEndInstant
+                                component.startRentalCreate(
+                                    RentalCreateContext(
+                                        organizationId = currentOrganization.id,
+                                        organizationName = currentOrganization.name,
+                                        organizationLocation = currentOrganization.location,
+                                        organizationAddress = currentOrganization.address,
+                                        organizationCoordinates = currentOrganization.coordinates,
+                                        organizationFieldIds = currentOrganization.fieldIds,
+                                        selectedFieldIds = selectedFieldIdsForCreate,
+                                        selectedTimeSlotIds = selectedTimeSlotIdsForCreate,
+                                        lockedSelections = lockedSelectionsForCreate,
+                                        participantRequiredTemplateIds = selectedParticipantTemplateIdsForCreate,
+                                        hostRequiredTemplateIds = selectedHostTemplateIdsForCreate,
+                                        rentalPriceCents = totalRentalPriceCents,
+                                        startEpochMillis = start.toEpochMilliseconds(),
+                                        endEpochMillis = end.toEpochMilliseconds(),
+                                    )
+                                )
                             }
                         )
                     }

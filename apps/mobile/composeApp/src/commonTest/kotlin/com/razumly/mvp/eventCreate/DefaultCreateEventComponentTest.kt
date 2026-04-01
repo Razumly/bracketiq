@@ -428,7 +428,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
-    fun given_rental_context_when_updating_event_then_rental_constraints_lock_type_schedule_and_pricing() = runTest(testDispatcher) {
+    fun given_rental_context_when_updating_event_then_rental_constraints_lock_schedule_and_pricing_but_keep_selected_type() = runTest(testDispatcher) {
         val rentalContext = RentalCreateContext(
             organizationId = "org-1",
             organizationName = "Org One",
@@ -448,7 +448,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
 
         val initial = harness.component.newEventState.value
         assertEquals(EventType.EVENT, initial.eventType)
-        assertEquals("org-1", initial.organizationId)
+        assertNull(initial.organizationId)
         assertEquals(listOf("field-a", "field-b"), initial.fieldIds)
         assertEquals(listOf("slot-a"), initial.timeSlotIds)
         assertEquals(listOf("template-a", "template-b"), initial.requiredTemplateIds)
@@ -472,14 +472,113 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         advance()
 
         val constrained = harness.component.newEventState.value
-        assertEquals(EventType.EVENT, constrained.eventType)
-        assertEquals("org-1", constrained.organizationId)
+        assertEquals(EventType.TOURNAMENT, constrained.eventType)
+        assertFalse(constrained.noFixedEndDateTime)
+        assertNull(constrained.organizationId)
         assertEquals(listOf("field-a", "field-b"), constrained.fieldIds)
         assertEquals(listOf("slot-a"), constrained.timeSlotIds)
         assertEquals(listOf("template-a", "template-b"), constrained.requiredTemplateIds)
         assertEquals(2500, constrained.priceCents)
         assertEquals(instant(1_700_000_000_000), constrained.start)
         assertEquals(instant(1_700_003_600_000), constrained.end)
+    }
+
+    @Test
+    fun given_rental_context_with_locked_selections_when_initialized_then_seeded_slots_match_selection_windows() = runTest(testDispatcher) {
+        val slotOneStart = 1_700_000_000_000L
+        val slotOneEnd = 1_700_001_800_000L
+        val slotTwoStart = 1_700_010_000_000L
+        val slotTwoEnd = 1_700_011_800_000L
+        val rentalContext = RentalCreateContext(
+            organizationId = "org-locked",
+            organizationName = "Locked Org",
+            organizationLocation = "Main Gym",
+            organizationCoordinates = listOf(-122.25, 37.78),
+            organizationFieldIds = listOf("org-field-1"),
+            selectedFieldIds = listOf("field-a", "field-b"),
+            selectedTimeSlotIds = listOf("slot-a", "slot-b"),
+            lockedSelections = listOf(
+                com.razumly.mvp.core.presentation.LockedRentalSelection(
+                    fieldId = "field-a",
+                    fieldName = "Court A",
+                    sourceTimeSlotIds = listOf("slot-a"),
+                    startEpochMillis = slotOneStart,
+                    endEpochMillis = slotOneEnd,
+                ),
+                com.razumly.mvp.core.presentation.LockedRentalSelection(
+                    fieldId = "field-b",
+                    fieldName = "Court B",
+                    sourceTimeSlotIds = listOf("slot-b"),
+                    startEpochMillis = slotTwoStart,
+                    endEpochMillis = slotTwoEnd,
+                ),
+            ),
+            participantRequiredTemplateIds = listOf("participant-template"),
+            hostRequiredTemplateIds = listOf("host-template"),
+            rentalPriceCents = 4000,
+            startEpochMillis = slotOneStart,
+            endEpochMillis = slotTwoEnd,
+        )
+        val harness = CreateEventHarness(rentalContext = rentalContext)
+        advance()
+
+        assertEquals(2, harness.component.leagueSlots.value.size)
+        val firstSlot = harness.component.leagueSlots.value[0]
+        val secondSlot = harness.component.leagueSlots.value[1]
+
+        assertEquals(false, firstSlot.repeating)
+        assertEquals("field-a", firstSlot.scheduledFieldId)
+        assertEquals(listOf("field-a"), firstSlot.scheduledFieldIds)
+        assertEquals(instant(slotOneStart), firstSlot.startDate)
+        assertEquals(instant(slotOneEnd), firstSlot.endDate)
+
+        assertEquals(false, secondSlot.repeating)
+        assertEquals("field-b", secondSlot.scheduledFieldId)
+        assertEquals(listOf("field-b"), secondSlot.scheduledFieldIds)
+        assertEquals(instant(slotTwoStart), secondSlot.startDate)
+        assertEquals(instant(slotTwoEnd), secondSlot.endDate)
+    }
+
+    @Test
+    fun given_rental_event_with_locked_slots_when_created_then_event_payload_persists_slots_for_event_type() = runTest(testDispatcher) {
+        val rentalContext = RentalCreateContext(
+            organizationId = "org-event-slots",
+            organizationName = "Event Slots Org",
+            organizationLocation = "Court 1",
+            organizationCoordinates = listOf(-122.25, 37.78),
+            organizationFieldIds = listOf("org-field-1"),
+            selectedFieldIds = listOf("field-a"),
+            selectedTimeSlotIds = listOf("slot-a"),
+            lockedSelections = listOf(
+                com.razumly.mvp.core.presentation.LockedRentalSelection(
+                    fieldId = "field-a",
+                    sourceTimeSlotIds = listOf("slot-a"),
+                    startEpochMillis = 1_700_000_000_000,
+                    endEpochMillis = 1_700_003_600_000,
+                ),
+            ),
+            participantRequiredTemplateIds = listOf("participant-template"),
+            hostRequiredTemplateIds = emptyList(),
+            rentalPriceCents = 0,
+            startEpochMillis = 1_700_000_000_000,
+            endEpochMillis = 1_700_003_600_000,
+        )
+        val harness = CreateEventHarness(rentalContext = rentalContext)
+        advance()
+
+        assertEquals(EventType.EVENT, harness.component.newEventState.value.eventType)
+        harness.component.createEvent()
+        advance()
+
+        assertEquals(1, harness.eventRepository.createEventCalls.size)
+        val createCall = harness.eventRepository.createEventCalls.single()
+        val payloadSlots = createCall.timeSlots.orEmpty()
+        assertEquals(EventType.EVENT, createCall.event.eventType)
+        assertEquals(1, payloadSlots.size)
+        assertEquals(payloadSlots.map { it.id }, createCall.event.timeSlotIds)
+        assertEquals("field-a", payloadSlots.single().scheduledFieldId)
+        assertEquals(listOf("field-a"), payloadSlots.single().scheduledFieldIds)
+        assertEquals(false, payloadSlots.single().repeating)
     }
 
     @Test
@@ -515,6 +614,7 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         assertEquals(1, harness.eventRepository.createEventCalls.size)
         assertEquals(1, harness.onEventCreatedCount)
         assertEquals(0, harness.eventRepository.createEventCalls.single().event.priceCents)
+        assertNull(harness.eventRepository.createEventCalls.single().event.organizationId)
         assertEquals(
             listOf("facility-template"),
             harness.eventRepository.createEventCalls.single().requiredTemplateIds,
@@ -595,6 +695,8 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         assertEquals(3500, checkoutCall.event.priceCents)
         assertEquals("slot-a", checkoutCall.timeSlotContext?.id)
         assertEquals(3500, checkoutCall.timeSlotContext?.priceCents)
+        assertEquals("field-a", checkoutCall.timeSlotContext?.scheduledFieldId)
+        assertEquals(listOf("field-a"), checkoutCall.timeSlotContext?.scheduledFieldIds)
         assertEquals(
             listOf("host-template-a", "host-template-b"),
             checkoutCall.timeSlotContext?.hostRequiredTemplateIds,
