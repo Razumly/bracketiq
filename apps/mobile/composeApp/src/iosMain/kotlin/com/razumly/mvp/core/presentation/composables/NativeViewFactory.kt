@@ -19,7 +19,8 @@ interface NativeViewFactory {
         onPlaceSelectionPoint: (x: Float, y: Float) -> Unit,
         canClickPOI: Boolean,
         focusedLocation: LatLng?,
-        focusedEvent: Event?
+        focusedEvent: Event?,
+        locationButtonBottomPadding: Float,
     ): UIViewController
 
     fun updateNativeMapView(
@@ -30,7 +31,8 @@ interface NativeViewFactory {
         onPlaceSelectionPoint: (x: Float, y: Float) -> Unit,
         canClickPOI: Boolean,
         focusedLocation: LatLng?,
-        focusedEvent: Event?
+        focusedEvent: Event?,
+        locationButtonBottomPadding: Float,
     )
 
     fun createNativePlatformDatePicker(

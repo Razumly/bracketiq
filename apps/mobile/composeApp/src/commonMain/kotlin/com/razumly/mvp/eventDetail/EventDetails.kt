@@ -2164,8 +2164,9 @@ fun EventDetails(
                         if (!hostHasAccount) {
                             StripeButton(
                                 onClick = onHostCreateAccount,
-                                paymentProcessor,
-                                "Create Stripe Connect Account to Change Price",
+                                paymentProcessor = paymentProcessor,
+                                text = "Create Stripe Connect Account to Change Price",
+                                modifier = Modifier.align(Alignment.CenterHorizontally),
                             )
                         }
                         MoneyInputField(

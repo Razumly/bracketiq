@@ -1762,6 +1762,7 @@ fun EventDetailScreen(
     var showTeamSelectionDialog by remember { mutableStateOf(false) }
     var showFab by remember { mutableStateOf(false) }
     var showOptionsDropdown by remember { mutableStateOf(false) }
+    var showPublishDropdown by remember { mutableStateOf(false) }
     var showDeleteConfirmation by remember { mutableStateOf(false) }
     var showWithdrawTargetDialog by remember { mutableStateOf(false) }
     var showRefundReasonDialog by remember { mutableStateOf(false) }
@@ -2399,6 +2400,46 @@ fun EventDetailScreen(
                                                 Text("Cancel")
                                             }
                                         }
+                                        if (isHost && selectedEvent.event.state == "UNPUBLISHED") {
+                                            Box(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                contentAlignment = Alignment.Center,
+                                            ) {
+                                                Button(
+                                                    onClick = { showPublishDropdown = true },
+                                                    colors = buttonColors,
+                                                ) {
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                                    ) {
+                                                        Text("Publish")
+                                                        Icon(
+                                                            imageVector = Icons.Default.KeyboardArrowDown,
+                                                            contentDescription = null,
+                                                        )
+                                                    }
+                                                }
+                                                DropdownMenu(
+                                                    expanded = showPublishDropdown,
+                                                    onDismissRequest = { showPublishDropdown = false },
+                                                ) {
+                                                    DropdownMenuItem(
+                                                        text = { Text("Publish Event") },
+                                                        onClick = {
+                                                            component.publishEvent()
+                                                            showPublishDropdown = false
+                                                        },
+                                                        leadingIcon = {
+                                                            Icon(
+                                                                imageVector = Icons.Default.Check,
+                                                                contentDescription = null,
+                                                            )
+                                                        },
+                                                    )
+                                                }
+                                            }
+                                        }
                                         if (canBuildBracketsForEditedEvent) {
                                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                                 Button(
@@ -2497,19 +2538,6 @@ fun EventDetailScreen(
                                         }, leadingIcon = {
                                             Icon(Icons.Default.Edit, contentDescription = null)
                                         }, enabled = canEditEventDetails
-                                        )
-                                    }
-
-                                    if (isHost && selectedEvent.event.state == "UNPUBLISHED") {
-                                        DropdownMenuItem(
-                                            text = { Text("Publish") },
-                                            onClick = {
-                                                component.publishEvent()
-                                                showOptionsDropdown = false
-                                            },
-                                            leadingIcon = {
-                                                Icon(Icons.Default.Check, contentDescription = null)
-                                            },
                                         )
                                     }
 

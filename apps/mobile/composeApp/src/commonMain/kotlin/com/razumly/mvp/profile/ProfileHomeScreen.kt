@@ -39,6 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
@@ -255,7 +256,11 @@ fun ProfileHomeScreen(component: ProfileComponent) {
                     modifier = Modifier.fillMaxWidth(),
                     onClick = component::onLogout,
                 ) {
-                    Text("Logout")
+                    Text(
+                        text = "Logout",
+                        modifier = Modifier.fillMaxWidth(),
+                        textAlign = TextAlign.Center,
+                    )
                 }
             }
         }
@@ -284,7 +289,8 @@ private fun ProfileActionCard(action: ProfileAction) {
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .align(Alignment.TopStart),
+                    .align(Alignment.TopCenter),
+                textAlign = TextAlign.Center,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -316,7 +322,8 @@ private fun ProfileActionCard(action: ProfileAction) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .align(Alignment.BottomStart),
+                    .align(Alignment.BottomCenter),
+                textAlign = TextAlign.Center,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -364,14 +371,22 @@ private fun PushTargetDebugCard(
                     enabled = !state.isLoading,
                     onClick = onCheckStatus,
                 ) {
-                    Text("Check")
+                    Text(
+                        text = "Check",
+                        modifier = Modifier.fillMaxWidth(),
+                        textAlign = TextAlign.Center,
+                    )
                 }
                 Button(
                     modifier = Modifier.weight(1f),
                     enabled = !state.isLoading,
                     onClick = onSyncAndCheck,
                 ) {
-                    Text("Sync + Check")
+                    Text(
+                        text = "Sync + Check",
+                        modifier = Modifier.fillMaxWidth(),
+                        textAlign = TextAlign.Center,
+                    )
                 }
             }
 

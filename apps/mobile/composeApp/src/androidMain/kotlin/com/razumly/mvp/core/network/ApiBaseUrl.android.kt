@@ -12,16 +12,21 @@ private const val NGROK_HOST_TOKEN = "ngrok"
 private const val UNSET_WEB_BASE_URL = "__MVP_WEB_BASE_URL_UNSET__"
 
 private fun isEmulator(): Boolean {
-    val fingerprint = Build.FINGERPRINT.lowercase()
+    val fingerprint = Build.FINGERPRINT?.lowercase().orEmpty()
+    val model = Build.MODEL.orEmpty()
+    val brand = Build.BRAND.orEmpty()
+    val device = Build.DEVICE.orEmpty()
+    val manufacturer = Build.MANUFACTURER.orEmpty()
+    val product = Build.PRODUCT.orEmpty()
     return fingerprint.startsWith("generic") ||
         fingerprint.startsWith("unknown") ||
-        Build.MODEL.contains("google_sdk", ignoreCase = true) ||
-        Build.MODEL.contains("emulator", ignoreCase = true) ||
-        Build.MODEL.contains("sdk_gphone", ignoreCase = true) ||
-        Build.BRAND.startsWith("generic") ||
-        Build.DEVICE.startsWith("generic") ||
-        Build.MANUFACTURER.contains("genymotion", ignoreCase = true) ||
-        Build.PRODUCT.contains("sdk", ignoreCase = true)
+        model.contains("google_sdk", ignoreCase = true) ||
+        model.contains("emulator", ignoreCase = true) ||
+        model.contains("sdk_gphone", ignoreCase = true) ||
+        brand.startsWith("generic") ||
+        device.startsWith("generic") ||
+        manufacturer.contains("genymotion", ignoreCase = true) ||
+        product.contains("sdk", ignoreCase = true)
 }
 
 private fun resolveApiBaseUrl(baseUrl: String, remoteBaseUrl: String): String {

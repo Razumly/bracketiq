@@ -379,10 +379,16 @@ class EventRepository(
                     id = newEvent.id,
                     event = newEvent.toUpdateDto(
                         requiredTemplateIdsOverride = requiredTemplateIds,
-                        leagueScoringConfigOverride = leagueScoringConfig,
-                        fieldsOverride = fields,
-                        timeSlotsOverride = timeSlots,
+                        leagueScoringConfigOverride = null,
+                        fieldsOverride = null,
+                        timeSlotsOverride = null,
+                        includeOrganizationId = true,
+                        includeFieldObjects = false,
+                        includeTimeSlotObjects = false,
                     ),
+                    newFields = fields,
+                    timeSlots = timeSlots,
+                    leagueScoringConfig = leagueScoringConfig,
                 ),
             ).event?.toEventOrNull() ?: error("Create event response missing event")
             created
@@ -459,6 +465,9 @@ class EventRepository(
                         leagueScoringConfigOverride = leagueScoringConfig,
                         fieldsOverride = fields,
                         timeSlotsOverride = timeSlots,
+                        includeOrganizationId = false,
+                        includeFieldObjects = fields != null,
+                        includeTimeSlotObjects = timeSlots != null,
                     ),
                 ),
             ).toEventOrNull() ?: error("Update event response missing event")

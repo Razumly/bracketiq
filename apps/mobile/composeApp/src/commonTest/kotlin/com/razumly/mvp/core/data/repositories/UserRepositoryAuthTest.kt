@@ -490,29 +490,46 @@ class UserRepositoryAuthTest {
         val currentUserDataSource = CurrentUserDataSource(prefsStore)
 
         val engine = MockEngine { request ->
-            assertEquals("/api/users/ensure", request.url.encodedPath)
-            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
-            respond(
-                content = """
-                    {
-                      "user": {
-                        "id":"u2",
-                        "firstName":"Invited",
-                        "lastName":"User",
-                        "userName":"invited_user",
-                        "teamIds":[],
-                        "friendIds":[],
-                        "friendRequestIds":[],
-                        "friendRequestSentIds":[],
-                        "followingIds":[],
-                        "uploadedImages":[],
-                        "hasStripeAccount":false
-                      }
-                    }
-                """.trimIndent(),
-                status = HttpStatusCode.OK,
-                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
-            )
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> respond(
+                    content = """
+                        {
+                          "user": { "id":"u1", "email":"u1@example.com", "name":"U1" },
+                          "session": { "userId":"u1", "isAdmin":false },
+                          "token":"t123"
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+                )
+
+                "/api/users/ensure" -> {
+                    assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+                    respond(
+                        content = """
+                            {
+                              "user": {
+                                "id":"u2",
+                                "firstName":"Invited",
+                                "lastName":"User",
+                                "userName":"invited_user",
+                                "teamIds":[],
+                                "friendIds":[],
+                                "friendRequestIds":[],
+                                "friendRequestSentIds":[],
+                                "followingIds":[],
+                                "uploadedImages":[],
+                                "hasStripeAccount":false
+                              }
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+                    )
+                }
+
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
         }
 
         val http = HttpClient(engine) {
@@ -650,14 +667,31 @@ class UserRepositoryAuthTest {
         val currentUserDataSource = CurrentUserDataSource(prefsStore)
 
         val engine = MockEngine { request ->
-            assertEquals("/api/family/children", request.url.encodedPath)
-            assertEquals(HttpMethod.Post, request.method)
-            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
-            respond(
-                content = """{"childUserId":"child_2","linkId":"link_1","status":"active"}""",
-                status = HttpStatusCode.Created,
-                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
-            )
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> respond(
+                    content = """
+                        {
+                          "user": { "id":"u1", "email":"u1@example.com", "name":"U1" },
+                          "session": { "userId":"u1", "isAdmin":false },
+                          "token":"t123"
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+                )
+
+                "/api/family/children" -> {
+                    assertEquals(HttpMethod.Post, request.method)
+                    assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+                    respond(
+                        content = """{"childUserId":"child_2","linkId":"link_1","status":"active"}""",
+                        status = HttpStatusCode.Created,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+                    )
+                }
+
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
         }
 
         val http = HttpClient(engine) {
@@ -686,14 +720,31 @@ class UserRepositoryAuthTest {
         val currentUserDataSource = CurrentUserDataSource(prefsStore)
 
         val engine = MockEngine { request ->
-            assertEquals("/api/family/children/child_2", request.url.encodedPath)
-            assertEquals(HttpMethod.Patch, request.method)
-            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
-            respond(
-                content = """{}""",
-                status = HttpStatusCode.OK,
-                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
-            )
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> respond(
+                    content = """
+                        {
+                          "user": { "id":"u1", "email":"u1@example.com", "name":"U1" },
+                          "session": { "userId":"u1", "isAdmin":false },
+                          "token":"t123"
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+                )
+
+                "/api/family/children/child_2" -> {
+                    assertEquals(HttpMethod.Patch, request.method)
+                    assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+                    respond(
+                        content = """{}""",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
         }
 
         val http = HttpClient(engine) {

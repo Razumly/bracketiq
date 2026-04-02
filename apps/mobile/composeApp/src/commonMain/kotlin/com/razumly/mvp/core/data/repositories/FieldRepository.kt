@@ -67,7 +67,6 @@ class FieldRepository(
                 name = field.name,
                 rentalSlotIds = field.rentalSlotIds,
                 location = field.location,
-                organizationId = field.organizationId,
             )
         )
         val updated = api.patch<FieldPatchRequest, Field>(
@@ -279,5 +278,4 @@ private data class FieldPatchPayload(
     val name: String? = null,
     val rentalSlotIds: List<String> = emptyList(),
     val location: String? = null,
-    val organizationId: String? = null,
 )

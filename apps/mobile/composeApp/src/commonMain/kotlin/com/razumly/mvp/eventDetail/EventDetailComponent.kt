@@ -2477,7 +2477,14 @@ class DefaultEventDetailComponent(
                 },
             ).syncOfficialStaffing(sport = sourceSport)
 
-            eventRepository.createEvent(templateEvent)
+            val templatePayload = prepareTemplateForCreate(templateEvent)
+            eventRepository.createEvent(
+                newEvent = templatePayload.event,
+                requiredTemplateIds = emptyList(),
+                leagueScoringConfig = templatePayload.leagueScoringConfig,
+                fields = templatePayload.fields,
+                timeSlots = templatePayload.timeSlots,
+            )
                 .onSuccess {
                     _errorState.value = ErrorMessage("Template created and added to your templates.")
                 }
@@ -2815,6 +2822,124 @@ class DefaultEventDetailComponent(
         val timeSlots: List<TimeSlot>? = null,
         val leagueScoringConfig: LeagueScoringConfigDTO? = null,
     )
+
+    private data class PreparedTemplateForCreate(
+        val event: Event,
+        val fields: List<Field>? = null,
+        val timeSlots: List<TimeSlot>? = null,
+        val leagueScoringConfig: LeagueScoringConfigDTO? = null,
+    )
+
+    private fun prepareTemplateForCreate(templateEvent: Event): PreparedTemplateForCreate {
+        val shouldPersistFieldsAndSlots = templateEvent.eventType == EventType.LEAGUE ||
+            templateEvent.eventType == EventType.TOURNAMENT ||
+            templateEvent.eventType == EventType.WEEKLY_EVENT
+        if (!shouldPersistFieldsAndSlots) {
+            return PreparedTemplateForCreate(
+                event = templateEvent,
+                fields = null,
+                timeSlots = null,
+                leagueScoringConfig = null,
+            )
+        }
+
+        val sourceFields = buildEditableFieldDrafts(
+            event = templateEvent,
+            sourceFields = if (_isEditing.value) {
+                _editableFields.value
+            } else {
+                eventFields.value.map { relation -> relation.field }
+            },
+        )
+        val sourceSlots = if (_isEditing.value) {
+            _editableLeagueTimeSlots.value
+        } else {
+            eventWithRelations.value.timeSlots
+        }
+
+        val isOrganizationManaged = !templateEvent.organizationId.isNullOrBlank()
+        val clonedFields = if (isOrganizationManaged) {
+            null
+        } else {
+            sourceFields.mapIndexed { index, field ->
+                field.copy(
+                    id = newId(),
+                    fieldNumber = index + 1,
+                    name = field.name?.takeIf(String::isNotBlank) ?: "Field ${index + 1}",
+                    divisions = field.divisions
+                        .normalizeDivisionIdentifiers()
+                        .ifEmpty { defaultFieldDivisions(templateEvent) },
+                    organizationId = resolveFieldOrganizationId(
+                        fieldOrganizationId = field.organizationId,
+                        eventOrganizationId = templateEvent.organizationId,
+                    ),
+                )
+            }
+        }
+
+        val fieldIdRemap = if (clonedFields != null) {
+            sourceFields.zip(clonedFields).mapNotNull { (source, clone) ->
+                val sourceId = source.id.trim().takeIf(String::isNotBlank) ?: return@mapNotNull null
+                sourceId to clone.id
+            }.toMap()
+        } else {
+            emptyMap()
+        }
+
+        val resolvedFieldIds = if (clonedFields != null) {
+            clonedFields.map { field -> field.id }
+        } else {
+            templateEvent.fieldIds
+                .map { fieldId -> fieldId.trim() }
+                .filter(String::isNotBlank)
+                .ifEmpty {
+                    sourceFields
+                        .map { field -> field.id.trim() }
+                        .filter(String::isNotBlank)
+                }
+        }
+        val resolvedFieldIdSet = resolvedFieldIds.toSet()
+
+        val clonedTimeSlots = sourceSlots.mapNotNull { slot ->
+            val mappedFieldIds = slot.normalizedScheduledFieldIds()
+                .map { fieldId -> fieldIdRemap[fieldId] ?: fieldId }
+                .filter(resolvedFieldIdSet::contains)
+                .distinct()
+            if (mappedFieldIds.isEmpty()) {
+                return@mapNotNull null
+            }
+            val normalizedDays = slot.normalizedDaysOfWeek()
+            val normalizedDivisions = slot.normalizedDivisionIds()
+                .map { divisionId -> divisionId.normalizeDivisionIdentifier() }
+                .filter(String::isNotBlank)
+                .distinct()
+                .ifEmpty { defaultFieldDivisions(templateEvent) }
+            slot.copy(
+                id = newId(),
+                dayOfWeek = normalizedDays.firstOrNull(),
+                daysOfWeek = normalizedDays,
+                divisions = normalizedDivisions,
+                scheduledFieldId = mappedFieldIds.firstOrNull(),
+                scheduledFieldIds = mappedFieldIds,
+            )
+        }
+
+        val leagueScoringConfig = if (templateEvent.eventType == EventType.LEAGUE) {
+            _editableLeagueScoringConfig.value
+        } else {
+            null
+        }
+
+        return PreparedTemplateForCreate(
+            event = templateEvent.copy(
+                fieldIds = resolvedFieldIds,
+                timeSlotIds = clonedTimeSlots.map { slot -> slot.id },
+            ),
+            fields = clonedFields,
+            timeSlots = clonedTimeSlots,
+            leagueScoringConfig = leagueScoringConfig,
+        )
+    }
 
     private fun prepareEventForUpdate(): PreparedEventForUpdate {
         val eventDraft = _editedEvent.value

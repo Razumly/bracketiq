@@ -235,10 +235,17 @@ actual fun EventMap(
     ) {
         GoogleMap(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(top = 160.dp),
+            contentPadding = PaddingValues(
+                top = 160.dp,
+                end = MAP_ACTION_BUTTON_SCAFFOLD_BOTTOM_SPACING,
+                bottom = closeButtonBottomPadding,
+            ),
             cameraPositionState = cameraPositionState,
             properties = MapProperties(isMyLocationEnabled = trackedLocation != null),
-            uiSettings = MapUiSettings(zoomControlsEnabled = false),
+            uiSettings = MapUiSettings(
+                zoomControlsEnabled = false,
+                myLocationButtonEnabled = trackedLocation != null,
+            ),
             onPOIClick = { poi ->
                 if (canClickPOI && !isAnimating) {
                     selectedPOI = poi

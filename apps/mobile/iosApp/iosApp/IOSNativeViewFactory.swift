@@ -22,7 +22,8 @@ class IOSNativeViewFactory: NativeViewFactory {
         onPlaceSelectionPoint: @escaping (KotlinFloat, KotlinFloat) -> Void,
         canClickPOI: Bool,
         focusedLocation: LatLng?,
-        focusedEvent: (Event)?
+        focusedEvent: (Event)?,
+        locationButtonBottomPadding: Float
     ) -> UIViewController {
         let view = EventMap(
             component: component,
@@ -31,7 +32,8 @@ class IOSNativeViewFactory: NativeViewFactory {
             onPlaceSelectionPoint: onPlaceSelectionPoint,
             canClickPOI: canClickPOI,
             focusedLocation: focusedLocation,
-            focusedEvent: focusedEvent
+            focusedEvent: focusedEvent,
+            locationButtonBottomPadding: CGFloat(locationButtonBottomPadding)
         )
         
         let hostingController = UIHostingController(rootView: view)
@@ -50,7 +52,8 @@ class IOSNativeViewFactory: NativeViewFactory {
             onPlaceSelectionPoint: @escaping (KotlinFloat, KotlinFloat) -> Void,
             canClickPOI: Bool,
             focusedLocation: LatLng?,
-            focusedEvent: (Event)?
+            focusedEvent: (Event)?,
+            locationButtonBottomPadding: Float
         ) {
             guard let hostingController = viewController as? UIHostingController<EventMap> else {
                 return
@@ -63,7 +66,8 @@ class IOSNativeViewFactory: NativeViewFactory {
                 onPlaceSelectionPoint: onPlaceSelectionPoint,
                 canClickPOI: canClickPOI,
                 focusedLocation: focusedLocation,
-                focusedEvent: focusedEvent
+                focusedEvent: focusedEvent,
+                locationButtonBottomPadding: CGFloat(locationButtonBottomPadding)
             )
 
             hostingController.rootView = updatedView

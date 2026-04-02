@@ -30,6 +30,7 @@ struct EventMap: View {
     var canClickPOI: Bool
     var focusedEvent: Event?
     var focusedLocation: LatLng?
+    var locationButtonBottomPadding: CGFloat
     
     @State private var suggestions: [MVPPlace] = []
     @State private var searchText: String = ""
@@ -43,7 +44,8 @@ struct EventMap: View {
         onPlaceSelectionPoint: @escaping (KotlinFloat, KotlinFloat) -> Void,
         canClickPOI: Bool,
         focusedLocation: LatLng?,
-        focusedEvent: Event?
+        focusedEvent: Event?,
+        locationButtonBottomPadding: CGFloat
     ) {
         self.component = component
         self.onEventSelected = onEventSelected
@@ -52,6 +54,7 @@ struct EventMap: View {
         self.canClickPOI = canClickPOI
         self.focusedLocation = focusedLocation
         self.focusedEvent = focusedEvent
+        self.locationButtonBottomPadding = locationButtonBottomPadding
     }
     
     var body: some View {
@@ -75,7 +78,8 @@ struct EventMap: View {
                     onEventSelected: onEventSelected,
                     onPlaceSelected: onPlaceSelected,
                     onPlaceSelectionPoint: onPlaceSelectionPoint,
-                    places: mergedPlaces
+                    places: mergedPlaces,
+                    locationButtonBottomPadding: locationButtonBottomPadding
                 )
                 .edgesIgnoringSafeArea(.all)
                 
@@ -171,6 +175,7 @@ struct GoogleMapView: UIViewRepresentable {
     let onPlaceSelected: (MVPPlace) -> Void
     let onPlaceSelectionPoint: (KotlinFloat, KotlinFloat) -> Void
     let places: [MVPPlace]
+    let locationButtonBottomPadding: CGFloat
     
     func makeUIView(context: Context) -> GMSMapView {
         let camera: GMSCameraPosition
@@ -186,6 +191,7 @@ struct GoogleMapView: UIViewRepresentable {
         
         let mapView = GMSMapView.init(options: options)
         mapView.isMyLocationEnabled = true
+        mapView.settings.myLocationButton = true
         mapView.delegate = context.coordinator
         mapView.mapType = .normal
         mapView.settings.consumesGesturesInView = false
@@ -203,6 +209,13 @@ struct GoogleMapView: UIViewRepresentable {
     }
     
     func updateUIView(_ mapView: GMSMapView, context: Context) {
+        mapView.padding = UIEdgeInsets(
+            top: canClickPOI ? 160 : 0,
+            left: 0,
+            bottom: locationButtonBottomPadding,
+            right: 16
+        )
+
         // Clear existing markers
         mapView.clear()
         context.coordinator.clearAllMarkers()

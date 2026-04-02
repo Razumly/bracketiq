@@ -16,7 +16,11 @@ private val ERROR_MESSAGE_KEYS = listOf(
 )
 
 private val HTTP_ERROR_ENVELOPE_REGEX = Regex(
-    pattern = "(?s)^HTTP\\s+\\d{3}\\s+for\\s+.+?:\\s*(.+)$",
+    pattern = "(?s)^HTTP\\s+\\d{3}\\s+for\\s+.+?:\\s*(\\{.*|\\[.*)$",
+)
+
+private val JSON_BODY_AFTER_PREFIX_REGEX = Regex(
+    pattern = "(?s)^.+:\\s*(\\{.*|\\[.*)$",
 )
 
 fun extractApiErrorMessage(rawError: String?): String? {
@@ -29,6 +33,17 @@ fun extractApiErrorMessage(rawError: String?): String? {
     val envelopeBody = HTTP_ERROR_ENVELOPE_REGEX.find(normalized)?.groupValues?.getOrNull(1)?.trim()
     if (!envelopeBody.isNullOrEmpty()) {
         return extractApiErrorMessage(envelopeBody) ?: sanitizePlainMessage(envelopeBody)
+    }
+
+    if (!normalized.startsWith("{") && !normalized.startsWith("[")) {
+        val prefixedJsonBody = JSON_BODY_AFTER_PREFIX_REGEX
+            .find(normalized)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.trim()
+        if (!prefixedJsonBody.isNullOrEmpty()) {
+            return extractApiErrorMessage(prefixedJsonBody) ?: sanitizePlainMessage(prefixedJsonBody)
+        }
     }
 
     if (normalized.startsWith("{") || normalized.startsWith("[")) {
@@ -78,6 +93,13 @@ private fun extractFromJsonObject(jsonObject: JsonObject): String? {
     jsonObject["errors"]?.let { errors ->
         extractFromJsonElement(errors)?.let { return it }
     }
+
+    jsonObject.values
+        .asSequence()
+        .filter { value -> value is JsonObject || value is JsonArray }
+        .mapNotNull(::extractFromJsonElement)
+        .firstOrNull()
+        ?.let { return it }
 
     return jsonObject.values
         .asSequence()

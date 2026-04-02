@@ -366,6 +366,9 @@ data class EventParticipantsRequestDto(
     val divisionId: String? = null,
     val divisionTypeId: String? = null,
     val divisionTypeKey: String? = null,
+    val sessionStart: String? = null,
+    val sessionEnd: String? = null,
+    val slotId: String? = null,
 )
 
 @Serializable
@@ -488,6 +491,9 @@ data class EventUpdateDto(
 data class CreateEventRequestDto(
     val id: String,
     val event: EventUpdateDto,
+    val newFields: List<Field>? = null,
+    val timeSlots: List<TimeSlot>? = null,
+    val leagueScoringConfig: LeagueScoringConfigDTO? = null,
 )
 
 @Serializable
@@ -500,6 +506,9 @@ fun Event.toUpdateDto(
     leagueScoringConfigOverride: LeagueScoringConfigDTO? = null,
     fieldsOverride: List<Field>? = null,
     timeSlotsOverride: List<TimeSlot>? = null,
+    includeOrganizationId: Boolean = true,
+    includeFieldObjects: Boolean = true,
+    includeTimeSlotObjects: Boolean = true,
 ): EventUpdateDto {
     val sourceRequiredTemplateIds = requiredTemplateIdsOverride ?: requiredTemplateIds
     val resolvedRequiredTemplateIds = sourceRequiredTemplateIds
@@ -639,13 +648,13 @@ fun Event.toUpdateDto(
         sportId = sportId,
         timeSlotIds = timeSlotIds,
         fieldIds = fieldIds,
-        fields = fieldsOverride,
-        timeSlots = timeSlotsOverride,
+        fields = if (includeFieldObjects) fieldsOverride else null,
+        timeSlots = if (includeTimeSlotObjects) timeSlotsOverride else null,
         teamIds = teamIds,
         userIds = userIds,
         leagueScoringConfigId = leagueScoringConfigId,
         leagueScoringConfig = leagueScoringConfigOverride,
-        organizationId = organizationId,
+        organizationId = if (includeOrganizationId) organizationId else null,
         autoCancellation = autoCancellation,
         eventType = eventType.name,
         doTeamsOfficiate = doTeamsOfficiate,

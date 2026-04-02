@@ -1,9 +1,9 @@
 package com.razumly.mvp.eventDetail
 
 import com.razumly.mvp.core.data.dataTypes.Event
-import com.razumly.mvp.core.data.dataTypes.EventType
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue

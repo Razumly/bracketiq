@@ -51,6 +51,7 @@ actual fun EventMap(
                     canClickPOI,
                     focusedLocation,
                     focusedEvent,
+                    closeButtonBottomPadding.value,
                 )
             },
             update = { viewController ->
@@ -63,6 +64,7 @@ actual fun EventMap(
                     canClickPOI,
                     focusedLocation,
                     focusedEvent,
+                    closeButtonBottomPadding.value,
                 )
             }
         )
