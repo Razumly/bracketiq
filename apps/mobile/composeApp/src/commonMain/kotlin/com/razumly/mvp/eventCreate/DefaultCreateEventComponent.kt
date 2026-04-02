@@ -62,6 +62,7 @@ import com.razumly.mvp.eventDetail.reconcileEventStaffInvites
 import com.razumly.mvp.eventDetail.data.IMatchRepository
 import io.github.ismoy.imagepickerkmp.domain.models.GalleryPhotoResult
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.isoDayNumber
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.coroutines.Dispatchers
@@ -1597,17 +1598,19 @@ class DefaultCreateEventComponent(
                 )
             }
 
-            if (normalizedDays.isEmpty() || startMinutes == null) {
+            if (normalizedDays.isEmpty() || startMinutes == null || endMinutes == null) {
                 return@mapNotNull null
             }
-            if (endMinutes != null && endMinutes <= startMinutes) {
+            if (endMinutes <= startMinutes) {
                 return@mapNotNull null
             }
             val slotStartDate = slot.startDate.takeUnless { it == Instant.DISTANT_PAST } ?: event.start
             val repeatingEndDate = if (event.eventType == EventType.WEEKLY_EVENT) {
                 null
+            } else if (event.noFixedEndDateTime) {
+                null
             } else {
-                event.end.takeIf { it > event.start }
+                slot.endDate?.toDateOnlyInstant()
             }
             slot.copy(
                 id = slot.id.ifBlank { newId() },
@@ -1807,11 +1810,7 @@ class DefaultCreateEventComponent(
     private fun createDefaultLeagueSlot(): TimeSlot {
         val event = newEventState.value
         val startDate = if (event.start == Instant.DISTANT_PAST) Clock.System.now() else event.start
-        val endDate = if (event.eventType == EventType.WEEKLY_EVENT) {
-            null
-        } else {
-            event.end.takeIf { it > event.start }
-        }
+        val endDate = event.defaultLeagueSlotEndDate()
         return TimeSlot(
             id = newId(),
             dayOfWeek = null,
@@ -1831,6 +1830,21 @@ class DefaultCreateEventComponent(
     private fun defaultFieldDivisions(event: Event): List<String> {
         val eventDivisions = event.divisions.normalizeDivisionIdentifiers()
         return eventDivisions.ifEmpty { listOf(DEFAULT_DIVISION) }
+    }
+
+    private fun Event.defaultLeagueSlotEndDate(): Instant? {
+        if (eventType == EventType.WEEKLY_EVENT || noFixedEndDateTime) {
+            return null
+        }
+        return end
+            .takeIf { value -> value > start }
+            ?.toDateOnlyInstant()
+    }
+
+    private fun Instant.toDateOnlyInstant(): Instant {
+        val timezone = TimeZone.currentSystemDefault()
+        val localDate = toLocalDateTime(timezone).date
+        return localDate.atStartOfDayIn(timezone)
     }
 
     private fun Instant.toMinutesOfDay(): Int {

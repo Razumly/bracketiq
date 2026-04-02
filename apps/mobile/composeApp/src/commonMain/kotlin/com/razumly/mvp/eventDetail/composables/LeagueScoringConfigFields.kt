@@ -125,18 +125,6 @@ private val numericScoringFields = listOf(
         getter = { it.pointsForLoss },
         setter = { config, value -> config.copy(pointsForLoss = value) },
     ),
-    intField(
-        label = "Points for Forfeit Win",
-        enabledSelector = { usePointsForForfeitWin },
-        getter = { it.pointsForForfeitWin },
-        setter = { config, value -> config.copy(pointsForForfeitWin = value) },
-    ),
-    intField(
-        label = "Points for Forfeit Loss",
-        enabledSelector = { usePointsForForfeitLoss },
-        getter = { it.pointsForForfeitLoss },
-        setter = { config, value -> config.copy(pointsForForfeitLoss = value) },
-    ),
     decimalField(
         label = "Points per Set Win",
         enabledSelector = { usePointsPerSetWin },

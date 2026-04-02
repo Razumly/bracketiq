@@ -6279,7 +6279,8 @@ internal fun computeLeagueSlotErrors(
             fieldIds.isEmpty() -> "Select at least one field."
             days.isEmpty() -> "Select at least one day."
             start == null -> "Select a start time."
-            end != null && end <= start -> "Timeslot must end after it starts."
+            end == null -> "Select an end time."
+            end <= start -> "Timeslot must end after it starts."
             else -> null
         }
         if (requiredMissing != null) {

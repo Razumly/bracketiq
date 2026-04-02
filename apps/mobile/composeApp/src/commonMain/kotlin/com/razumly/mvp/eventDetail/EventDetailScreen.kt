@@ -192,6 +192,32 @@ private data class JoinOption(
     val onClick: () -> Unit
 )
 
+private enum class EditableLifecycleState(
+    val label: String,
+) {
+    PUBLISHED("Published"),
+    DRAFT("Draft"),
+}
+
+private fun Event.toEditableLifecycleState(): EditableLifecycleState {
+    return when (state.trim().uppercase()) {
+        "PUBLISHED" -> EditableLifecycleState.PUBLISHED
+        else -> EditableLifecycleState.DRAFT
+    }
+}
+
+private fun EditableLifecycleState.toEventState(currentState: String): String {
+    return when (this) {
+        EditableLifecycleState.PUBLISHED -> "PUBLISHED"
+        EditableLifecycleState.DRAFT ->
+            if (currentState.trim().uppercase() == "DRAFT") {
+                "DRAFT"
+            } else {
+                "UNPUBLISHED"
+            }
+    }
+}
+
 private data class WeeklySessionOption(
     val id: String,
     val slotId: String?,
@@ -1758,7 +1784,7 @@ fun EventDetailScreen(
     var showTeamSelectionDialog by remember { mutableStateOf(false) }
     var showFab by remember { mutableStateOf(false) }
     var showOptionsDropdown by remember { mutableStateOf(false) }
-    var showPublishDropdown by remember { mutableStateOf(false) }
+    var showEventStateDropdown by remember { mutableStateOf(false) }
     var showDeleteConfirmation by remember { mutableStateOf(false) }
     var showWithdrawTargetDialog by remember { mutableStateOf(false) }
     var showRefundReasonDialog by remember { mutableStateOf(false) }
@@ -2396,20 +2422,23 @@ fun EventDetailScreen(
                                                 Text("Cancel")
                                             }
                                         }
-                                        if (isHost && selectedEvent.event.state == "UNPUBLISHED") {
+                                        if (isHost && !editedEvent.state.equals("TEMPLATE", ignoreCase = true)) {
+                                            val selectedLifecycleState = remember(editedEvent.state) {
+                                                editedEvent.toEditableLifecycleState()
+                                            }
                                             Box(
                                                 modifier = Modifier.fillMaxWidth(),
                                                 contentAlignment = Alignment.Center,
                                             ) {
                                                 Button(
-                                                    onClick = { showPublishDropdown = true },
+                                                    onClick = { showEventStateDropdown = true },
                                                     colors = buttonColors,
                                                 ) {
                                                     Row(
                                                         verticalAlignment = Alignment.CenterVertically,
                                                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                                                     ) {
-                                                        Text("Publish")
+                                                        Text(selectedLifecycleState.label)
                                                         Icon(
                                                             imageVector = Icons.Default.KeyboardArrowDown,
                                                             contentDescription = null,
@@ -2417,22 +2446,32 @@ fun EventDetailScreen(
                                                     }
                                                 }
                                                 DropdownMenu(
-                                                    expanded = showPublishDropdown,
-                                                    onDismissRequest = { showPublishDropdown = false },
+                                                    expanded = showEventStateDropdown,
+                                                    onDismissRequest = { showEventStateDropdown = false },
                                                 ) {
-                                                    DropdownMenuItem(
-                                                        text = { Text("Publish Event") },
-                                                        onClick = {
-                                                            component.publishEvent()
-                                                            showPublishDropdown = false
-                                                        },
-                                                        leadingIcon = {
-                                                            Icon(
-                                                                imageVector = Icons.Default.Check,
-                                                                contentDescription = null,
-                                                            )
-                                                        },
-                                                    )
+                                                    EditableLifecycleState.values().forEach { option ->
+                                                        DropdownMenuItem(
+                                                            text = { Text(option.label) },
+                                                            onClick = {
+                                                                component.editEventField {
+                                                                    copy(
+                                                                        state = option.toEventState(currentState = state),
+                                                                    )
+                                                                }
+                                                                showEventStateDropdown = false
+                                                            },
+                                                            leadingIcon = if (option == selectedLifecycleState) {
+                                                                {
+                                                                    Icon(
+                                                                        imageVector = Icons.Default.Check,
+                                                                        contentDescription = null,
+                                                                    )
+                                                                }
+                                                            } else {
+                                                                null
+                                                            },
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }
@@ -2804,7 +2843,6 @@ fun EventDetailScreen(
                                 DetailTab.LEAGUES -> {
                                     LeagueStandingsTab(
                                         standings = leagueStandings,
-                                        pointPrecision = selectedEvent.leagueScoringConfig?.pointPrecision,
                                         showFab = { showFab = it },
                                         validationMessages = leagueDivisionStandings?.validationMessages.orEmpty(),
                                         isLoading = leagueDivisionStandingsLoading,
@@ -3393,7 +3431,6 @@ private fun WithdrawTargetDialog(
 @Composable
 private fun LeagueStandingsTab(
     standings: List<TeamStanding>,
-    pointPrecision: Int?,
     validationMessages: List<String>,
     isLoading: Boolean,
     isConfirming: Boolean,
@@ -3460,7 +3497,6 @@ private fun LeagueStandingsTab(
             items(standings, key = { it.teamId }) { standing ->
                 LeagueStandingRow(
                     standing = standing,
-                    pointPrecision = pointPrecision
                 )
             }
         }
@@ -3511,7 +3547,6 @@ private fun LeagueStandingsHeader() {
 @Composable
 private fun LeagueStandingRow(
     standing: TeamStanding,
-    pointPrecision: Int?,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -3540,7 +3575,7 @@ private fun LeagueStandingRow(
         ) {
             StandingsCell(
                 label = "S",
-                value = standing.score.formatPoints(pointPrecision),
+                value = standing.score.formatPoints(),
                 modifier = Modifier.weight(1.4f)
             )
             StandingsCell(
@@ -3685,9 +3720,8 @@ private fun StandingAccumulator.applyMatchResult(
     score += matchPoints
 }
 
-private fun Double.formatPoints(precisionOverride: Int?): String {
+private fun Double.formatPoints(): String {
     val decimals = when {
-        precisionOverride != null -> precisionOverride
         (this % 1.0).absoluteValue < 0.0001 -> 0
         else -> 2
     }

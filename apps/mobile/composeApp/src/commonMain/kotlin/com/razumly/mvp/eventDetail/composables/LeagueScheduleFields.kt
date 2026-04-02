@@ -488,27 +488,19 @@ private fun TimeslotCard(
                         enabled = !readOnly,
                     )
                     TimeOfDayPickerField(
-                        label = "End Time (Optional)",
+                        label = "End Time",
                         minutes = slot.endTimeMinutes,
                         onMinutesSelected = { minutes ->
                             onUpdateSlot(index, slot.copy(endTimeMinutes = minutes))
                         },
                         modifier = Modifier.weight(1f),
-                        isError = slot.startTimeMinutes != null &&
-                            slot.endTimeMinutes != null &&
-                            slot.endTimeMinutes <= slot.startTimeMinutes,
+                        isError = slot.endTimeMinutes == null ||
+                            (
+                                slot.startTimeMinutes != null &&
+                                    slot.endTimeMinutes <= slot.startTimeMinutes
+                                ),
                         enabled = !readOnly,
                     )
-                }
-                if (!readOnly && slot.endTimeMinutes != null) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
-                    ) {
-                        TextButton(onClick = { onUpdateSlot(index, slot.copy(endTimeMinutes = null)) }) {
-                            Text("Clear end time")
-                        }
-                    }
                 }
             } else {
                 DateTimePickerField(
@@ -560,7 +552,7 @@ private fun TimeSlot.toggleRepeating(eventStart: Instant, eventEnd: Instant?): T
     return if (repeating) {
         toOneTimeSlot(eventStart = eventStart, eventEnd = eventEnd)
     } else {
-        toRepeatingSlot(eventStart = eventStart)
+        toRepeatingSlot(eventStart = eventStart, eventEnd = eventEnd)
     }
 }
 
@@ -588,17 +580,18 @@ private fun TimeSlot.toOneTimeSlot(eventStart: Instant, eventEnd: Instant?): Tim
 }
 
 @OptIn(ExperimentalTime::class)
-private fun TimeSlot.toRepeatingSlot(eventStart: Instant): TimeSlot {
+private fun TimeSlot.toRepeatingSlot(eventStart: Instant, eventEnd: Instant?): TimeSlot {
     val effectiveStart = startDate.takeUnless { it == Instant.DISTANT_PAST } ?: eventStart
     val day = effectiveStart.toMondayFirstDay()
     val resolvedStartMinutes = startTimeMinutes ?: effectiveStart.toMinutesOfDay()
-    val resolvedEndMinutes = endTimeMinutes ?: endDate?.toMinutesOfDay()
+    val resolvedEndDate = (endDate ?: eventEnd)?.toDateOnlyInstant()
+    val resolvedEndMinutes = endTimeMinutes ?: resolvedEndDate?.toMinutesOfDay()
     return copy(
         repeating = true,
         dayOfWeek = day,
         daysOfWeek = listOf(day),
         startDate = effectiveStart,
-        endDate = null,
+        endDate = resolvedEndDate,
         startTimeMinutes = resolvedStartMinutes,
         endTimeMinutes = resolvedEndMinutes,
     )
@@ -901,6 +894,13 @@ private fun Instant.withMinutesOfDay(minutes: Int): Instant {
 private fun Instant.toMinutesOfDay(): Int {
     val localTime = this.toLocalDateTime(TimeZone.currentSystemDefault()).time
     return localTime.hour * 60 + localTime.minute
+}
+
+@OptIn(ExperimentalTime::class)
+private fun Instant.toDateOnlyInstant(): Instant {
+    val timezone = TimeZone.currentSystemDefault()
+    val localDate = this.toLocalDateTime(timezone).date
+    return localDate.atStartOfDayIn(timezone)
 }
 
 @OptIn(ExperimentalTime::class)

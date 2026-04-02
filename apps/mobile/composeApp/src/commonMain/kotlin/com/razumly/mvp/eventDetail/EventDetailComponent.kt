@@ -95,6 +95,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.datetime.isoDayNumber
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.toLocalDateTime
 import kotlin.time.Clock
 import kotlin.time.Duration
@@ -3149,10 +3150,10 @@ class DefaultEventDetailComponent(
             val normalizedDays = slot.normalizedDaysOfWeek()
             val startMinutes = slot.startTimeMinutes
             val endMinutes = slot.endTimeMinutes
-            if (normalizedDays.isEmpty() || startMinutes == null) {
+            if (normalizedDays.isEmpty() || startMinutes == null || endMinutes == null) {
                 return@mapNotNull null
             }
-            if (endMinutes != null && endMinutes <= startMinutes) {
+            if (endMinutes <= startMinutes) {
                 return@mapNotNull null
             }
 
@@ -3162,7 +3163,7 @@ class DefaultEventDetailComponent(
             } else if (event.noFixedEndDateTime) {
                 null
             } else {
-                slot.endDate
+                slot.endDate?.toDateOnlyInstant()
             }
             slot.copy(
                 id = slot.id.ifBlank { newId() },
@@ -3249,58 +3250,18 @@ class DefaultEventDetailComponent(
         pointsForWin = pointsForWin,
         pointsForDraw = pointsForDraw,
         pointsForLoss = pointsForLoss,
-        pointsForForfeitWin = pointsForForfeitWin,
-        pointsForForfeitLoss = pointsForForfeitLoss,
         pointsPerSetWin = pointsPerSetWin,
         pointsPerSetLoss = pointsPerSetLoss,
         pointsPerGameWin = pointsPerGameWin,
         pointsPerGameLoss = pointsPerGameLoss,
         pointsPerGoalScored = pointsPerGoalScored,
         pointsPerGoalConceded = pointsPerGoalConceded,
-        maxGoalBonusPoints = maxGoalBonusPoints,
-        minGoalBonusThreshold = minGoalBonusThreshold,
-        pointsForShutout = pointsForShutout,
-        pointsForCleanSheet = pointsForCleanSheet,
-        applyShutoutOnlyIfWin = applyShutoutOnlyIfWin,
-        pointsPerGoalDifference = pointsPerGoalDifference,
-        maxGoalDifferencePoints = maxGoalDifferencePoints,
-        pointsPenaltyPerGoalDifference = pointsPenaltyPerGoalDifference,
-        pointsForParticipation = pointsForParticipation,
-        pointsForNoShow = pointsForNoShow,
-        pointsForWinStreakBonus = pointsForWinStreakBonus,
-        winStreakThreshold = winStreakThreshold,
-        pointsForOvertimeWin = pointsForOvertimeWin,
-        pointsForOvertimeLoss = pointsForOvertimeLoss,
-        overtimeEnabled = overtimeEnabled,
-        pointsPerRedCard = pointsPerRedCard,
-        pointsPerYellowCard = pointsPerYellowCard,
-        pointsPerPenalty = pointsPerPenalty,
-        maxPenaltyDeductions = maxPenaltyDeductions,
-        maxPointsPerMatch = maxPointsPerMatch,
-        minPointsPerMatch = minPointsPerMatch,
-        goalDifferenceTiebreaker = goalDifferenceTiebreaker,
-        headToHeadTiebreaker = headToHeadTiebreaker,
-        totalGoalsTiebreaker = totalGoalsTiebreaker,
-        enableBonusForComebackWin = enableBonusForComebackWin,
-        bonusPointsForComebackWin = bonusPointsForComebackWin,
-        enableBonusForHighScoringMatch = enableBonusForHighScoringMatch,
-        highScoringThreshold = highScoringThreshold,
-        bonusPointsForHighScoringMatch = bonusPointsForHighScoringMatch,
-        enablePenaltyForUnsportingBehavior = enablePenaltyForUnsportingBehavior,
-        penaltyPointsForUnsportingBehavior = penaltyPointsForUnsportingBehavior,
-        pointPrecision = pointPrecision,
     )
 
     private fun createDefaultLeagueSlot(): TimeSlot {
         val event = _editedEvent.value
         val startDate = if (event.start == Instant.DISTANT_PAST) Clock.System.now() else event.start
-        val endDate = if (event.eventType == EventType.WEEKLY_EVENT) {
-            null
-        } else if (event.noFixedEndDateTime) {
-            null
-        } else {
-            event.end.takeIf { end -> end > event.start }
-        }
+        val endDate = event.defaultLeagueSlotEndDate()
         return TimeSlot(
             id = newId(),
             dayOfWeek = null,
@@ -3315,6 +3276,21 @@ class DefaultEventDetailComponent(
             scheduledFieldIds = emptyList(),
             price = null,
         )
+    }
+
+    private fun Event.defaultLeagueSlotEndDate(): Instant? {
+        if (eventType == EventType.WEEKLY_EVENT || noFixedEndDateTime) {
+            return null
+        }
+        return end
+            .takeIf { value -> value > start }
+            ?.toDateOnlyInstant()
+    }
+
+    private fun Instant.toDateOnlyInstant(): Instant {
+        val timezone = TimeZone.currentSystemDefault()
+        val localDate = toLocalDateTime(timezone).date
+        return localDate.atStartOfDayIn(timezone)
     }
 
     private fun Instant.toMinutesOfDay(): Int {

@@ -2,6 +2,7 @@
 
 package com.razumly.mvp.eventDetail.composables
 
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,6 +29,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -37,9 +39,11 @@ import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.FieldWithMatches
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
+import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.assignedOfficialUserIds
 import com.razumly.mvp.core.data.dataTypes.officialAssignmentLabels
 import com.razumly.mvp.core.data.dataTypes.normalizedOfficialAssignments
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
@@ -67,10 +71,15 @@ private val AlternateBracketPrimary = Color(0xFF0F5C5A)
 private val AlternateBracketOnPrimary = Color(0xFFFFFFFF)
 private val AlternateBracketContainer = Color(0xFFD9F4EF)
 private val AlternateBracketOnContainer = Color(0xFF123B39)
+private val CurrentUserMatchGlowColor = Color(0xFF2FCC71)
+private val CurrentUserMatchGlowAmbientColor = CurrentUserMatchGlowColor.copy(alpha = 0.7f)
+private val CurrentUserMatchGlowSpotColor = CurrentUserMatchGlowColor.copy(alpha = 0.85f)
+private val CurrentUserMatchGlowBorderColor = CurrentUserMatchGlowColor.copy(alpha = 0.9f)
+private val MatchCardShape = RoundedCornerShape(14.dp)
 
 internal const val MATCH_CARD_BASE_HEIGHT_DP = 90
 private const val MATCH_CARD_MANAGE_SECTION_BASE_HEIGHT_DP = 12
-private const val MATCH_CARD_MANAGE_LINE_HEIGHT_DP = 16
+private const val MATCH_CARD_MANAGE_LINE_HEIGHT_DP = 17
 
 @Composable
 fun MatchCard(
@@ -182,6 +191,13 @@ fun MatchCard(
                 }
                 val showOfficial = !officialSummary.isNullOrBlank()
                 val showManageOfficials = manageMode && manageOfficialRows.isNotEmpty()
+                val highlightForCurrentUser = remember(match, teams, currentUser.id) {
+                    matchBelongsToUser(
+                        match = match,
+                        teams = teams,
+                        currentUserId = currentUser.id,
+                    )
+                }
                 FloatingBox(
                     modifier = Modifier.align(Alignment.TopCenter).offset(y = (-20).dp).zIndex(1f),
                     color = localColors.current.primaryContainer
@@ -196,8 +212,29 @@ fun MatchCard(
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .then(
+                            if (highlightForCurrentUser) {
+                                Modifier
+                                    .shadow(
+                                        elevation = 14.dp,
+                                        shape = MatchCardShape,
+                                        ambientColor = CurrentUserMatchGlowAmbientColor,
+                                        spotColor = CurrentUserMatchGlowSpotColor,
+                                    )
+                                    .border(
+                                        width = 1.5.dp,
+                                        color = CurrentUserMatchGlowBorderColor,
+                                        shape = MatchCardShape,
+                                    )
+                            } else {
+                                Modifier
+                            }
+                        )
                         .clickable(onClick = onClick),
-                    elevation = CardDefaults.cardElevation(4.dp),
+                    shape = MatchCardShape,
+                    elevation = CardDefaults.cardElevation(
+                        defaultElevation = if (highlightForCurrentUser) 8.dp else 4.dp,
+                    ),
                     colors = CardDefaults.cardColors(
                         containerColor = localColors.current.primary,
                         contentColor = localColors.current.onPrimary
@@ -252,6 +289,52 @@ fun MatchCard(
             }
         }
     }
+}
+
+internal fun matchBelongsToUser(
+    match: MatchWithRelations,
+    teams: Map<String, TeamWithPlayers>,
+    currentUserId: String,
+): Boolean {
+    val normalizedCurrentUserId = currentUserId.trim()
+    if (normalizedCurrentUserId.isBlank()) {
+        return false
+    }
+
+    if (match.match.assignedOfficialUserIds().any { assignedUserId ->
+            assignedUserId == normalizedCurrentUserId
+        }) {
+        return true
+    }
+
+    val candidateTeams = listOfNotNull(
+        resolveMatchTeam(match.match.team1Id, teams, match.team1),
+        resolveMatchTeam(match.match.team2Id, teams, match.team2),
+        resolveMatchTeam(match.match.teamOfficialId, teams, match.teamOfficial),
+    )
+    return candidateTeams.any { team -> team.includesUser(normalizedCurrentUserId) }
+}
+
+private fun resolveMatchTeam(
+    matchTeamId: String?,
+    teams: Map<String, TeamWithPlayers>,
+    relationTeam: Team?,
+): Team? {
+    val normalizedTeamId = matchTeamId?.trim()?.takeIf(String::isNotBlank)
+    if (normalizedTeamId != null) {
+        teams[normalizedTeamId]?.team?.let { mappedTeam ->
+            return mappedTeam
+        }
+    }
+    return relationTeam
+}
+
+private fun Team.includesUser(userId: String): Boolean {
+    return captainId.trim() == userId ||
+        managerId?.trim() == userId ||
+        headCoachId?.trim() == userId ||
+        coachIds.any { coachId -> coachId.trim() == userId } ||
+        playerIds.any { playerId -> playerId.trim() == userId }
 }
 
 @Composable

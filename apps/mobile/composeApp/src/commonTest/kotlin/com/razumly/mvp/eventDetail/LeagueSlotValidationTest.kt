@@ -83,7 +83,7 @@ class LeagueSlotValidationTest {
     }
 
     @Test
-    fun repeating_slot_allows_null_end_time() {
+    fun repeating_slot_requires_end_time() {
         val slot = buildSlot(
             id = "slot-open-ended",
             repeating = true,
@@ -100,7 +100,7 @@ class LeagueSlotValidationTest {
             selectedDivisionIds = emptyList(),
         )
 
-        assertEquals(emptyMap(), errors)
+        assertEquals("Select an end time.", errors[0])
     }
 
     private fun buildSlot(

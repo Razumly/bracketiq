@@ -11,6 +11,7 @@ import com.razumly.mvp.core.data.repositories.SignStep
 import com.razumly.mvp.core.presentation.RentalCreateContext
 import com.razumly.mvp.eventDetail.EventStaffRole
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.isoDayNumber
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.coroutines.test.runTest
@@ -368,7 +369,6 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
                 pointsForLoss = -2,
                 pointsPerSetWin = 1.5,
                 pointsPerSetLoss = 0.5,
-                overtimeEnabled = true,
             )
         }
         assertEquals(9, harness.component.leagueScoringConfig.value.pointsForWin)
@@ -397,7 +397,6 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
                 pointsForWin = 7,
                 pointsForDraw = 3,
                 pointsForLoss = 0,
-                overtimeEnabled = true,
             )
         }
         val configured = harness.component.leagueScoringConfig.value
@@ -809,6 +808,100 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
         assertEquals(listOf(1, 3), payloadSlots[0].daysOfWeek)
         assertEquals(3, createCall.leagueScoringConfig?.pointsForWin)
         assertEquals(emptyList(), createCall.requiredTemplateIds)
+    }
+
+    @Test
+    fun given_repeating_league_slot_without_end_time_when_submitted_then_slot_is_filtered_from_payload() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        harness.component.setLoadingHandler(harness.loadingHandler)
+        advance()
+
+        harness.component.onTypeSelected(EventType.LEAGUE)
+        advance()
+        harness.component.selectFieldCount(1)
+        advance()
+        val localFieldId = harness.component.localFields.value.first().id
+
+        harness.component.updateEventField {
+            copy(
+                name = "League Missing End Time",
+                organizationId = "org-missing-end-time",
+                divisions = listOf("Open"),
+                start = instant(1_700_000_000_000),
+                end = instant(1_700_086_400_000),
+            )
+        }
+        harness.component.updateLeagueTimeSlot(0) {
+            copy(
+                repeating = true,
+                dayOfWeek = 1,
+                daysOfWeek = listOf(1),
+                startTimeMinutes = 600,
+                endTimeMinutes = null,
+                scheduledFieldId = localFieldId,
+                scheduledFieldIds = listOf(localFieldId),
+            )
+        }
+        advance()
+
+        harness.component.createEvent()
+        advance()
+
+        val createCall = harness.eventRepository.createEventCalls.single()
+        assertEquals(emptyList(), createCall.timeSlots.orEmpty())
+        assertEquals(emptyList(), createCall.event.timeSlotIds)
+    }
+
+    @Test
+    fun given_added_league_slot_when_event_has_fixed_end_then_default_slot_end_date_uses_event_end_date_only() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        advance()
+
+        harness.component.onTypeSelected(EventType.LEAGUE)
+        advance()
+
+        val eventStart = instant(1_700_000_000_000)
+        val eventEnd = instant(1_700_003_600_000)
+        harness.component.updateEventField {
+            copy(
+                start = eventStart,
+                end = eventEnd,
+                noFixedEndDateTime = false,
+            )
+        }
+        advance()
+
+        harness.component.addLeagueTimeSlot()
+        advance()
+
+        val addedSlot = harness.component.leagueSlots.value.last()
+        val timezone = TimeZone.currentSystemDefault()
+        val expectedDateOnlyEnd = eventEnd.toLocalDateTime(timezone).date.atStartOfDayIn(timezone)
+        assertEquals(expectedDateOnlyEnd, addedSlot.endDate)
+    }
+
+    @Test
+    fun given_added_league_slot_when_event_has_no_fixed_end_then_default_slot_end_date_is_null() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        advance()
+
+        harness.component.onTypeSelected(EventType.LEAGUE)
+        advance()
+
+        harness.component.updateEventField {
+            copy(
+                start = instant(1_700_000_000_000),
+                end = instant(1_700_003_600_000),
+                noFixedEndDateTime = true,
+            )
+        }
+        advance()
+
+        harness.component.addLeagueTimeSlot()
+        advance()
+
+        val addedSlot = harness.component.leagueSlots.value.last()
+        assertNull(addedSlot.endDate)
     }
 
     @Test

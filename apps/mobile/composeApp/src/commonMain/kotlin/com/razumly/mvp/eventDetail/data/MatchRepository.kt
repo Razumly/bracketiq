@@ -156,7 +156,12 @@ class MatchRepository(
 
     override fun getMatchFlow(matchId: String): Flow<Result<MatchWithRelations>> {
         val localFlow =
-            databaseService.getMatchDao.getMatchFlowById(matchId).map { Result.success(it) }
+            databaseService.getMatchDao.getMatchFlowById(matchId).map { relation ->
+                relation?.let { Result.success(it) }
+                    ?: Result.failure(
+                        NoSuchElementException("Match $matchId is no longer available in local cache")
+                    )
+            }
         scope.launch {
             getMatch(matchId)
         }
