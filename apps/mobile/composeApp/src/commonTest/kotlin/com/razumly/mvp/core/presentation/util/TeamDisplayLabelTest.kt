@@ -47,7 +47,7 @@ class TeamDisplayLabelTest {
         val team = buildTeamWithPlayers(
             team = Team(captainId = captain.id).copy(
                 id = "team_3",
-                name = null,
+                name = "",
                 playerIds = listOf(captain.id),
             ),
             captain = captain,

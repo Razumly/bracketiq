@@ -46,8 +46,8 @@ fun TeamDetailsDialog(
                 val knownUsersById = (knownUsers + team.players + team.pendingPlayers + listOfNotNull(team.captain, currentUser))
                     .associateBy { it.id }
                 val managerId = (team.team.managerId ?: team.team.captainId)
-                    ?.trim()
-                    ?.takeIf(String::isNotBlank)
+                    .trim()
+                    .takeIf(String::isNotBlank)
                 val managerLabel = managerId?.let { id ->
                     knownUsersById[id]?.displayName ?: id
                 } ?: "Unassigned"
@@ -70,11 +70,11 @@ fun TeamDetailsDialog(
 
                 // Team Header
                 Text(
-                    text = team.team.name ?: "Team ${
+                    text = team.team.name.ifBlank { "Team ${
                         team.players.joinToString(" & ") {
                             "${it.firstName} ${it.lastName.first()}."
                         }
-                    }",
+                    }" },
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold
                 )

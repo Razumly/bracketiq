@@ -7,7 +7,7 @@ import kotlinx.serialization.Transient
 
 @Serializable
 data class TeamDTO (
-    var name: String?,
+    var name: String = "",
     var division: String,
     val playerIds: List<String> = emptyList(),
     val captainId: String,

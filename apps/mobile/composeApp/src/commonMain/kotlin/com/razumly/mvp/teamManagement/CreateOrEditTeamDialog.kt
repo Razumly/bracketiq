@@ -93,7 +93,7 @@ fun CreateOrEditTeamDialog(
     onEnsureUserByEmail: (suspend (email: String) -> Result<UserData>)? = null,
     onInviteTeamRole: ((teamId: String, userId: String, inviteType: String) -> Unit)? = null,
 ) {
-    var teamName by remember { mutableStateOf(team.team.name ?: "") }
+    var teamName by remember { mutableStateOf(team.team.name) }
     var teamSizeInput by remember { mutableStateOf(team.team.teamSize.toString()) }
     var showSearchDialog by remember { mutableStateOf(false) }
     var invitedPlayers by remember { mutableStateOf(team.pendingPlayers) }

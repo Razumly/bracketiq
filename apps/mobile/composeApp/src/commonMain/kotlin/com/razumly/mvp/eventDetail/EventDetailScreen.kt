@@ -920,7 +920,7 @@ private fun TeamPreviewChip(
     teamSizeLimit: Int,
     onClick: () -> Unit
 ) {
-    val teamName = team.team.name?.takeIf { it.isNotBlank() } ?: "Team"
+    val teamName = team.team.name.takeIf { it.isNotBlank() } ?: "Team"
     Surface(
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
@@ -1422,11 +1422,6 @@ private fun JoinOptionsSheet(
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.SemiBold,
             )
-            Text(
-                text = "Choose a session to create your registration event.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             if (weeklySessionOptions.isEmpty()) {
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
@@ -1596,6 +1591,7 @@ fun EventDetailScreen(
     val showMatchEditDialog by component.showMatchEditDialog.collectAsState()
     val joinChoiceDialog by component.joinChoiceDialog.collectAsState()
     val childJoinSelectionDialog by component.childJoinSelectionDialog.collectAsState()
+    val paymentPlanPreviewDialog by component.paymentPlanPreviewDialog.collectAsState()
     val withdrawTargets by component.withdrawTargets.collectAsState()
     val textSignaturePrompt by component.textSignaturePrompt.collectAsState()
     val webSignaturePrompt by component.webSignaturePrompt.collectAsState()
@@ -3098,6 +3094,13 @@ fun EventDetailScreen(
                     onChildSelected = component::selectChildForJoin,
                 )
             }
+            paymentPlanPreviewDialog?.let { dialogState ->
+                PaymentPlanPreviewDialog(
+                    dialogState = dialogState,
+                    onContinue = component::confirmPaymentPlanPreviewDialog,
+                    onCancel = component::dismissPaymentPlanPreviewDialog,
+                )
+            }
             if (showStandingsConfirmDialog) {
                 AlertDialog(
                     onDismissRequest = { showStandingsConfirmDialog = false },
@@ -3643,7 +3646,7 @@ private fun buildLeagueStandings(
         TeamStanding(
             team = team,
             teamId = team.team.id,
-            teamName = team.team.name ?: team.team.id,
+            teamName = team.team.name.ifBlank { team.team.id },
             draws = stats.draws,
             goalsFor = stats.goalsFor,
             goalsAgainst = stats.goalsAgainst,
@@ -3863,6 +3866,92 @@ fun FeeBreakdownDialog(
             Text("Cancel")
         }
     })
+}
+
+@Composable
+private fun PaymentPlanPreviewDialog(
+    dialogState: PaymentPlanPreviewDialogState,
+    onContinue: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    val installmentRows = remember(dialogState.installmentAmounts, dialogState.installmentDueDates) {
+        val rowCount = maxOf(
+            dialogState.installmentAmounts.size,
+            dialogState.installmentDueDates.size,
+        )
+        List(rowCount) { index ->
+            val amountCents = dialogState.installmentAmounts.getOrNull(index)?.coerceAtLeast(0) ?: 0
+            val dueDate = dialogState.installmentDueDates
+                .getOrNull(index)
+                ?.trim()
+                ?.takeIf(String::isNotBlank)
+                ?: "TBD"
+            Triple(index + 1, amountCents, dueDate)
+        }
+    }
+    val ownerSubject = if (dialogState.ownerLabel.equals("You", ignoreCase = true)) {
+        "you"
+    } else {
+        dialogState.ownerLabel
+    }
+
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("Payment Plan Preview") },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = "Continuing will join the event and start a payment plan for $ownerSubject.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                dialogState.divisionLabel
+                    ?.takeIf(String::isNotBlank)
+                    ?.let { divisionLabel ->
+                        Text(
+                            text = "Division: $divisionLabel",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+
+                HorizontalDivider()
+
+                FeeRow(
+                    label = "Plan Total",
+                    amount = "$${dialogState.totalAmountCents.centsToDollars()}",
+                    isTotal = true,
+                )
+
+                if (installmentRows.isNotEmpty()) {
+                    HorizontalDivider()
+                    installmentRows.forEach { (sequence, amountCents, dueDate) ->
+                        FeeRow(
+                            label = "Installment $sequence (Due $dueDate)",
+                            amount = "$${amountCents.centsToDollars()}",
+                        )
+                    }
+                } else {
+                    Text(
+                        text = "Installment schedule will be generated after joining.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onContinue) {
+                Text("Continue")
+            }
+        },
+        dismissButton = {
+            Button(onClick = onCancel) {
+                Text("Cancel")
+            }
+        },
+    )
 }
 
 @Composable

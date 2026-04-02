@@ -491,7 +491,7 @@ private fun isBracketMatch(match: MatchMVP): Boolean {
 }
 
 private fun resolveTeamLabel(team: TeamWithPlayers): String {
-    val explicitTeamName = team.team.name?.trim().orEmpty()
+    val explicitTeamName = team.team.name.trim()
     if (explicitTeamName.isNotEmpty()) {
         return explicitTeamName
     }

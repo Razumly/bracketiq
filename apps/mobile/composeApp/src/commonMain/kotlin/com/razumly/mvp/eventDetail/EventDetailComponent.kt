@@ -140,6 +140,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val showMatchEditDialog: StateFlow<MatchEditDialogState?>
     val joinChoiceDialog: StateFlow<JoinChoiceDialogState?>
     val childJoinSelectionDialog: StateFlow<ChildJoinSelectionDialogState?>
+    val paymentPlanPreviewDialog: StateFlow<PaymentPlanPreviewDialogState?>
     val withdrawTargets: StateFlow<List<WithdrawTargetOption>>
     val textSignaturePrompt: StateFlow<TextSignaturePromptState?>
     val webSignaturePrompt: StateFlow<WebSignaturePromptState?>
@@ -181,6 +182,8 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun selectChildForJoin(childUserId: String)
     fun dismissJoinChoiceDialog()
     fun dismissChildJoinSelectionDialog()
+    fun dismissPaymentPlanPreviewDialog()
+    fun confirmPaymentPlanPreviewDialog()
     fun viewEvent()
     fun leaveEvent(targetUserId: String? = null)
     fun requestRefund(reason: String, targetUserId: String? = null)
@@ -301,6 +304,14 @@ data class JoinChoiceDialogState(
 
 data class ChildJoinSelectionDialogState(
     val children: List<JoinChildOption>,
+)
+
+data class PaymentPlanPreviewDialogState(
+    val ownerLabel: String,
+    val totalAmountCents: Int,
+    val installmentAmounts: List<Int>,
+    val installmentDueDates: List<String>,
+    val divisionLabel: String? = null,
 )
 
 enum class WithdrawTargetMembership {
@@ -800,6 +811,9 @@ class DefaultEventDetailComponent(
     private val _childJoinSelectionDialog = MutableStateFlow<ChildJoinSelectionDialogState?>(null)
     override val childJoinSelectionDialog = _childJoinSelectionDialog.asStateFlow()
 
+    private val _paymentPlanPreviewDialog = MutableStateFlow<PaymentPlanPreviewDialogState?>(null)
+    override val paymentPlanPreviewDialog = _paymentPlanPreviewDialog.asStateFlow()
+
     private val _withdrawTargets = MutableStateFlow<List<WithdrawTargetOption>>(emptyList())
     override val withdrawTargets = _withdrawTargets.asStateFlow()
 
@@ -818,6 +832,7 @@ class DefaultEventDetailComponent(
     private var pendingSignatureContextIndex = 0
     private var pendingSignatureChild: JoinChildOption? = null
     private var pendingPdfSignaturePollJob: Job? = null
+    private var pendingPaymentPlanPreviewAction: (() -> Unit)? = null
     private val completedSignatureKeys = mutableSetOf<String>()
 
     private val shareServiceProvider = ShareServiceProvider()
@@ -1315,6 +1330,21 @@ class DefaultEventDetailComponent(
             _usersTeam.value = team
             _joinChoiceDialog.value = null
             _childJoinSelectionDialog.value = null
+
+            buildPaymentPlanPreviewDialogState(
+                ownerLabel = team.team.name.trim().ifBlank { "Your team" },
+                forTeamJoin = true,
+            )?.let { preview ->
+                showPaymentPlanPreviewDialog(preview) {
+                    scope.launch {
+                        runActionAfterRequiredSigning {
+                            executeJoinEventAsTeam(team)
+                        }
+                    }
+                }
+                return@launch
+            }
+
             runActionAfterRequiredSigning {
                 executeJoinEventAsTeam(team)
             }
@@ -1374,14 +1404,74 @@ class DefaultEventDetailComponent(
         _childJoinSelectionDialog.value = null
     }
 
-    private suspend fun runSelfJoinFlow() {
+    private suspend fun runSelfJoinFlow(skipPaymentPlanPreview: Boolean = false) {
         if (!ensureRegistrationOpen()) return
+        if (!skipPaymentPlanPreview) {
+            buildPaymentPlanPreviewDialogState(
+                ownerLabel = "You",
+                forTeamJoin = false,
+            )?.let { preview ->
+                showPaymentPlanPreviewDialog(preview) {
+                    scope.launch {
+                        runSelfJoinFlow(skipPaymentPlanPreview = true)
+                    }
+                }
+                return
+            }
+        }
         runActionAfterRequiredSigning(
             signerContext = SignerContext.PARTICIPANT,
             child = null,
         ) {
             executeJoinEvent()
         }
+    }
+
+    private fun buildPaymentPlanPreviewDialogState(
+        ownerLabel: String,
+        forTeamJoin: Boolean,
+    ): PaymentPlanPreviewDialogState? {
+        val event = selectedEvent.value
+        if (currentUser.value.isMinor) return null
+        val preferredDivisionId = selectedDivision.value
+        val paymentPlan = resolveEffectivePaymentPlan(
+            event = event,
+            preferredDivisionId = preferredDivisionId,
+        )
+        val shouldPreview = if (forTeamJoin) {
+            paymentPlan.allowPaymentPlans && paymentPlan.priceCents > 0 && !isEventFull.value
+        } else {
+            paymentPlan.allowPaymentPlans &&
+                paymentPlan.priceCents > 0 &&
+                !isEventFull.value &&
+                !event.teamSignup
+        }
+        if (!shouldPreview) return null
+
+        val divisionLabel = if (event.singleDivision) {
+            null
+        } else {
+            resolveSelectedDivisionDetail(event, preferredDivisionId)
+                ?.name
+                ?.trim()
+                ?.takeIf(String::isNotBlank)
+        }
+
+        return PaymentPlanPreviewDialogState(
+            ownerLabel = ownerLabel,
+            totalAmountCents = paymentPlan.priceCents,
+            installmentAmounts = paymentPlan.installmentAmounts,
+            installmentDueDates = paymentPlan.installmentDueDates,
+            divisionLabel = divisionLabel,
+        )
+    }
+
+    private fun showPaymentPlanPreviewDialog(
+        dialogState: PaymentPlanPreviewDialogState,
+        onContinue: () -> Unit,
+    ) {
+        _paymentPlanPreviewDialog.value = dialogState
+        pendingPaymentPlanPreviewAction = onContinue
     }
 
     private suspend fun loadJoinableChildren(): List<JoinChildOption> {
@@ -3634,6 +3724,17 @@ class DefaultEventDetailComponent(
     override fun confirmFeeBreakdown() {
         pendingPaymentAction?.invoke()
         dismissFeeBreakdown()
+    }
+
+    override fun dismissPaymentPlanPreviewDialog() {
+        _paymentPlanPreviewDialog.value = null
+        pendingPaymentPlanPreviewAction = null
+    }
+
+    override fun confirmPaymentPlanPreviewDialog() {
+        val continuation = pendingPaymentPlanPreviewAction
+        dismissPaymentPlanPreviewDialog()
+        continuation?.invoke()
     }
 
     override fun confirmTextSignature() {

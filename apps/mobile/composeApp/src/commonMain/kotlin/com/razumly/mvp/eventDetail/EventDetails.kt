@@ -4957,20 +4957,92 @@ private fun ScheduleTimeslotsReadOnlyList(
                                 style = MaterialTheme.typography.titleSmall,
                                 color = MaterialTheme.colorScheme.onSurface,
                             )
-                            ReadOnlyNameList(
-                                title = "Fields",
-                                singularTitle = "Field",
-                                values = fieldNames,
-                                emptyText = "Fields: Not assigned",
-                            )
-                            ReadOnlyNameList(
-                                title = "Divisions",
-                                singularTitle = "Division",
-                                values = divisionNames,
-                                emptyText = "Divisions: Not assigned",
-                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.Top,
+                            ) {
+                                TimeslotReadOnlyNameColumn(
+                                    title = "Fields",
+                                    values = fieldNames,
+                                    emptyText = "Fields: Not assigned",
+                                    modifier = Modifier.weight(1f),
+                                )
+                                TimeslotReadOnlyNameColumn(
+                                    title = "Divisions",
+                                    values = divisionNames,
+                                    emptyText = "Divisions: Not assigned",
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TimeslotReadOnlyNameColumn(
+    title: String,
+    values: List<String>,
+    emptyText: String,
+    modifier: Modifier = Modifier,
+) {
+    val maxHeight = (readOnlyNameListItemHeight * MAX_READ_ONLY_NAME_LIST_ITEMS) +
+        (readOnlyNameListSpacing * (MAX_READ_ONLY_NAME_LIST_ITEMS - 1).coerceAtLeast(0))
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(readOnlyNameListSpacing),
+    ) {
+        if (values.isEmpty()) {
+            Text(
+                text = emptyText,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            return@Column
+        }
+
+        Text(
+            text = "$title (${values.size})",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        if (values.size > MAX_READ_ONLY_NAME_LIST_ITEMS) {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = maxHeight),
+                verticalArrangement = Arrangement.spacedBy(readOnlyNameListSpacing),
+            ) {
+                items(values) { value ->
+                    Text(
+                        text = value,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = readOnlyNameListItemHeight),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        } else {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(readOnlyNameListSpacing),
+            ) {
+                values.forEach { value ->
+                    Text(
+                        text = value,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = readOnlyNameListItemHeight),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }

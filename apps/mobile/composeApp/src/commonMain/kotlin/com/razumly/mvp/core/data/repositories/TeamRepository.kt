@@ -157,7 +157,7 @@ class TeamRepository(
         if (player.id != userRepository.currentUser.value.getOrThrow().id) {
             pushNotificationRepository.sendUserNotification(
                 player.id,
-                team.name ?: "Team Update",
+                team.name.ifBlank { "Team Update" },
                 "You have been removed from a team",
             )
         }

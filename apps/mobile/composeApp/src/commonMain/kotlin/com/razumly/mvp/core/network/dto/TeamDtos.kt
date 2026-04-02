@@ -10,7 +10,7 @@ import kotlinx.serialization.Serializable
 data class TeamApiDto(
     val id: String? = null,
     @SerialName("\$id") val legacyId: String? = null,
-    val name: String? = null,
+    val name: String = "",
     val division: String? = null,
     val playerIds: List<String>? = null,
     val captainId: String? = null,

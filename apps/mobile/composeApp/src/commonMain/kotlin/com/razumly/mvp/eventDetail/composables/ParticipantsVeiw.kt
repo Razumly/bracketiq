@@ -269,7 +269,7 @@ fun ParticipantsView(
     }
 
     fun buildTeamBillingContext(team: TeamWithPlayers): ParticipantBillingContext {
-        val teamName = team.team.name?.trim().takeUnless { it.isNullOrBlank() } ?: "Team"
+        val teamName = team.team.name.trim().ifBlank { "Team" }
         val users = resolveTeamUsers(team)
         return ParticipantBillingContext(
             billingTeamId = team.team.id,
@@ -426,7 +426,7 @@ fun ParticipantsView(
                                         onClick = {
                                             removeTarget = ParticipantRemoveTarget(
                                                 cardType = ParticipantCardType.TEAM,
-                                                title = team.team.name ?: "Remove team",
+                                                title = team.team.name.ifBlank { "Remove team" },
                                                 subtitle = "Remove this team from participants?",
                                                 team = team,
                                             )

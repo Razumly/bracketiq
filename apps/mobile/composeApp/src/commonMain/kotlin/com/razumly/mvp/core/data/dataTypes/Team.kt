@@ -16,7 +16,7 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class Team(
     val division: String,
-    val name: String?,
+    val name: String,
     val captainId: String,
     val managerId: String? = null,
     val headCoachId: String? = null,
@@ -36,7 +36,7 @@ data class Team(
     val divisionGender: String? = null,
     @PrimaryKey override val id: String
 ) : MVPDocument, DisplayableEntity {
-    override val displayName: String get() = name ?: "Team ${playerIds.size}"
+    override val displayName: String get() = name.ifBlank { "Team ${playerIds.size}" }
     override val imageUrl: String? get() = profileImageId
     val assistantCoachIds: List<String> get() = coachIds
 
@@ -48,7 +48,7 @@ data class Team(
             val defaultAgeDivisionTypeName = defaultAgeDivisionTypeId.toDivisionDisplayLabel()
             return Team(
                 division = DEFAULT_DIVISION,
-                name = null,
+                name = "",
                 playerIds = listOf(captainId),
                 teamSize = 2,
                 id = newId(),

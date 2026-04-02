@@ -951,7 +951,7 @@ class DefaultProfileComponent(
             val teams = teamRepository.getTeams(currentUser.teamIds).getOrElse { emptyList() }
             val captainTeams = teams.filter { it.captainId == currentUser.id }
             captainTeams.forEach { team ->
-                val ownerLabel = team.name?.takeIf { it.isNotBlank() } ?: "Team"
+                val ownerLabel = team.name.takeIf { it.isNotBlank() } ?: "Team"
                 val teamBills = billingRepository.listBills(ownerType = "TEAM", ownerId = team.id)
                     .getOrElse { throwable ->
                         Napier.w("Unable to load team bills for team ${team.id}", throwable)

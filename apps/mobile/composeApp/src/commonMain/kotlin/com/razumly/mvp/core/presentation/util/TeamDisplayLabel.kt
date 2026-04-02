@@ -3,7 +3,7 @@ package com.razumly.mvp.core.presentation.util
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 
 fun TeamWithPlayers.toTeamDisplayLabel(): String {
-    val explicitName = team.name?.trim().orEmpty()
+    val explicitName = team.name.trim()
     if (explicitName.isNotEmpty()) {
         return explicitName
     }
