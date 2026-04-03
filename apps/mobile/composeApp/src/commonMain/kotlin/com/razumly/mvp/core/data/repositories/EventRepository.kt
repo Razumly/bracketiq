@@ -7,6 +7,7 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.Field
+import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfig
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.Team
@@ -63,6 +64,7 @@ interface IEventRepository : IMVPRepository {
     fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>>
     fun resetCursor()
     suspend fun getEvent(eventId: String): Result<Event>
+    suspend fun getLeagueScoringConfig(eventId: String): Result<LeagueScoringConfig?> = Result.success(null)
     suspend fun getEventStaffInvites(eventId: String): Result<List<Invite>>
     suspend fun getEventsByIds(eventIds: List<String>): Result<List<Event>>
     suspend fun getEventsByOrganization(organizationId: String, limit: Int = 200): Result<List<Event>>
@@ -254,6 +256,10 @@ class EventRepository(
         return api.get<EventApiDto>("api/events/$eventId")
     }
 
+    private suspend fun fetchRemoteLeagueScoringConfig(scoringConfigId: String): LeagueScoringConfig {
+        return api.get<LeagueScoringConfig>("api/league-scoring-configs/$scoringConfigId")
+    }
+
     private suspend fun fetchRemoteEvent(eventId: String): Event {
         val dto = fetchRemoteEventDto(eventId)
         return dto.toEventOrNull() ?: error("Event $eventId response missing required fields")
@@ -328,6 +334,25 @@ class EventRepository(
             databaseService.getEventDao.getEventById(eventId)
                 ?: throw IllegalStateException("Event $eventId not cached")
         })
+
+    override suspend fun getLeagueScoringConfig(eventId: String): Result<LeagueScoringConfig?> = runCatching {
+        val normalizedEventId = eventId.trim().takeIf(String::isNotBlank) ?: return@runCatching null
+        val dto = fetchRemoteEventDto(normalizedEventId)
+        val scoringConfigId = dto.leagueScoringConfigId
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?: databaseService.getEventDao.getEventById(normalizedEventId)
+                ?.leagueScoringConfigId
+                ?.trim()
+                ?.takeIf(String::isNotBlank)
+            ?: return@runCatching null
+        val embeddedConfig = dto.leagueScoringConfig
+        if (embeddedConfig != null) {
+            embeddedConfig.toLeagueScoringConfig(scoringConfigId)
+        } else {
+            fetchRemoteLeagueScoringConfig(scoringConfigId)
+        }
+    }
 
     override suspend fun getEventStaffInvites(eventId: String): Result<List<Invite>> = runCatching {
         val normalizedEventId = eventId.trim().takeIf(String::isNotBlank) ?: return@runCatching emptyList()

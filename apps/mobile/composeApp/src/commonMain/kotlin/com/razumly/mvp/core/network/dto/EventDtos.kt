@@ -66,6 +66,7 @@ data class EventApiDto(
     val timeSlotIds: List<String>? = null,
     val fieldIds: List<String>? = null,
     val leagueScoringConfigId: String? = null,
+    val leagueScoringConfig: LeagueScoringConfigDTO? = null,
     val organizationId: String? = null,
 
     val autoCancellation: Boolean? = null,

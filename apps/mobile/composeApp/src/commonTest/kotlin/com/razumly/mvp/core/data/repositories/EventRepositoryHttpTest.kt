@@ -384,6 +384,131 @@ class EventRepositoryHttpTest {
     }
 
     @Test
+    fun getLeagueScoringConfig_fetches_embedded_config_for_event() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+        eventDao.upsertEvent(
+            makeEvent(id = "e1", hostId = "u1").copy(
+                leagueScoringConfigId = "cfg_win4",
+            )
+        )
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/events/e1", request.url.encodedPath)
+            assertEquals(HttpMethod.Get, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+            respond(
+                content = """
+                    {
+                      "id": "e1",
+                      "name": "League Event",
+                      "hostId": "u1",
+                      "start": "2026-03-01T10:00:00Z",
+                      "end": "2026-03-01T12:00:00Z",
+                      "coordinates": [0, 0],
+                      "leagueScoringConfigId": "cfg_win4",
+                      "leagueScoringConfig": {
+                        "pointsForWin": 4,
+                        "pointsForLoss": 1,
+                        "pointsPerSetWin": 0.5
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val config = repo.getLeagueScoringConfig("e1").getOrThrow()
+
+        assertEquals("cfg_win4", config?.id)
+        assertEquals(4, config?.pointsForWin)
+        assertEquals(1, config?.pointsForLoss)
+        assertEquals(0.5, config?.pointsPerSetWin)
+    }
+
+    @Test
+    fun getLeagueScoringConfig_fetches_by_id_when_event_embed_missing() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+        eventDao.upsertEvent(
+            makeEvent(id = "e1", hostId = "u1").copy(
+                leagueScoringConfigId = "cfg_win4",
+            )
+        )
+
+        val requestedPaths = mutableListOf<String>()
+        val engine = MockEngine { request ->
+            requestedPaths += request.url.encodedPath
+            assertEquals(HttpMethod.Get, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+            when (request.url.encodedPath) {
+                "/api/events/e1" -> respond(
+                    content = """
+                        {
+                          "id": "e1",
+                          "name": "League Event",
+                          "hostId": "u1",
+                          "start": "2026-03-01T10:00:00Z",
+                          "end": "2026-03-01T12:00:00Z",
+                          "coordinates": [0, 0],
+                          "leagueScoringConfigId": "cfg_win4"
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                "/api/league-scoring-configs/cfg_win4" -> respond(
+                    content = """
+                        {
+                          "id": "cfg_win4",
+                          "pointsForWin": 4,
+                          "pointsForLoss": 1,
+                          "pointsPerSetWin": 0.5
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val config = repo.getLeagueScoringConfig("e1").getOrThrow()
+
+        assertEquals(
+            listOf("/api/events/e1", "/api/league-scoring-configs/cfg_win4"),
+            requestedPaths,
+        )
+        assertEquals("cfg_win4", config?.id)
+        assertEquals(4, config?.pointsForWin)
+        assertEquals(1, config?.pointsForLoss)
+        assertEquals(0.5, config?.pointsPerSetWin)
+    }
+
+    @Test
     fun getEventTemplatesByHostFlow_requests_template_state_and_returns_templates() = runTest {
         val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
         val eventDao = EventRepositoryHttp_FakeEventDao()

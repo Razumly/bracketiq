@@ -77,6 +77,17 @@ private fun buildTargetStaffRoles(event: Event): MutableMap<String, MutableSet<E
     return rolesByUserId
 }
 
+private fun Invite.normalizedStaffTypes(): Set<String> = staffTypes
+    .map(String::trim)
+    .filter(String::isNotBlank)
+    .map(String::uppercase)
+    .toSet()
+
+private fun Invite.isReinvitableStatus(): Boolean = when (status?.trim()?.uppercase()) {
+    "PENDING", "DECLINED", "FAILED", "EMAIL_INVITE" -> true
+    else -> false
+}
+
 private fun mergeReturnedStaffInvites(
     existing: List<Invite>,
     deletedInviteIds: Set<String>,
@@ -115,6 +126,7 @@ suspend fun reconcileEventStaffInvites(
     event: Event,
     pendingStaffInvites: List<PendingStaffInviteDraft>,
     existingStaffInvites: List<Invite>,
+    previouslyAssignedUserIds: Set<String> = emptySet(),
     createdByUserId: String? = null,
 ): Result<EventStaffSaveOutcome> = runCatching {
     val normalizedDrafts = pendingStaffInvites
@@ -129,17 +141,40 @@ suspend fun reconcileEventStaffInvites(
     )
 
     val targetRolesByUserId = buildTargetStaffRoles(event)
+    val normalizedPreviouslyAssignedUserIds = previouslyAssignedUserIds
+        .map(String::trim)
+        .filter(String::isNotBlank)
+        .toSet()
+    val scopedExistingInvites = existingStaffInvites.filter { invite ->
+        invite.type.equals("STAFF", ignoreCase = true) &&
+            invite.eventId?.trim() == event.id
+    }
+    val scopedExistingInviteByUserId = scopedExistingInvites
+        .mapNotNull { invite ->
+            val userId = invite.userId?.trim()?.takeIf(String::isNotBlank) ?: return@mapNotNull null
+            userId to invite
+        }
+        .toMap()
     val targetInviteRequests = mutableListOf<InviteCreateDto>()
 
     targetRolesByUserId.forEach { (userId, roles) ->
-        targetInviteRequests += InviteCreateDto(
-            type = "STAFF",
-            eventId = event.id,
-            userId = userId,
-            createdBy = createdByUserId,
-            staffTypes = roles.map(EventStaffRole::toInviteStaffType).sorted(),
-            replaceStaffTypes = true,
-        )
+        val inviteStaffTypes = roles.map(EventStaffRole::toInviteStaffType).sorted()
+        val existingInvite = scopedExistingInviteByUserId[userId]
+        val shouldCreateOrUpdateInvite = when {
+            existingInvite == null -> userId !in normalizedPreviouslyAssignedUserIds
+            !existingInvite.isReinvitableStatus() -> false
+            else -> existingInvite.normalizedStaffTypes() != inviteStaffTypes.map(String::uppercase).toSet()
+        }
+        if (shouldCreateOrUpdateInvite) {
+            targetInviteRequests += InviteCreateDto(
+                type = "STAFF",
+                eventId = event.id,
+                userId = userId,
+                createdBy = createdByUserId,
+                staffTypes = inviteStaffTypes,
+                replaceStaffTypes = true,
+            )
+        }
     }
 
     normalizedDrafts.forEach { draft ->
@@ -160,10 +195,6 @@ suspend fun reconcileEventStaffInvites(
         }
     }
 
-    val scopedExistingInvites = existingStaffInvites.filter { invite ->
-        invite.type.equals("STAFF", ignoreCase = true) &&
-            invite.eventId?.trim() == event.id
-    }
     val activeUserIds = targetRolesByUserId.keys
     val deletedInviteIds = scopedExistingInvites
         .filter { invite ->
@@ -242,5 +273,4 @@ suspend fun reconcileEventStaffInvites(
         ),
     )
 }
-
 

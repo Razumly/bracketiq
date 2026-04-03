@@ -593,6 +593,30 @@ class DefaultEventDetailComponent(
         }
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
+    private val eventLeagueScoringConfig: StateFlow<LeagueScoringConfig?> = eventRelations
+        .map { relations ->
+            relations.event.id to relations.event.leagueScoringConfigId
+                .orEmpty()
+                .trim()
+        }
+        .distinctUntilChanged()
+        .flatMapLatest { (eventId, scoringConfigId) ->
+            if (scoringConfigId.isBlank()) {
+                flowOf<LeagueScoringConfig?>(null)
+            } else {
+                flowOf(
+                    eventRepository.getLeagueScoringConfig(eventId)
+                        .onFailure { error ->
+                            Napier.w(
+                                "Failed to load league scoring config for event $eventId: ${error.message}"
+                            )
+                        }
+                        .getOrNull()
+                )
+            }
+        }
+        .stateIn(scope, SharingStarted.Eagerly, null)
+
     override val eventWithRelations = eventRelations.flatMapLatest { relations ->
         val hostFallbackFlow = if (relations.host != null || relations.event.hostId.isBlank()) {
             flowOf(relations.host)
@@ -629,6 +653,8 @@ class DefaultEventDetailComponent(
                 sport = sport,
                 host = relations.host ?: hostFallback,
             )
+        }.combine(eventLeagueScoringConfig) { combinedRelations, leagueScoringConfig ->
+            combinedRelations.copy(leagueScoringConfig = leagueScoringConfig)
         }.combine(_eventStaffInvites) { combinedRelations, staffInvites ->
             combinedRelations.copy(staffInvites = staffInvites)
         }
@@ -2410,6 +2436,18 @@ class DefaultEventDetailComponent(
         scope.launch {
             loadingHandler.showLoading("Saving event...")
             runCatching {
+                val previouslyAssignedStaffUserIds = buildSet {
+                    addAll(
+                        selectedEvent.value.officialIds
+                            .map(String::trim)
+                            .filter(String::isNotBlank),
+                    )
+                    addAll(
+                        selectedEvent.value.assistantHostIds
+                            .map(String::trim)
+                            .filter(String::isNotBlank),
+                    )
+                }
                 val prepared = prepareEventForUpdate()
                 val updated = eventRepository.updateEvent(
                     newEvent = prepared.event,
@@ -2422,6 +2460,7 @@ class DefaultEventDetailComponent(
                     event = updated,
                     pendingStaffInvites = _pendingStaffInvites.value,
                     existingStaffInvites = _eventStaffInvites.value,
+                    previouslyAssignedUserIds = previouslyAssignedStaffUserIds,
                     createdByUserId = currentUser.value.id,
                 ).getOrThrow()
                 val finalEvent = if (saveOutcome.event == updated) {
