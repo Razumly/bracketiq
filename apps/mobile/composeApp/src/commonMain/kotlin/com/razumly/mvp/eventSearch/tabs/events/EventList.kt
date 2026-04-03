@@ -46,6 +46,7 @@ fun EventList(
     onEventClick: (Event) -> Unit
 ) {
     var lastLoadRequestKey by remember { mutableStateOf<String?>(null) }
+    val hasTrailingStatusItem = events.isNotEmpty() && (isLoadingMore || !hasMoreEvents)
 
     LaunchedEffect(lazyListState, events.size, hasMoreEvents, isLoadingMore) {
         snapshotFlow { lazyListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
@@ -89,7 +90,7 @@ fun EventList(
             itemsIndexed(items = events, key = { _, item -> item.id }) { index, event ->
                 val padding = when (index) {
                     0 -> firstElementPadding
-                    events.size - 1 -> lastElementPadding
+                    events.size - 1 -> if (hasTrailingStatusItem) PaddingValues() else lastElementPadding
                     else -> PaddingValues()
                 }
 
@@ -119,6 +120,7 @@ fun EventList(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .padding(lastElementPadding)
                         .padding(16.dp),
                     contentAlignment = Alignment.Center
                 ) {
@@ -132,9 +134,10 @@ fun EventList(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .padding(lastElementPadding)
                         .padding(
                             start = 16.dp,
-                            top = 36.dp,
+                            top = 8.dp,
                             end = 16.dp,
                             bottom = 16.dp
                         ),

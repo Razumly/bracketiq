@@ -6,6 +6,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -80,6 +82,7 @@ private val MatchCardShape = RoundedCornerShape(14.dp)
 internal const val MATCH_CARD_BASE_HEIGHT_DP = 90
 private const val MATCH_CARD_MANAGE_SECTION_BASE_HEIGHT_DP = 12
 private const val MATCH_CARD_MANAGE_LINE_HEIGHT_DP = 17
+private const val MATCH_CARD_INFO_MAX_WIDTH_FRACTION = 0.5f
 
 @Composable
 fun MatchCard(
@@ -240,27 +243,31 @@ fun MatchCard(
                         contentColor = localColors.current.onPrimary
                     )
                 ) {
-                    Row(
-                        modifier = Modifier.padding(vertical = 4.dp),
-                        verticalAlignment = if (showManageOfficials) Alignment.Top else Alignment.CenterVertically
-                    ) {
-                        MatchInfoSection(
-                            match = match,
-                            fields = fields,
-                            showManageOfficials = showManageOfficials,
-                            manageOfficialRows = manageOfficialRows,
-                        )
-                        VerticalDivider(color = localColors.current.onPrimary)
-                        TeamsSection(
-                            team1 = teams[match.match.team1Id],
-                            team2 = teams[match.match.team2Id],
-                            match = match,
-                            matches = matches,
-                            playoffPlaceholders = playoffPlaceholderBySlot,
-                            displaySetCount = resolveDisplaySetCount(selectedEvent, match.match),
-                            showManageOfficials = showManageOfficials,
-                            manageOfficialRows = manageOfficialRows,
-                        )
+                    BoxWithConstraints {
+                        val maxMatchInfoWidth = maxWidth * MATCH_CARD_INFO_MAX_WIDTH_FRACTION
+                        Row(
+                            modifier = Modifier.padding(vertical = 4.dp),
+                            verticalAlignment = if (showManageOfficials) Alignment.Top else Alignment.CenterVertically
+                        ) {
+                            MatchInfoSection(
+                                match = match,
+                                fields = fields,
+                                showManageOfficials = showManageOfficials,
+                                manageOfficialRows = manageOfficialRows,
+                                modifier = Modifier.widthIn(max = maxMatchInfoWidth),
+                            )
+                            VerticalDivider(color = localColors.current.onPrimary)
+                            TeamsSection(
+                                team1 = teams[match.match.team1Id],
+                                team2 = teams[match.match.team2Id],
+                                match = match,
+                                matches = matches,
+                                playoffPlaceholders = playoffPlaceholderBySlot,
+                                displaySetCount = resolveDisplaySetCount(selectedEvent, match.match),
+                                showManageOfficials = showManageOfficials,
+                                manageOfficialRows = manageOfficialRows,
+                            )
+                        }
                     }
                 }
                 if (showOfficial) {
@@ -355,6 +362,7 @@ private fun MatchInfoSection(
     fields: List<FieldWithMatches>,
     showManageOfficials: Boolean,
     manageOfficialRows: List<ManageOfficialRow>,
+    modifier: Modifier = Modifier,
 ) {
     val fieldLabel = resolveFieldLabel(match, fields)
     val rowTextStyle = if (showManageOfficials) {
@@ -363,7 +371,7 @@ private fun MatchInfoSection(
         MaterialTheme.typography.bodyMedium
     }
     Column(
-        modifier = Modifier
+        modifier = modifier
             .padding(
                 start = 8.dp,
                 top = 8.dp,

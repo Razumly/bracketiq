@@ -353,6 +353,68 @@ class UserRepositoryAuthTest {
     }
 
     @Test
+    fun createNewUser_returns_verification_required_exception_when_signup_requires_email_verification() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/auth/register", request.url.encodedPath)
+            respond(
+                content = """
+                    {
+                      "error":"Email not verified. We sent a verification link to your email.",
+                      "code":"EMAIL_NOT_VERIFIED",
+                      "email":"signup@example.com",
+                      "requiresEmailVerification":true,
+                      "verificationEmailSent":true,
+                      "user": { "id":"u_signup", "email":"signup@example.com", "name":"Signup User" },
+                      "profile": {
+                        "id":"u_signup",
+                        "firstName":"Sign",
+                        "lastName":"Up",
+                        "userName":"signup_user",
+                        "teamIds":[],
+                        "friendIds":[],
+                        "friendRequestIds":[],
+                        "friendRequestSentIds":[],
+                        "followingIds":[],
+                        "uploadedImages":[],
+                        "hasStripeAccount":false
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.Accepted,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        val result = repo.createNewUser(
+            email = "signup@example.com",
+            password = "password123",
+            firstName = "Sign",
+            lastName = "Up",
+            userName = "signup_user",
+            dateOfBirth = "2008-05-02",
+        )
+
+        assertTrue(result.isFailure)
+        val verificationException = assertIs<EmailVerificationRequiredException>(result.exceptionOrNull())
+        assertEquals("signup@example.com", verificationException.email)
+        assertEquals("Email not verified. We sent a verification link to your email.", verificationException.message)
+        assertEquals("", tokenStore.get())
+        assertEquals("", currentUserDataSource.getUserId().first())
+    }
+
+    @Test
     fun createNewUser_returns_profile_conflict_exception_for_conflicting_claim_signup() = runTest {
         val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("")
         val userDao = FakeUserDataDao()

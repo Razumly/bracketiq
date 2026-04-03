@@ -178,8 +178,12 @@ import kotlin.time.ExperimentalTime
 val localImageScheme = compositionLocalOf<DynamicScheme> { error("No color scheme provided") }
 private const val MOBILE_EVENT_DETAILS_BREAKPOINT_DP = 600
 private const val MAX_READ_ONLY_NAME_LIST_ITEMS = 5
+private const val STAFF_LAZY_LIST_THRESHOLD = 4
+private const val STAFF_LAZY_LIST_VISIBLE_COUNT = 4
 private val readOnlyNameListItemHeight = 28.dp
 private val readOnlyNameListSpacing = 4.dp
+private val editableOfficialStaffListHeight = 160.dp * STAFF_LAZY_LIST_VISIBLE_COUNT
+private val editableHostStaffListHeight = 130.dp * STAFF_LAZY_LIST_VISIBLE_COUNT
 
 @OptIn(ExperimentalHazeApi::class, ExperimentalTime::class)
 @Suppress("UNUSED_PARAMETER")
@@ -308,8 +312,8 @@ fun EventDetails(
     var draftInviteOfficial by rememberSaveable { mutableStateOf(false) }
     var draftInviteAssistantHost by rememberSaveable { mutableStateOf(false) }
     var staffEditorError by remember { mutableStateOf<String?>(null) }
-    var visibleOfficialCards by rememberSaveable { mutableStateOf(5) }
-    var visibleHostCards by rememberSaveable { mutableStateOf(5) }
+    var officialPositionsExpanded by rememberSaveable(editEvent.id, editView) { mutableStateOf(false) }
+    var assignedStaffExpanded by rememberSaveable(editEvent.id, editView) { mutableStateOf(false) }
 
     val lazyListState = rememberLazyListState()
 
@@ -1749,7 +1753,6 @@ fun EventDetails(
                     collapsibleInEditMode = true,
                     collapsibleInViewMode = true,
                     viewSummary = basicsSummaryLine,
-                    defaultExpandedInViewMode = false,
                     requiredMissingCount = basicsMissingRequiredCount,
                     isEditMode = editView,
                     animationDelay = 100,
@@ -1939,8 +1942,6 @@ fun EventDetails(
                     collapsibleInEditMode = true,
                     collapsibleInViewMode = true,
                     viewSummary = pricingSummaryLine,
-                    defaultExpandedInViewMode = false,
-                    defaultExpandedInEditMode = !isNewEvent,
                     requiredMissingCount = eventDetailsMissingRequiredCount,
                     isEditMode = editView,
                     animationDelay = 200,
@@ -2367,8 +2368,6 @@ fun EventDetails(
                         collapsibleInEditMode = true,
                         collapsibleInViewMode = true,
                         viewSummary = "${assistantHostIds.size + event.officialIds.size} assigned",
-                        defaultExpandedInViewMode = false,
-                        defaultExpandedInEditMode = !isNewEvent,
                         isEditMode = editView,
                         animationDelay = 300,
                         viewContent = {
@@ -2431,87 +2430,94 @@ fun EventDetails(
                                 modifier = Modifier.fillMaxWidth(),
                             )
                             FormSectionDivider()
-                            Text(
-                                text = "Event official positions",
-                                style = MaterialTheme.typography.titleSmall,
-                                color = Color(localImageScheme.current.onSurface),
+                            CollapsibleEditorSubsectionHeader(
+                                title = "Event official positions",
+                                expanded = officialPositionsExpanded,
+                                onToggle = { officialPositionsExpanded = !officialPositionsExpanded },
                             )
-                            Text(
-                                text = "Sport defaults are copied into this event.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color(localImageScheme.current.onSurfaceVariant),
-                            )
-                            TextButton(
-                                onClick = onLoadOfficialPositionDefaults,
-                                enabled = selectedSportForOfficialDefaults != null,
-                                modifier = Modifier.align(Alignment.End),
-                            ) {
-                                Text("Load defaults")
-                            }
-                            if (editEvent.officialPositions.isEmpty()) {
-                                Text(
-                                    text = "No official positions configured yet.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color(localImageScheme.current.onSurfaceVariant),
-                                )
-                            } else {
-                                editEvent.officialPositions
-                                    .sortedBy(EventOfficialPosition::order)
-                                    .forEach { position ->
-                                        Card(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            colors = CardDefaults.cardColors(
-                                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                                            ),
-                                        ) {
-                                            Column(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .padding(12.dp),
-                                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                                            ) {
-                                                StandardTextField(
-                                                    value = position.name,
-                                                    onValueChange = { newName ->
-                                                        onUpdateOfficialPositionName(position.id, newName)
-                                                    },
-                                                    label = "Position name",
+                            AnimatedVisibility(visible = officialPositionsExpanded) {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Text(
+                                        text = "Sport defaults are copied into this event.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color(localImageScheme.current.onSurfaceVariant),
+                                    )
+                                    TextButton(
+                                        onClick = onLoadOfficialPositionDefaults,
+                                        enabled = selectedSportForOfficialDefaults != null,
+                                        modifier = Modifier.align(Alignment.End),
+                                    ) {
+                                        Text("Load defaults")
+                                    }
+                                    if (editEvent.officialPositions.isEmpty()) {
+                                        Text(
+                                            text = "No official positions configured yet.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Color(localImageScheme.current.onSurfaceVariant),
+                                        )
+                                    } else {
+                                        editEvent.officialPositions
+                                            .sortedBy(EventOfficialPosition::order)
+                                            .forEach { position ->
+                                                Card(
                                                     modifier = Modifier.fillMaxWidth(),
-                                                )
-                                                Row(
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                                    verticalAlignment = Alignment.Bottom,
+                                                    colors = CardDefaults.cardColors(
+                                                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                                    ),
                                                 ) {
-                                                    NumberInputField(
-                                                        modifier = Modifier.weight(1f),
-                                                        value = position.count.toString(),
-                                                        label = "Slots",
-                                                        isError = false,
-                                                        onValueChange = { newValue ->
-                                                            val nextCount = newValue.toIntOrNull()
-                                                            if (newValue.isBlank()) {
-                                                                onUpdateOfficialPositionCount(position.id, 1)
-                                                            } else if (nextCount != null) {
-                                                                onUpdateOfficialPositionCount(position.id, nextCount.coerceAtLeast(1))
-                                                            }
-                                                        },
-                                                    )
-                                                    Button(
-                                                        onClick = { onRemoveOfficialPosition(position.id) },
+                                                    Column(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .padding(12.dp),
+                                                        verticalArrangement = Arrangement.spacedBy(8.dp),
                                                     ) {
-                                                        Text("Remove")
+                                                        StandardTextField(
+                                                            value = position.name,
+                                                            onValueChange = { newName ->
+                                                                onUpdateOfficialPositionName(position.id, newName)
+                                                            },
+                                                            label = "Position name",
+                                                            modifier = Modifier.fillMaxWidth(),
+                                                        )
+                                                        Row(
+                                                            modifier = Modifier.fillMaxWidth(),
+                                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                            verticalAlignment = Alignment.Bottom,
+                                                        ) {
+                                                            NumberInputField(
+                                                                modifier = Modifier.weight(1f),
+                                                                value = position.count.toString(),
+                                                                label = "Slots",
+                                                                isError = false,
+                                                                onValueChange = { newValue ->
+                                                                    val nextCount = newValue.toIntOrNull()
+                                                                    if (newValue.isBlank()) {
+                                                                        onUpdateOfficialPositionCount(position.id, 1)
+                                                                    } else if (nextCount != null) {
+                                                                        onUpdateOfficialPositionCount(position.id, nextCount.coerceAtLeast(1))
+                                                                    }
+                                                                },
+                                                            )
+                                                            Button(
+                                                                onClick = { onRemoveOfficialPosition(position.id) },
+                                                            ) {
+                                                                Text("Remove")
+                                                            }
+                                                        }
                                                     }
                                                 }
                                             }
-                                        }
                                     }
-                            }
-                            TextButton(
-                                onClick = onAddOfficialPosition,
-                                modifier = Modifier.align(Alignment.End),
-                            ) {
-                                Text("Add position")
+                                    TextButton(
+                                        onClick = onAddOfficialPosition,
+                                        modifier = Modifier.align(Alignment.End),
+                                    ) {
+                                        Text("Add position")
+                                    }
+                                }
                             }
                             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                             Text(
@@ -2674,33 +2680,31 @@ fun EventDetails(
                                 )
                             }
                             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-                            Text(
-                                text = "Assigned staff",
-                                style = MaterialTheme.typography.titleSmall,
-                                color = Color(localImageScheme.current.onSurface),
+                            CollapsibleEditorSubsectionHeader(
+                                title = "Assigned staff",
+                                expanded = assignedStaffExpanded,
+                                onToggle = { assignedStaffExpanded = !assignedStaffExpanded },
                             )
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                verticalAlignment = Alignment.Top,
-                            ) {
-                                Column(
-                                    modifier = Modifier.weight(1f),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                            AnimatedVisibility(visible = assignedStaffExpanded) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    verticalAlignment = Alignment.Top,
                                 ) {
-                                    Text(
-                                        text = "Officials",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                    )
-                                    if (officialStaffCards.isEmpty()) {
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
                                         Text(
-                                            text = "No officials selected yet.",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = Color(localImageScheme.current.onSurfaceVariant),
+                                            text = "Officials",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold,
                                         )
-                                    } else {
-                                        officialStaffCards.take(visibleOfficialCards).forEach { card ->
+                                        EditableStaffCardList(
+                                            cards = officialStaffCards,
+                                            emptyText = "No officials selected yet.",
+                                            lazyListHeight = editableOfficialStaffListHeight,
+                                        ) { card ->
                                             val assignedUserId = card.userId
                                             val selectedPositionIds = assignedUserId
                                                 ?.let(eventOfficialRecordsByUserId::get)
@@ -2738,30 +2742,21 @@ fun EventDetails(
                                                 },
                                             )
                                         }
-                                        if (officialStaffCards.size > visibleOfficialCards) {
-                                            TextButton(onClick = { visibleOfficialCards += 5 }) {
-                                                Text("Show 5 more")
-                                            }
-                                        }
                                     }
-                                }
-                                Column(
-                                    modifier = Modifier.weight(1f),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                                ) {
-                                    Text(
-                                        text = "Hosts",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                    )
-                                    if (hostStaffCards.isEmpty()) {
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
                                         Text(
-                                            text = "No host staff assigned yet.",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = Color(localImageScheme.current.onSurfaceVariant),
+                                            text = "Hosts",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold,
                                         )
-                                    } else {
-                                        hostStaffCards.take(visibleHostCards).forEach { card ->
+                                        EditableStaffCardList(
+                                            cards = hostStaffCards,
+                                            emptyText = "No host staff assigned yet.",
+                                            lazyListHeight = editableHostStaffListHeight,
+                                        ) { card ->
                                             StaffAssignmentCard(
                                                 card = card,
                                                 editView = true,
@@ -2776,11 +2771,6 @@ fun EventDetails(
                                                 },
                                                 onRemoveDraft = onRemovePendingStaffInvite,
                                             )
-                                        }
-                                        if (hostStaffCards.size > visibleHostCards) {
-                                            TextButton(onClick = { visibleHostCards += 5 }) {
-                                                Text("Show 5 more")
-                                            }
                                         }
                                     }
                                 }
@@ -2797,10 +2787,8 @@ fun EventDetails(
                     collapsibleInEditMode = true,
                     collapsibleInViewMode = true,
                     viewSummary = competitionSummaryLine,
-                    defaultExpandedInViewMode = false,
                     isEditMode = editView,
                     animationDelay = 400,
-                    defaultExpandedInEditMode = !isNewEvent,
                     requiredMissingCount = divisionSettingsMissingRequiredCount,
                     viewContent = {
                         val maxParticipantsLabel =
@@ -3522,8 +3510,6 @@ fun EventDetails(
                         collapsibleInEditMode = true,
                         collapsibleInViewMode = true,
                         viewSummary = "Scoring rules",
-                        defaultExpandedInViewMode = false,
-                        defaultExpandedInEditMode = !isNewEvent,
                         isEditMode = editView,
                         animationDelay = 440,
                         viewContent = {
@@ -3554,8 +3540,6 @@ fun EventDetails(
                         collapsibleInEditMode = true,
                         collapsibleInViewMode = true,
                         viewSummary = facilitiesSummaryLine,
-                        defaultExpandedInViewMode = false,
-                        defaultExpandedInEditMode = !isNewEvent,
                         requiredMissingCount = scheduleMissingRequiredCount,
                         isEditMode = editView,
                         animationDelay = 450,
@@ -4200,8 +4184,6 @@ fun LazyListScope.animatedCardSection(
     sectionTitle: String? = null,
     collapsibleInEditMode: Boolean = false,
     collapsibleInViewMode: Boolean = false,
-    defaultExpandedInEditMode: Boolean = true,
-    defaultExpandedInViewMode: Boolean = true,
     requiredMissingCount: Int = 0,
     viewSummary: String? = null,
     editSummary: String? = null,
@@ -4212,10 +4194,10 @@ fun LazyListScope.animatedCardSection(
 ) {
     item(key = sectionId) {
         val isCollapsible = if (isEditMode) collapsibleInEditMode else collapsibleInViewMode
-        val defaultExpanded = if (isEditMode) defaultExpandedInEditMode else defaultExpandedInViewMode
         var expanded by rememberSaveable(sectionId, isEditMode) {
-            mutableStateOf(defaultExpanded)
+            mutableStateOf(false)
         }
+        val horizontalCardPadding = if (isCollapsible) 0.dp else 16.dp
 
         Box(
             modifier = Modifier
@@ -4225,7 +4207,7 @@ fun LazyListScope.animatedCardSection(
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 6.dp, horizontal = 16.dp),
+                    .padding(vertical = 6.dp, horizontal = horizontalCardPadding),
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
@@ -4612,6 +4594,82 @@ private fun FormSectionDivider(
         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f),
         thickness = 1.dp,
     )
+}
+
+@Composable
+private fun CollapsibleEditorSubsectionHeader(
+    title: String,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onToggle),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = if (expanded) "Hide" else "Show",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Icon(
+                imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                contentDescription = if (expanded) "Collapse $title" else "Expand $title",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun EditableStaffCardList(
+    cards: List<StaffAssignmentCardModel>,
+    emptyText: String,
+    lazyListHeight: androidx.compose.ui.unit.Dp,
+    cardContent: @Composable (StaffAssignmentCardModel) -> Unit,
+) {
+    if (cards.isEmpty()) {
+        Text(
+            text = emptyText,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        return
+    }
+
+    if (cards.size >= STAFF_LAZY_LIST_THRESHOLD) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(lazyListHeight),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            items(cards) { card ->
+                cardContent(card)
+            }
+        }
+        return
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        cards.forEach { card ->
+            cardContent(card)
+        }
+    }
 }
 
 private data class DetailGridItem(

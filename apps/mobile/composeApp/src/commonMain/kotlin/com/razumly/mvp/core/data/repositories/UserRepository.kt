@@ -53,6 +53,7 @@ import kotlinx.serialization.Serializable
 import kotlin.time.Clock
 
 private const val USER_REPOSITORY_LOG_TAG = "UserRepository"
+private const val EMAIL_NOT_VERIFIED_CODE = "EMAIL_NOT_VERIFIED"
 
 sealed class StartupAuthState {
     data object Checking : StartupAuthState()
@@ -170,6 +171,11 @@ class SignupProfileConflictException(
         append(conflict.fields.joinToString { it.apiName })
     },
 )
+
+class EmailVerificationRequiredException(
+    val email: String,
+    message: String,
+) : Exception(message)
 
 interface IUserRepository : IMVPRepository {
     val currentUser: StateFlow<Result<UserData>>
@@ -384,6 +390,18 @@ class UserRepository(
             val conflict = apiException.toSignupConflictOrNull()
             if (conflict != null) throw SignupProfileConflictException(conflict)
             throw apiException
+        }
+
+        if (res.requiresEmailVerification == true ||
+            res.code?.equals(EMAIL_NOT_VERIFIED_CODE, ignoreCase = true) == true
+        ) {
+            val verificationEmail = res.email?.trim()?.takeIf(String::isNotBlank) ?: normalizedEmail
+            val verificationMessage = res.error?.trim()?.takeIf(String::isNotBlank)
+                ?: "Email verification is required. Check your inbox for a verification link, then sign in."
+            throw EmailVerificationRequiredException(
+                email = verificationEmail,
+                message = verificationMessage,
+            )
         }
 
         val token = res.token?.takeIf(String::isNotBlank)

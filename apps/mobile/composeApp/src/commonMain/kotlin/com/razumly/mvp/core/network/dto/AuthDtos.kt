@@ -110,6 +110,11 @@ data class UserProfileDto(
 
 @Serializable
 data class AuthResponseDto(
+    val error: String? = null,
+    val code: String? = null,
+    val email: String? = null,
+    val requiresEmailVerification: Boolean? = null,
+    val verificationEmailSent: Boolean? = null,
     val user: AuthUserDto? = null,
     val session: AuthSessionDto? = null,
     val token: String? = null,

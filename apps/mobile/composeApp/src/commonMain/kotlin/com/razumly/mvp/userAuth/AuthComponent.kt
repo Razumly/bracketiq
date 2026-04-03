@@ -3,6 +3,7 @@ package com.razumly.mvp.userAuth
 import com.arkivanov.decompose.ComponentContext
 import com.razumly.mvp.core.data.dataTypes.LoginState
 import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.data.repositories.EmailVerificationRequiredException
 import com.razumly.mvp.core.data.repositories.SignupProfileConflict
 import com.razumly.mvp.core.data.repositories.SignupProfileConflictException
 import com.razumly.mvp.core.data.repositories.SignupProfileSelection
@@ -205,6 +206,13 @@ class DefaultAuthComponent(
     }
 
     private fun resolveSignupFailureMessage(throwable: Throwable): String {
+        if (throwable is EmailVerificationRequiredException) {
+            return throwable.message
+                ?.trim()
+                ?.takeIf(String::isNotBlank)
+                ?: "Email verification is required. Check your inbox for a verification link, then sign in."
+        }
+
         val apiException = throwable as? ApiException
         if (apiException != null) {
             val parsedPayload = apiException.responseBody
