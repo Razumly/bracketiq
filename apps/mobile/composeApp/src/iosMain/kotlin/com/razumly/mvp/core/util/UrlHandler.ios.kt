@@ -9,7 +9,11 @@ actual class UrlHandler {
             val nsUrl =
                 NSURL.URLWithString(url) ?: return Result.failure(Exception("Invalid URL"))
 
-            UIApplication.sharedApplication.openURL(nsUrl)
+            UIApplication.sharedApplication.openURL(
+                url = nsUrl,
+                options = emptyMap<Any?, Any?>(),
+                completionHandler = null,
+            )
 
             Result.success("opened")
         } catch (e: Exception) {

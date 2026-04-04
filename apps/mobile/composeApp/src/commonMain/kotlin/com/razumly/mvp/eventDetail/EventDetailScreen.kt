@@ -2219,6 +2219,7 @@ fun EventDetailScreen(
                             eventWithRelations = selectedEvent,
                             editEvent = editedEvent,
                             navPadding = LocalNavBarPadding.current,
+                            topInset = innerPadding.calculateTopPadding(),
                             editView = isEditing,
                             showOfficialsPanel = showOfficialsPanel,
                             isNewEvent = false,

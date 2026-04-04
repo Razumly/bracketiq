@@ -3,6 +3,7 @@ package com.razumly.mvp.eventDetail
 import com.razumly.mvp.core.network.userMessage
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -18,9 +19,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
@@ -54,7 +58,9 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.mapSaver
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -70,6 +76,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import coil3.compose.AsyncImage
@@ -176,6 +183,19 @@ import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 
 val localImageScheme = compositionLocalOf<DynamicScheme> { error("No color scheme provided") }
+
+private val SectionExpansionStatesSaver = mapSaver(
+    save = { stateMap: SnapshotStateMap<String, Boolean> ->
+        stateMap.toMap()
+    },
+    restore = { restored ->
+        mutableStateMapOf<String, Boolean>().apply {
+            restored.forEach { (key, value) ->
+                this[key] = value as Boolean
+            }
+        }
+    },
+)
 private const val MOBILE_EVENT_DETAILS_BREAKPOINT_DP = 600
 private const val MAX_READ_ONLY_NAME_LIST_ITEMS = 5
 private const val STAFF_LAZY_LIST_THRESHOLD = 4
@@ -199,6 +219,7 @@ fun EventDetails(
     editView: Boolean,
     showOfficialsPanel: Boolean = true,
     navPadding: PaddingValues = PaddingValues(),
+    topInset: Dp = 0.dp,
     isNewEvent: Boolean,
     rentalTimeLocked: Boolean = false,
     onHostCreateAccount: () -> Unit,
@@ -314,6 +335,12 @@ fun EventDetails(
     var staffEditorError by remember { mutableStateOf<String?>(null) }
     var officialPositionsExpanded by rememberSaveable(editEvent.id, editView) { mutableStateOf(false) }
     var assignedStaffExpanded by rememberSaveable(editEvent.id, editView) { mutableStateOf(false) }
+    val sectionExpansionStates = rememberSaveable(
+        editEvent.id,
+        saver = SectionExpansionStatesSaver,
+    ) {
+        mutableStateMapOf<String, Boolean>()
+    }
 
     val lazyListState = rememberLazyListState()
 
@@ -1547,7 +1574,9 @@ fun EventDetails(
     val heroHeightFraction = if (editView) 0.6f else 0.32f
     val heroSpacerFraction = if (editView) 0.5f else 0.24f
     val heroHeight = (getScreenHeight() * heroHeightFraction).dp
-    val heroSpacerHeight = (getScreenHeight() * heroSpacerFraction).dp
+    val statusBarInset = with(LocalDensity.current) { WindowInsets.statusBars.getTop(this).toDp() }
+    val stickyHeaderTopInset = maxOf(topInset, statusBarInset + 12.dp)
+    val heroSpacerHeight = ((getScreenHeight() * heroSpacerFraction).dp - stickyHeaderTopInset).coerceAtLeast(0.dp)
     val heroSpacerHeightPx = with(LocalDensity.current) { heroSpacerHeight.toPx() }
     val heroParallaxOffset by remember(lazyListState, heroSpacerHeightPx) {
         derivedStateOf {
@@ -1570,7 +1599,9 @@ fun EventDetails(
             )
             LazyColumn(
                 state = lazyListState,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(top = stickyHeaderTopInset),
                 contentPadding = PaddingValues(
                     // Keep final content scrollable above the floating action dock in view mode.
                     bottom = navPadding.calculateBottomPadding() + if (editView) 32.dp else 120.dp,
@@ -1749,6 +1780,7 @@ fun EventDetails(
 
                 animatedCardSection(
                     sectionId = "event_basics",
+                    sectionExpansionStates = sectionExpansionStates,
                     sectionTitle = "Basic Information",
                     collapsibleInEditMode = true,
                     collapsibleInViewMode = true,
@@ -1938,6 +1970,7 @@ fun EventDetails(
 
                 animatedCardSection(
                     sectionId = "event_details",
+                    sectionExpansionStates = sectionExpansionStates,
                     sectionTitle = "Event Details",
                     collapsibleInEditMode = true,
                     collapsibleInViewMode = true,
@@ -2364,6 +2397,7 @@ fun EventDetails(
                 if (showOfficialsPanel) {
                     animatedCardSection(
                         sectionId = "officials",
+                        sectionExpansionStates = sectionExpansionStates,
                         sectionTitle = "Staff",
                         collapsibleInEditMode = true,
                         collapsibleInViewMode = true,
@@ -2782,15 +2816,16 @@ fun EventDetails(
                 if (editView) {
                     // Specifics Card
                     animatedCardSection(
-                    sectionId = "specifics",
-                    sectionTitle = "Division Settings",
-                    collapsibleInEditMode = true,
-                    collapsibleInViewMode = true,
-                    viewSummary = competitionSummaryLine,
-                    isEditMode = editView,
-                    animationDelay = 400,
-                    requiredMissingCount = divisionSettingsMissingRequiredCount,
-                    viewContent = {
+                        sectionId = "specifics",
+                        sectionExpansionStates = sectionExpansionStates,
+                        sectionTitle = "Division Settings",
+                        collapsibleInEditMode = true,
+                        collapsibleInViewMode = true,
+                        viewSummary = competitionSummaryLine,
+                        isEditMode = editView,
+                        animationDelay = 400,
+                        requiredMissingCount = divisionSettingsMissingRequiredCount,
+                        viewContent = {
                         val maxParticipantsLabel =
                             if (event.teamSignup) "Max teams" else "Max players"
                         val divisionsText =
@@ -2901,8 +2936,8 @@ fun EventDetails(
                                 }
                             },
                         )
-                    },
-                    editContent = {
+                        },
+                        editContent = {
                     Text(
                         text = "Team settings",
                         style = MaterialTheme.typography.titleSmall,
@@ -2923,9 +2958,9 @@ fun EventDetails(
                                     if (editEvent.eventType == EventType.EVENT) {
                                         onEditEvent { copy(teamSignup = checked) }
                                     }
-                                },
-                            )
-                        }
+                        },
+                    )
+                }
                         Box(modifier = Modifier.weight(1f)) {
                             LabeledCheckboxRow(
                                 checked = if (isNewEvent) true else editEvent.singleDivision,
@@ -3506,6 +3541,7 @@ fun EventDetails(
                 if (editEvent.eventType == EventType.LEAGUE) {
                     animatedCardSection(
                         sectionId = "league_scoring",
+                        sectionExpansionStates = sectionExpansionStates,
                         sectionTitle = if (editView) "League Scoring Config" else "League Scoring Rules",
                         collapsibleInEditMode = true,
                         collapsibleInViewMode = true,
@@ -3536,6 +3572,7 @@ fun EventDetails(
                 if (supportsScheduleConfig) {
                     animatedCardSection(
                         sectionId = "facility_schedule",
+                        sectionExpansionStates = sectionExpansionStates,
                         sectionTitle = if (editView) "Schedule Config" else "Schedule",
                         collapsibleInEditMode = true,
                         collapsibleInViewMode = true,
@@ -4179,8 +4216,10 @@ private fun SummaryTagChip(label: String) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 fun LazyListScope.animatedCardSection(
     sectionId: String,
+    sectionExpansionStates: SnapshotStateMap<String, Boolean>,
     sectionTitle: String? = null,
     collapsibleInEditMode: Boolean = false,
     collapsibleInViewMode: Boolean = false,
@@ -4192,13 +4231,42 @@ fun LazyListScope.animatedCardSection(
     viewContent: @Composable() (ColumnScope.() -> Unit),
     editContent: @Composable() (ColumnScope.() -> Unit)
 ) {
-    item(key = sectionId) {
-        val isCollapsible = if (isEditMode) collapsibleInEditMode else collapsibleInViewMode
-        var expanded by rememberSaveable(sectionId, isEditMode) {
-            mutableStateOf(false)
-        }
-        val horizontalCardPadding = if (isCollapsible) 0.dp else 16.dp
+    val isCollapsible = if (isEditMode) collapsibleInEditMode else collapsibleInViewMode
+    val shouldUseStickyHeader = isCollapsible && sectionTitle != null
+    val horizontalCardPadding = if (shouldUseStickyHeader) 0.dp else 16.dp
+    val sectionStateKey = "$sectionId:${if (isEditMode) "edit" else "view"}"
+    val expanded = sectionExpansionStates[sectionStateKey] ?: false
+    val summaryText = if (isEditMode) editSummary else viewSummary
 
+    if (shouldUseStickyHeader) {
+        stickyHeader(key = "${sectionStateKey}_header") {
+            CollapsibleSectionHeaderCard(
+                title = sectionTitle,
+                expanded = expanded,
+                summaryText = summaryText,
+                requiredMissingCount = requiredMissingCount,
+                horizontalCardPadding = horizontalCardPadding,
+                onToggleExpanded = {
+                    sectionExpansionStates[sectionStateKey] = !expanded
+                },
+            )
+        }
+
+        item(key = "${sectionStateKey}_body") {
+            CollapsibleSectionBodyCard(
+                expanded = expanded,
+                isEditMode = isEditMode,
+                animationDelay = animationDelay,
+                horizontalCardPadding = horizontalCardPadding,
+                viewContent = viewContent,
+                editContent = editContent,
+            )
+        }
+
+        return
+    }
+
+    item(key = sectionId) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -4220,92 +4288,186 @@ fun LazyListScope.animatedCardSection(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     if (sectionTitle != null) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .let { baseModifier ->
-                                    if (isCollapsible) {
-                                        baseModifier.clickable { expanded = !expanded }
-                                    } else {
-                                        baseModifier
-                                    }
-                                },
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(
-                                modifier = Modifier.weight(1f),
-                                verticalArrangement = Arrangement.spacedBy(4.dp),
-                            ) {
-                                Text(
-                                    text = sectionTitle,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = Color(localImageScheme.current.onSurface),
-                                )
-                                if (isCollapsible && !expanded) {
-                                    val summaryText = if (isEditMode) editSummary else viewSummary
-                                    if (!summaryText.isNullOrBlank()) {
-                                        Text(
-                                            text = summaryText,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                }
-                            }
-                            if (isCollapsible) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    if (requiredMissingCount > 0) {
-                                        Box(
-                                            modifier = Modifier
-                                                .padding(end = 6.dp)
-                                                .size(20.dp)
-                                                .background(
-                                                    color = MaterialTheme.colorScheme.error,
-                                                    shape = RoundedCornerShape(999.dp),
-                                                ),
-                                            contentAlignment = Alignment.Center,
-                                        ) {
-                                            Text(
-                                                text = if (requiredMissingCount > 99) "99+" else requiredMissingCount.toString(),
-                                                color = Color.White,
-                                                style = MaterialTheme.typography.labelSmall,
-                                            )
-                                        }
-                                    }
-                                    Icon(
-                                        imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                        contentDescription = if (expanded) "Collapse section" else "Expand section",
-                                    )
-                                }
-                            }
-                        }
+                        Text(
+                            text = sectionTitle,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = Color(localImageScheme.current.onSurface),
+                        )
                     }
 
-                    AnimatedVisibility(
-                        visible = !isCollapsible || expanded,
+                    SectionCardAnimatedContent(
+                        isEditMode = isEditMode,
+                        animationDelay = animationDelay,
+                        viewContent = viewContent,
+                        editContent = editContent,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CollapsibleSectionHeaderCard(
+    title: String,
+    expanded: Boolean,
+    summaryText: String?,
+    requiredMissingCount: Int,
+    horizontalCardPadding: Dp,
+    onToggleExpanded: () -> Unit,
+) {
+    val bottomCornerSize = if (expanded) 0.dp else 16.dp
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface),
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(
+                    start = horizontalCardPadding,
+                    end = horizontalCardPadding,
+                    top = 6.dp,
+                    bottom = if (expanded) 0.dp else 6.dp,
+                ),
+            shape = RoundedCornerShape(
+                topStart = 16.dp,
+                topEnd = 16.dp,
+                bottomStart = bottomCornerSize,
+                bottomEnd = bottomCornerSize,
+            ),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onToggleExpanded)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Color(localImageScheme.current.onSurface),
+                        modifier = Modifier.weight(1f),
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        AnimatedContent(
-                            targetState = isEditMode,
-                            transitionSpec = { transitionSpec(animationDelay) },
-                            label = "cardTransition",
-                        ) { editMode ->
-                            Column(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalAlignment = Alignment.Start,
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                        if (requiredMissingCount > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .padding(end = 6.dp)
+                                    .size(20.dp)
+                                    .background(
+                                        color = MaterialTheme.colorScheme.error,
+                                        shape = RoundedCornerShape(999.dp),
+                                    ),
+                                contentAlignment = Alignment.Center,
                             ) {
-                                if (editMode) {
-                                    editContent()
-                                } else {
-                                    viewContent()
-                                }
+                                Text(
+                                    text = if (requiredMissingCount > 99) "99+" else requiredMissingCount.toString(),
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.labelSmall,
+                                )
                             }
                         }
+                        Icon(
+                            imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            contentDescription = if (expanded) "Collapse section" else "Expand section",
+                        )
                     }
                 }
+
+                if (!expanded && !summaryText.isNullOrBlank()) {
+                    Text(
+                        text = summaryText,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CollapsibleSectionBodyCard(
+    expanded: Boolean,
+    isEditMode: Boolean,
+    animationDelay: Int,
+    horizontalCardPadding: Dp,
+    viewContent: @Composable() (ColumnScope.() -> Unit),
+    editContent: @Composable() (ColumnScope.() -> Unit),
+) {
+    AnimatedVisibility(visible = expanded) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surface),
+        ) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = horizontalCardPadding, end = horizontalCardPadding, bottom = 6.dp)
+                    .offset(y = (-1).dp),
+                shape = RoundedCornerShape(
+                    topStart = 0.dp,
+                    topEnd = 0.dp,
+                    bottomStart = 16.dp,
+                    bottomEnd = 16.dp,
+                ),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                ) {
+                    SectionCardAnimatedContent(
+                        isEditMode = isEditMode,
+                        animationDelay = animationDelay,
+                        viewContent = viewContent,
+                        editContent = editContent,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SectionCardAnimatedContent(
+    isEditMode: Boolean,
+    animationDelay: Int,
+    viewContent: @Composable() (ColumnScope.() -> Unit),
+    editContent: @Composable() (ColumnScope.() -> Unit),
+) {
+    AnimatedContent(
+        targetState = isEditMode,
+        transitionSpec = { transitionSpec(animationDelay) },
+        label = "cardTransition",
+    ) { editMode ->
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.Start,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (editMode) {
+                editContent()
+            } else {
+                viewContent()
             }
         }
     }
