@@ -840,8 +840,14 @@ class DefaultProfileComponent(
 
     override fun manageStripeAccountOnboarding() {
         scope.launch {
+            val currentUser = userRepository.currentUser.value.getOrNull()
+            Napier.i(
+                "Manage Stripe onboarding tapped: hasStripeAccount=${currentUser?.hasStripeAccount} apiBaseUrl=$apiBaseUrl",
+                tag = "Stripe",
+            )
             loadingHandler?.showLoading("Redirecting to Stripe ...")
             billingRepository.createAccount().onSuccess { onboardingUrl ->
+                Napier.i("Manage Stripe onboarding returned URL=$onboardingUrl", tag = "Stripe")
                 urlHandler?.openUrlInWebView(url = onboardingUrl)
             }.onFailure {
                 _errorState.value = ErrorMessage(it.userMessage())
@@ -852,8 +858,14 @@ class DefaultProfileComponent(
 
     override fun manageStripeAccount() {
         scope.launch {
+            val currentUser = userRepository.currentUser.value.getOrNull()
+            Napier.i(
+                "Manage Stripe account tapped: hasStripeAccount=${currentUser?.hasStripeAccount} apiBaseUrl=$apiBaseUrl",
+                tag = "Stripe",
+            )
             loadingHandler?.showLoading("Redirecting to Stripe ...")
             billingRepository.getOnboardingLink().onSuccess { onboardingUrl ->
+                Napier.i("Manage Stripe account returned URL=$onboardingUrl", tag = "Stripe")
                 urlHandler?.openUrlInWebView(url = onboardingUrl)
                     ?.onFailure {
                         _errorState.value = ErrorMessage(it.userMessage())

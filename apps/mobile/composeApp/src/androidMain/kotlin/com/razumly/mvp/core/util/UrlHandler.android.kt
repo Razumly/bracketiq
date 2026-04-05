@@ -5,10 +5,12 @@ import android.content.Intent
 import android.net.Uri
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.core.net.toUri
+import io.github.aakira.napier.Napier
 
 actual class UrlHandler(private val context: Context) {
     actual suspend fun openUrlInWebView(url: String): Result<String> {
         return try {
+            Napier.i("Opening URL on Android: $url", tag = "Stripe")
             val targetUri = url.toUri()
             val scheme = targetUri.scheme?.lowercase()
             if (scheme == "http" || scheme == "https") {

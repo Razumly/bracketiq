@@ -550,6 +550,10 @@ class BillingRepository(
         val user = userRepository.currentUser.value.getOrThrow()
         val email = userRepository.currentAccount.value.getOrNull()?.email
         val redirectBase = stripeRedirectBaseUrl.trimEnd('/')
+        Napier.i(
+            "Stripe host request: endpoint=/api/billing/host/connect redirectBase=$redirectBase userId=${user.id}",
+            tag = "Stripe",
+        )
 
         val onboardingUrl = api.post<StripeHostLinkRequestDto, StripeOnboardingLinkResponseDto>(
             path = "api/billing/host/connect",
@@ -559,6 +563,7 @@ class BillingRepository(
                 user = BillingUserRefDto(id = user.id, email = email),
             ),
         ).onboardingUrl
+        Napier.i("Stripe host response: endpoint=/api/billing/host/connect onboardingUrl=$onboardingUrl", tag = "Stripe")
 
         // Server may update `hasStripeAccount`; refresh local user/profile cache.
         runCatching { userRepository.getCurrentAccount().getOrThrow() }
@@ -570,6 +575,10 @@ class BillingRepository(
         val user = userRepository.currentUser.value.getOrThrow()
         val email = userRepository.currentAccount.value.getOrNull()?.email
         val redirectBase = stripeRedirectBaseUrl.trimEnd('/')
+        Napier.i(
+            "Stripe host request: endpoint=/api/billing/host/onboarding-link redirectBase=$redirectBase userId=${user.id}",
+            tag = "Stripe",
+        )
 
         api.post<StripeHostLinkRequestDto, StripeOnboardingLinkResponseDto>(
             path = "api/billing/host/onboarding-link",
@@ -578,7 +587,12 @@ class BillingRepository(
                 returnUrl = redirectBase,
                 user = BillingUserRefDto(id = user.id, email = email),
             ),
-        ).onboardingUrl
+        ).onboardingUrl.also { onboardingUrl ->
+            Napier.i(
+                "Stripe host response: endpoint=/api/billing/host/onboarding-link onboardingUrl=$onboardingUrl",
+                tag = "Stripe",
+            )
+        }
     }
 
     override suspend fun listBills(ownerType: String, ownerId: String, limit: Int): Result<List<Bill>> =
