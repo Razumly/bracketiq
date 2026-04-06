@@ -115,9 +115,14 @@ fun Event.isDraftLikeState(): Boolean {
     }
 }
 
+fun Event.isPrivateState(): Boolean {
+    return state.trim().uppercase() == "PRIVATE"
+}
+
 fun Event.lifecycleStateLabel(): String {
     return when (state.trim().uppercase()) {
         "UNPUBLISHED", "DRAFT" -> "Draft"
+        "PRIVATE" -> "Private"
         "TEMPLATE" -> "Template"
         else -> "Published"
     }

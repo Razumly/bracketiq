@@ -192,32 +192,6 @@ private data class JoinOption(
     val onClick: () -> Unit
 )
 
-private enum class EditableLifecycleState(
-    val label: String,
-) {
-    PUBLISHED("Published"),
-    DRAFT("Draft"),
-}
-
-private fun Event.toEditableLifecycleState(): EditableLifecycleState {
-    return when (state.trim().uppercase()) {
-        "PUBLISHED" -> EditableLifecycleState.PUBLISHED
-        else -> EditableLifecycleState.DRAFT
-    }
-}
-
-private fun EditableLifecycleState.toEventState(currentState: String): String {
-    return when (this) {
-        EditableLifecycleState.PUBLISHED -> "PUBLISHED"
-        EditableLifecycleState.DRAFT ->
-            if (currentState.trim().uppercase() == "DRAFT") {
-                "DRAFT"
-            } else {
-                "UNPUBLISHED"
-            }
-    }
-}
-
 private data class WeeklySessionOption(
     val id: String,
     val slotId: String?,

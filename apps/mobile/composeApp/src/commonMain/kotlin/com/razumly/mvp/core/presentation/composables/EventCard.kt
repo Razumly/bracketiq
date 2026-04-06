@@ -45,6 +45,8 @@ import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.isDraftLikeState
+import com.razumly.mvp.core.data.dataTypes.isPrivateState
+import com.razumly.mvp.core.data.dataTypes.lifecycleStateLabel
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabels
 import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.eventTypeWithSportLabel
@@ -62,6 +64,11 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.format
 import kotlinx.datetime.toLocalDateTime
 import kotlin.time.ExperimentalTime
+
+private data class EventLifecycleBadge(
+    val label: String,
+    val containerColor: Color,
+)
 
 @OptIn(
     ExperimentalHazeMaterialsApi::class, ExperimentalHazeApi::class
@@ -109,7 +116,19 @@ fun EventCard(
             else -> "Division: TBD"
         }
     }
-    val showDraftBadge = remember(event.state) { event.isDraftLikeState() }
+    val lifecycleBadge = remember(event.state) {
+        when {
+            event.isPrivateState() -> EventLifecycleBadge(
+                label = event.lifecycleStateLabel(),
+                containerColor = Color(0xFF1565C0),
+            )
+            event.isDraftLikeState() -> EventLifecycleBadge(
+                label = event.lifecycleStateLabel(),
+                containerColor = Color(0xFFD32F2F),
+            )
+            else -> null
+        }
+    }
 
 
     Box(Modifier.fillMaxWidth().clipToBounds()) {
@@ -259,19 +278,19 @@ fun EventCard(
                     )
                 }
             }
-            if (showDraftBadge) {
+            lifecycleBadge?.let { badge ->
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(bottom = 12.dp)
                         .background(
-                            color = Color(0xFFD32F2F),
+                            color = badge.containerColor,
                             shape = RoundedCornerShape(999.dp),
                         )
                         .padding(horizontal = 12.dp, vertical = 4.dp),
                 ) {
                     Text(
-                        text = "Draft",
+                        text = badge.label,
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = Color.White,
