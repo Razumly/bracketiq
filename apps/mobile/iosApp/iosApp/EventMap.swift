@@ -22,6 +22,31 @@ private func focusedLocationMatchesUser(
     return focused.distance(from: user) <= thresholdMeters
 }
 
+private func enumTitleCase(_ value: String) -> String {
+    return value
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .replacingOccurrences(of: "_", with: " ")
+        .replacingOccurrences(of: "-", with: " ")
+        .split(whereSeparator: \.isWhitespace)
+        .map { token in
+            let normalized = token.lowercased()
+            return normalized.prefix(1).uppercased() + normalized.dropFirst()
+        }
+        .joined(separator: " ")
+}
+
+private func eventTypeWithSportLabel(for event: Event) -> String {
+    let eventTypeLabel = enumTitleCase(event.eventType.name)
+    let sportLabel = event.sportId?
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+
+    guard let sportLabel, !sportLabel.isEmpty else {
+        return eventTypeLabel
+    }
+
+    return "\(eventTypeLabel): \(sportLabel)"
+}
+
 struct EventMap: View {
     var component: MapComponent
     var onEventSelected: (Event) -> Void
@@ -69,6 +94,7 @@ struct EventMap: View {
                     component: component,
                     events: ev,
                     canClickPOI: canClickPOI,
+                    currentLocation: loc,
                     focusedLocation: focusedLocation,
                     isFocusedOnUserLocation: focusedLocationMatchesUser(
                         focusedLocation: focusedLocation,
@@ -168,6 +194,7 @@ struct GoogleMapView: UIViewRepresentable {
     let component: MapComponent
     let events: [Event]
     let canClickPOI: Bool
+    let currentLocation: LatLng?
     let focusedLocation: LatLng?
     let isFocusedOnUserLocation: Bool
     let focusedEvent: Event?
@@ -191,17 +218,25 @@ struct GoogleMapView: UIViewRepresentable {
         
         let mapView = GMSMapView.init(options: options)
         mapView.isMyLocationEnabled = true
-        mapView.settings.myLocationButton = true
+        mapView.settings.myLocationButton = false
         mapView.delegate = context.coordinator
         mapView.mapType = .normal
         mapView.settings.consumesGesturesInView = false
         mapView.settings.scrollGestures = true
         mapView.settings.zoomGestures = true
+        context.coordinator.attachLocationButton(to: mapView)
 
         if isFocusedOnUserLocation, let focusedLocation {
             context.coordinator.lastUserCameraLocation = CLLocation(
                 latitude: focusedLocation.latitude,
                 longitude: focusedLocation.longitude
+            )
+        } else if let focusedLocation {
+            context.coordinator.recordExplicitFocus(
+                CLLocationCoordinate2D(
+                    latitude: focusedLocation.latitude,
+                    longitude: focusedLocation.longitude
+                )
             )
         }
         
@@ -214,6 +249,11 @@ struct GoogleMapView: UIViewRepresentable {
             left: 0,
             bottom: locationButtonBottomPadding,
             right: 16
+        )
+        context.coordinator.currentLocation = currentLocation
+        context.coordinator.updateLocationButton(
+            bottomPadding: locationButtonBottomPadding,
+            isHidden: currentLocation == nil
         )
 
         // Clear existing markers
@@ -232,6 +272,19 @@ struct GoogleMapView: UIViewRepresentable {
                 mapView.animate(with: GMSCameraUpdate.setTarget(focusedCoordinate))
                 context.coordinator.recordUserCameraLocation(focusedCoordinate)
             }
+        } else if let focusedLocation {
+            let focusedCoordinate = CLLocationCoordinate2D(
+                latitude: focusedLocation.latitude,
+                longitude: focusedLocation.longitude
+            )
+            if context.coordinator.shouldRecenterOnExplicitFocus(
+                focusedCoordinate,
+                thresholdMeters: 1
+            ) {
+                let zoom = mapView.camera.zoom > 0 ? mapView.camera.zoom : 12
+                mapView.camera = GMSCameraPosition.camera(withTarget: focusedCoordinate, zoom: zoom)
+                context.coordinator.recordExplicitFocus(focusedCoordinate)
+            }
         }
         
         // Add focused event marker
@@ -239,13 +292,10 @@ struct GoogleMapView: UIViewRepresentable {
             let coord = CLLocationCoordinate2D(latitude: fe.lat, longitude: fe.long)
             let marker = GMSMarker(position: coord)
             marker.title = fe.name
-            marker.snippet = "\(fe.eventType.name) – $\(fe.price)"
+            marker.snippet = "\(eventTypeWithSportLabel(for: fe)) – $\(fe.price)"
             marker.userData = EventMarkerData(event: fe)
             marker.icon = GMSMarker.markerImage(with: .red)
             marker.map = mapView
-            
-            let camera = GMSCameraPosition.camera(withTarget: coord, zoom: 12)
-            mapView.animate(to: camera)
         }
         
         // Add event markers (only when not in POI selection mode)
@@ -254,7 +304,7 @@ struct GoogleMapView: UIViewRepresentable {
                 let coord = CLLocationCoordinate2D(latitude: event.lat, longitude: event.long)
                 let marker = GMSMarker(position: coord)
                 marker.title = event.name
-                marker.snippet = "\(event.eventType.name) – $\(event.price)"
+                marker.snippet = "\(eventTypeWithSportLabel(for: event)) – $\(event.price)"
                 marker.userData = EventMarkerData(event: event)
                 marker.icon = GMSMarker.markerImage(with: .blue)
                 marker.map = mapView
@@ -303,6 +353,11 @@ class Coordinator: NSObject, GMSMapViewDelegate {
     var placeMarkers: [GMSMarker] = []
     var currentPOIMarker: GMSMarker?
     var lastUserCameraLocation: CLLocation?
+    var lastExplicitFocusLocation: CLLocation?
+    var currentLocation: LatLng?
+    private weak var mapView: GMSMapView?
+    private weak var locationButton: UIButton?
+    private var locationButtonBottomConstraint: NSLayoutConstraint?
     
     init(parent: GoogleMapView,
          onEventSelected: @escaping (Event) -> Void,
@@ -330,6 +385,82 @@ class Coordinator: NSObject, GMSMapViewDelegate {
 
     func recordUserCameraLocation(_ coordinate: CLLocationCoordinate2D) {
         lastUserCameraLocation = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+    }
+
+    func shouldRecenterOnExplicitFocus(
+        _ coordinate: CLLocationCoordinate2D,
+        thresholdMeters: CLLocationDistance
+    ) -> Bool {
+        guard let lastExplicitFocusLocation else { return true }
+        let nextLocation = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        return nextLocation.distance(from: lastExplicitFocusLocation) >= thresholdMeters
+    }
+
+    func recordExplicitFocus(_ coordinate: CLLocationCoordinate2D) {
+        lastExplicitFocusLocation = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+    }
+
+    func attachLocationButton(to mapView: GMSMapView) {
+        guard locationButton == nil else {
+            self.mapView = mapView
+            return
+        }
+
+        self.mapView = mapView
+
+        let button = UIButton(type: .system)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.backgroundColor = .white
+        button.tintColor = .label
+        button.layer.cornerRadius = 14
+        button.layer.shadowColor = UIColor.black.cgColor
+        button.layer.shadowOpacity = 0.16
+        button.layer.shadowRadius = 8
+        button.layer.shadowOffset = CGSize(width: 0, height: 4)
+        button.accessibilityLabel = "Go to my location"
+        button.accessibilityIdentifier = "map_current_location_button"
+        button.setImage(
+            UIImage(
+                systemName: "scope",
+                withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .semibold)
+            ),
+            for: .normal
+        )
+        button.addTarget(self, action: #selector(handleLocationButtonTap), for: .touchUpInside)
+
+        mapView.addSubview(button)
+
+        locationButtonBottomConstraint = button.bottomAnchor.constraint(equalTo: mapView.safeAreaLayoutGuide.bottomAnchor)
+        NSLayoutConstraint.activate([
+            button.widthAnchor.constraint(equalToConstant: 48),
+            button.heightAnchor.constraint(equalToConstant: 48),
+            button.trailingAnchor.constraint(equalTo: mapView.trailingAnchor, constant: -16),
+            locationButtonBottomConstraint!
+        ])
+
+        locationButton = button
+    }
+
+    func updateLocationButton(bottomPadding: CGFloat, isHidden: Bool) {
+        locationButtonBottomConstraint?.constant = -bottomPadding
+        locationButton?.isHidden = isHidden
+    }
+
+    func recenterOnCurrentLocationIfNeeded() {
+        guard let currentLocation, let mapView else { return }
+
+        let coordinate = CLLocationCoordinate2D(
+            latitude: currentLocation.latitude,
+            longitude: currentLocation.longitude
+        )
+        let zoom = mapView.camera.zoom > 0 ? mapView.camera.zoom : 12
+        mapView.animate(to: GMSCameraPosition.camera(withTarget: coordinate, zoom: zoom))
+        recordUserCameraLocation(coordinate)
+    }
+
+    @objc
+    private func handleLocationButtonTap() {
+        recenterOnCurrentLocationIfNeeded()
     }
     
     // MARK: - Custom Info Windows
@@ -423,19 +554,14 @@ class Coordinator: NSObject, GMSMapViewDelegate {
         locationLabel.textColor = UIColor.secondaryLabel
         containerView.addSubview(locationLabel)
         
-        // Event type and field type
-        let typeLabel = UILabel(frame: CGRect(x: 12, y: 76, width: 108, height: 16))
-        typeLabel.text = event.eventType.name
+        // Event type and sport type
+        let typeLabel = UILabel(frame: CGRect(x: 12, y: 76, width: 216, height: 16))
+        typeLabel.text = eventTypeWithSportLabel(for: event)
         typeLabel.font = UIFont.systemFont(ofSize: 12)
         typeLabel.textColor = UIColor.systemBlue
+        typeLabel.numberOfLines = 1
+        typeLabel.lineBreakMode = .byTruncatingTail
         containerView.addSubview(typeLabel)
-        
-        let fieldLabel = UILabel(frame: CGRect(x: 120, y: 76, width: 108, height: 16))
-        fieldLabel.text = event.state
-        fieldLabel.font = UIFont.systemFont(ofSize: 12)
-        fieldLabel.textColor = UIColor.systemPurple
-        fieldLabel.textAlignment = .right
-        containerView.addSubview(fieldLabel)
         
         // Price
         let priceLabel = UILabel(frame: CGRect(x: 12, y: 100, width: 216, height: 30))

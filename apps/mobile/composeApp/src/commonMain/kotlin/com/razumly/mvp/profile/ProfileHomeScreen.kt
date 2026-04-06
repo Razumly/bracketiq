@@ -46,7 +46,6 @@ import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.util.Platform
 import com.razumly.mvp.icons.MVPIcons
 import com.razumly.mvp.icons.ProfileActionChildren
-import com.razumly.mvp.icons.ProfileActionClearCache
 import com.razumly.mvp.icons.ProfileActionDetails
 import com.razumly.mvp.icons.ProfileActionEvents
 import com.razumly.mvp.icons.ProfileActionMemberships
@@ -194,14 +193,6 @@ fun ProfileHomeScreen(component: ProfileComponent) {
                     onClick = component::manageRefunds,
                 ),
             )
-            add(
-                ProfileAction(
-                    title = "Clear Cache",
-                    description = "Reset local cached data",
-                    icon = MVPIcons.ProfileActionClearCache,
-                    onClick = component::clearCache,
-                ),
-            )
         }
     }
 
@@ -279,52 +270,58 @@ private fun ProfileActionCard(action: ProfileAction) {
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         ),
     ) {
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
                 text = action.title,
                 style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .align(Alignment.TopCenter),
+                modifier = Modifier.fillMaxWidth(),
                 textAlign = TextAlign.Center,
-                maxLines = 2,
+                maxLines = 1,
+                minLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
 
-            BadgedBox(
+            Box(
                 modifier = Modifier
-                    .align(Alignment.Center)
-                    .fillMaxHeight(0.5f)
-                    .aspectRatio(1f),
-                badge = {
-                    if (action.badgeCount > 0) {
-                        Badge {
-                            Text(action.badgeCount.toString())
-                        }
-                    }
-                },
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center,
             ) {
-                Icon(
-                    imageVector = action.icon,
-                    contentDescription = action.title,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.fillMaxSize(),
-                )
+                BadgedBox(
+                    modifier = Modifier
+                        .fillMaxHeight(0.8f)
+                        .aspectRatio(1f),
+                    badge = {
+                        if (action.badgeCount > 0) {
+                            Badge {
+                                Text(action.badgeCount.toString())
+                            }
+                        }
+                    },
+                ) {
+                    Icon(
+                        imageVector = action.icon,
+                        contentDescription = action.title,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
 
             Text(
                 text = action.description,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .align(Alignment.BottomCenter),
+                modifier = Modifier.fillMaxWidth(),
                 textAlign = TextAlign.Center,
                 maxLines = 2,
+                minLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
         }

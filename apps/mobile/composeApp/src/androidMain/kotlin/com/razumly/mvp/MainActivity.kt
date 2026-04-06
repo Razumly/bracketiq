@@ -3,18 +3,20 @@ package com.razumly.mvp
 import android.app.Activity
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
-import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
-import androidx.core.view.WindowCompat
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.platform.LocalView
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.core.view.WindowCompat
+import androidx.lifecycle.lifecycleScope
 import com.arkivanov.decompose.ExperimentalDecomposeApi
 import com.arkivanov.decompose.handleDeepLink
 import com.arkivanov.decompose.retainedComponent
@@ -27,7 +29,6 @@ import com.razumly.mvp.core.presentation.RootComponent.DeepLinkNav
 import dev.icerock.moko.geo.compose.BindLocationTrackerEffect
 import dev.icerock.moko.permissions.compose.BindEffect
 import io.github.aakira.napier.Napier
-import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import org.koin.core.parameter.parametersOf
 import org.koin.mp.KoinPlatform.getKoin
@@ -43,7 +44,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         val splashScreen = installSplashScreen()
         splashScreen.setKeepOnScreenCondition { keepSystemSplashVisible }
-        enableEdgeToEdge()
+        configureEdgeToEdgeWindow()
         super.onCreate(savedInstanceState)
 
         NotifierManager.onCreateOrOnNewIntent(intent)
@@ -94,6 +95,29 @@ class MainActivity : ComponentActivity() {
             }
         } ?: run {
             Napier.d(tag = "DeepLink", message = "No URI data in intent")
+        }
+    }
+
+    private fun configureEdgeToEdgeWindow() {
+        // Force the decor view to initialize before changing edge-to-edge attributes.
+        window.decorView
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isStatusBarContrastEnforced = false
+            window.isNavigationBarContrastEnforced = true
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val attributes = window.attributes
+            if (
+                attributes.layoutInDisplayCutoutMode !=
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            ) {
+                attributes.layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                window.attributes = attributes
+            }
         }
     }
 

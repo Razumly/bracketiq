@@ -521,7 +521,14 @@ fun EventSearchScreen(
                         onClick = {
                             selectedTab = tab
                         },
-                        text = { Text(tab.label) }
+                        text = {
+                            Text(
+                                text = tab.label,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                softWrap = false,
+                            )
+                        }
                     )
                 }
             }

@@ -2159,49 +2159,49 @@ fun EventDetailScreen(
     }
 
     CompositionLocalProvider(LocalTournamentComponent provides component) {
-        PullToRefreshContainer(
-            isRefreshing = isEventRefreshInProgress,
-            onRefresh = component::refreshEventDetails,
-            enabled = !showMap,
+        CircularRevealUnderlay(
+            isRevealed = showMap,
+            revealCenterInWindow = mapRevealCenter,
+            animationDurationMillis = 800,
             modifier = Modifier.fillMaxSize(),
-        ) {
-            CircularRevealUnderlay(
-                isRevealed = showMap,
-                revealCenterInWindow = mapRevealCenter,
-                animationDurationMillis = 800,
-                modifier = Modifier.fillMaxSize(),
-                backgroundContent = {
-                    EventMap(
-                        component = mapComponent,
-                        onEventSelected = { _ ->
+            backgroundContent = {
+                EventMap(
+                    component = mapComponent,
+                    onEventSelected = { _ ->
+                        mapComponent.toggleMap()
+                    },
+                    onPlaceSelected = { place ->
+                        if (isEditing) {
+                            component.selectPlace(place)
+                            previousMapSelection = LatLng(place.latitude, place.longitude)
                             mapComponent.toggleMap()
-                        },
-                        onPlaceSelected = { place ->
-                            if (isEditing) {
-                                component.selectPlace(place)
-                                previousMapSelection = LatLng(place.latitude, place.longitude)
-                                mapComponent.toggleMap()
-                            }
-                        },
-                        onPlaceSelectionPoint = { x, y ->
-                            mapRevealCenter = Offset(x, y)
-                        },
-                        canClickPOI = isEditing,
-                        focusedLocation = if (editedEvent.location.isNotBlank()) {
-                            LatLng(editedEvent.lat, editedEvent.long)
-                        } else if (previousMapSelection != null) {
-                            previousMapSelection!!
-                        } else {
-                            mapComponent.currentLocation.value ?: LatLng(0.0, 0.0)
-                        },
-                        focusedEvent = if (!isEditing && selectedEvent.event.location.isNotBlank()) {
-                            selectedEvent.event
-                        } else {
-                            null
-                        },
-                        onBackPressed = mapComponent::toggleMap,
-                    )
-                },
+                        }
+                    },
+                    onPlaceSelectionPoint = { x, y ->
+                        mapRevealCenter = Offset(x, y)
+                    },
+                    canClickPOI = isEditing,
+                    focusedLocation = if (editedEvent.location.isNotBlank()) {
+                        LatLng(editedEvent.lat, editedEvent.long)
+                    } else if (previousMapSelection != null) {
+                        previousMapSelection!!
+                    } else {
+                        mapComponent.currentLocation.value ?: LatLng(0.0, 0.0)
+                    },
+                    focusedEvent = if (!isEditing && selectedEvent.event.location.isNotBlank()) {
+                        selectedEvent.event
+                    } else {
+                        null
+                    },
+                    onBackPressed = mapComponent::toggleMap,
+                )
+            },
+        ) {
+            PullToRefreshContainer(
+                isRefreshing = isEventRefreshInProgress,
+                onRefresh = component::refreshEventDetails,
+                enabled = !showMap,
+                modifier = Modifier.fillMaxSize(),
             ) {
                 Scaffold(Modifier.fillMaxSize()) { innerPadding ->
                 Box(

@@ -47,11 +47,9 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.isDraftLikeState
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabels
 import com.razumly.mvp.core.presentation.util.dateFormat
+import com.razumly.mvp.core.presentation.util.eventTypeWithSportLabel
 import com.razumly.mvp.core.presentation.util.getImageUrl
 import com.razumly.mvp.core.presentation.util.moneyFormat
-import com.razumly.mvp.core.presentation.util.toEnumTitleCase
-import com.razumly.mvp.eventSearch.composables.StylizedText
-import com.razumly.mvp.eventSearch.util.TextPatterns
 import dev.chrisbanes.haze.ExperimentalHazeApi
 import dev.chrisbanes.haze.HazeInputScale
 import dev.chrisbanes.haze.HazeProgressive
@@ -81,7 +79,6 @@ fun EventCard(
             ?.let { imageId -> getImageUrl(imageId) }
     }
     var isImageReady by remember(imageModel) { mutableStateOf(imageModel == null) }
-    val patterns = TextPatterns(event.name)
     val hazeState = rememberHazeState()
     var mapButtonOffset by remember { mutableStateOf(Offset.Zero) }
 
@@ -207,9 +204,10 @@ fun EventCard(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    StylizedText(
-                        text = event.eventType.name.toEnumTitleCase(),
-                        patterns = patterns,
+                    Text(
+                        text = event.eventTypeWithSportLabel(),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.background,
                         modifier = Modifier.weight(1f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -226,15 +224,17 @@ fun EventCard(
                         )
                     }
                 }
-                StylizedText(
+                Text(
                     text = if (event.teamSignup) "Team registration" else "Individual registration",
-                    patterns = patterns,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.background,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                StylizedText(
+                Text(
                     text = divisionSummaryText,
-                    patterns = patterns,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.background,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )

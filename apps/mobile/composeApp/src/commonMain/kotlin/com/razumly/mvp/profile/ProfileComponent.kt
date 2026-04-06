@@ -264,7 +264,6 @@ interface ProfileComponent : IPaymentProcessor {
     fun manageTeams()
     fun manageEvents()
     fun manageRefunds()
-    fun clearCache()
     fun refreshPushTargetDebugStatus(syncBeforeCheck: Boolean = false)
     fun refreshEventTemplates()
     fun openEventTemplate(event: Event)
@@ -568,12 +567,6 @@ class DefaultProfileComponent(
 
     override fun manageRefunds() {
         navigationHandler.navigateToRefunds()
-    }
-
-    override fun clearCache() {
-        scope.launch {
-            // TODO: Wire cache clearing behavior once the cache strategy is finalized.
-        }
     }
 
     override fun refreshPushTargetDebugStatus(syncBeforeCheck: Boolean) {

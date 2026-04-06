@@ -163,6 +163,19 @@ fun String.toEnumTitleCase(): String {
         }
 }
 
+fun Event.eventTypeWithSportLabel(): String {
+    val eventTypeLabel = eventType.name.toEnumTitleCase()
+    val sportLabel = sportId
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+
+    return if (sportLabel != null) {
+        "$eventTypeLabel: $sportLabel"
+    } else {
+        eventTypeLabel
+    }
+}
+
 fun Double.moneyFormat(): String {
     val rounded = (this * 100).roundToInt()
     val whole = rounded / 100

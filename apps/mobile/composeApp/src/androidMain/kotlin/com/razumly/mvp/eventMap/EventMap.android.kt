@@ -244,7 +244,7 @@ actual fun EventMap(
             properties = MapProperties(isMyLocationEnabled = trackedLocation != null),
             uiSettings = MapUiSettings(
                 zoomControlsEnabled = false,
-                myLocationButtonEnabled = trackedLocation != null,
+                myLocationButtonEnabled = false,
             ),
             onPOIClick = { poi ->
                 if (canClickPOI && !isAnimating) {
@@ -456,6 +456,28 @@ actual fun EventMap(
                     }
                 }
             }
+        }
+
+        trackedLatLng?.let { userLocation ->
+            MapCurrentLocationButton(
+                onClick = {
+                    scope.launch {
+                        val update = if (cameraPositionState.position.zoom > 0f) {
+                            CameraUpdateFactory.newLatLng(userLocation)
+                        } else {
+                            CameraUpdateFactory.newLatLngZoom(userLocation, defaultZoom)
+                        }
+                        cameraPositionState.animate(update, defaultDurationMs)
+                        lastUserCameraLocation = userLocation
+                    }
+                },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(
+                        end = MAP_ACTION_BUTTON_SCAFFOLD_BOTTOM_SPACING,
+                        bottom = closeButtonBottomPadding,
+                    ),
+            )
         }
 
         if (onBackPressed != null) {

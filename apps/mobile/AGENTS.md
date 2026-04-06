@@ -23,6 +23,8 @@ Any save flow that updates multiple related records (for example event match edi
 - `./gradlew :composeApp:allTests` runs aggregated multiplatform tests; on Linux/WSL this can fail due to iOS simulator tasks (`xcrun`) and should be run on macOS.
 - `./gradlew bootIOSSimulator && ./gradlew :composeApp:iosSimulatorArm64Test` boots the configured iOS simulator and runs native tests (macOS only).
 - `cd iosApp; pod install` refreshes the CocoaPods workspace after touching `composeApp.podspec`.
+- For Xcode/CocoaPods iOS builds on macOS, keep Gradle on JDK 17. JDK 25 can fail during `:composeApp:syncFramework` with `IllegalArgumentException: 25.0.2` from the Kotlin/Gradle toolchain.
+- On Apple Silicon Macs, if native iOS linking reports `Failed to load native library: libjansi.jnilib` with an `x86_64` vs `arm64` mismatch, clear `~/.gradle/native/jansi` and rerun `pod install` so the CocoaPods build script and Gradle cache are refreshed.
 
 ## Local Test Environment (WSL)
 - Use JDK 17 for Gradle builds/tests. Set `org.gradle.java.home` in `~/.gradle/gradle.properties`.
@@ -30,6 +32,10 @@ Any save flow that updates multiple related records (for example event match edi
 - Ensure SDK packages required by this project are installed: `platform-tools`, `platforms;android-35`, `platforms;android-36`, `build-tools;35.0.0`, `build-tools;36.0.0`.
 - Export `ANDROID_SDK_ROOT`/`ANDROID_HOME` to the Linux SDK path before running tests in new shells.
 - Do not run Gradle test tasks concurrently from multiple agents in the same checkout; they can contend on `build/` and Gradle caches and cause flaky failures.
+
+## Local Test Environment (macOS/iOS)
+- Use JDK 17 for Gradle tasks invoked from Xcode/CocoaPods as well as terminal builds. If multiple JDKs are installed, make sure `JAVA_HOME` resolves to 17 before running `pod install` or opening an Xcode build that triggers `:composeApp:syncFramework`.
+- If `~/.gradle/native/jansi/1.18/osx/libjansi.jnilib` is cached as `x86_64` on Apple Silicon, remove `~/.gradle/native/jansi` before rerunning the iOS build so Gradle can recreate native artifacts for the active architecture.
 
 ## Coding Style & Naming Conventions
 Follow the Kotlin style guide: 4-space indents, prefer `val`, and lean on focused data classes. Compose surfaces use PascalCase suffixed with `Screen`, `Presenter`, or `UnifiedCard`, mirroring the feature folders under `com/razumly/mvp`. Cross-platform extensions belong in `core/` and should be grouped by capability (e.g., `LocationExtensions.kt`). Hoist state out of composables and run `.\gradlew :composeApp:lint` (or IDE inspections) before a PR.
