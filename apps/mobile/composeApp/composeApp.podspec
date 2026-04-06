@@ -40,6 +40,13 @@ Pod::Spec.new do |spec|
                 fi
                 set -ev
                 REPO_ROOT="$PODS_TARGET_SRCROOT"
+                JAVA_17_HOME="$(/usr/libexec/java_home -v 17 2>/dev/null || true)"
+                if [ -z "$JAVA_17_HOME" ]; then
+                    echo "error: JDK 17 is required for Kotlin iOS CocoaPods builds. Install JDK 17 and rerun pod install." >&2
+                    exit 1
+                fi
+                export JAVA_HOME="$JAVA_17_HOME"
+                export ORG_GRADLE_JAVA_HOME="$JAVA_17_HOME"
                 "$REPO_ROOT/../gradlew" -p "$REPO_ROOT" $KOTLIN_PROJECT_PATH:syncFramework \
                     -Pkotlin.native.cocoapods.platform=$PLATFORM_NAME \
                     -Pkotlin.native.cocoapods.archs="$ARCHS" \
