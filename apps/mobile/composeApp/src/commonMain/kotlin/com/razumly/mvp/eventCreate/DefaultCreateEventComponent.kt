@@ -11,6 +11,7 @@ import com.arkivanov.decompose.router.stack.pop
 import com.arkivanov.decompose.router.stack.pushNew
 import com.arkivanov.decompose.value.Value
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
+import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
@@ -99,6 +100,7 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     val organizationTemplatesError: StateFlow<String?>
     val textSignaturePrompt: StateFlow<TextSignaturePromptState?>
     val webSignaturePrompt: StateFlow<WebSignaturePromptState?>
+    val billingAddressPrompt: StateFlow<BillingAddressDraft?>
     val localFields: StateFlow<List<Field>>
     val leagueSlots: StateFlow<List<TimeSlot>>
     val leagueScoringConfig: StateFlow<LeagueScoringConfigDTO>
@@ -150,6 +152,8 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     fun confirmTextSignature()
     fun dismissTextSignature()
     fun dismissWebSignaturePrompt()
+    fun submitBillingAddress(address: BillingAddressDraft)
+    fun dismissBillingAddressPrompt()
     fun onUploadSelected(photo: GalleryPhotoResult)
     fun deleteImage(url: String)
 
@@ -206,6 +210,8 @@ class DefaultCreateEventComponent(
 
     private val _errorState = MutableStateFlow<ErrorMessage?>(null)
     override val errorState = _errorState.asStateFlow()
+    private val _billingAddressPrompt = MutableStateFlow<BillingAddressDraft?>(null)
+    override val billingAddressPrompt = _billingAddressPrompt.asStateFlow()
 
     private val _addUserToEvent = MutableStateFlow(false)
 
@@ -247,6 +253,7 @@ class DefaultCreateEventComponent(
     private var pendingRentalSignatureStepIndex = 0
     private var pendingRentalSignatureEvent: Event? = null
     private var pendingRentalPdfSignaturePollJob: Job? = null
+    private var pendingBillingAddressAction: (() -> Unit)? = null
 
     private lateinit var loadingHandler: LoadingHandler
 
@@ -421,6 +428,28 @@ class DefaultCreateEventComponent(
     override fun dismissWebSignaturePrompt() {
         clearPendingRentalSignatureFlow()
         _errorState.value = ErrorMessage("Document signing canceled.")
+    }
+
+    override fun submitBillingAddress(address: BillingAddressDraft) {
+        scope.launch {
+            loadingHandler.showLoading("Saving billing address...")
+            billingRepository.updateBillingAddress(address)
+                .onSuccess {
+                    _billingAddressPrompt.value = null
+                    val action = pendingBillingAddressAction
+                    pendingBillingAddressAction = null
+                    action?.invoke()
+                }
+                .onFailure { error ->
+                    _errorState.value = ErrorMessage(error.userMessage("Unable to save billing address."))
+                }
+            loadingHandler.hideLoading()
+        }
+    }
+
+    override fun dismissBillingAddressPrompt() {
+        _billingAddressPrompt.value = null
+        pendingBillingAddressAction = null
     }
 
     override fun updateEventField(update: Event.() -> Event) {
@@ -1207,6 +1236,9 @@ class DefaultCreateEventComponent(
             createEventAfterPayment(eventDraft)
             return
         }
+        if (!ensureBillingAddressOrPrompt { createEvent() }) {
+            return
+        }
 
         if (!reserveRentalCheckoutLocks(eventDraft)) {
             _errorState.value = ErrorMessage(
@@ -1246,8 +1278,9 @@ class DefaultCreateEventComponent(
                     val account = userRepository.currentAccount.value.getOrThrow()
                     val user = currentUser.value ?: userRepository.currentUser.value.getOrNull()
                         ?: error("Current user is not available yet.")
+                    val billingAddress = loadSavedBillingAddress()
                     loadingHandler.showLoading("Waiting for payment completion...")
-                    presentPaymentSheet(account.email, user.fullName)
+                    presentPaymentSheet(account.email, user.fullName, billingAddress)
                 }.onFailure { throwable ->
                     awaitingRentalPayment.value = false
                     pendingEventAfterPayment.value = null
@@ -1261,6 +1294,31 @@ class DefaultCreateEventComponent(
                 _errorState.value = ErrorMessage(throwable.userMessage("Unable to create rental payment."))
                 loadingHandler.hideLoading()
             }
+    }
+
+    private suspend fun ensureBillingAddressOrPrompt(onReady: () -> Unit): Boolean {
+        val billingAddress = billingRepository.getBillingAddress()
+            .getOrElse { error ->
+                _errorState.value = ErrorMessage(error.userMessage("Unable to load billing address."))
+                return false
+            }
+            .billingAddress
+            ?.normalized()
+
+        if (billingAddress != null && billingAddress.isCompleteForUsTax()) {
+            return true
+        }
+
+        pendingBillingAddressAction = onReady
+        _billingAddressPrompt.value = billingAddress ?: BillingAddressDraft()
+        return false
+    }
+
+    private suspend fun loadSavedBillingAddress(): BillingAddressDraft? {
+        return billingRepository.getBillingAddress()
+            .getOrNull()
+            ?.billingAddress
+            ?.normalized()
     }
 
     private suspend fun createEventAfterPayment(eventDraft: Event) {

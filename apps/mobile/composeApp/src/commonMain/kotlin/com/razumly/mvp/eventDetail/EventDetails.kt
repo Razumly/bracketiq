@@ -96,6 +96,7 @@ import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.divisionPriceRangeLabel
 import com.razumly.mvp.core.data.dataTypes.label
 import com.razumly.mvp.core.data.dataTypes.officialPositionSummary
 import com.razumly.mvp.core.data.dataTypes.positionSummary
@@ -1459,8 +1460,8 @@ fun EventDetails(
     val refundSummary = remember(event.cancellationRefundHours) {
         event.cancellationRefundHours.toRefundSummary()
     }
-    val priceSummary = remember(event.teamSignup, event.price) {
-        if (event.teamSignup) "${event.price.moneyFormat()} / team" else "${event.price.moneyFormat()} / player"
+    val priceSummary = remember(event.teamSignup, event.priceCents, event.divisions, event.divisionDetails) {
+        if (event.teamSignup) "${event.divisionPriceRangeLabel()} / team" else "${event.divisionPriceRangeLabel()} / player"
     }
     val basicsSummaryLine = remember(event.location, basicDateSummary, hostDisplayName) {
         listOf(hostDisplayName, event.location, basicDateSummary)

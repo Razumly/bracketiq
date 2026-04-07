@@ -42,6 +42,7 @@ import com.razumly.mvp.core.data.dataTypes.updateOfficialUserPositions
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
+import com.razumly.mvp.core.presentation.composables.BillingAddressDialog
 import com.razumly.mvp.core.presentation.composables.EmbeddedWebModal
 import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
 import com.razumly.mvp.core.presentation.util.backAnimation
@@ -87,6 +88,7 @@ fun CreateEventScreen(
     val pendingStaffInvites by component.pendingStaffInvites.collectAsState()
     val textSignaturePrompt by component.textSignaturePrompt.collectAsState()
     val webSignaturePrompt by component.webSignaturePrompt.collectAsState()
+    val billingAddressPrompt by component.billingAddressPrompt.collectAsState()
     val showMap by mapComponent.showMap.collectAsState()
     val isEditing = true
     val currentUser by component.currentUser.collectAsState()
@@ -452,6 +454,14 @@ fun CreateEventScreen(
                         url = prompt.url,
                         description = null,
                         onDismiss = component::dismissWebSignaturePrompt,
+                    )
+                }
+
+                billingAddressPrompt?.let { address ->
+                    BillingAddressDialog(
+                        initialAddress = address,
+                        onConfirm = component::submitBillingAddress,
+                        onDismiss = component::dismissBillingAddressPrompt,
                     )
                 }
 

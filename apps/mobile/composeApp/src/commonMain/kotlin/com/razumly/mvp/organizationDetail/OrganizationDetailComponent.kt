@@ -3,6 +3,7 @@ package com.razumly.mvp.organizationDetail
 import com.razumly.mvp.core.network.userMessage
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
+import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.Product
@@ -47,6 +48,7 @@ interface OrganizationDetailComponent : IPaymentProcessor {
     val isLoadingRentals: StateFlow<Boolean>
     val errorState: StateFlow<ErrorMessage?>
     val message: StateFlow<String?>
+    val billingAddressPrompt: StateFlow<BillingAddressDraft?>
 
     fun setLoadingHandler(handler: LoadingHandler)
     fun refreshOrganization(force: Boolean = false)
@@ -56,6 +58,8 @@ interface OrganizationDetailComponent : IPaymentProcessor {
     fun refreshRentals(force: Boolean = false)
     fun clearRentalData()
     fun startProductPurchase(product: Product)
+    fun submitBillingAddress(address: BillingAddressDraft)
+    fun dismissBillingAddressPrompt()
     fun startRentalCreate(context: RentalCreateContext)
     fun viewEvent(event: Event)
     fun onBackClicked()
@@ -118,6 +122,8 @@ class DefaultOrganizationDetailComponent(
 
     private val _message = MutableStateFlow<String?>(null)
     override val message: StateFlow<String?> = _message.asStateFlow()
+    private val _billingAddressPrompt = MutableStateFlow<BillingAddressDraft?>(null)
+    override val billingAddressPrompt: StateFlow<BillingAddressDraft?> = _billingAddressPrompt.asStateFlow()
 
     private var organizationLoaded = false
     private var eventsLoaded = false
@@ -125,6 +131,7 @@ class DefaultOrganizationDetailComponent(
     private var productsLoaded = false
     private var rentalsLoaded = false
     private var pendingProductPurchase: Product? = null
+    private var pendingBillingAddressAction: (() -> Unit)? = null
 
     private lateinit var loadingHandler: LoadingHandler
 
@@ -148,7 +155,9 @@ class DefaultOrganizationDetailComponent(
                     PaymentResult.Completed -> {
                         val pendingProduct = pendingProductPurchase
                         if (pendingProduct != null) {
-                            handleSubscriptionAfterPurchase(pendingProduct)
+                            _message.value = "Subscription started for ${pendingProduct.name}."
+                            refreshProducts(force = true)
+                            pendingProductPurchase = null
                         }
                     }
                 }
@@ -307,11 +316,14 @@ class DefaultOrganizationDetailComponent(
                 _errorState.value = ErrorMessage("Please sign in to purchase.")
                 return@launch
             }
+            if (!ensureBillingAddressOrPrompt { startProductPurchase(product) }) {
+                return@launch
+            }
 
             if (::loadingHandler.isInitialized) {
                 loadingHandler.showLoading("Preparing checkout...")
             }
-            billingRepository.createProductPurchaseIntent(product.id)
+            billingRepository.createProductSubscriptionIntent(product.id)
                 .onSuccess { intent ->
                     pendingProductPurchase = product
                     showPaymentSheet(intent, account?.email.orEmpty(), user.fullName)
@@ -329,6 +341,32 @@ class DefaultOrganizationDetailComponent(
         navigationHandler.navigateToCreate(context)
     }
 
+    override fun submitBillingAddress(address: BillingAddressDraft) {
+        scope.launch {
+            if (::loadingHandler.isInitialized) {
+                loadingHandler.showLoading("Saving billing address...")
+            }
+            billingRepository.updateBillingAddress(address)
+                .onSuccess {
+                    _billingAddressPrompt.value = null
+                    val action = pendingBillingAddressAction
+                    pendingBillingAddressAction = null
+                    action?.invoke()
+                }
+                .onFailure { error ->
+                    _errorState.value = ErrorMessage(error.userMessage("Unable to save billing address."))
+                }
+            if (::loadingHandler.isInitialized) {
+                loadingHandler.hideLoading()
+            }
+        }
+    }
+
+    override fun dismissBillingAddressPrompt() {
+        _billingAddressPrompt.value = null
+        pendingBillingAddressAction = null
+    }
+
     override fun viewEvent(event: Event) {
         navigationHandler.navigateToEvent(event)
     }
@@ -343,31 +381,36 @@ class DefaultOrganizationDetailComponent(
         name: String,
     ) {
         setPaymentIntent(intent)
+        val billingAddress = loadSavedBillingAddress()
         if (::loadingHandler.isInitialized) {
             loadingHandler.showLoading("Waiting for payment completion...")
         }
-        presentPaymentSheet(email, name)
+        presentPaymentSheet(email, name, billingAddress)
     }
 
-    private suspend fun handleSubscriptionAfterPurchase(product: Product) {
-        if (::loadingHandler.isInitialized) {
-            loadingHandler.showLoading("Finalizing subscription...")
+    private suspend fun ensureBillingAddressOrPrompt(onReady: () -> Unit): Boolean {
+        val billingAddress = billingRepository.getBillingAddress()
+            .getOrElse { error ->
+                _errorState.value = ErrorMessage(error.userMessage("Unable to load billing address."))
+                return false
+            }
+            .billingAddress
+            ?.normalized()
+
+        if (billingAddress != null && billingAddress.isCompleteForUsTax()) {
+            return true
         }
-        billingRepository.createProductSubscription(
-            productId = product.id,
-            organizationId = product.organizationId,
-            priceCents = product.priceCents,
-            startDate = null,
-        ).onSuccess {
-            _message.value = "Subscription started for ${product.name}."
-            refreshProducts(force = true)
-        }.onFailure { error ->
-            _errorState.value = ErrorMessage("Failed to start subscription: ${error.userMessage()}")
-        }
-        pendingProductPurchase = null
-        if (::loadingHandler.isInitialized) {
-            loadingHandler.hideLoading()
-        }
+
+        pendingBillingAddressAction = onReady
+        _billingAddressPrompt.value = billingAddress ?: BillingAddressDraft()
+        return false
+    }
+
+    private suspend fun loadSavedBillingAddress(): BillingAddressDraft? {
+        return billingRepository.getBillingAddress()
+            .getOrNull()
+            ?.billingAddress
+            ?.normalized()
     }
 
     private suspend fun resolveOrganizationFieldIds(organization: Organization): List<String> {

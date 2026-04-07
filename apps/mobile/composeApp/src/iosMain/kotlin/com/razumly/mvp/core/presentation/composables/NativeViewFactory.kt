@@ -2,6 +2,7 @@
 
 package com.razumly.mvp.core.presentation.composables
 
+import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.presentation.PaymentResult
@@ -50,6 +51,9 @@ interface NativeViewFactory {
         customerId: String?,
         ephemeralKey: String?,
         paymentIntent: String,
+        billingName: String?,
+        billingEmail: String?,
+        billingAddress: BillingAddressDraft?,
         onPaymentResult: (PaymentResult) -> Unit
     )
 }

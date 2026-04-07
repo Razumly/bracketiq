@@ -42,6 +42,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.divisionPriceRangeLabel
 import com.razumly.mvp.core.presentation.util.eventTypeWithSportLabel
 
 @Composable
@@ -222,7 +223,7 @@ private fun EventCardContent(event: Event) {
 
         // Price
         Text(
-            text = "$${event.price}",
+            text = event.divisionPriceRangeLabel(),
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.primary,

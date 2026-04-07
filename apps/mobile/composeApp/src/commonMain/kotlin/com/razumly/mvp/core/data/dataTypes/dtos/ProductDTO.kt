@@ -3,6 +3,7 @@
 package com.razumly.mvp.core.data.dataTypes.dtos
 
 import com.razumly.mvp.core.data.dataTypes.Product
+import com.razumly.mvp.core.data.dataTypes.ProductTaxCategory
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 import kotlin.native.ObjCName
@@ -20,6 +21,7 @@ data class ProductDTO(
     val createdAt: String? = null,
     val stripeProductId: String? = null,
     val stripePriceId: String? = null,
+    val taxCategory: ProductTaxCategory = ProductTaxCategory.ONE_TIME_PRODUCT,
     @Transient val id: String = "",
 ) {
     fun toProduct(id: String): Product =
@@ -34,6 +36,7 @@ data class ProductDTO(
             createdAt = createdAt,
             stripeProductId = stripeProductId,
             stripePriceId = stripePriceId,
+            taxCategory = taxCategory,
             id = id
         )
 }

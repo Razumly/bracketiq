@@ -103,12 +103,15 @@ import com.materialkolor.ktx.DynamicScheme
 import com.razumly.mvp.core.data.dataTypes.addOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.addOfficialUser
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.divisionPriceRange
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfig
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.hasAnyPaidDivision
+import com.razumly.mvp.core.data.dataTypes.resolvedDivisionPriceCents
 import com.razumly.mvp.core.data.dataTypes.removeOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.removeOfficialUser
 import com.razumly.mvp.core.data.dataTypes.syncOfficialStaffing
@@ -125,6 +128,7 @@ import com.razumly.mvp.core.data.util.resolveParticipantCapacity
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.PlayerInteractionComponent
+import com.razumly.mvp.core.presentation.composables.BillingAddressDialog
 import com.razumly.mvp.core.presentation.composables.EmbeddedWebModal
 import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
@@ -1595,6 +1599,7 @@ fun EventDetailScreen(
     val withdrawTargets by component.withdrawTargets.collectAsState()
     val textSignaturePrompt by component.textSignaturePrompt.collectAsState()
     val webSignaturePrompt by component.webSignaturePrompt.collectAsState()
+    val billingAddressPrompt by component.billingAddressPrompt.collectAsState()
     val eventImageIds by component.eventImageIds.collectAsState()
     val organizationTemplates by component.organizationTemplates.collectAsState()
     val organizationTemplatesLoading by component.organizationTemplatesLoading.collectAsState()
@@ -1773,6 +1778,13 @@ fun EventDetailScreen(
     var mapRevealCenter by remember { mutableStateOf(Offset.Zero) }
     var previousMapSelection by remember { mutableStateOf<LatLng?>(null) }
     var isManagingParticipants by rememberSaveable { mutableStateOf(false) }
+    val hasAnyPaidDivision = remember(
+        selectedEvent.event.priceCents,
+        selectedEvent.event.divisions,
+        selectedEvent.event.divisionDetails,
+    ) {
+        selectedEvent.event.hasAnyPaidDivision()
+    }
 
     var imageScheme by remember {
         mutableStateOf(
@@ -1856,8 +1868,8 @@ fun EventDetailScreen(
             }
         }
     }
-    val refundableWithdrawTargets = remember(withdrawTargets, selectedEvent.event.price) {
-        if (selectedEvent.event.price <= 0) {
+    val refundableWithdrawTargets = remember(withdrawTargets, hasAnyPaidDivision) {
+        if (!hasAnyPaidDivision) {
             emptyList()
         } else {
             withdrawTargets.filter { it.membership == WithdrawTargetMembership.PARTICIPANT }
@@ -1876,25 +1888,25 @@ fun EventDetailScreen(
         singleWithdrawTarget?.membership == WithdrawTargetMembership.FREE_AGENT -> "Leave as Free Agent"
         singleWithdrawTarget?.membership == WithdrawTargetMembership.WAITLIST -> "Leave Waitlist"
         singleWithdrawTarget?.membership == WithdrawTargetMembership.PARTICIPANT &&
-            selectedEvent.event.price > 0 &&
+            hasAnyPaidDivision &&
             isRefundAutomatic -> "Withdraw and Request Refund"
         singleWithdrawTarget?.membership == WithdrawTargetMembership.PARTICIPANT &&
-            selectedEvent.event.price > 0 -> "Withdraw and Get Refund"
+            hasAnyPaidDivision -> "Withdraw and Get Refund"
         singleWithdrawTarget?.membership == WithdrawTargetMembership.PARTICIPANT -> "Leave Event"
         isFreeAgent -> "Leave as Free Agent"
         isWaitListed -> "Leave Waitlist"
-        selectedEvent.event.price > 0 && isRefundAutomatic -> "Leave and Request Refund"
-        selectedEvent.event.price > 0 -> "Leave and Get Refund"
+        hasAnyPaidDivision && isRefundAutomatic -> "Leave and Request Refund"
+        hasAnyPaidDivision -> "Leave and Get Refund"
         else -> "Leave Event"
     }
     val openLeaveOrRefundForTarget: (WithdrawTargetOption?) -> Unit = { target ->
         val shouldRefund = when {
             target != null -> {
-                target.membership == WithdrawTargetMembership.PARTICIPANT && selectedEvent.event.price > 0
+                target.membership == WithdrawTargetMembership.PARTICIPANT && hasAnyPaidDivision
             }
 
             else -> {
-                selectedEvent.event.price > 0 && !isFreeAgent && !isWaitListed
+                hasAnyPaidDivision && !isFreeAgent && !isWaitListed
             }
         }
 
@@ -2029,11 +2041,27 @@ fun EventDetailScreen(
             selectedJoinOptionDivisionId = null
         }
     }
+    val joinOptionPriceCents = remember(
+        selectedEvent.event.priceCents,
+        selectedEvent.event.divisions,
+        selectedEvent.event.divisionDetails,
+        selectedDivision,
+        selectedJoinOptionDivisionId,
+        hasAnyPaidDivision,
+    ) {
+        val preferredDivisionId = selectedJoinOptionDivisionId ?: selectedDivision
+        when {
+            !preferredDivisionId.isNullOrBlank() -> selectedEvent.event.resolvedDivisionPriceCents(preferredDivisionId)
+            selectedEvent.event.singleDivision -> selectedEvent.event.resolvedDivisionPriceCents()
+            hasAnyPaidDivision -> selectedEvent.event.divisionPriceRange().maxPriceCents
+            else -> 0
+        }
+    }
     val joinOptions = remember(
         isUserInEvent,
         isEventFull,
         teamSignup,
-        selectedEvent.event.price,
+        joinOptionPriceCents,
         joinBlockedByStart,
         isWeeklyParentEvent,
         selectedJoinOptionDivisionId,
@@ -2047,12 +2075,12 @@ fun EventDetailScreen(
                     if (teamSignup) {
                         add(
                             JoinOption(
-                                label = if (selectedEvent.event.price > 0) {
+                                label = if (joinOptionPriceCents > 0) {
                                     "Join Waitlist as Team (No Payment Yet)"
                                 } else {
                                     "Join Waitlist as Team"
                                 },
-                                requiresPayment = selectedEvent.event.price > 0,
+                                requiresPayment = joinOptionPriceCents > 0,
                                 onClick = {
                                     selectedJoinOptionDivisionId?.let { component.selectDivision(it) }
                                     showTeamSelectionDialog = true
@@ -2062,12 +2090,12 @@ fun EventDetailScreen(
                     } else {
                         add(
                             JoinOption(
-                                label = if (selectedEvent.event.price > 0) {
+                                label = if (joinOptionPriceCents > 0) {
                                     "Join Waitlist (No Payment Yet)"
                                 } else {
                                     "Join Waitlist"
                                 },
-                                requiresPayment = selectedEvent.event.price > 0,
+                                requiresPayment = joinOptionPriceCents > 0,
                                 onClick = component::joinEvent
                             )
                         )
@@ -2082,12 +2110,12 @@ fun EventDetailScreen(
                     )
                     add(
                         JoinOption(
-                            label = if (selectedEvent.event.price > 0) {
+                            label = if (joinOptionPriceCents > 0) {
                                 "Purchase Ticket for Team"
                             } else {
                                 "Join as Team"
                             },
-                            requiresPayment = selectedEvent.event.price > 0,
+                            requiresPayment = joinOptionPriceCents > 0,
                             onClick = {
                                 selectedJoinOptionDivisionId?.let { component.selectDivision(it) }
                                 showTeamSelectionDialog = true
@@ -2097,8 +2125,8 @@ fun EventDetailScreen(
                 } else {
                     add(
                         JoinOption(
-                            label = if (selectedEvent.event.price > 0) "Purchase Ticket" else "Join Event",
-                            requiresPayment = selectedEvent.event.price > 0,
+                            label = if (joinOptionPriceCents > 0) "Purchase Ticket" else "Join Event",
+                            requiresPayment = joinOptionPriceCents > 0,
                             onClick = component::joinEvent
                         )
                     )
@@ -3187,7 +3215,7 @@ fun EventDetailScreen(
                         Text(
                             if (isTemplateEvent) {
                                 "Are you sure you want to delete this template? This action cannot be undone."
-                            } else if (selectedEvent.event.price > 0) {
+                            } else if (hasAnyPaidDivision) {
                                 "Are you sure you want to delete this event? All participants will receive a full refund. This action cannot be undone."
                             } else {
                                 "Are you sure you want to delete this event? This action cannot be undone."
@@ -3277,6 +3305,14 @@ fun EventDetailScreen(
                     feeBreakdown = currentFeeBreakdown!!,
                     onConfirm = { component.confirmFeeBreakdown() },
                     onCancel = { component.dismissFeeBreakdown() })
+            }
+
+            billingAddressPrompt?.let { address ->
+                BillingAddressDialog(
+                    initialAddress = address,
+                    onConfirm = component::submitBillingAddress,
+                    onDismiss = component::dismissBillingAddressPrompt,
+                )
             }
         }
     }
@@ -3853,6 +3889,9 @@ fun FeeBreakdownDialog(
             FeeRow("Event Price", "$${feeBreakdown.eventPrice.centsToDollars()}")
             FeeRow("Processing Fee", "$${feeBreakdown.processingFee.centsToDollars()}")
             FeeRow("Stripe Fee", "$${feeBreakdown.stripeFee.centsToDollars()}")
+            feeBreakdown.taxAmount?.takeIf { it > 0 }?.let { taxAmount ->
+                FeeRow("Tax", "$${taxAmount.centsToDollars()}")
+            }
 
             HorizontalDivider()
 

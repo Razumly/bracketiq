@@ -1,5 +1,6 @@
 package com.razumly.mvp.core.network.dto
 
+import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.dataTypes.RefundRequest
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -47,7 +48,41 @@ data class PurchaseIntentRequestDto(
     val team: BillingTeamRefDto? = null,
     val timeSlot: BillingTimeSlotRefDto? = null,
     val productId: String? = null,
+    val billingAddress: BillingAddressDto? = null,
 )
+
+@Serializable
+data class BillingAddressDto(
+    @SerialName("billingAddressLine1") val line1: String? = null,
+    @SerialName("billingAddressLine2") val line2: String? = null,
+    @SerialName("billingCity") val city: String? = null,
+    @SerialName("billingState") val state: String? = null,
+    @SerialName("billingPostalCode") val postalCode: String? = null,
+    @SerialName("billingCountryCode") val countryCode: String? = null,
+) {
+    fun toBillingAddressDraft(): BillingAddressDraft = BillingAddressDraft(
+        line1 = line1.orEmpty(),
+        line2 = line2,
+        city = city.orEmpty(),
+        state = state.orEmpty(),
+        postalCode = postalCode.orEmpty(),
+        countryCode = countryCode ?: "US",
+    )
+
+    companion object {
+        fun fromDraft(address: BillingAddressDraft): BillingAddressDto {
+            val normalized = address.normalized()
+            return BillingAddressDto(
+                line1 = normalized.line1,
+                line2 = normalized.line2,
+                city = normalized.city,
+                state = normalized.state,
+                postalCode = normalized.postalCode,
+                countryCode = normalized.countryCode,
+            )
+        }
+    }
+}
 
 @Serializable
 data class StripeHostLinkRequestDto(

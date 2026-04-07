@@ -123,6 +123,9 @@ class IOSNativeViewFactory: NativeViewFactory {
         customerId: String?,
         ephemeralKey: String?,
         paymentIntent: String,
+        billingName: String?,
+        billingEmail: String?,
+        billingAddress: BillingAddressDraft?,
         onPaymentResult: @escaping (PaymentResult) -> Void
     ) {
         // Configure Stripe
@@ -134,6 +137,20 @@ class IOSNativeViewFactory: NativeViewFactory {
             configuration.customer = .init(id: customerId, ephemeralKeySecret: ephemeralKey)
         }
         configuration.allowsDelayedPaymentMethods = true
+        var defaultBillingDetails = PaymentSheet.BillingDetails()
+        defaultBillingDetails.name = billingName
+        defaultBillingDetails.email = billingEmail
+        if let billingAddress = billingAddress {
+            var address = PaymentSheet.Address()
+            address.line1 = billingAddress.line1
+            address.line2 = billingAddress.line2
+            address.city = billingAddress.city
+            address.state = billingAddress.state
+            address.postalCode = billingAddress.postalCode
+            address.country = billingAddress.countryCode
+            defaultBillingDetails.address = address
+        }
+        configuration.defaultBillingDetails = defaultBillingDetails
         
         let paymentSheet = PaymentSheet(
             paymentIntentClientSecret: paymentIntent,

@@ -49,6 +49,7 @@ import com.razumly.mvp.core.presentation.LockedRentalSelection
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.OrganizationDetailTab
 import com.razumly.mvp.core.presentation.RentalCreateContext
+import com.razumly.mvp.core.presentation.composables.BillingAddressDialog
 import com.razumly.mvp.core.presentation.composables.EventCard
 import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
 import com.razumly.mvp.core.presentation.composables.TeamCard
@@ -94,6 +95,7 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
     val isLoadingTeams by component.isLoadingTeams.collectAsState()
     val isLoadingProducts by component.isLoadingProducts.collectAsState()
     val isLoadingRentals by component.isLoadingRentals.collectAsState()
+    val billingAddressPrompt by component.billingAddressPrompt.collectAsState()
 
     var selectedTab by remember(component) { mutableStateOf(component.initialTab) }
 
@@ -490,6 +492,14 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                 }
             }
         }
+    }
+
+    billingAddressPrompt?.let { address ->
+        BillingAddressDialog(
+            initialAddress = address,
+            onConfirm = component::submitBillingAddress,
+            onDismiss = component::dismissBillingAddressPrompt,
+        )
     }
 }
 

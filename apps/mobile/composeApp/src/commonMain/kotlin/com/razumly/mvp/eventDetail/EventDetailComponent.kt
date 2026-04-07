@@ -7,6 +7,7 @@ import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.essenty.backhandler.BackCallback
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.AuthAccount
+import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventOfficial
@@ -26,7 +27,9 @@ import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
+import com.razumly.mvp.core.data.dataTypes.hasAnyPaidDivision
 import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
+import com.razumly.mvp.core.data.dataTypes.resolvedDivisionPriceCents
 import com.razumly.mvp.core.data.dataTypes.shouldReplaceOfficialPositionsWithSportDefaults
 import com.razumly.mvp.core.data.dataTypes.syncOfficialStaffing
 import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
@@ -145,6 +148,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val withdrawTargets: StateFlow<List<WithdrawTargetOption>>
     val textSignaturePrompt: StateFlow<TextSignaturePromptState?>
     val webSignaturePrompt: StateFlow<WebSignaturePromptState?>
+    val billingAddressPrompt: StateFlow<BillingAddressDraft?>
     val eventImageIds: StateFlow<List<String>>
     val organizationTemplates: StateFlow<List<OrganizationTemplateDocument>>
     val organizationTemplatesLoading: StateFlow<Boolean>
@@ -249,6 +253,8 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun confirmTextSignature()
     fun dismissTextSignature()
     fun dismissWebSignaturePrompt()
+    fun submitBillingAddress(address: BillingAddressDraft)
+    fun dismissBillingAddressPrompt()
     fun onUploadSelected(photo: GalleryPhotoResult)
     fun deleteImage(imageId: String)
     fun sendNotification(title: String, message: String)
@@ -499,6 +505,8 @@ class DefaultEventDetailComponent(
 
     private val _errorState = MutableStateFlow<ErrorMessage?>(null)
     override val errorState = _errorState.asStateFlow()
+    private val _billingAddressPrompt = MutableStateFlow<BillingAddressDraft?>(null)
+    override val billingAddressPrompt = _billingAddressPrompt.asStateFlow()
 
     private lateinit var loadingHandler: LoadingHandler
 
@@ -854,6 +862,7 @@ class DefaultEventDetailComponent(
     private var pendingSignatureSteps: List<SignStep> = emptyList()
     private var pendingSignatureStepIndex = 0
     private var pendingPostSignatureAction: (suspend () -> Unit)? = null
+    private var pendingBillingAddressAction: (() -> Unit)? = null
     private var pendingSignatureContext: SignerContext = SignerContext.PARTICIPANT
     private var pendingSignatureContexts: List<SignerContext> = emptyList()
     private var pendingSignatureContextIndex = 0
@@ -1280,7 +1289,7 @@ class DefaultEventDetailComponent(
     }
 
     private fun canRequestPaidRefund(event: Event, membership: WithdrawTargetMembership): Boolean =
-        event.price > 0 && membership == WithdrawTargetMembership.PARTICIPANT
+        event.hasAnyPaidDivision() && membership == WithdrawTargetMembership.PARTICIPANT
 
     override fun joinEvent() {
         scope.launch {
@@ -1768,6 +1777,9 @@ class DefaultEventDetailComponent(
                     _errorState.value = ErrorMessage(it.userMessage())
                 }
             } else {
+                if (!ensureBillingAddressOrPrompt { scope.launch { executeJoinEvent() } }) {
+                    return
+                }
                 loadingHandler.showLoading("Creating Purchase Request ...")
                 billingRepository.createPurchaseIntent(
                     event = selectedEvent.value,
@@ -1856,6 +1868,9 @@ class DefaultEventDetailComponent(
                     _errorState.value = ErrorMessage(it.userMessage())
                 }
             } else {
+                if (!ensureBillingAddressOrPrompt { scope.launch { executeJoinEventAsTeam(team) } }) {
+                    return
+                }
                 loadingHandler.showLoading("Creating Purchase Request ...")
                 billingRepository.createPurchaseIntent(
                     event = selectedEvent.value,
@@ -2096,10 +2111,38 @@ class DefaultEventDetailComponent(
     private suspend fun showPaymentSheet(intent: PurchaseIntent) {
         clearPaymentResult()
         setPaymentIntent(intent)
+        val billingAddress = loadSavedBillingAddress()
         loadingHandler.showLoading("Waiting for Payment Completion ..")
         presentPaymentSheet(
-            _currentAccount.value.email, currentUser.value.fullName
+            _currentAccount.value.email,
+            currentUser.value.fullName,
+            billingAddress,
         )
+    }
+
+    private suspend fun ensureBillingAddressOrPrompt(onReady: () -> Unit): Boolean {
+        val billingAddress = billingRepository.getBillingAddress()
+            .getOrElse { error ->
+                _errorState.value = ErrorMessage(error.userMessage("Unable to load billing address."))
+                return false
+            }
+            .billingAddress
+            ?.normalized()
+
+        if (billingAddress != null && billingAddress.isCompleteForUsTax()) {
+            return true
+        }
+
+        pendingBillingAddressAction = onReady
+        _billingAddressPrompt.value = billingAddress ?: BillingAddressDraft()
+        return false
+    }
+
+    private suspend fun loadSavedBillingAddress(): BillingAddressDraft? {
+        return billingRepository.getBillingAddress()
+            .getOrNull()
+            ?.billingAddress
+            ?.normalized()
     }
 
     override fun requestRefund(reason: String, targetUserId: String?) {
@@ -2119,7 +2162,7 @@ class DefaultEventDetailComponent(
             }
             if (!canRequestPaidRefund(event, membership)) {
                 _errorState.value = ErrorMessage(
-                    if (event.price <= 0.0) {
+                    if (!event.hasAnyPaidDivision()) {
                         "Refund requests are only available for paid events."
                     } else {
                         "Only registered participants can request refunds."
@@ -3437,7 +3480,7 @@ class DefaultEventDetailComponent(
             val currentEvent = selectedEvent.value
             val isTemplateEvent = currentEvent.state.equals("TEMPLATE", ignoreCase = true)
             var deleted = false
-            if (isTemplateEvent || currentEvent.price == 0.0) {
+            if (isTemplateEvent || !currentEvent.hasAnyPaidDivision()) {
                 loadingHandler.showLoading(if (isTemplateEvent) "Deleting Template ..." else "Deleting Event ...")
                 eventRepository.deleteEvent(selectedEvent.value.id)
                     .onSuccess {
@@ -3657,28 +3700,28 @@ class DefaultEventDetailComponent(
         event: Event,
         preferredDivisionId: String?,
     ): EffectivePaymentPlan {
-        if (event.singleDivision) {
-            return EffectivePaymentPlan(
-                priceCents = event.priceCents.coerceAtLeast(0),
-                allowPaymentPlans = event.allowPaymentPlans == true,
-                installmentAmounts = event.installmentAmounts.map { amount -> amount.coerceAtLeast(0) },
-                installmentDueDates = event.installmentDueDates
-                    .map { dueDate -> dueDate.trim() }
-                    .filter(String::isNotBlank),
-            )
+        val selectedDivision = resolveSelectedDivisionDetail(event, preferredDivisionId)
+        val allowPaymentPlans = when (selectedDivision?.allowPaymentPlans) {
+            null -> event.allowPaymentPlans == true
+            else -> selectedDivision.allowPaymentPlans == true
         }
 
-        val selectedDivision = resolveSelectedDivisionDetail(event, preferredDivisionId)
         return EffectivePaymentPlan(
-            priceCents = (selectedDivision?.price ?: event.priceCents).coerceAtLeast(0),
-            allowPaymentPlans = selectedDivision?.allowPaymentPlans == true,
-            installmentAmounts = if (selectedDivision?.allowPaymentPlans == true) {
-                selectedDivision.installmentAmounts.map { amount -> amount.coerceAtLeast(0) }
+            priceCents = event.resolvedDivisionPriceCents(preferredDivisionId),
+            allowPaymentPlans = allowPaymentPlans,
+            installmentAmounts = if (allowPaymentPlans) {
+                val configuredAmounts = selectedDivision?.installmentAmounts
+                    ?.takeIf { amounts -> amounts.isNotEmpty() }
+                    ?: event.installmentAmounts
+                configuredAmounts.map { amount -> amount.coerceAtLeast(0) }
             } else {
                 emptyList()
             },
-            installmentDueDates = if (selectedDivision?.allowPaymentPlans == true) {
-                selectedDivision.installmentDueDates
+            installmentDueDates = if (allowPaymentPlans) {
+                val configuredDueDates = selectedDivision?.installmentDueDates
+                    ?.takeIf { dueDates -> dueDates.isNotEmpty() }
+                    ?: event.installmentDueDates
+                configuredDueDates
                     .map { dueDate -> dueDate.trim() }
                     .filter(String::isNotBlank)
             } else {
@@ -3794,6 +3837,28 @@ class DefaultEventDetailComponent(
     override fun dismissWebSignaturePrompt() {
         clearPendingSignatureFlow()
         _errorState.value = ErrorMessage("Document signing canceled.")
+    }
+
+    override fun submitBillingAddress(address: BillingAddressDraft) {
+        scope.launch {
+            loadingHandler.showLoading("Saving billing address...")
+            billingRepository.updateBillingAddress(address)
+                .onSuccess {
+                    _billingAddressPrompt.value = null
+                    val action = pendingBillingAddressAction
+                    pendingBillingAddressAction = null
+                    action?.invoke()
+                }
+                .onFailure { error ->
+                    _errorState.value = ErrorMessage(error.userMessage("Unable to save billing address."))
+                }
+            loadingHandler.hideLoading()
+        }
+    }
+
+    override fun dismissBillingAddressPrompt() {
+        _billingAddressPrompt.value = null
+        pendingBillingAddressAction = null
     }
 
     private fun refreshEditableRounds() {

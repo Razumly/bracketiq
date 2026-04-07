@@ -1,5 +1,6 @@
 package com.razumly.mvp.core.presentation
 
+import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.util.UrlHandler
 import kotlinx.coroutines.flow.StateFlow
@@ -7,7 +8,7 @@ import kotlinx.coroutines.flow.StateFlow
 interface IPaymentProcessor {
     val paymentResult: StateFlow<PaymentResult?>
     var urlHandler: UrlHandler?
-    fun presentPaymentSheet(email: String, name: String)
+    fun presentPaymentSheet(email: String, name: String, billingAddress: BillingAddressDraft?)
     suspend fun setPaymentIntent(intent: PurchaseIntent)
     fun clearPaymentResult()
 }
@@ -15,7 +16,7 @@ interface IPaymentProcessor {
 expect open class PaymentProcessor(): IPaymentProcessor {
     override val paymentResult: StateFlow<PaymentResult?>
     override var urlHandler: UrlHandler?
-    override fun presentPaymentSheet(email: String, name: String)
+    override fun presentPaymentSheet(email: String, name: String, billingAddress: BillingAddressDraft?)
     override suspend fun setPaymentIntent(intent: PurchaseIntent)
     override fun clearPaymentResult()
 }

@@ -1,5 +1,6 @@
 package com.razumly.mvp.core.presentation
 
+import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.presentation.composables.NativeViewFactory
 import com.razumly.mvp.core.util.UrlHandler
@@ -25,7 +26,7 @@ actual open class PaymentProcessor : IPaymentProcessor {
         _paymentResult.value = null
     }
 
-    actual override fun presentPaymentSheet(email: String, name: String) {
+    actual override fun presentPaymentSheet(email: String, name: String, billingAddress: BillingAddressDraft?) {
         val intent = purchaseIntent ?: return
 
         _nativeViewFactory?.presentStripePaymentSheet(
@@ -33,6 +34,9 @@ actual open class PaymentProcessor : IPaymentProcessor {
             customerId = intent.customer,
             ephemeralKey = intent.ephemeralKey,
             paymentIntent = intent.paymentIntent ?: return,
+            billingName = name,
+            billingEmail = email,
+            billingAddress = billingAddress?.normalized(),
             onPaymentResult = { result ->
                 handlePaymentResult(result)
             }
