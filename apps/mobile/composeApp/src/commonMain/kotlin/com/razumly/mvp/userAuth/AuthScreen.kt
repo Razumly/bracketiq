@@ -46,7 +46,11 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 
 @Composable
-fun AuthScreenBase(component: AuthComponent, onOauth2: () -> Unit?) {
+fun AuthScreenBase(
+    component: AuthComponent,
+    onGoogleOauth2: () -> Unit?,
+    appleSignInButton: (@Composable () -> Unit)? = null,
+) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
@@ -335,7 +339,11 @@ fun AuthScreenBase(component: AuthComponent, onOauth2: () -> Unit?) {
                     )
 
                     Text("Or")
-                    GoogleSignInButton(onClick = { onOauth2() })
+                    appleSignInButton?.invoke()
+                    if (appleSignInButton != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                    GoogleSignInButton(onClick = { onGoogleOauth2() })
                 }
             }
         }

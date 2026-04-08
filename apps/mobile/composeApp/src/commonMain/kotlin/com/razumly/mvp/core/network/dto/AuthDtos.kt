@@ -18,6 +18,15 @@ data class GoogleMobileLoginRequestDto(
 )
 
 @Serializable
+data class AppleMobileLoginRequestDto(
+    val identityToken: String,
+    val user: String? = null,
+    val email: String? = null,
+    val firstName: String? = null,
+    val lastName: String? = null,
+)
+
+@Serializable
 data class RegisterRequestDto(
     val email: String,
     val password: String,

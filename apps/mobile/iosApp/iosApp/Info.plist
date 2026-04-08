@@ -61,12 +61,8 @@
 	<string>This app may save images to your photo library when you choose to export or share content.</string>
 	<key>NSContactsUsageDescription</key>
 	<string>This app does not access your contacts, but a third-party library may require this permission for compatibility.</string>
-	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>This app needs access to location when in the background to track your position.</string>
-	<key>NSLocationAlwaysUsageDescription</key>
-	<string>This app needs access to location when in the background for continuous location updates.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>This app needs access to location when open to show your current location on the map.</string>
+	<string>BracketIQ uses your location while the app is open to center the map on you, show nearby events, and help you find event venues.</string>
 	<key>NSMotionUsageDescription</key>
 	<string>This app does not access motion, but a third-party library may require this permission for compatibility.</string>
 	<key>UIApplicationSceneManifest</key>

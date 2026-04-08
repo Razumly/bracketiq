@@ -290,6 +290,76 @@ class UserRepositoryAuthTest {
     }
 
     @Test
+    fun loginWithAppleIdentityToken_sends_identity_payload_and_sets_current_user_and_account() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+        var capturedBody = ""
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/auth/apple/mobile", request.url.encodedPath)
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+            respond(
+                content = """
+                    {
+                      "user": { "id":"u_apple", "email":"apple@example.com", "name":"Apple User" },
+                      "session": { "userId":"u_apple", "isAdmin":false },
+                      "token":"apple_token_123",
+                      "profile": {
+                        "id":"u_apple",
+                        "firstName":"Apple",
+                        "lastName":"User",
+                        "userName":"apple_user",
+                        "teamIds":[],
+                        "friendIds":[],
+                        "friendRequestIds":[],
+                        "friendRequestSentIds":[],
+                        "followingIds":[],
+                        "uploadedImages":[],
+                        "hasStripeAccount":false
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        val user = repo.loginWithAppleIdentityToken(
+            identityToken = "apple.identity.token",
+            user = "apple-user-1",
+            email = "Apple@Example.com",
+            firstName = " Apple ",
+            lastName = " User ",
+        ).getOrThrow()
+
+        assertEquals("u_apple", user.id)
+        assertEquals("apple_token_123", tokenStore.get())
+        assertEquals("u_apple", currentUserDataSource.getUserId().first())
+        assertEquals(true, capturedBody.contains("\"identityToken\":\"apple.identity.token\""))
+        assertEquals(true, capturedBody.contains("\"user\":\"apple-user-1\""))
+        assertEquals(true, capturedBody.contains("\"email\":\"apple@example.com\""))
+        assertEquals(true, capturedBody.contains("\"firstName\":\"Apple\""))
+        assertEquals(true, capturedBody.contains("\"lastName\":\"User\""))
+
+        val account = repo.currentAccount.value.getOrThrow()
+        assertEquals("u_apple", account.id)
+        assertEquals("apple@example.com", account.email)
+    }
+
+    @Test
     fun createNewUser_includes_date_of_birth_in_register_payload() = runTest {
         val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("")
         val userDao = FakeUserDataDao()

@@ -10,6 +10,7 @@ import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.AuthTokenStore
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.dto.AuthResponseDto
+import com.razumly.mvp.core.network.dto.AppleMobileLoginRequestDto
 import com.razumly.mvp.core.network.dto.CreateInvitesRequestDto
 import com.razumly.mvp.core.network.dto.EmailMembershipLookupRequestDto
 import com.razumly.mvp.core.network.dto.EmailMembershipLookupResponseDto
@@ -354,6 +355,46 @@ class UserRepository(
     }.onFailure { throwable ->
         Napier.e(tag = USER_REPOSITORY_LOG_TAG, throwable = throwable) {
             "Google login failed: ${throwable.message}"
+        }
+    }
+
+    suspend fun loginWithAppleIdentityToken(
+        identityToken: String,
+        user: String? = null,
+        email: String? = null,
+        firstName: String? = null,
+        lastName: String? = null,
+    ): Result<UserData> = runCatching {
+        Napier.d(tag = USER_REPOSITORY_LOG_TAG) { "Apple login started" }
+        val res = api.post<AppleMobileLoginRequestDto, AuthResponseDto>(
+            path = "api/auth/apple/mobile",
+            body = AppleMobileLoginRequestDto(
+                identityToken = identityToken,
+                user = user?.trim()?.takeIf(String::isNotBlank),
+                email = email?.trim()?.lowercase()?.takeIf(String::isNotBlank),
+                firstName = firstName?.trim()?.takeIf(String::isNotBlank),
+                lastName = lastName?.trim()?.takeIf(String::isNotBlank),
+            ),
+        )
+
+        val token = res.token?.takeIf(String::isNotBlank)
+            ?: error("Apple login response missing token")
+        tokenStore.set(token)
+
+        val account = res.user?.toAuthAccountOrNull()
+            ?: error("Apple login response missing user")
+        _currentAccount.value = Result.success(account)
+
+        val profile = res.profile?.toUserDataOrNull() ?: fetchUserProfile(account.id)
+            ?: error("Apple login response missing profile")
+
+        cacheCurrentUserProfile(profile)
+        _startupAuthState.value = StartupAuthState.Authenticated
+        Napier.i(tag = USER_REPOSITORY_LOG_TAG) { "Apple login succeeded for userId=${profile.id}" }
+        profile
+    }.onFailure { throwable ->
+        Napier.e(tag = USER_REPOSITORY_LOG_TAG, throwable = throwable) {
+            "Apple login failed: ${throwable.message}"
         }
     }
 
