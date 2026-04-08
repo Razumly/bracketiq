@@ -216,7 +216,12 @@ private object BillingRepositoryHttp_UnusedEventRepository : IEventRepository {
         divisionId: String,
         applyReassignment: Boolean,
     ): Result<LeagueStandingsConfirmResult> = error("unused")
-    override suspend fun removeTeamFromEvent(event: Event, teamWithPlayers: com.razumly.mvp.core.data.dataTypes.TeamWithPlayers): Result<Unit> = error("unused")
+    override suspend fun removeTeamFromEvent(
+        event: Event,
+        teamWithPlayers: com.razumly.mvp.core.data.dataTypes.TeamWithPlayers,
+        refundMode: EventParticipantRefundMode?,
+        refundReason: String?,
+    ): Result<Unit> = error("unused")
     override suspend fun removeCurrentUserFromEvent(event: Event, targetUserId: String?): Result<Unit> = error("unused")
 }
 

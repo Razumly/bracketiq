@@ -1458,7 +1458,7 @@ fun EventDetails(
         editEvent.registrationCutoffHours.toRegistrationCutoffSummary()
     }
     val refundSummary = remember(event.cancellationRefundHours) {
-        event.cancellationRefundHours.toRefundSummary()
+        formatRefundSummary(event.cancellationRefundHours)
     }
     val priceSummary = remember(event.teamSignup, event.priceCents, event.divisions, event.divisionDetails) {
         if (event.teamSignup) "${event.divisionPriceRangeLabel()} / team" else "${event.divisionPriceRangeLabel()} / player"
@@ -5804,15 +5804,6 @@ internal fun buildDivisionName(
 private fun Int.toRegistrationCutoffSummary(): String {
     return when (this) {
         0 -> "No cutoff"
-        1 -> "24h before start"
-        2 -> "48h before start"
-        else -> "No cutoff"
-    }
-}
-
-private fun Int.toRefundSummary(): String {
-    return when (this) {
-        0 -> "Automatic refunds"
         1 -> "24h before start"
         2 -> "48h before start"
         else -> "No cutoff"

@@ -21,12 +21,7 @@ fun CancellationRefundOptions(
     onOptionSelected: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val refundOptions = listOf(
-        RefundOption(0, "No cutoff (always allow refunds)"),
-        RefundOption(1, "24 hours before event"),
-        RefundOption(2, "48 hours before event"),
-        RefundOption(3, "Automatic refunds disabled")
-    )
+    val refundOptions = buildCancellationRefundOptions(selectedOption)
 
     Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
@@ -63,3 +58,22 @@ data class RefundOption(
     val value: Int,
     val label: String
 )
+
+internal fun buildCancellationRefundOptions(selectedOption: Int): List<RefundOption> {
+    val options = mutableListOf<RefundOption>()
+    val normalizedSelected = selectedOption.coerceAtLeast(0)
+
+    if (normalizedSelected > 0 && normalizedSelected != 24 && normalizedSelected != 48) {
+        options.add(RefundOption(normalizedSelected, "$normalizedSelected hours before event"))
+    }
+
+    options.addAll(
+        listOf(
+            RefundOption(24, "24 hours before event"),
+            RefundOption(48, "48 hours before event"),
+            RefundOption(0, "Automatic refunds disabled"),
+        ),
+    )
+
+    return options.distinctBy(RefundOption::value)
+}

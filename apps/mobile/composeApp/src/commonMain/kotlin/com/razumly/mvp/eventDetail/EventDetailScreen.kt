@@ -1613,7 +1613,6 @@ fun EventDetailScreen(
     val editableFieldsForDetails by component.editableFields.collectAsState()
     val editableLeagueScoringConfig by component.editableLeagueScoringConfig.collectAsState()
 
-    var isRefundAutomatic by remember { mutableStateOf(false) }
     val isHost by component.isHost.collectAsState()
     val isEditing by component.isEditing.collectAsState()
     val isEventFull by component.isEventFull.collectAsState()
@@ -1806,13 +1805,8 @@ fun EventDetailScreen(
         )
     }
 
-    val cutoffHours = when (selectedEvent.event.cancellationRefundHours) {
-        0 -> 0
-        1 -> 24
-        2 -> 48
-        else -> null
-    }
-    val eventHasStarted = Clock.System.now() >= selectedEvent.event.start
+    val refundPolicy = getRefundPolicy(selectedEvent.event)
+    val eventHasStarted = refundPolicy.eventHasStarted
     val isWeeklyEvent = selectedEvent.event.eventType == EventType.WEEKLY_EVENT
     val joinBlockedByStart = eventHasStarted && !isWeeklyEvent
     val hasWeeklyParentTimeSlots = remember(selectedEvent.event.timeSlotIds) {
@@ -1844,8 +1838,6 @@ fun EventDetailScreen(
             )
         }
     }
-    val timeDiff = selectedEvent.event.start.minus(Clock.System.now())
-    isRefundAutomatic = (cutoffHours != null && timeDiff <= cutoffHours.hours)
     val teamSignup = selectedEvent.event.teamSignup
     val teamSelectionSportLabel = remember(selectedEvent.sport, sports, selectedEvent.event.sportId) {
         selectedEvent.sport?.name
@@ -1889,14 +1881,14 @@ fun EventDetailScreen(
         singleWithdrawTarget?.membership == WithdrawTargetMembership.WAITLIST -> "Leave Waitlist"
         singleWithdrawTarget?.membership == WithdrawTargetMembership.PARTICIPANT &&
             hasAnyPaidDivision &&
-            isRefundAutomatic -> "Withdraw and Request Refund"
+            refundPolicy.canAutoRefund -> "Withdraw and Get Refund"
         singleWithdrawTarget?.membership == WithdrawTargetMembership.PARTICIPANT &&
-            hasAnyPaidDivision -> "Withdraw and Get Refund"
+            hasAnyPaidDivision -> "Withdraw and Request Refund"
         singleWithdrawTarget?.membership == WithdrawTargetMembership.PARTICIPANT -> "Leave Event"
         isFreeAgent -> "Leave as Free Agent"
         isWaitListed -> "Leave Waitlist"
-        hasAnyPaidDivision && isRefundAutomatic -> "Leave and Request Refund"
-        hasAnyPaidDivision -> "Leave and Get Refund"
+        hasAnyPaidDivision && refundPolicy.canAutoRefund -> "Leave and Get Refund"
+        hasAnyPaidDivision -> "Leave and Request Refund"
         else -> "Leave Event"
     }
     val openLeaveOrRefundForTarget: (WithdrawTargetOption?) -> Unit = { target ->
@@ -1911,8 +1903,12 @@ fun EventDetailScreen(
         }
 
         if (shouldRefund) {
-            selectedWithdrawalTarget = target
-            showRefundReasonDialog = true
+            if (refundPolicy.canAutoRefund) {
+                component.withdrawAndRefund(target?.userId)
+            } else {
+                selectedWithdrawalTarget = target
+                showRefundReasonDialog = true
+            }
         } else {
             component.leaveEvent(target?.userId)
         }

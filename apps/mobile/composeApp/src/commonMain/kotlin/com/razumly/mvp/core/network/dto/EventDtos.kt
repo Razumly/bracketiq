@@ -370,6 +370,8 @@ data class EventParticipantsRequestDto(
     val sessionStart: String? = null,
     val sessionEnd: String? = null,
     val slotId: String? = null,
+    val refundMode: String? = null,
+    val refundReason: String? = null,
 )
 
 @Serializable

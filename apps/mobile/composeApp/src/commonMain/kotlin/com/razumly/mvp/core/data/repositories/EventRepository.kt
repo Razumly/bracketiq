@@ -136,9 +136,19 @@ interface IEventRepository : IMVPRepository {
         divisionId: String,
         applyReassignment: Boolean = true,
     ): Result<LeagueStandingsConfirmResult>
-    suspend fun removeTeamFromEvent(event: Event, teamWithPlayers: TeamWithPlayers): Result<Unit>
+    suspend fun removeTeamFromEvent(
+        event: Event,
+        teamWithPlayers: TeamWithPlayers,
+        refundMode: EventParticipantRefundMode? = null,
+        refundReason: String? = null,
+    ): Result<Unit>
     suspend fun removeCurrentUserFromEvent(event: Event, targetUserId: String? = null): Result<Unit>
     suspend fun getMySchedule(): Result<UserScheduleSnapshot> = Result.success(UserScheduleSnapshot())
+}
+
+enum class EventParticipantRefundMode(val wireValue: String) {
+    AUTO("auto"),
+    REQUEST("request"),
 }
 
 data class SelfRegistrationResult(
@@ -886,12 +896,20 @@ class EventRepository(
 
     override suspend fun removeTeamFromEvent(
         event: Event,
-        teamWithPlayers: TeamWithPlayers
+        teamWithPlayers: TeamWithPlayers,
+        refundMode: EventParticipantRefundMode?,
+        refundReason: String?,
     ): Result<Unit> =
         runCatching {
             val updated = api.delete<EventParticipantsRequestDto, EventResponseDto>(
                 path = "api/events/${event.id}/participants",
-                body = EventParticipantsRequestDto(teamId = teamWithPlayers.team.id),
+                body = EventParticipantsRequestDto(
+                    teamId = teamWithPlayers.team.id,
+                    refundMode = refundMode?.wireValue,
+                    refundReason = refundReason
+                        ?.trim()
+                        ?.takeIf(String::isNotBlank),
+                ),
             ).event?.toEventOrNull() ?: error("Participant update response missing event")
 
             databaseService.getEventDao.upsertEvent(updated)

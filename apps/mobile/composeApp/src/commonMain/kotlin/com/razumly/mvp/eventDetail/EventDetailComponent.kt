@@ -52,6 +52,7 @@ import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.data.repositories.CreateBillRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillCreateRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
+import com.razumly.mvp.core.data.repositories.EventParticipantRefundMode
 import com.razumly.mvp.core.data.repositories.UserVisibilityContext
 import com.razumly.mvp.core.data.util.divisionsEquivalent
 import com.razumly.mvp.core.data.util.isPlaceholderSlot
@@ -191,6 +192,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun confirmPaymentPlanPreviewDialog()
     fun viewEvent()
     fun leaveEvent(targetUserId: String? = null)
+    fun withdrawAndRefund(targetUserId: String? = null)
     fun requestRefund(reason: String, targetUserId: String? = null)
     fun editEventField(update: Event.() -> Event)
     fun editTournamentField(update: Event.() -> Event)
@@ -1277,6 +1279,16 @@ class DefaultEventDetailComponent(
     private fun hasEventStarted(event: Event = selectedEvent.value): Boolean =
         Clock.System.now() >= event.start
 
+    private fun shouldUseRegisteredTeamWithdrawal(
+        event: Event,
+        targetUserId: String,
+        membership: WithdrawTargetMembership,
+    ): Boolean =
+        membership == WithdrawTargetMembership.PARTICIPANT &&
+            event.teamSignup &&
+            targetUserId == currentUser.value.id &&
+            !checkIsUserFreeAgent(event)
+
     private fun isJoinBlockedByStart(event: Event = selectedEvent.value): Boolean {
         if (!hasEventStarted(event)) return false
         return event.eventType != EventType.WEEKLY_EVENT
@@ -2171,17 +2183,104 @@ class DefaultEventDetailComponent(
                 return@launch
             }
             loadingHandler.showLoading("Requesting Refund ...")
-            billingRepository.leaveAndRefundEvent(
-                event = event,
-                reason = reason,
-                targetUserId = normalizedTargetUserId,
-            ).onFailure {
+            val refundResult = if (
+                shouldUseRegisteredTeamWithdrawal(
+                    event = event,
+                    targetUserId = normalizedTargetUserId,
+                    membership = membership,
+                )
+            ) {
+                val team = _usersTeam.value
+                if (team == null) {
+                    Result.failure(IllegalStateException("Unable to resolve your team registration."))
+                } else {
+                    eventRepository.removeTeamFromEvent(
+                        event = event,
+                        teamWithPlayers = team,
+                        refundMode = EventParticipantRefundMode.REQUEST,
+                        refundReason = reason,
+                    )
+                }
+            } else {
+                billingRepository.leaveAndRefundEvent(
+                    event = event,
+                    reason = reason,
+                    targetUserId = normalizedTargetUserId,
+                )
+            }
+            refundResult.onFailure {
                 _errorState.value = ErrorMessage(it.userMessage())
             }.onSuccess {
                 eventRepository.getEvent(event.id)
             }
             loadingHandler.showLoading("Reloading Event")
             eventRepository.getEvent(event.id)
+            loadingHandler.hideLoading()
+        }
+    }
+
+    override fun withdrawAndRefund(targetUserId: String?) {
+        scope.launch {
+            val event = selectedEvent.value
+            val normalizedTargetUserId = targetUserId
+                ?.trim()
+                ?.takeIf(String::isNotBlank)
+                ?: currentUser.value.id
+            val membership = resolveWithdrawTargetMembership(
+                event = event,
+                userId = normalizedTargetUserId,
+            )
+            if (membership == null) {
+                _errorState.value = ErrorMessage("Selected profile is not registered for this event.")
+                return@launch
+            }
+            if (!canRequestPaidRefund(event, membership)) {
+                _errorState.value = ErrorMessage(
+                    if (!event.hasAnyPaidDivision()) {
+                        "Refund requests are only available for paid events."
+                    } else {
+                        "Only registered participants can request refunds."
+                    }
+                )
+                return@launch
+            }
+            if (hasEventStarted(event)) {
+                _errorState.value = ErrorMessage("Automatic refunds are no longer available after the event starts.")
+                return@launch
+            }
+
+            loadingHandler.showLoading("Withdrawing and Refunding ...")
+            val refundResult = if (
+                shouldUseRegisteredTeamWithdrawal(
+                    event = event,
+                    targetUserId = normalizedTargetUserId,
+                    membership = membership,
+                )
+            ) {
+                val team = _usersTeam.value
+                if (team == null) {
+                    Result.failure(IllegalStateException("Unable to resolve your team registration."))
+                } else {
+                    eventRepository.removeTeamFromEvent(
+                        event = event,
+                        teamWithPlayers = team,
+                        refundMode = EventParticipantRefundMode.AUTO,
+                    )
+                }
+            } else {
+                billingRepository.leaveAndRefundEvent(
+                    event = event,
+                    reason = "",
+                    targetUserId = normalizedTargetUserId,
+                )
+            }
+
+            refundResult.onFailure {
+                _errorState.value = ErrorMessage(it.userMessage())
+            }.onSuccess {
+                loadingHandler.showLoading("Reloading Event")
+                eventRepository.getEvent(event.id)
+            }
             loadingHandler.hideLoading()
         }
     }
@@ -2217,8 +2316,11 @@ class DefaultEventDetailComponent(
                 WithdrawTargetMembership.PARTICIPANT -> {
                     if (
                         leavingSelf &&
-                        event.teamSignup &&
-                        !checkIsUserFreeAgent(event)
+                        shouldUseRegisteredTeamWithdrawal(
+                            event = event,
+                            targetUserId = normalizedTargetUserId,
+                            membership = membership,
+                        )
                     ) {
                         loadingHandler.showLoading("Team Leaving Event ...")
                         val team = _usersTeam.value

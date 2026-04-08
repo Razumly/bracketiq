@@ -51,6 +51,7 @@ import com.razumly.mvp.core.data.repositories.ChildRegistrationResult
 import com.razumly.mvp.core.data.repositories.CreateBillRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillCreateRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
+import com.razumly.mvp.core.data.repositories.EventParticipantRefundMode
 import com.razumly.mvp.core.data.repositories.SelfRegistrationResult
 import com.razumly.mvp.core.data.repositories.SignerContext
 import com.razumly.mvp.core.data.repositories.SignStep
@@ -405,7 +406,12 @@ internal class CreateEvent_FakeEventRepository(
         divisionId: String,
         applyReassignment: Boolean,
     ): Result<LeagueStandingsConfirmResult> = Result.failure(IllegalStateException("unused"))
-    override suspend fun removeTeamFromEvent(event: Event, teamWithPlayers: TeamWithPlayers): Result<Unit> =
+    override suspend fun removeTeamFromEvent(
+        event: Event,
+        teamWithPlayers: TeamWithPlayers,
+        refundMode: EventParticipantRefundMode?,
+        refundReason: String?,
+    ): Result<Unit> =
         Result.success(Unit)
     override suspend fun removeCurrentUserFromEvent(event: Event, targetUserId: String?): Result<Unit> =
         Result.success(Unit)
