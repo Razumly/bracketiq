@@ -7,6 +7,7 @@ import com.razumly.mvp.core.data.dataTypes.AuthAccount
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.IImagesRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.presentation.IPaymentProcessor
 import com.razumly.mvp.core.presentation.PaymentProcessor
 import com.razumly.mvp.core.presentation.util.convertPhotoResultToUploadFile
@@ -35,6 +36,7 @@ interface ProfileDetailsComponent : IPaymentProcessor {
     fun onUploadSelected(photo: GalleryPhotoResult)
     fun consumeUploadedImageSelection()
     fun deleteImage(imageId: String)
+    fun deleteAccount(confirmationText: String)
 
     fun updateProfile(
         firstName: String,
@@ -51,7 +53,8 @@ class DefaultProfileDetailsComponent(
     private val componentContext: ComponentContext,
     private val userRepository: IUserRepository,
     private val imageRepository: IImagesRepository,
-    private val onNavigateBack: () -> Unit
+    private val onNavigateBack: () -> Unit,
+    private val navigationHandler: INavigationHandler,
 ) : ProfileDetailsComponent, PaymentProcessor(), ComponentContext by componentContext {
     private val scope = coroutineScope(Dispatchers.Main + SupervisorJob())
     private val _errorState = MutableStateFlow<ErrorMessage?>(null)
@@ -125,6 +128,24 @@ class DefaultProfileDetailsComponent(
                 }
                 .onSuccess {
                     _message.value = "Image deleted"
+                }
+            if (::loadingHandler.isInitialized) {
+                loadingHandler.hideLoading()
+            }
+        }
+    }
+
+    override fun deleteAccount(confirmationText: String) {
+        scope.launch {
+            if (::loadingHandler.isInitialized) {
+                loadingHandler.showLoading("Deleting account...")
+            }
+            userRepository.deleteAccount(confirmationText)
+                .onFailure { error ->
+                    _errorState.value = ErrorMessage("Failed to delete account: ${error.userMessage()}")
+                }
+                .onSuccess {
+                    navigationHandler.navigateToLogin()
                 }
             if (::loadingHandler.isInitialized) {
                 loadingHandler.hideLoading()

@@ -220,7 +220,8 @@ val componentModule = module {
             componentContext = params.get(),
             userRepository = get(),
             imageRepository = get(),
-            onNavigateBack = params.get()
+            onNavigateBack = params.get(),
+            navigationHandler = params.get(),
         )
     }
 

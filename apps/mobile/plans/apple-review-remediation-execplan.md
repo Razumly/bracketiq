@@ -19,7 +19,9 @@ The one rejected item that is not code-backed is the App Store Connect age ratin
 - [x] (2026-04-07 23:39-07:00) Added Sign in with Apple wiring for the easy/code-backed portion of the review: shared mobile DTO and repository support, iOS auth entry points and button surface, backend `api/auth/apple/mobile`, and iOS entitlements.
 - [x] (2026-04-07 23:39-07:00) Added backend Apple auth route tests and a shared repository auth test for the Apple payload path.
 - [x] (2026-04-07 23:39-07:00) Validated the backend Apple route tests and Android main-source compile in the remediation worktree.
-- [ ] Account deletion flow remains pending product decisions on blocking conditions and retained/scrubbed data before implementation begins.
+- [x] (2026-04-08 00:58-07:00) Implemented the self-serve account deletion flow: authenticated backend deletion route, Profile Details delete-account UI with typed confirmation, shared repository delete call, and website copy updates that point to the in-app flow.
+- [x] (2026-04-08 00:43-07:00) Extended mobile Apple sign-in to send the Apple authorization code, added backend code exchange and refresh-token persistence, and required refresh-token revocation before Apple-linked account deletion can proceed.
+- [x] (2026-04-08 00:43-07:00) Regenerated the Prisma client, re-ran the targeted backend Jest suites for Apple auth and account deletion, and re-ran shared Kotlin metadata compilation for the app worktree.
 - [ ] Manual App Store Connect metadata update remains pending: set `Parental Controls` and `Age Assurance` to `None` unless those features are intentionally added later.
 
 ## Surprises & Discoveries
@@ -32,6 +34,14 @@ The one rejected item that is not code-backed is the App Store Connect age ratin
   Evidence: Git returned `fatal: detected dubious ownership in repository` until the new worktree path was added to `safe.directory`.
 - Observation: the Android unit-test task in this checkout is currently blocked by unrelated pre-existing test-source compile errors, so repository-level validation had to stop at backend Jest plus Android main-source compilation.
   Evidence: `:composeApp:testDebugUnitTest --tests "*UserRepositoryAuthTest*"` fails in `composeApp/src/commonTest/kotlin/com/razumly/mvp/eventDetail/EventDetailsScheduleLockingTest.kt` with unresolved `EventType`, while `:composeApp:compileDebugKotlinAndroid` succeeds.
+- Observation: the remediation worktree does not include local Android/Firebase configuration files, so debug Android packaging tasks are blocked by missing `local.properties` and `google-services.json`, but shared Kotlin metadata compilation still succeeds.
+  Evidence: `:composeApp:compileDebugKotlinAndroid` first failed for missing SDK configuration, then failed for missing `composeApp/google-services.json`; `:composeApp:compileCommonMainKotlinMetadata` succeeds on the same checkout.
+- Observation: Sign in with Apple token revocation is still not implemented in the deletion flow because the current mobile Apple login path does not store a revocable Apple credential on the backend.
+  Evidence: this was true before the final remediation pass; the gap is now closed by `src/lib/appleAuth.ts`, `src/app/api/auth/apple/mobile/route.ts`, `src/app/api/auth/account/route.ts`, and the new Prisma fields in `prisma/schema.prisma`.
+- Observation: Prisma generation in the WSL-backed site worktree must be run inside WSL with a valid `DATABASE_URL`, even for client generation only.
+  Evidence: Windows-side `npx prisma generate` failed with package-manager lock issues, and WSL-side `npm exec prisma generate` failed until `DATABASE_URL='postgresql://postgres:postgres@localhost:5432/bracketiq'` was supplied inline.
+- Observation: Android debug/unit-test tasks in this remediation worktree are blocked by missing local-only Google config even after a valid SDK path is injected for the session.
+  Evidence: `:composeApp:testDebugUnitTest --tests "*UserRepositoryAuthTest*"` advances past SDK discovery once `ANDROID_HOME` is set, then fails in `:composeApp:processDebugGoogleServices` because `composeApp/google-services.json` is absent from the worktree.
 
 ## Decision Log
 
@@ -47,12 +57,23 @@ The one rejected item that is not code-backed is the App Store Connect age ratin
 - Decision: pause the account deletion implementation after the easy fixes and return with decision questions instead of guessing the retention and refund-blocking policy.
   Rationale: the user explicitly asked to fix the easy items first and to surface anything needing decisions afterward; deletion logic is where the unresolved business rules sit.
   Date/Author: 2026-04-07 / Codex
+- Decision: block account deletion when the user still owes money on user-owned bills or when refund requests are still pending in either direction.
+  Rationale: the product owner explicitly answered "Both" when asked whether deletion should be blocked for outstanding obligations and pending refunds, so the backend route now enforces both checks before starting the deletion transaction.
+  Date/Author: 2026-04-08 / Codex
+- Decision: scrub the public profile down to name/username only, preserve record-linked history, and cancel/remove active adjunct records rather than deleting the `UserData` row.
+  Rationale: `UserData` is still required as the public record anchor for billing, refund, organization, and event history; the route now removes auth and sensitive rows, clears mutable profile/social fields, and keeps only the limited retained record required by product policy.
+  Date/Author: 2026-04-08 / Codex
+- Decision: store the Apple subject on `AuthUser` and the Apple refresh token on `SensitiveUserData`, then revoke that refresh token before executing the deletion transaction for Apple-linked accounts.
+  Rationale: the Apple subject is part of the durable auth identity and should be queryable on the auth record, while the refresh token is sensitive material that belongs in the sensitive-data row that is already deleted during account removal.
+  Date/Author: 2026-04-08 / Codex
 
 ## Outcomes & Retrospective
 
-The easy/code-backed review fixes are now in place. The iOS permission sheet copy no longer advertises background tracking the app does not appear to request, and the app/backend now have a concrete Sign in with Apple path built alongside the existing Google mobile auth flow. Backend route tests pass, and Android main-source compilation passes in the remediation worktree, which gives confidence in the shared DTO and repository changes.
+The easy/code-backed review fixes are now in place. The iOS permission sheet copy no longer advertises background tracking the app does not appear to request, and the app/backend now have a concrete Sign in with Apple path built alongside the existing Google mobile auth flow. That Apple path now exchanges the one-time Apple authorization code, stores the resulting refresh token in sensitive account data, and revokes that token during account deletion before auth access is stripped. Backend route tests pass, Prisma client generation passes from WSL with an explicit `DATABASE_URL`, and shared Kotlin metadata compilation passes in the app remediation worktree, which gives confidence in the shared DTO and repository changes.
 
-The remaining rejected work is policy-heavy rather than technically ambiguous. Account deletion still needs product-owner decisions about exactly when deletion is blocked, exactly what is scrubbed versus retained, and whether Apple token revocation is part of the first implementation. The App Store Connect age-rating selection also still requires a manual metadata change outside the codebase.
+The main code-backed rejection work is now implemented. Reviewers can open Profile Details, tap a destructive delete-account action, type the required confirmation phrase, and trigger a real authenticated backend flow that first revokes any Apple-linked refresh token, then strips auth access and sensitive data while preserving record-linked profile identity. The public `/delete-data` instructions now point to the in-app flow instead of the previous support-email-only process.
+
+One follow-up remains outside the main code path. App Store Connect age-rating metadata still must be updated manually. Android debug/unit-test packaging and iOS native validation remain environment-specific verification steps because this Windows remediation worktree does not include `google-services.json` and cannot execute Xcode-based builds.
 
 ## Context and Orientation
 

@@ -339,6 +339,7 @@ class UserRepositoryAuthTest {
 
         val user = repo.loginWithAppleIdentityToken(
             identityToken = "apple.identity.token",
+            authorizationCode = "apple.authorization.code",
             user = "apple-user-1",
             email = "Apple@Example.com",
             firstName = " Apple ",
@@ -349,6 +350,7 @@ class UserRepositoryAuthTest {
         assertEquals("apple_token_123", tokenStore.get())
         assertEquals("u_apple", currentUserDataSource.getUserId().first())
         assertEquals(true, capturedBody.contains("\"identityToken\":\"apple.identity.token\""))
+        assertEquals(true, capturedBody.contains("\"authorizationCode\":\"apple.authorization.code\""))
         assertEquals(true, capturedBody.contains("\"user\":\"apple-user-1\""))
         assertEquals(true, capturedBody.contains("\"email\":\"apple@example.com\""))
         assertEquals(true, capturedBody.contains("\"firstName\":\"Apple\""))
@@ -357,6 +359,76 @@ class UserRepositoryAuthTest {
         val account = repo.currentAccount.value.getOrThrow()
         assertEquals("u_apple", account.id)
         assertEquals("apple@example.com", account.email)
+    }
+
+    @Test
+    fun deleteAccount_calls_account_delete_endpoint_and_clears_local_auth_state() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("delete_token")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+        var deleteBody = ""
+
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> respond(
+                    content = """
+                        {
+                          "user": { "id":"u_delete", "email":"delete@example.com", "name":"Delete User" },
+                          "session": { "userId":"u_delete", "isAdmin":false },
+                          "token":"delete_token",
+                          "profile": {
+                            "id":"u_delete",
+                            "firstName":"Delete",
+                            "lastName":"User",
+                            "userName":"delete_user",
+                            "teamIds":[],
+                            "friendIds":[],
+                            "friendRequestIds":[],
+                            "friendRequestSentIds":[],
+                            "followingIds":[],
+                            "uploadedImages":[],
+                            "hasStripeAccount":false
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                "/api/auth/account" -> {
+                    assertEquals(HttpMethod.Delete, request.method)
+                    assertEquals("Bearer delete_token", request.headers[HttpHeaders.Authorization])
+                    deleteBody = (request.body as? OutgoingContent.ByteArrayContent)
+                        ?.bytes()
+                        ?.decodeToString()
+                        .orEmpty()
+                    respond(
+                        content = """{"ok":true}""",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        repo.getCurrentAccount().getOrThrow()
+        repo.deleteAccount("delete my account").getOrThrow()
+
+        assertEquals(true, deleteBody.contains("\"confirmationText\":\"delete my account\""))
+        assertEquals("", tokenStore.get())
+        assertEquals("", currentUserDataSource.getUserId().first())
+        assertTrue(repo.currentAccount.value.isFailure)
+        assertTrue(repo.currentUser.value.isFailure)
     }
 
     @Test

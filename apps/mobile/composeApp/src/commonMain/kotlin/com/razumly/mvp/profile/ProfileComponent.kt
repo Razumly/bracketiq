@@ -1791,7 +1791,7 @@ class DefaultProfileComponent(
         ProfileConfig.Home -> ProfileComponent.Child.ProfileHome(this@DefaultProfileComponent)
         ProfileConfig.Details -> ProfileComponent.Child.ProfileDetails(
             koin.get<ProfileDetailsComponent> {
-                parametersOf(componentContext, ::onBackClicked)
+                parametersOf(componentContext, ::onBackClicked, navigationHandler)
             },
         )
 

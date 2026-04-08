@@ -26,6 +26,7 @@ import platform.darwin.NSObject
 
 private data class AppleAuthorizationPayload(
     val identityToken: String,
+    val authorizationCode: String,
     val user: String,
     val email: String?,
     val firstName: String?,
@@ -47,6 +48,7 @@ suspend fun IUserRepository.appleLogin(): Result<Unit> {
         val payload = requestAppleAuthorization()
         repository.loginWithAppleIdentityToken(
             identityToken = payload.identityToken,
+            authorizationCode = payload.authorizationCode,
             user = payload.user,
             email = payload.email,
             firstName = payload.firstName,
@@ -99,9 +101,13 @@ private fun ASAuthorizationAppleIDCredential.toPayload(): AppleAuthorizationPayl
     val resolvedToken = identityToken?.toUtf8String()
         ?.takeIf(String::isNotBlank)
         ?: error("Apple sign-in did not return an identity token.")
+    val resolvedAuthorizationCode = authorizationCode?.toUtf8String()
+        ?.takeIf(String::isNotBlank)
+        ?: error("Apple sign-in did not return an authorization code.")
 
     return AppleAuthorizationPayload(
         identityToken = resolvedToken,
+        authorizationCode = resolvedAuthorizationCode,
         user = resolvedUser,
         email = email?.trim()?.takeIf(String::isNotBlank),
         firstName = fullName?.givenName?.trim()?.takeIf(String::isNotBlank),

@@ -20,6 +20,7 @@ data class GoogleMobileLoginRequestDto(
 @Serializable
 data class AppleMobileLoginRequestDto(
     val identityToken: String,
+    val authorizationCode: String,
     val user: String? = null,
     val email: String? = null,
     val firstName: String? = null,
@@ -74,6 +75,11 @@ data class PasswordRequestDto(
     val currentPassword: String? = null,
     val newPassword: String,
     val userId: String? = null,
+)
+
+@Serializable
+data class DeleteAccountRequestDto(
+    val confirmationText: String,
 )
 
 @Serializable

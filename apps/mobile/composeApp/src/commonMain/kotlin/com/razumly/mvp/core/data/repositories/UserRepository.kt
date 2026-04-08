@@ -12,6 +12,7 @@ import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.dto.AuthResponseDto
 import com.razumly.mvp.core.network.dto.AppleMobileLoginRequestDto
 import com.razumly.mvp.core.network.dto.CreateInvitesRequestDto
+import com.razumly.mvp.core.network.dto.DeleteAccountRequestDto
 import com.razumly.mvp.core.network.dto.EmailMembershipLookupRequestDto
 import com.razumly.mvp.core.network.dto.EmailMembershipLookupResponseDto
 import com.razumly.mvp.core.network.dto.EnsureUserByEmailRequestDto
@@ -186,6 +187,7 @@ interface IUserRepository : IMVPRepository {
 
     suspend fun login(email: String, password: String): Result<UserData>
     suspend fun logout(): Result<Unit>
+    suspend fun deleteAccount(confirmationText: String): Result<Unit>
 
     suspend fun getUsers(
         userIds: List<String>,
@@ -360,6 +362,7 @@ class UserRepository(
 
     suspend fun loginWithAppleIdentityToken(
         identityToken: String,
+        authorizationCode: String,
         user: String? = null,
         email: String? = null,
         firstName: String? = null,
@@ -370,6 +373,8 @@ class UserRepository(
             path = "api/auth/apple/mobile",
             body = AppleMobileLoginRequestDto(
                 identityToken = identityToken,
+                authorizationCode = authorizationCode.trim().takeIf(String::isNotBlank)
+                    ?: error("Apple login response missing authorization code"),
                 user = user?.trim()?.takeIf(String::isNotBlank),
                 email = email?.trim()?.lowercase()?.takeIf(String::isNotBlank),
                 firstName = firstName?.trim()?.takeIf(String::isNotBlank),
@@ -468,6 +473,25 @@ class UserRepository(
 
     override suspend fun logout(): Result<Unit> = runCatching {
         runCatching { api.postNoResponse("api/auth/logout") }
+        clearLoginState()
+    }
+
+    override suspend fun deleteAccount(confirmationText: String): Result<Unit> = runCatching {
+        val currentUserId = currentUser.value.getOrNull()?.id?.trim()?.takeIf(String::isNotBlank)
+            ?: currentAccount.value.getOrNull()?.id?.trim()?.takeIf(String::isNotBlank)
+            ?: error("No user")
+
+        val response = api.delete<DeleteAccountRequestDto, OkResponseDto>(
+            path = "api/auth/account",
+            body = DeleteAccountRequestDto(confirmationText = confirmationText.trim()),
+        )
+        if (!response.ok) {
+            error("Account deletion failed.")
+        }
+
+        runCatching {
+            databaseService.getUserDataDao.deleteUsersById(listOf(currentUserId))
+        }
         clearLoginState()
     }
 
