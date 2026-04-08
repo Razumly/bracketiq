@@ -3,10 +3,13 @@ package com.razumly.mvp.core.data.repositories
 import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.Bill
 import com.razumly.mvp.core.data.dataTypes.BillPayment
+import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
+import com.razumly.mvp.core.data.dataTypes.BillingAddressProfile
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.Product
+import com.razumly.mvp.core.data.dataTypes.ProductTaxCategory
 import com.razumly.mvp.core.data.dataTypes.RefundRequest
 import com.razumly.mvp.core.data.dataTypes.RefundRequestWithRelations
 import com.razumly.mvp.core.data.dataTypes.Subscription
@@ -14,6 +17,7 @@ import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.stripeRedirectBaseUrl
 import com.razumly.mvp.core.network.dto.BillingEventRefDto
+import com.razumly.mvp.core.network.dto.BillingAddressDto
 import com.razumly.mvp.core.network.dto.BillingRefundRequestDto
 import com.razumly.mvp.core.network.dto.BillingTeamRefDto
 import com.razumly.mvp.core.network.dto.BillingTimeSlotRefDto
@@ -272,12 +276,15 @@ interface IBillingRepository : IMVPRepository {
         amountCents: Int,
     ): Result<Unit>
     suspend fun createBillingIntent(billId: String, billPaymentId: String): Result<PurchaseIntent>
+    suspend fun getBillingAddress(): Result<BillingAddressProfile>
+    suspend fun updateBillingAddress(address: BillingAddressDraft): Result<BillingAddressProfile>
     suspend fun listSubscriptions(userId: String, limit: Int = 100): Result<List<Subscription>>
     suspend fun cancelSubscription(subscriptionId: String): Result<Boolean>
     suspend fun restartSubscription(subscriptionId: String): Result<Boolean>
     suspend fun getProductsByIds(productIds: List<String>): Result<List<Product>>
     suspend fun listProductsByOrganization(organizationId: String): Result<List<Product>>
     suspend fun createProductPurchaseIntent(productId: String): Result<PurchaseIntent>
+    suspend fun createProductSubscriptionIntent(productId: String): Result<PurchaseIntent>
     suspend fun createProductSubscription(
         productId: String,
         organizationId: String? = null,
@@ -766,6 +773,26 @@ class BillingRepository(
         response
     }
 
+    override suspend fun getBillingAddress(): Result<BillingAddressProfile> = runCatching {
+        val response = api.get<BillingAddressResponseDto>(path = "api/profile/billing-address")
+        response.toBillingAddressProfile()
+    }
+
+    override suspend fun updateBillingAddress(address: BillingAddressDraft): Result<BillingAddressProfile> = runCatching {
+        val normalizedAddress = address.normalized()
+        if (!normalizedAddress.isCompleteForUsTax()) {
+            throw IllegalArgumentException("A complete US billing address is required.")
+        }
+
+        val response = api.patch<UpdateBillingAddressRequestDto, BillingAddressResponseDto>(
+            path = "api/profile/billing-address",
+            body = UpdateBillingAddressRequestDto(
+                billingAddress = BillingAddressDto.fromDraft(normalizedAddress),
+            ),
+        )
+        response.toBillingAddressProfile()
+    }
+
     override suspend fun listSubscriptions(userId: String, limit: Int): Result<List<Subscription>> = runCatching {
         val encodedUserId = userId.encodeURLQueryComponent()
         val candidatePaths = listOf(
@@ -852,6 +879,23 @@ class BillingRepository(
                 user = BillingUserRefDto(id = user.id, email = email),
                 productId = normalizedId,
             ),
+        )
+
+        if (!response.error.isNullOrBlank()) {
+            throw Exception(response.error)
+        }
+        response
+    }
+
+    override suspend fun createProductSubscriptionIntent(productId: String): Result<PurchaseIntent> = runCatching {
+        val normalizedId = productId.trim()
+        if (normalizedId.isEmpty()) {
+            throw Exception("Product id is required.")
+        }
+
+        val response = api.post<EmptyRequestDto, PurchaseIntent>(
+            path = "api/products/$normalizedId/subscriptions",
+            body = EmptyRequestDto(),
         )
 
         if (!response.error.isNullOrBlank()) {
@@ -1242,6 +1286,22 @@ private data class CreateBillingIntentRequestDto(
 )
 
 @Serializable
+private data class UpdateBillingAddressRequestDto(
+    val billingAddress: BillingAddressDto,
+)
+
+@Serializable
+private data class BillingAddressResponseDto(
+    val billingAddress: BillingAddressDto? = null,
+    val email: String? = null,
+) {
+    fun toBillingAddressProfile(): BillingAddressProfile = BillingAddressProfile(
+        billingAddress = billingAddress?.toBillingAddressDraft(),
+        email = email?.trim()?.takeIf(String::isNotBlank),
+    )
+}
+
+@Serializable
 private data class CreateBillRequestDto(
     val ownerType: String,
     val ownerId: String,
@@ -1596,6 +1656,7 @@ private data class ProductApiDto(
     val createdAt: String? = null,
     val stripeProductId: String? = null,
     val stripePriceId: String? = null,
+    val taxCategory: ProductTaxCategory = ProductTaxCategory.ONE_TIME_PRODUCT,
 ) {
     fun toProductOrNull(): Product? {
         val resolvedId = id ?: legacyId
@@ -1625,6 +1686,7 @@ private data class ProductApiDto(
             createdAt = createdAt,
             stripeProductId = stripeProductId,
             stripePriceId = stripePriceId,
+            taxCategory = taxCategory,
         )
     }
 }
@@ -1750,6 +1812,8 @@ data class PurchaseIntent(
     val ephemeralKey: String? = null,
     val customer: String? = null,
     val publishableKey: String? = null,
+    val taxCalculationId: String? = null,
+    val taxCategory: String? = null,
     val feeBreakdown: FeeBreakdown? = null,
     val boldSignUrl: String? = null,
     val boldsignUrl: String? = null,
@@ -1794,6 +1858,8 @@ data class FeeBreakdown(
     val eventPrice: Int,
     val stripeFee: Int,
     val processingFee: Int,
+    val taxAmount: Int? = null,
+    val purchaseType: String? = null,
     val totalCharge: Int,
     val hostReceives: Int,
     val feePercentage: Float,

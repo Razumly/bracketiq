@@ -2,6 +2,7 @@ package com.razumly.mvp.core.presentation
 
 import android.content.Context
 import com.razumly.mvp.BuildConfig
+import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.repositories.PurchaseIntent
 import com.razumly.mvp.core.util.UrlHandler
 import com.stripe.android.core.exception.APIConnectionException
@@ -27,15 +28,29 @@ actual open class PaymentProcessor : IPaymentProcessor {
     actual override var urlHandler: UrlHandler? = null
 
     @OptIn(AddressAutocompletePreview::class)
-    actual override fun presentPaymentSheet(email: String, name: String) {
+    actual override fun presentPaymentSheet(email: String, name: String, billingAddress: BillingAddressDraft?) {
         purchaseIntent.value?.let {
             val clientSecret = it.paymentIntent ?: return
+            val normalizedBillingAddress = billingAddress?.normalized()
             _paymentSheet.value?.presentWithPaymentIntent(
                 paymentIntentClientSecret = clientSecret,
                 configuration = PaymentSheet.Configuration.Builder("BracketIQ").apply {
                     _customerConfig?.let(::customer)
                 }.allowsDelayedPaymentMethods(true).defaultBillingDetails(
-                    PaymentSheet.BillingDetails(email = email, name = name)
+                    PaymentSheet.BillingDetails(
+                        email = email,
+                        name = name,
+                        address = normalizedBillingAddress?.let { address ->
+                            PaymentSheet.Address(
+                                line1 = address.line1,
+                                line2 = address.line2,
+                                city = address.city,
+                                state = address.state,
+                                postalCode = address.postalCode,
+                                country = address.countryCode,
+                            )
+                        },
+                    )
                 ).googlePlacesApiKey(BuildConfig.MAPS_API_KEY).build()
             )
         }

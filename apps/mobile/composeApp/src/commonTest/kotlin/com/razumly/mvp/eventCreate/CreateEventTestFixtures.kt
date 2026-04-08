@@ -8,6 +8,8 @@ import com.arkivanov.essenty.lifecycle.LifecycleRegistry
 import com.razumly.mvp.core.data.dataTypes.AuthAccount
 import com.razumly.mvp.core.data.dataTypes.Bill
 import com.razumly.mvp.core.data.dataTypes.BillPayment
+import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
+import com.razumly.mvp.core.data.dataTypes.BillingAddressProfile
 import com.razumly.mvp.core.data.dataTypes.Bounds
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
@@ -49,6 +51,7 @@ import com.razumly.mvp.core.data.repositories.ChildRegistrationResult
 import com.razumly.mvp.core.data.repositories.CreateBillRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillCreateRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
+import com.razumly.mvp.core.data.repositories.EventParticipantRefundMode
 import com.razumly.mvp.core.data.repositories.SelfRegistrationResult
 import com.razumly.mvp.core.data.repositories.SignerContext
 import com.razumly.mvp.core.data.repositories.SignStep
@@ -403,7 +406,12 @@ internal class CreateEvent_FakeEventRepository(
         divisionId: String,
         applyReassignment: Boolean,
     ): Result<LeagueStandingsConfirmResult> = Result.failure(IllegalStateException("unused"))
-    override suspend fun removeTeamFromEvent(event: Event, teamWithPlayers: TeamWithPlayers): Result<Unit> =
+    override suspend fun removeTeamFromEvent(
+        event: Event,
+        teamWithPlayers: TeamWithPlayers,
+        refundMode: EventParticipantRefundMode?,
+        refundReason: String?,
+    ): Result<Unit> =
         Result.success(Unit)
     override suspend fun removeCurrentUserFromEvent(event: Event, targetUserId: String?): Result<Unit> =
         Result.success(Unit)
@@ -645,6 +653,20 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
     ): Result<Unit> = Result.success(Unit)
     override suspend fun createBillingIntent(billId: String, billPaymentId: String): Result<PurchaseIntent> =
         Result.success(PurchaseIntent(paymentIntent = "pi_bill", publishableKey = "pk_bill"))
+    override suspend fun getBillingAddress(): Result<BillingAddressProfile> = Result.success(
+        BillingAddressProfile(
+            billingAddress = BillingAddressDraft(
+                line1 = "1 Test St",
+                city = "Los Angeles",
+                state = "CA",
+                postalCode = "90001",
+                countryCode = "US",
+            ),
+            email = "test@example.com",
+        )
+    )
+    override suspend fun updateBillingAddress(address: BillingAddressDraft): Result<BillingAddressProfile> =
+        Result.success(BillingAddressProfile(billingAddress = address.normalized(), email = "test@example.com"))
     override suspend fun listSubscriptions(userId: String, limit: Int): Result<List<Subscription>> =
         Result.success(emptyList())
     override suspend fun cancelSubscription(subscriptionId: String): Result<Boolean> = Result.success(true)
@@ -654,6 +676,8 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
         Result.success(emptyList())
     override suspend fun createProductPurchaseIntent(productId: String): Result<PurchaseIntent> =
         Result.success(PurchaseIntent(paymentIntent = "pi_product", publishableKey = "pk_product"))
+    override suspend fun createProductSubscriptionIntent(productId: String): Result<PurchaseIntent> =
+        Result.success(PurchaseIntent(paymentIntent = "pi_subscription", publishableKey = "pk_product"))
     override suspend fun createProductSubscription(
         productId: String,
         organizationId: String?,

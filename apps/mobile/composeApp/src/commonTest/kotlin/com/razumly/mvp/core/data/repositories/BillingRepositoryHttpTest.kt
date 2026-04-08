@@ -2,6 +2,7 @@ package com.razumly.mvp.core.data.repositories
 
 import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.AuthAccount
+import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.daos.ChatGroupDao
@@ -216,7 +217,12 @@ private object BillingRepositoryHttp_UnusedEventRepository : IEventRepository {
         divisionId: String,
         applyReassignment: Boolean,
     ): Result<LeagueStandingsConfirmResult> = error("unused")
-    override suspend fun removeTeamFromEvent(event: Event, teamWithPlayers: com.razumly.mvp.core.data.dataTypes.TeamWithPlayers): Result<Unit> = error("unused")
+    override suspend fun removeTeamFromEvent(
+        event: Event,
+        teamWithPlayers: com.razumly.mvp.core.data.dataTypes.TeamWithPlayers,
+        refundMode: EventParticipantRefundMode?,
+        refundReason: String?,
+    ): Result<Unit> = error("unused")
     override suspend fun removeCurrentUserFromEvent(event: Event, targetUserId: String?): Result<Unit> = error("unused")
 }
 
@@ -239,6 +245,70 @@ private fun billingMakeUser(id: String): UserData {
 }
 
 class BillingRepositoryHttpTest {
+    @Test
+    fun updateBillingAddress_uses_site_schema_field_names() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+        var capturedBody = ""
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/profile/billing-address", request.url.encodedPath)
+            assertEquals(HttpMethod.Patch, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+
+            respond(
+                content = """
+                    {
+                      "billingAddress": {
+                        "line1": "2130 N Q St",
+                        "line2": null,
+                        "city": "Washougal",
+                        "state": "WA",
+                        "postalCode": "98671",
+                        "countryCode": "US"
+                      },
+                      "email": "u1@example.test"
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = BillingRepository(api, userRepo, BillingRepositoryHttp_UnusedEventRepository, db)
+
+        val result = repo.updateBillingAddress(
+            BillingAddressDraft(
+                line1 = "2130 N Q St",
+                city = "Washougal",
+                state = "wa",
+                postalCode = "98671",
+                countryCode = "us",
+            ),
+        ).getOrThrow()
+
+        assertTrue(capturedBody.contains("\"line1\":\"2130 N Q St\""))
+        assertTrue(capturedBody.contains("\"city\":\"Washougal\""))
+        assertTrue(capturedBody.contains("\"state\":\"WA\""))
+        assertTrue(capturedBody.contains("\"postalCode\":\"98671\""))
+        assertTrue(capturedBody.contains("\"countryCode\":\"US\""))
+        assertFalse(capturedBody.contains("billingAddressLine1"))
+        assertEquals("2130 N Q St", result.billingAddress?.line1)
+        assertEquals("WA", result.billingAddress?.state)
+        assertEquals("US", result.billingAddress?.countryCode)
+    }
+
     @Test
     fun listBills_gets_and_maps_response() = runTest {
         val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")

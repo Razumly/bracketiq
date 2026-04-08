@@ -88,6 +88,14 @@ fun ProfileHomeScreen(component: ProfileComponent) {
             )
             add(
                 ProfileAction(
+                    title = "Billing Address",
+                    description = "Edit address used for tax and checkout",
+                    icon = MVPIcons.ProfileActionPayments,
+                    onClick = component::editBillingAddress,
+                ),
+            )
+            add(
+                ProfileAction(
                     title = "My Schedule",
                     description = "Events and matches I attend",
                     icon = Icons.Default.DateRange,

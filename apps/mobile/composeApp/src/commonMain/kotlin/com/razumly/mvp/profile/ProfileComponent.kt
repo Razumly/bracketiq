@@ -13,6 +13,7 @@ import com.arkivanov.decompose.value.Value
 import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.Bill
 import com.razumly.mvp.core.data.dataTypes.BillPayment
+import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.Invite
@@ -244,6 +245,7 @@ interface ProfileComponent : IPaymentProcessor {
     val activeDocumentActionId: StateFlow<String?>
     val textSignaturePrompt: StateFlow<ProfileTextSignaturePromptState?>
     val webDocumentPrompt: StateFlow<ProfileWebDocumentPromptState?>
+    val billingAddressPrompt: StateFlow<BillingAddressDraft?>
     val isStripeAccountConnected: StateFlow<Boolean>
 
     fun onBackClicked()
@@ -259,6 +261,7 @@ interface ProfileComponent : IPaymentProcessor {
     fun navigateToDocuments()
     fun navigateToMySchedule()
     fun navigateToInvites()
+    fun editBillingAddress()
 
     fun onLogout()
     fun manageTeams()
@@ -298,6 +301,8 @@ interface ProfileComponent : IPaymentProcessor {
     fun confirmTextSignature()
     fun dismissTextSignature()
     fun dismissWebDocumentPrompt()
+    fun submitBillingAddress(address: BillingAddressDraft)
+    fun dismissBillingAddressPrompt()
     fun createChild(
         firstName: String,
         lastName: String,
@@ -422,6 +427,8 @@ class DefaultProfileComponent(
 
     private val _pendingInviteCount = MutableStateFlow(0)
     override val pendingInviteCount = _pendingInviteCount.asStateFlow()
+    private val _billingAddressPrompt = MutableStateFlow<BillingAddressDraft?>(null)
+    override val billingAddressPrompt = _billingAddressPrompt.asStateFlow()
 
     private val _activeBillPaymentId = MutableStateFlow<String?>(null)
     override val activeBillPaymentId = _activeBillPaymentId.asStateFlow()
@@ -445,6 +452,7 @@ class DefaultProfileComponent(
     private var eventTemplatesJob: Job? = null
     private var childrenTabVisibilityUserId: String? = null
     private var pendingDocumentSyncJob: Job? = null
+    private var pendingBillingAddressAction: (() -> Unit)? = null
 
     override val childStack: Value<ChildStack<*, ProfileComponent.Child>> = childStack(
         source = navigation,
@@ -546,6 +554,23 @@ class DefaultProfileComponent(
 
     override fun navigateToInvites() {
         push(ProfileConfig.Invites)
+    }
+
+    override fun editBillingAddress() {
+        scope.launch {
+            loadingHandler?.showLoading("Loading billing address...")
+            val billingAddress = billingRepository.getBillingAddress()
+                .onFailure { error ->
+                    _errorState.value = ErrorMessage(error.userMessage("Unable to load billing address."))
+                }
+                .getOrNull()
+                ?.billingAddress
+                ?.normalized()
+
+            pendingBillingAddressAction = null
+            _billingAddressPrompt.value = billingAddress ?: BillingAddressDraft()
+            loadingHandler?.hideLoading()
+        }
     }
 
     override fun onLogout() {
@@ -1001,6 +1026,9 @@ class DefaultProfileComponent(
         }
 
         scope.launch {
+            if (!ensureBillingAddressOrPrompt { payNextInstallment(paymentPlan) }) {
+                return@launch
+            }
             _activeBillPaymentId.value = paymentPlan.bill.id
             loadingHandler?.showLoading("Preparing payment ...")
 
@@ -1013,10 +1041,12 @@ class DefaultProfileComponent(
                     setPaymentIntent(intent)
                     val account = userRepository.currentAccount.value.getOrThrow()
                     val user = userRepository.currentUser.value.getOrThrow()
+                    val billingAddress = loadSavedBillingAddress()
                     loadingHandler?.showLoading("Waiting for payment completion ...")
                     presentPaymentSheet(
                         email = account.email,
                         name = user.fullName,
+                        billingAddress = billingAddress,
                     )
                 }.onFailure {
                     _activeBillPaymentId.value = null
@@ -1626,6 +1656,54 @@ class DefaultProfileComponent(
         if (mode == ProfileWebDocumentPromptMode.SIGN) {
             _errorState.value = ErrorMessage("Document signing canceled.")
         }
+    }
+
+    override fun submitBillingAddress(address: BillingAddressDraft) {
+        scope.launch {
+            loadingHandler?.showLoading("Saving billing address...")
+            billingRepository.updateBillingAddress(address)
+                .onSuccess {
+                    _billingAddressPrompt.value = null
+                    _errorState.value = ErrorMessage("Billing address saved.")
+                    val action = pendingBillingAddressAction
+                    pendingBillingAddressAction = null
+                    action?.invoke()
+                }
+                .onFailure { error ->
+                    _errorState.value = ErrorMessage(error.userMessage("Unable to save billing address."))
+                }
+            loadingHandler?.hideLoading()
+        }
+    }
+
+    override fun dismissBillingAddressPrompt() {
+        _billingAddressPrompt.value = null
+        pendingBillingAddressAction = null
+    }
+
+    private suspend fun ensureBillingAddressOrPrompt(onReady: () -> Unit): Boolean {
+        val billingAddress = billingRepository.getBillingAddress()
+            .getOrElse { error ->
+                _errorState.value = ErrorMessage(error.userMessage("Unable to load billing address."))
+                return false
+            }
+            .billingAddress
+            ?.normalized()
+
+        if (billingAddress != null && billingAddress.isCompleteForUsTax()) {
+            return true
+        }
+
+        pendingBillingAddressAction = onReady
+        _billingAddressPrompt.value = billingAddress ?: BillingAddressDraft()
+        return false
+    }
+
+    private suspend fun loadSavedBillingAddress(): BillingAddressDraft? {
+        return billingRepository.getBillingAddress()
+            .getOrNull()
+            ?.billingAddress
+            ?.normalized()
     }
 
     override fun createChild(

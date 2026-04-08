@@ -1,5 +1,6 @@
 package com.razumly.mvp.profile
 
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -7,6 +8,7 @@ import com.arkivanov.decompose.ExperimentalDecomposeApi
 import com.arkivanov.decompose.ComponentContext
 import com.arkivanov.decompose.extensions.compose.experimental.stack.ChildStack
 import com.arkivanov.decompose.extensions.compose.subscribeAsState
+import com.razumly.mvp.core.presentation.composables.BillingAddressDialog
 import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
 import com.razumly.mvp.core.presentation.util.backAnimation
 import com.razumly.mvp.core.util.LocalLoadingHandler
@@ -19,6 +21,7 @@ fun ProfileScreen(component: ProfileComponent) {
     PreparePaymentProcessor(component)
 
     val childStack by component.childStack.subscribeAsState()
+    val billingAddressPrompt by component.billingAddressPrompt.collectAsState()
     val popupHandler = LocalPopupHandler.current
     val loadingHandler = LocalLoadingHandler.current
 
@@ -88,5 +91,13 @@ fun ProfileScreen(component: ProfileComponent) {
                 ProfileInvitesScreen(component = instance.component)
             }
         }
+    }
+
+    billingAddressPrompt?.let { address ->
+        BillingAddressDialog(
+            initialAddress = address,
+            onConfirm = component::submitBillingAddress,
+            onDismiss = component::dismissBillingAddressPrompt,
+        )
     }
 }

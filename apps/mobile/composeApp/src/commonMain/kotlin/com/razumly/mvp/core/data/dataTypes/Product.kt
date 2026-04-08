@@ -7,6 +7,13 @@ import kotlinx.serialization.Transient
 import kotlin.native.ObjCName
 
 @Serializable
+enum class ProductTaxCategory {
+    ONE_TIME_PRODUCT,
+    SUBSCRIPTION,
+    NON_TAXABLE,
+}
+
+@Serializable
 data class Product(
     val name: String,
     @property:ObjCName(swiftName = "productDescription")
@@ -19,6 +26,7 @@ data class Product(
     val createdAt: String? = null,
     val stripeProductId: String? = null,
     val stripePriceId: String? = null,
+    val taxCategory: ProductTaxCategory = ProductTaxCategory.ONE_TIME_PRODUCT,
     @Transient
     override val id: String = "",
 ) : MVPDocument

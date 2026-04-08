@@ -10,7 +10,9 @@ import com.razumly.mvp.core.data.dataTypes.dtos.EventDTO
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.DivisionConverters
 import com.razumly.mvp.core.data.util.DivisionDetailConverters
+import com.razumly.mvp.core.data.util.divisionsEquivalent
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
+import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.presentation.Primary
 import com.razumly.mvp.core.util.newId
@@ -106,6 +108,79 @@ data class Event(
     val freeAgents: List<String> get() = freeAgentIds
     val waitList: List<String> get() = waitListIds
     val playerIds: List<String> get() = userIds
+}
+
+data class EventPriceRange(
+    val minPriceCents: Int,
+    val maxPriceCents: Int,
+)
+
+private fun Event.mergedDivisionDetailsForPricing(): List<DivisionDetail> =
+    mergeDivisionDetailsForDivisions(
+        divisions = divisions,
+        existingDetails = divisionDetails,
+        eventId = id,
+    )
+
+private fun Event.findDivisionDetailForPricing(preferredDivisionId: String?): DivisionDetail? {
+    val mergedDetails = mergedDivisionDetailsForPricing()
+    if (mergedDetails.isEmpty()) {
+        return null
+    }
+
+    val normalizedPreferredDivision = preferredDivisionId
+        ?.normalizeDivisionIdentifier()
+        ?.ifEmpty { null }
+
+    return if (!normalizedPreferredDivision.isNullOrBlank()) {
+        mergedDetails.firstOrNull { detail ->
+            divisionsEquivalent(detail.id, normalizedPreferredDivision) ||
+                divisionsEquivalent(detail.key, normalizedPreferredDivision)
+        } ?: mergedDetails.firstOrNull()
+    } else {
+        mergedDetails.firstOrNull()
+    }
+}
+
+private fun formatPriceCentsLabel(priceCents: Int): String {
+    val normalizedPriceCents = priceCents.coerceAtLeast(0)
+    val wholeDollars = normalizedPriceCents / 100
+    val cents = normalizedPriceCents % 100
+    return "$$wholeDollars.${cents.toString().padStart(2, '0')}"
+}
+
+fun Event.resolvedDivisionPriceCents(preferredDivisionId: String? = null): Int =
+    (findDivisionDetailForPricing(preferredDivisionId)?.price ?: priceCents).coerceAtLeast(0)
+
+fun Event.divisionPriceRange(): EventPriceRange {
+    val mergedDetails = mergedDivisionDetailsForPricing()
+    if (mergedDetails.isEmpty()) {
+        val defaultPriceCents = priceCents.coerceAtLeast(0)
+        return EventPriceRange(
+            minPriceCents = defaultPriceCents,
+            maxPriceCents = defaultPriceCents,
+        )
+    }
+
+    val divisionPrices = mergedDetails.map { detail ->
+        (detail.price ?: priceCents).coerceAtLeast(0)
+    }
+
+    return EventPriceRange(
+        minPriceCents = divisionPrices.minOrNull() ?: 0,
+        maxPriceCents = divisionPrices.maxOrNull() ?: 0,
+    )
+}
+
+fun Event.hasAnyPaidDivision(): Boolean = divisionPriceRange().maxPriceCents > 0
+
+fun Event.divisionPriceRangeLabel(): String {
+    val priceRange = divisionPriceRange()
+    return if (priceRange.minPriceCents == priceRange.maxPriceCents) {
+        formatPriceCentsLabel(priceRange.minPriceCents)
+    } else {
+        "${formatPriceCentsLabel(priceRange.minPriceCents)} - ${formatPriceCentsLabel(priceRange.maxPriceCents)}"
+    }
 }
 
 fun Event.isDraftLikeState(): Boolean {

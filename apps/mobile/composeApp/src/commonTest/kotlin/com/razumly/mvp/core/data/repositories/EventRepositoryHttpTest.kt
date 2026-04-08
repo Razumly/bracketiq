@@ -911,6 +911,79 @@ class EventRepositoryHttpTest {
     }
 
     @Test
+    fun removeTeamFromEvent_includes_refund_intent_when_provided() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+        var capturedBody = ""
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/events/e1/participants", request.url.encodedPath)
+            assertEquals(HttpMethod.Delete, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+
+            respond(
+                content = """
+                    {
+                      "event": {
+                        "id": "e1",
+                        "name": "Event One",
+                        "hostId": "h1",
+                        "start": "2026-02-10T00:00:00Z",
+                        "end": "2026-02-10T01:00:00Z",
+                        "coordinates": [-80.0, 25.0],
+                        "userIds": [],
+                        "teamIds": []
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+        val team = TeamWithPlayers(
+            team = Team(
+                id = "team_1",
+                division = "open",
+                captainId = "u1",
+                managerId = "u1",
+                name = "Team One",
+                teamSize = 2,
+                playerIds = listOf("u1"),
+            ),
+            captain = null,
+            players = emptyList(),
+            pendingPlayers = emptyList(),
+        )
+        val event = makeEvent(id = "e1", hostId = "h1").copy(teamSignup = true, teamIds = listOf("team_1"))
+
+        repo.removeTeamFromEvent(
+            event = event,
+            teamWithPlayers = team,
+            refundMode = EventParticipantRefundMode.REQUEST,
+            refundReason = "Team can no longer attend",
+        ).getOrThrow()
+
+        assertTrue(capturedBody.contains("\"teamId\":\"team_1\""))
+        assertTrue(capturedBody.contains("\"refundMode\":\"request\""))
+        assertTrue(capturedBody.contains("\"refundReason\":\"Team can no longer attend\""))
+    }
+
+    @Test
     fun addCurrentUserToEvent_uses_free_agents_endpoint_for_team_signup_events() = runTest {
         val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
         val eventDao = EventRepositoryHttp_FakeEventDao()

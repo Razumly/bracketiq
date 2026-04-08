@@ -96,6 +96,7 @@ import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.divisionPriceRangeLabel
 import com.razumly.mvp.core.data.dataTypes.label
 import com.razumly.mvp.core.data.dataTypes.officialPositionSummary
 import com.razumly.mvp.core.data.dataTypes.positionSummary
@@ -1457,10 +1458,10 @@ fun EventDetails(
         editEvent.registrationCutoffHours.toRegistrationCutoffSummary()
     }
     val refundSummary = remember(event.cancellationRefundHours) {
-        event.cancellationRefundHours.toRefundSummary()
+        formatRefundSummary(event.cancellationRefundHours)
     }
-    val priceSummary = remember(event.teamSignup, event.price) {
-        if (event.teamSignup) "${event.price.moneyFormat()} / team" else "${event.price.moneyFormat()} / player"
+    val priceSummary = remember(event.teamSignup, event.priceCents, event.divisions, event.divisionDetails) {
+        if (event.teamSignup) "${event.divisionPriceRangeLabel()} / team" else "${event.divisionPriceRangeLabel()} / player"
     }
     val basicsSummaryLine = remember(event.location, basicDateSummary, hostDisplayName) {
         listOf(hostDisplayName, event.location, basicDateSummary)
@@ -5803,15 +5804,6 @@ internal fun buildDivisionName(
 private fun Int.toRegistrationCutoffSummary(): String {
     return when (this) {
         0 -> "No cutoff"
-        1 -> "24h before start"
-        2 -> "48h before start"
-        else -> "No cutoff"
-    }
-}
-
-private fun Int.toRefundSummary(): String {
-    return when (this) {
-        0 -> "Automatic refunds"
         1 -> "24h before start"
         2 -> "48h before start"
         else -> "No cutoff"
