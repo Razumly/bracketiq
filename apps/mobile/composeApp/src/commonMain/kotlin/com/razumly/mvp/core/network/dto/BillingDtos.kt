@@ -53,12 +53,12 @@ data class PurchaseIntentRequestDto(
 
 @Serializable
 data class BillingAddressDto(
-    @SerialName("billingAddressLine1") val line1: String? = null,
-    @SerialName("billingAddressLine2") val line2: String? = null,
-    @SerialName("billingCity") val city: String? = null,
-    @SerialName("billingState") val state: String? = null,
-    @SerialName("billingPostalCode") val postalCode: String? = null,
-    @SerialName("billingCountryCode") val countryCode: String? = null,
+    val line1: String? = null,
+    val line2: String? = null,
+    val city: String? = null,
+    val state: String? = null,
+    val postalCode: String? = null,
+    val countryCode: String? = null,
 ) {
     fun toBillingAddressDraft(): BillingAddressDraft = BillingAddressDraft(
         line1 = line1.orEmpty(),
