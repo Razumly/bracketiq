@@ -33,6 +33,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
+private fun Product.isSinglePurchase(): Boolean =
+    period.trim().equals("SINGLE", ignoreCase = true)
+
 interface OrganizationDetailComponent : IPaymentProcessor {
     val initialTab: OrganizationDetailTab
     val organization: StateFlow<Organization?>
@@ -155,7 +158,11 @@ class DefaultOrganizationDetailComponent(
                     PaymentResult.Completed -> {
                         val pendingProduct = pendingProductPurchase
                         if (pendingProduct != null) {
-                            _message.value = "Subscription started for ${pendingProduct.name}."
+                            _message.value = if (pendingProduct.isSinglePurchase()) {
+                                "Purchase completed for ${pendingProduct.name}."
+                            } else {
+                                "Subscription started for ${pendingProduct.name}."
+                            }
                             refreshProducts(force = true)
                             pendingProductPurchase = null
                         }
@@ -323,7 +330,12 @@ class DefaultOrganizationDetailComponent(
             if (::loadingHandler.isInitialized) {
                 loadingHandler.showLoading("Preparing checkout...")
             }
-            billingRepository.createProductSubscriptionIntent(product.id)
+            val purchaseIntentResult = if (product.isSinglePurchase()) {
+                billingRepository.createProductPurchaseIntent(product.id)
+            } else {
+                billingRepository.createProductSubscriptionIntent(product.id)
+            }
+            purchaseIntentResult
                 .onSuccess { intent ->
                     pendingProductPurchase = product
                     showPaymentSheet(intent, account?.email.orEmpty(), user.fullName)

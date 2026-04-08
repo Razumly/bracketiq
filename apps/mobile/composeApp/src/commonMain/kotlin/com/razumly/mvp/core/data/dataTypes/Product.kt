@@ -9,6 +9,8 @@ import kotlin.native.ObjCName
 @Serializable
 enum class ProductTaxCategory {
     ONE_TIME_PRODUCT,
+    DAY_PASS,
+    EQUIPMENT_RENTAL,
     SUBSCRIPTION,
     NON_TAXABLE,
 }

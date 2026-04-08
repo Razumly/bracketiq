@@ -523,6 +523,35 @@ private fun OrganizationDetailTab.icon(): ImageVector {
     }
 }
 
+private fun Product.isSinglePurchase(): Boolean =
+    period.trim().equals("SINGLE", ignoreCase = true)
+
+private fun Product.periodLabel(): String {
+    return when {
+        isSinglePurchase() -> "Single purchase"
+        period.trim().equals("WEEK", ignoreCase = true) -> "Weekly"
+        period.trim().equals("YEAR", ignoreCase = true) -> "Yearly"
+        else -> "Monthly"
+    }
+}
+
+private fun Product.priceLabel(): String {
+    val formattedPrice = (priceCents / 100.0).moneyFormat()
+    return if (isSinglePurchase()) {
+        formattedPrice
+    } else {
+        val suffix = when {
+            period.trim().equals("WEEK", ignoreCase = true) -> "week"
+            period.trim().equals("YEAR", ignoreCase = true) -> "year"
+            else -> "month"
+        }
+        "$formattedPrice / $suffix"
+    }
+}
+
+private fun Product.purchaseButtonLabel(): String =
+    if (isSinglePurchase()) "Buy now" else "Subscribe"
+
 @Composable
 private fun OverviewTabContent(
     organization: Organization?,
@@ -752,7 +781,6 @@ private fun ProductCard(
     onPurchase: (Product) -> Unit,
 ) {
     val isActive = product.isActive != false
-    val priceLabel = (product.priceCents / 100.0).moneyFormat()
     Card(
         modifier = Modifier.fillMaxWidth(),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
@@ -777,14 +805,14 @@ private fun ProductCard(
                     }
                 }
                 Text(
-                    text = product.period.lowercase(),
+                    text = product.periodLabel(),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
             Text(
-                text = "$priceLabel / ${product.period.lowercase()}",
+                text = product.priceLabel(),
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.SemiBold
             )
@@ -802,7 +830,7 @@ private fun ProductCard(
                 enabled = hasStripeAccount && isActive,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(text = if (hasStripeAccount) "Purchase" else "Payments unavailable")
+                Text(text = if (hasStripeAccount) product.purchaseButtonLabel() else "Payments unavailable")
             }
         }
     }
