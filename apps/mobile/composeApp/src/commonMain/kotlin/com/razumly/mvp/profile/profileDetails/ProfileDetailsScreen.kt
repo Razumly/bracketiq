@@ -16,15 +16,19 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -36,6 +40,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -50,6 +55,8 @@ import com.razumly.mvp.core.util.emailAddressRegex
 import com.razumly.mvp.eventDetail.composables.SelectEventImage
 import io.github.ismoy.imagepickerkmp.domain.models.MimeType
 import io.github.ismoy.imagepickerkmp.presentation.ui.components.GalleryPickerLauncher
+
+private const val DELETE_ACCOUNT_CONFIRMATION_TEXT = "delete my account"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -78,6 +85,8 @@ fun ProfileDetailsScreen(
     var showUploadImagePicker by remember { mutableStateOf(false) }
     var showImageSelector by rememberSaveable { mutableStateOf(false) }
     var pendingProfileImageId by remember { mutableStateOf<String?>(null) }
+    var showDeleteAccountDialog by rememberSaveable { mutableStateOf(false) }
+    var deleteAccountConfirmationText by rememberSaveable { mutableStateOf("") }
 
     val uploadedImageIds = remember(currentUser.uploadedImages) {
         currentUser.uploadedImages
@@ -116,6 +125,11 @@ fun ProfileDetailsScreen(
     val isFormValid by remember {
         derivedStateOf {
             isEmailValid && isFirstNameValid && isLastNameValid && isPasswordValid
+        }
+    }
+    val canConfirmDeleteAccount by remember {
+        derivedStateOf {
+            deleteAccountConfirmationText.trim().equals(DELETE_ACCOUNT_CONFIRMATION_TEXT, ignoreCase = true)
         }
     }
 
@@ -209,6 +223,74 @@ fun ProfileDetailsScreen(
                 )
             }
         }
+    }
+
+    if (showDeleteAccountDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showDeleteAccountDialog = false
+                deleteAccountConfirmationText = ""
+            },
+            title = { Text("Delete Account") },
+            text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        "This removes your sign-in access and sensitive account data. Your first name, last name, username, bills, refunds, and event history stay on file as matters of record.",
+                    )
+                    Text(
+                        "Type \"$DELETE_ACCOUNT_CONFIRMATION_TEXT\" and press enter, or use the delete button below.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    StandardTextField(
+                        value = deleteAccountConfirmationText,
+                        onValueChange = { deleteAccountConfirmationText = it },
+                        label = "Confirmation",
+                        imeAction = ImeAction.Done,
+                        onImeAction = {
+                            if (canConfirmDeleteAccount) {
+                                showDeleteAccountDialog = false
+                                component.deleteAccount(deleteAccountConfirmationText)
+                                deleteAccountConfirmationText = ""
+                            }
+                        },
+                        supportingText = if (deleteAccountConfirmationText.isNotBlank() && !canConfirmDeleteAccount) {
+                            "Type \"$DELETE_ACCOUNT_CONFIRMATION_TEXT\" exactly."
+                        } else {
+                            ""
+                        },
+                        isError = deleteAccountConfirmationText.isNotBlank() && !canConfirmDeleteAccount,
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteAccountDialog = false
+                        component.deleteAccount(deleteAccountConfirmationText)
+                        deleteAccountConfirmationText = ""
+                    },
+                    enabled = canConfirmDeleteAccount,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError,
+                    ),
+                ) {
+                    Text("Delete Account")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteAccountDialog = false
+                        deleteAccountConfirmationText = ""
+                    },
+                ) {
+                    Text("Cancel")
+                }
+            },
+        )
     }
 
     Scaffold(
@@ -401,6 +483,47 @@ fun ProfileDetailsScreen(
                 enabled = isFormValid
             ) {
                 Text("Save Profile Changes")
+            }
+
+            Text(
+                "Delete Account",
+                style = MaterialTheme.typography.titleMedium,
+            )
+
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                ),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        "Delete your account and remove sign-in access.",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                    )
+                    Text(
+                        "Deletion is blocked while bills are still owed or while refunds are still pending in either direction. Historical bills, refunds, and event records stay on file.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                    )
+                    Button(
+                        onClick = {
+                            deleteAccountConfirmationText = ""
+                            showDeleteAccountDialog = true
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error,
+                            contentColor = MaterialTheme.colorScheme.onError,
+                        ),
+                    ) {
+                        Text("Delete Account")
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(32.dp))
