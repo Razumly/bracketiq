@@ -22,6 +22,7 @@ import platform.AuthenticationServices.ASAuthorizationScopeEmail
 import platform.AuthenticationServices.ASAuthorizationScopeFullName
 import platform.Foundation.NSData
 import platform.Foundation.NSError
+import platform.Foundation.getBytes
 import platform.darwin.NSObject
 
 private data class AppleAuthorizationPayload(

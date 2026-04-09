@@ -5,6 +5,7 @@ import com.razumly.mvp.core.data.appleLogin
 import com.razumly.mvp.core.data.oauth2Login
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.UserRepository
+import com.razumly.mvp.core.network.userMessage
 import kotlinx.coroutines.launch
 
 fun DefaultAuthComponent.oauth2Login() {
@@ -12,8 +13,10 @@ fun DefaultAuthComponent.oauth2Login() {
         _loginState.value = LoginState.Loading
         userRepository.oauth2Login().onSuccess {
             _loginState.value = LoginState.Success
-        }.onFailure {
-            _loginState.value = LoginState.Error("Failed To Login: ${it.message}")
+        }.onFailure { throwable ->
+            _loginState.value = LoginState.Error(
+                throwable.userMessage("Couldn't sign in with Google.")
+            )
         }
     }
 }
@@ -23,8 +26,10 @@ fun DefaultAuthComponent.appleLogin() {
         _loginState.value = LoginState.Loading
         userRepository.appleLogin().onSuccess {
             _loginState.value = LoginState.Success
-        }.onFailure {
-            _loginState.value = LoginState.Error("Failed To Login: ${it.message}")
+        }.onFailure { throwable ->
+            _loginState.value = LoginState.Error(
+                throwable.userMessage("Couldn't sign in with Apple.")
+            )
         }
     }
 }
