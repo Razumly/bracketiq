@@ -42,6 +42,7 @@ interface OrganizationDetailComponent : IPaymentProcessor {
     val events: StateFlow<List<Event>>
     val teams: StateFlow<List<TeamWithPlayers>>
     val products: StateFlow<List<Product>>
+    val startingProductCheckoutId: StateFlow<String?>
     val rentalFieldOptions: StateFlow<List<RentalFieldOption>>
     val rentalBusyBlocks: StateFlow<List<RentalBusyBlock>>
     val isLoadingOrganization: StateFlow<Boolean>
@@ -99,6 +100,9 @@ class DefaultOrganizationDetailComponent(
     private val _products = MutableStateFlow<List<Product>>(emptyList())
     override val products: StateFlow<List<Product>> = _products.asStateFlow()
 
+    private val _startingProductCheckoutId = MutableStateFlow<String?>(null)
+    override val startingProductCheckoutId: StateFlow<String?> = _startingProductCheckoutId.asStateFlow()
+
     private val _rentalFieldOptions = MutableStateFlow<List<RentalFieldOption>>(emptyList())
     override val rentalFieldOptions: StateFlow<List<RentalFieldOption>> = _rentalFieldOptions.asStateFlow()
 
@@ -147,16 +151,19 @@ class DefaultOrganizationDetailComponent(
                 when (result) {
                     PaymentResult.Canceled -> {
                         _errorState.value = ErrorMessage("Payment canceled.")
+                        _startingProductCheckoutId.value = null
                         pendingProductPurchase = null
                     }
 
                     is PaymentResult.Failed -> {
                         _errorState.value = ErrorMessage(result.error)
+                        _startingProductCheckoutId.value = null
                         pendingProductPurchase = null
                     }
 
                     PaymentResult.Completed -> {
                         val pendingProduct = pendingProductPurchase
+                        _startingProductCheckoutId.value = null
                         if (pendingProduct != null) {
                             _message.value = if (pendingProduct.isSinglePurchase()) {
                                 "Purchase completed for ${pendingProduct.name}."
@@ -317,35 +324,47 @@ class DefaultOrganizationDetailComponent(
 
     override fun startProductPurchase(product: Product) {
         scope.launch {
-            val user = userRepository.currentUser.value.getOrNull()
-            val account = userRepository.currentAccount.value.getOrNull()
-            if (user == null || user.id.isBlank()) {
-                _errorState.value = ErrorMessage("Please sign in to purchase.")
-                return@launch
-            }
-            if (!ensureBillingAddressOrPrompt { startProductPurchase(product) }) {
-                return@launch
-            }
+            if (_startingProductCheckoutId.value != null) return@launch
 
-            if (::loadingHandler.isInitialized) {
-                loadingHandler.showLoading("Preparing checkout...")
-            }
-            val purchaseIntentResult = if (product.isSinglePurchase()) {
-                billingRepository.createProductPurchaseIntent(product.id)
-            } else {
-                billingRepository.createProductSubscriptionIntent(product.id)
-            }
-            purchaseIntentResult
-                .onSuccess { intent ->
-                    pendingProductPurchase = product
-                    showPaymentSheet(intent, account?.email.orEmpty(), user.fullName)
+            _startingProductCheckoutId.value = product.id
+            try {
+                val user = userRepository.currentUser.value.getOrNull()
+                val account = userRepository.currentAccount.value.getOrNull()
+                if (user == null || user.id.isBlank()) {
+                    _errorState.value = ErrorMessage("Please sign in to purchase.")
+                    return@launch
                 }
-                .onFailure { error ->
-                    _errorState.value = ErrorMessage("Unable to start checkout: ${error.userMessage()}")
-                    if (::loadingHandler.isInitialized) {
-                        loadingHandler.hideLoading()
+                if (!ensureBillingAddressOrPrompt { startProductPurchase(product) }) {
+                    return@launch
+                }
+
+                if (::loadingHandler.isInitialized) {
+                    loadingHandler.showLoading("Preparing checkout...")
+                }
+                val purchaseIntentResult = if (product.isSinglePurchase()) {
+                    billingRepository.createProductPurchaseIntent(product.id)
+                } else {
+                    billingRepository.createProductSubscriptionIntent(product.id)
+                }
+                purchaseIntentResult
+                    .onSuccess { intent ->
+                        pendingProductPurchase = product
+                        showPaymentSheet(intent, account?.email.orEmpty(), user.fullName)
                     }
+                    .onFailure { error ->
+                        _errorState.value = ErrorMessage("Unable to start checkout: ${error.userMessage()}")
+                        if (::loadingHandler.isInitialized) {
+                            loadingHandler.hideLoading()
+                        }
+                    }
+            } catch (error: Throwable) {
+                _errorState.value = ErrorMessage("Unable to start checkout: ${error.userMessage()}")
+                if (::loadingHandler.isInitialized) {
+                    loadingHandler.hideLoading()
                 }
+            } finally {
+                _startingProductCheckoutId.value = null
+            }
         }
     }
 

@@ -219,6 +219,7 @@ private class EventRepositoryHttp_FakeUserRepository(
 
     override suspend fun login(email: String, password: String): Result<UserData> = error("unused")
     override suspend fun logout(): Result<Unit> = error("unused")
+    override suspend fun deleteAccount(confirmationText: String): Result<Unit> = error("unused")
     override suspend fun searchPlayers(search: String): Result<List<UserData>> = error("unused")
     override suspend fun ensureUserByEmail(email: String): Result<UserData> = error("unused")
     override suspend fun createInvites(invites: List<com.razumly.mvp.core.network.dto.InviteCreateDto>): Result<List<com.razumly.mvp.core.data.dataTypes.Invite>> = error("unused")

@@ -146,6 +146,7 @@ private class FakeUserRepository : IUserRepository {
 
     override suspend fun login(email: String, password: String): Result<UserData> = error("unused")
     override suspend fun logout(): Result<Unit> = error("unused")
+    override suspend fun deleteAccount(confirmationText: String): Result<Unit> = error("unused")
 
     override suspend fun getUsers(
         userIds: List<String>,

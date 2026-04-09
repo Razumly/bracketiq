@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -20,6 +21,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -88,6 +90,7 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
     val events by component.events.collectAsState()
     val teams by component.teams.collectAsState()
     val products by component.products.collectAsState()
+    val startingProductCheckoutId by component.startingProductCheckoutId.collectAsState()
     val rentalFieldOptions by component.rentalFieldOptions.collectAsState()
     val rentalBusyBlocks by component.rentalBusyBlocks.collectAsState()
     val isLoadingOrganization by component.isLoadingOrganization.collectAsState()
@@ -485,6 +488,7 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
                     StoreTabContent(
                         organization = organization,
                         products = products,
+                        startingProductCheckoutId = startingProductCheckoutId,
                         isLoading = isLoadingProducts,
                         bottomPadding = bottomPadding,
                         onPurchase = component::startProductPurchase,
@@ -551,6 +555,14 @@ private fun Product.priceLabel(): String {
 
 private fun Product.purchaseButtonLabel(): String =
     if (isSinglePurchase()) "Buy now" else "Subscribe"
+
+private fun listTabPadding(bottomPadding: androidx.compose.ui.unit.Dp): PaddingValues =
+    PaddingValues(
+        start = 16.dp,
+        top = 16.dp,
+        end = 16.dp,
+        bottom = 16.dp + bottomPadding,
+    )
 
 @Composable
 private fun OverviewTabContent(
@@ -654,7 +666,7 @@ private fun EventsTabContent(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp + bottomPadding),
+        contentPadding = listTabPadding(bottomPadding),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         if (events.isEmpty()) {
@@ -693,7 +705,7 @@ private fun TeamsTabContent(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp + bottomPadding),
+        contentPadding = listTabPadding(bottomPadding),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         if (teams.isEmpty()) {
@@ -712,11 +724,13 @@ private fun TeamsTabContent(
 private fun StoreTabContent(
     organization: Organization?,
     products: List<Product>,
+    startingProductCheckoutId: String?,
     isLoading: Boolean,
     bottomPadding: androidx.compose.ui.unit.Dp,
     onPurchase: (Product) -> Unit,
 ) {
     val hasStripeAccount = organization?.hasStripeAccount == true
+    val isCheckoutStarting = !startingProductCheckoutId.isNullOrBlank()
 
     if (isLoading) {
         EmptyState(message = "Loading store...")
@@ -725,7 +739,7 @@ private fun StoreTabContent(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp + bottomPadding),
+        contentPadding = listTabPadding(bottomPadding),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         if (!hasStripeAccount) {
@@ -748,6 +762,8 @@ private fun StoreTabContent(
                 ProductCard(
                     product = product,
                     hasStripeAccount = hasStripeAccount,
+                    isStartingCheckout = startingProductCheckoutId == product.id,
+                    isCheckoutLocked = isCheckoutStarting,
                     onPurchase = onPurchase,
                 )
             }
@@ -778,6 +794,8 @@ private fun SectionCard(
 private fun ProductCard(
     product: Product,
     hasStripeAccount: Boolean,
+    isStartingCheckout: Boolean,
+    isCheckoutLocked: Boolean,
     onPurchase: (Product) -> Unit,
 ) {
     val isActive = product.isActive != false
@@ -827,10 +845,21 @@ private fun ProductCard(
 
             Button(
                 onClick = { onPurchase(product) },
-                enabled = hasStripeAccount && isActive,
+                enabled = hasStripeAccount && isActive && !isCheckoutLocked,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(text = if (hasStripeAccount) product.purchaseButtonLabel() else "Payments unavailable")
+                if (isStartingCheckout) {
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .width(18.dp)
+                            .height(18.dp),
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(text = "Preparing checkout...")
+                } else {
+                    Text(text = if (hasStripeAccount) product.purchaseButtonLabel() else "Payments unavailable")
+                }
             }
         }
     }
