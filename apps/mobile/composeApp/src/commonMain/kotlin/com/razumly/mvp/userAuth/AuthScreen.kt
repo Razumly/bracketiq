@@ -1,6 +1,7 @@
 package com.razumly.mvp.userAuth
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,27 +11,35 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.Text
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import com.razumly.mvp.core.data.dataTypes.LoginState
 import com.razumly.mvp.core.data.repositories.SignupProfileConflict
 import com.razumly.mvp.core.data.repositories.SignupProfileField
@@ -38,9 +47,12 @@ import com.razumly.mvp.core.data.repositories.SignupProfileSelection
 import com.razumly.mvp.core.presentation.composables.EmailSignInButton
 import com.razumly.mvp.core.presentation.composables.GoogleSignInButton
 import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
+import com.razumly.mvp.core.presentation.composables.PlatformLoadingIndicator
 import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.presentation.composables.rememberPlatformFocusManager
 import com.razumly.mvp.core.presentation.util.platformImePadding
+import com.razumly.mvp.core.util.ErrorMessage
+import com.razumly.mvp.core.util.LocalPopupHandler
 import io.github.aakira.napier.Napier
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
@@ -64,6 +76,7 @@ fun AuthScreenBase(
     val loginState by component.loginState.collectAsState()
     val isSignup by component.isSignup.collectAsState()
     val signupConflict by component.signupConflict.collectAsState()
+    val popupHandler = LocalPopupHandler.current
 
     val isPasswordValid = password.length in 8..256
     val isConfirmPasswordValid = confirmPassword.length in 8..256
@@ -113,10 +126,15 @@ fun AuthScreenBase(
         }
     }
 
-    LaunchedEffect(loginState) {
-        if (loginState is LoginState.Error) {
-            Napier.e("AuthScreen error state: ${(loginState as LoginState.Error).message}")
-        }
+    LaunchedEffect(loginState, popupHandler) {
+        val errorState = loginState as? LoginState.Error ?: return@LaunchedEffect
+        Napier.e("AuthScreen error state: ${errorState.message}")
+        popupHandler.showPopup(
+            ErrorMessage(
+                message = errorState.message,
+                duration = SnackbarDuration.Long,
+            )
+        )
     }
 
     Box(
@@ -296,24 +314,6 @@ fun AuthScreenBase(
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    when (loginState) {
-                        is LoginState.Error -> {
-                            Text(
-                                text = (loginState as LoginState.Error).message,
-                                color = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.padding(vertical = 8.dp)
-                            )
-                        }
-
-                        LoginState.Loading -> {
-                            CircularProgressIndicator(
-                                modifier = Modifier.padding(16.dp)
-                            )
-                        }
-
-                        else -> {}
-                    }
-
                     Button(
                         onClick = handleSubmit,
                         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
@@ -347,6 +347,10 @@ fun AuthScreenBase(
                 }
             }
         }
+
+        if (loginState is LoginState.Loading) {
+            AuthLoadingOverlay()
+        }
     }
 
     PlatformDateTimePicker(
@@ -363,6 +367,55 @@ fun AuthScreenBase(
         getTime = false,
         canSelectPast = true,
     )
+}
+
+@Composable
+private fun AuthLoadingOverlay() {
+    val isDarkTheme = isSystemInDarkTheme()
+    val scrimInteractionSource = remember { MutableInteractionSource() }
+    val cardBackground = if (isDarkTheme) Color(0xFF131B27) else MaterialTheme.colorScheme.surface
+    val borderColor = if (isDarkTheme) Color(0xFF2D405A) else Color(0xFFD7DDE6)
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.45f))
+            .clickable(
+                interactionSource = scrimInteractionSource,
+                indication = null,
+                onClick = {},
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Card(
+            modifier = Modifier
+                .padding(horizontal = 32.dp)
+                .clip(RoundedCornerShape(24.dp)),
+            colors = CardDefaults.cardColors(containerColor = cardBackground),
+            elevation = CardDefaults.cardElevation(defaultElevation = 12.dp),
+            border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(borderColor)),
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 28.dp, vertical = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                PlatformLoadingIndicator(
+                    modifier = Modifier.size(32.dp),
+                )
+                Text(
+                    text = "Signing you in",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Text(
+                    text = "Please wait a moment.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
 }
 
 @Composable
