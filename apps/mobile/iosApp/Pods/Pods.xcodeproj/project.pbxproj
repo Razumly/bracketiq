@@ -20,16 +20,16 @@
 		};
 		B96E9866C2872A8B63836A92F517CD48 /* composeApp */ = {
 			isa = PBXAggregateTarget;
-			buildConfigurationList = A41E267A1C2177E047B26E0DD5334EA8 /* Build configuration list for PBXAggregateTarget "composeApp" */;
+			buildConfigurationList = 9C953A199EDAE9602BF266AADAD97459 /* Build configuration list for PBXAggregateTarget "composeApp" */;
 			buildPhases = (
-				B51B3F956141B2C63B0533B760FF6A19 /* [CP-User] Build composeApp */,
+				235172A54D3F263FE1052B7EDEC3C900 /* [CP-User] Build composeApp */,
 			);
 			dependencies = (
-				7E4E9D957D4F1E2D5F7E630D5D27C581 /* PBXTargetDependency */,
-				F9724460B71A0C4C559766A704CAC507 /* PBXTargetDependency */,
-				E4FFF5207CA3CDD07233A43C15305FB3 /* PBXTargetDependency */,
-				4426478E55622157BFC2A09BF7997F70 /* PBXTargetDependency */,
-				59AB7C4695B70775338634C349A1D497 /* PBXTargetDependency */,
+				79075F0FBF9A93EE91D0F366569F305D /* PBXTargetDependency */,
+				3E1C5383A05BF8A1A31BA0CA963BEA70 /* PBXTargetDependency */,
+				3B7CC8A500C8D7E890A5A3B742BC2A84 /* PBXTargetDependency */,
+				DEA296BD85FFDC8FD5F27C44E51B1CF0 /* PBXTargetDependency */,
+				3B05E84AF76CAB10F2F64D7E241A3C4A /* PBXTargetDependency */,
 			);
 			name = composeApp;
 		};
@@ -939,6 +939,13 @@
 			remoteGlobalIDString = 8D7F5D5DD528D21A72DC87ADA5B12E2D;
 			remoteInfo = GoogleUtilities;
 		};
+		269E63234C5F377F4A9C14D073D635DA /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = BFDFE7DC352907FC980B868725387E98 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = CAD3534FC55B0333104E5117C0A9A324;
+			remoteInfo = GoogleSignIn;
+		};
 		2A061CF84D5C0C65B74DE68922C56B15 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = BFDFE7DC352907FC980B868725387E98 /* Project object */;
@@ -959,13 +966,6 @@
 			proxyType = 1;
 			remoteGlobalIDString = F9A1BF709B7BA4C24A83664EB1E1C7D4;
 			remoteInfo = IQKeyboardCore;
-		};
-		39269F115269379184F55DE65335BCE7 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = BFDFE7DC352907FC980B868725387E98 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = B490E7485944099E16C9CBD79119D1D4;
-			remoteInfo = IQKeyboardManagerSwift;
 		};
 		395DC2F74BF371809A404A3030B99485 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -989,6 +989,13 @@
 			remoteInfo = FirebaseCore;
 		};
 		3D3DDA5794F6A79C8A981947B5900E5E /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = BFDFE7DC352907FC980B868725387E98 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B490E7485944099E16C9CBD79119D1D4;
+			remoteInfo = IQKeyboardManagerSwift;
+		};
+		4241FFFF0D5B12F657DB6B35AF89CBBD /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = BFDFE7DC352907FC980B868725387E98 /* Project object */;
 			proxyType = 1;
@@ -1023,12 +1030,12 @@
 			remoteGlobalIDString = A6602BCAA6F4F932A586C41D0B7E019C;
 			remoteInfo = "IQTextView-IQTextView";
 		};
-		4E037582C02D45764DEF93F2146DDF1E /* PBXContainerItemProxy */ = {
+		4D74B768912F193F14F11881868FA51E /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = BFDFE7DC352907FC980B868725387E98 /* Project object */;
 			proxyType = 1;
-			remoteGlobalIDString = 0C1885900810601510E0C632060FAF26;
-			remoteInfo = GooglePlaces;
+			remoteGlobalIDString = 4402AFF83DBDC4DD07E198685FDC2DF2;
+			remoteInfo = FirebaseCore;
 		};
 		511165F6D47EE9BA6F4D5777A2B13052 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -1106,6 +1113,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = 0981F89DB5DA3FFCFFEBDE1F56287054;
 			remoteInfo = IQKeyboardReturnManager;
+		};
+		70129EED58B9EA1FD25C82EE3F2A396E /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = BFDFE7DC352907FC980B868725387E98 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 5895B432FE4D2F6826C8FF25A09DB6D2;
+			remoteInfo = FirebaseMessaging;
 		};
 		70168B81EB70114109157F05E1494199 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -1198,12 +1212,12 @@
 			remoteGlobalIDString = CAD3534FC55B0333104E5117C0A9A324;
 			remoteInfo = GoogleSignIn;
 		};
-		A9CA567165FDBDC98487A537B4CAD83C /* PBXContainerItemProxy */ = {
+		A6803888271BB561E2ADB71B750EF407 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = BFDFE7DC352907FC980B868725387E98 /* Project object */;
 			proxyType = 1;
-			remoteGlobalIDString = CAD3534FC55B0333104E5117C0A9A324;
-			remoteInfo = GoogleSignIn;
+			remoteGlobalIDString = 0C1885900810601510E0C632060FAF26;
+			remoteInfo = GooglePlaces;
 		};
 		AB4289B9339D57DE292422AAF3ABDAF2 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -1267,13 +1281,6 @@
 			proxyType = 1;
 			remoteGlobalIDString = 12890DE3ABBC2CA295E108358D85EE69;
 			remoteInfo = IQTextView;
-		};
-		BBD4136120E4B1B27DE1CBCED06F8E76 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = BFDFE7DC352907FC980B868725387E98 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 5895B432FE4D2F6826C8FF25A09DB6D2;
-			remoteInfo = FirebaseMessaging;
 		};
 		BF5F7D068F4786295840DA1D9C7E8488 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -1407,13 +1414,6 @@
 			proxyType = 1;
 			remoteGlobalIDString = 55522A91938FF505CFEBEAD2DD85AE2D;
 			remoteInfo = "nanopb-nanopb_Privacy";
-		};
-		FB35E7BE24C55A04975677E2734F63E4 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = BFDFE7DC352907FC980B868725387E98 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 4402AFF83DBDC4DD07E198685FDC2DF2;
-			remoteInfo = FirebaseCore;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -6282,6 +6282,16 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		235172A54D3F263FE1052B7EDEC3C900 /* [CP-User] Build composeApp */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			name = "[CP-User] Build composeApp";
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "                if [ \"YES\" = \"$OVERRIDE_KOTLIN_BUILD_IDE_SUPPORTED\" ]; then\n                    echo \"Skipping Gradle build task invocation due to OVERRIDE_KOTLIN_BUILD_IDE_SUPPORTED environment variable set to \"YES\"\"\n                    exit 0\n                fi\n                set -ev\n                REPO_ROOT=\"$PODS_TARGET_SRCROOT\"\n                \"$REPO_ROOT/../gradlew\" -p \"$REPO_ROOT\" $KOTLIN_PROJECT_PATH:syncFramework                     -Pkotlin.native.cocoapods.platform=$PLATFORM_NAME                     -Pkotlin.native.cocoapods.archs=\"$ARCHS\"                     -Pkotlin.native.cocoapods.configuration=\"$CONFIGURATION\"\n";
+		};
 		5C53F63B615C49C159CEC84184FD1687 /* [CP] Copy XCFrameworks */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
@@ -6298,16 +6308,6 @@
 			shellPath = /bin/sh;
 			shellScript = "\"${PODS_ROOT}/Target Support Files/GooglePlaces/GooglePlaces-xcframeworks.sh\"\n";
 			showEnvVarsInLog = 0;
-		};
-		B51B3F956141B2C63B0533B760FF6A19 /* [CP-User] Build composeApp */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			name = "[CP-User] Build composeApp";
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "                if [ \"YES\" = \"$OVERRIDE_KOTLIN_BUILD_IDE_SUPPORTED\" ]; then\n                    echo \"Skipping Gradle build task invocation due to OVERRIDE_KOTLIN_BUILD_IDE_SUPPORTED environment variable set to \"YES\"\"\n                    exit 0\n                fi\n                set -ev\n                REPO_ROOT=\"$PODS_TARGET_SRCROOT\"\n                JAVA_17_HOME=\"$(/usr/libexec/java_home -v 17 2>/dev/null || true)\"\n                if [ -z \"$JAVA_17_HOME\" ]; then\n                    echo \"error: JDK 17 is required for Kotlin iOS CocoaPods builds. Install JDK 17 and rerun pod install.\" >&2\n                    exit 1\n                fi\n                export JAVA_HOME=\"$JAVA_17_HOME\"\n                export ORG_GRADLE_JAVA_HOME=\"$JAVA_17_HOME\"\n                \"$REPO_ROOT/../gradlew\" -p \"$REPO_ROOT\" $KOTLIN_PROJECT_PATH:syncFramework                     -Pkotlin.native.cocoapods.platform=$PLATFORM_NAME                     -Pkotlin.native.cocoapods.archs=\"$ARCHS\"                     -Pkotlin.native.cocoapods.configuration=\"$CONFIGURATION\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -7096,6 +7096,18 @@
 			target = D676E21115185671D7258A56944ABE98 /* GTMSessionFetcher */;
 			targetProxy = BB14E219DC3A94D9FDBA1BED1D354EC7 /* PBXContainerItemProxy */;
 		};
+		3B05E84AF76CAB10F2F64D7E241A3C4A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = IQKeyboardManagerSwift;
+			target = B490E7485944099E16C9CBD79119D1D4 /* IQKeyboardManagerSwift */;
+			targetProxy = 4241FFFF0D5B12F657DB6B35AF89CBBD /* PBXContainerItemProxy */;
+		};
+		3B7CC8A500C8D7E890A5A3B742BC2A84 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = GooglePlaces;
+			target = 0C1885900810601510E0C632060FAF26 /* GooglePlaces */;
+			targetProxy = A6803888271BB561E2ADB71B750EF407 /* PBXContainerItemProxy */;
+		};
 		3C10FB397F164AEEE3D25E265B5A61BD /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			name = AppAuth;
@@ -7108,11 +7120,11 @@
 			target = 5895B432FE4D2F6826C8FF25A09DB6D2 /* FirebaseMessaging */;
 			targetProxy = 5E747147A9880EE7559C7EB9C8BD3E70 /* PBXContainerItemProxy */;
 		};
-		4426478E55622157BFC2A09BF7997F70 /* PBXTargetDependency */ = {
+		3E1C5383A05BF8A1A31BA0CA963BEA70 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			name = GoogleSignIn;
-			target = CAD3534FC55B0333104E5117C0A9A324 /* GoogleSignIn */;
-			targetProxy = A9CA567165FDBDC98487A537B4CAD83C /* PBXContainerItemProxy */;
+			name = FirebaseMessaging;
+			target = 5895B432FE4D2F6826C8FF25A09DB6D2 /* FirebaseMessaging */;
+			targetProxy = 70129EED58B9EA1FD25C82EE3F2A396E /* PBXContainerItemProxy */;
 		};
 		46E7A448113E020A0F2EDB2016DCEE3D /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
@@ -7143,12 +7155,6 @@
 			name = IQKeyboardToolbarManager;
 			target = 020993F16DA5986DACE118349EBCE9E5 /* IQKeyboardToolbarManager */;
 			targetProxy = 8B7EAFE181980CC79D82B31FA97892C7 /* PBXContainerItemProxy */;
-		};
-		59AB7C4695B70775338634C349A1D497 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			name = IQKeyboardManagerSwift;
-			target = B490E7485944099E16C9CBD79119D1D4 /* IQKeyboardManagerSwift */;
-			targetProxy = 39269F115269379184F55DE65335BCE7 /* PBXContainerItemProxy */;
 		};
 		5EA13D77A253CD74FE73C54D115F996B /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
@@ -7198,17 +7204,17 @@
 			target = 5C642AA10FB29936669CC269F42079C6 /* AppAuth */;
 			targetProxy = 129A0551AE2BD56184FFB146BB810D68 /* PBXContainerItemProxy */;
 		};
+		79075F0FBF9A93EE91D0F366569F305D /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = FirebaseCore;
+			target = 4402AFF83DBDC4DD07E198685FDC2DF2 /* FirebaseCore */;
+			targetProxy = 4D74B768912F193F14F11881868FA51E /* PBXContainerItemProxy */;
+		};
 		7E48782D67F79C629660594C183A5AA4 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			name = "PromisesObjC-FBLPromises_Privacy";
 			target = 1BFBEDBF7E03729D43C96530EE190825 /* PromisesObjC-FBLPromises_Privacy */;
 			targetProxy = 47EA6D3A872E19348FBFC8A0AE460455 /* PBXContainerItemProxy */;
-		};
-		7E4E9D957D4F1E2D5F7E630D5D27C581 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			name = FirebaseCore;
-			target = 4402AFF83DBDC4DD07E198685FDC2DF2 /* FirebaseCore */;
-			targetProxy = FB35E7BE24C55A04975677E2734F63E4 /* PBXContainerItemProxy */;
 		};
 		85AEF603316C9CE7991C66F782DABAB4 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
@@ -7372,6 +7378,12 @@
 			target = B490E7485944099E16C9CBD79119D1D4 /* IQKeyboardManagerSwift */;
 			targetProxy = 3D3DDA5794F6A79C8A981947B5900E5E /* PBXContainerItemProxy */;
 		};
+		DEA296BD85FFDC8FD5F27C44E51B1CF0 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = GoogleSignIn;
+			target = CAD3534FC55B0333104E5117C0A9A324 /* GoogleSignIn */;
+			targetProxy = 269E63234C5F377F4A9C14D073D635DA /* PBXContainerItemProxy */;
+		};
 		DF411F225017658343646C1808E9FBF2 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			name = FirebaseInstallations;
@@ -7389,12 +7401,6 @@
 			name = composeApp;
 			target = B96E9866C2872A8B63836A92F517CD48 /* composeApp */;
 			targetProxy = 106673F583AA8FCE88378D20E684836C /* PBXContainerItemProxy */;
-		};
-		E4FFF5207CA3CDD07233A43C15305FB3 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			name = GooglePlaces;
-			target = 0C1885900810601510E0C632060FAF26 /* GooglePlaces */;
-			targetProxy = 4E037582C02D45764DEF93F2146DDF1E /* PBXContainerItemProxy */;
 		};
 		E9F3B97B454E6920FC120DEB65123740 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
@@ -7431,12 +7437,6 @@
 			name = GoogleDataTransport;
 			target = 5C0371EE948D0357B8EE0E34ABB44BF0 /* GoogleDataTransport */;
 			targetProxy = 14CB3DAD2704E5A0CD35789278BF05CF /* PBXContainerItemProxy */;
-		};
-		F9724460B71A0C4C559766A704CAC507 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			name = FirebaseMessaging;
-			target = 5895B432FE4D2F6826C8FF25A09DB6D2 /* FirebaseMessaging */;
-			targetProxy = BBD4136120E4B1B27DE1CBCED06F8E76 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -7745,6 +7745,24 @@
 				TARGETED_DEVICE_FAMILY = "1,2";
 				VERSIONING_SYSTEM = "apple-generic";
 				VERSION_INFO_PREFIX = "";
+			};
+			name = Debug;
+		};
+		286B25B5ADC8767A26A09C7C2309EA2C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 032CB4153F783165B7699D3535F22B82 /* composeApp.debug.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.3;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
 		};
@@ -9244,6 +9262,25 @@
 			};
 			name = Debug;
 		};
+		B654ED93EFEBE9287067A6E17FA4A19D /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = A8BD58C20EC78311D90FC09CF7DA9FF3 /* composeApp.release.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.3;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
 		BAAD91FAB2D328FFF3A1A7F046C4C0C4 /* Release */ = {
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 8083A274A97162E222E7E45096B32D58 /* GTMSessionFetcher.release.xcconfig */;
@@ -9337,24 +9374,6 @@
 				WRAPPER_EXTENSION = bundle;
 			};
 			name = Release;
-		};
-		C5E564A1A587D78C278653CB22FD933A /* Debug */ = {
-			isa = XCBuildConfiguration;
-			baseConfigurationReference = 032CB4153F783165B7699D3535F22B82 /* composeApp.debug.xcconfig */;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CLANG_ENABLE_OBJC_WEAK = NO;
-				ENABLE_USER_SCRIPT_SANDBOXING = NO;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.3;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				SDKROOT = iphoneos;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Debug;
 		};
 		C802E97B43C6BD793DDF4CECB2DEF317 /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -10038,25 +10057,6 @@
 			};
 			name = Release;
 		};
-		FF9E79C5224A73C4AAA3CA250A05FC86 /* Release */ = {
-			isa = XCBuildConfiguration;
-			baseConfigurationReference = A8BD58C20EC78311D90FC09CF7DA9FF3 /* composeApp.release.xcconfig */;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CLANG_ENABLE_OBJC_WEAK = NO;
-				ENABLE_USER_SCRIPT_SANDBOXING = NO;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.3;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				SDKROOT = iphoneos;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				VALIDATE_PRODUCT = YES;
-			};
-			name = Release;
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -10285,20 +10285,20 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		9C953A199EDAE9602BF266AADAD97459 /* Build configuration list for PBXAggregateTarget "composeApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				286B25B5ADC8767A26A09C7C2309EA2C /* Debug */,
+				B654ED93EFEBE9287067A6E17FA4A19D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		A01B426E9FA7D28B846C5A95C9872E70 /* Build configuration list for PBXNativeTarget "FirebaseInstallations-FirebaseInstallations_Privacy" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				ED36D877786C3B13FAA0FD3C67DBFB18 /* Debug */,
 				65B74F22A2A79A770D564C33DC65C846 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		A41E267A1C2177E047B26E0DD5334EA8 /* Build configuration list for PBXAggregateTarget "composeApp" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				C5E564A1A587D78C278653CB22FD933A /* Debug */,
-				FF9E79C5224A73C4AAA3CA250A05FC86 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
