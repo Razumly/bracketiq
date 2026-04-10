@@ -46,6 +46,7 @@ import com.razumly.mvp.core.data.repositories.SignupProfileField
 import com.razumly.mvp.core.data.repositories.SignupProfileSelection
 import com.razumly.mvp.core.presentation.composables.EmailSignInButton
 import com.razumly.mvp.core.presentation.composables.GoogleSignInButton
+import com.razumly.mvp.core.presentation.composables.PasswordField
 import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
 import com.razumly.mvp.core.presentation.composables.PlatformLoadingIndicator
 import com.razumly.mvp.core.presentation.composables.StandardTextField
@@ -205,11 +206,10 @@ fun AuthScreenBase(
                         externalFocusManager = emailFocusManager
                     )
 
-                    StandardTextField(
+                    PasswordField(
                         value = password,
                         onValueChange = { password = it },
                         label = "Password",
-                        isPassword = true,
                         isError = passwordError.isNotBlank(),
                         supportingText = passwordError,
                         modifier = Modifier.fillMaxWidth(),
@@ -218,11 +218,10 @@ fun AuthScreenBase(
                     )
 
                     if (isSignup) {
-                        StandardTextField(
+                        PasswordField(
                             value = confirmPassword,
                             onValueChange = { confirmPassword = it },
                             label = "Confirm Password",
-                            isPassword = true,
                             modifier = Modifier.fillMaxWidth(),
                             imeAction = ImeAction.Done,
                             externalFocusManager = confirmPasswordFocusManager

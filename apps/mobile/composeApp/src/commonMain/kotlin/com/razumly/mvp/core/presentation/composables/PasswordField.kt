@@ -11,6 +11,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.ImeAction
 
 @Composable
 fun PasswordField(
@@ -23,6 +24,9 @@ fun PasswordField(
     supportingText: String = "",
     enabled: Boolean = true,
     readOnly: Boolean = false,
+    imeAction: ImeAction = ImeAction.Next,
+    externalFocusManager: PlatformFocusManager? = null,
+    onImeAction: (() -> Unit)? = null,
 ) {
     var passwordVisible by remember { mutableStateOf(false) }
 
@@ -38,6 +42,9 @@ fun PasswordField(
         supportingText = supportingText,
         enabled = enabled,
         readOnly = readOnly,
+        imeAction = imeAction,
+        externalFocusManager = externalFocusManager,
+        onImeAction = onImeAction,
         trailingIcon = {
             IconButton(onClick = { passwordVisible = !passwordVisible }) {
                 Icon(

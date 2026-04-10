@@ -133,6 +133,12 @@ fun ProfileDetailsScreen(
             deleteAccountConfirmationText.trim().equals(DELETE_ACCOUNT_CONFIRMATION_TEXT, ignoreCase = true)
         }
     }
+    val passwordKeyboardOptions = remember {
+        KeyboardOptions(
+            keyboardType = KeyboardType.Password,
+            autoCorrectEnabled = false,
+        )
+    }
 
     // Initialize form with current data
     LaunchedEffect(currentUser, currentAccount) {
@@ -404,7 +410,7 @@ fun ProfileDetailsScreen(
                 label = { Text("Current Password") },
                 modifier = Modifier.fillMaxWidth(),
                 visualTransformation = if (currentPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                keyboardOptions = passwordKeyboardOptions,
                 trailingIcon = {
                     IconButton(onClick = { currentPasswordVisible = !currentPasswordVisible }) {
                         Icon(
@@ -427,7 +433,7 @@ fun ProfileDetailsScreen(
                 label = { Text("New Password") },
                 modifier = Modifier.fillMaxWidth(),
                 visualTransformation = if (newPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                keyboardOptions = passwordKeyboardOptions,
                 trailingIcon = {
                     IconButton(onClick = { newPasswordVisible = !newPasswordVisible }) {
                         Icon(
@@ -454,7 +460,7 @@ fun ProfileDetailsScreen(
                     label = { Text("Confirm New Password") },
                     modifier = Modifier.fillMaxWidth(),
                     visualTransformation = if (confirmNewPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    keyboardOptions = passwordKeyboardOptions,
                     trailingIcon = {
                         IconButton(onClick = { confirmNewPasswordVisible = !confirmNewPasswordVisible }) {
                             Icon(
