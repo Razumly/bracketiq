@@ -158,42 +158,52 @@ fun AuthScreenBase(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     if (isSignup) {
-                        StandardTextField(
-                            value = firstName,
-                            onValueChange = { firstName = it },
+                        Row(
                             modifier = Modifier.fillMaxWidth(),
-                            label = "First Name",
-                            imeAction = ImeAction.Next,
-                            externalFocusManager = firstNameFocusManager
-                        )
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            StandardTextField(
+                                value = firstName,
+                                onValueChange = { firstName = it },
+                                modifier = Modifier.weight(1f),
+                                label = "First Name",
+                                imeAction = ImeAction.Next,
+                                externalFocusManager = firstNameFocusManager
+                            )
 
-                        StandardTextField(
-                            value = lastName,
-                            onValueChange = { lastName = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            label = "Last Name",
-                            imeAction = ImeAction.Next,
-                            externalFocusManager = lastNameFocusManager
-                        )
+                            StandardTextField(
+                                value = lastName,
+                                onValueChange = { lastName = it },
+                                modifier = Modifier.weight(1f),
+                                label = "Last Name",
+                                imeAction = ImeAction.Next,
+                                externalFocusManager = lastNameFocusManager
+                            )
+                        }
 
-                        StandardTextField(
-                            value = userName,
-                            onValueChange = { userName = it },
+                        Row(
                             modifier = Modifier.fillMaxWidth(),
-                            label = "Username",
-                            imeAction = ImeAction.Next,
-                            externalFocusManager = userNameFocusManager
-                        )
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            StandardTextField(
+                                value = userName,
+                                onValueChange = { userName = it },
+                                modifier = Modifier.weight(1f),
+                                label = "Username",
+                                imeAction = ImeAction.Next,
+                                externalFocusManager = userNameFocusManager
+                            )
 
-                        StandardTextField(
-                            value = dateOfBirth,
-                            onValueChange = {},
-                            modifier = Modifier.fillMaxWidth(),
-                            label = "Birthday",
-                            placeholder = "Select birthday",
-                            readOnly = true,
-                            onTap = { showBirthdayPicker = true },
-                        )
+                            StandardTextField(
+                                value = dateOfBirth,
+                                onValueChange = {},
+                                modifier = Modifier.weight(1f),
+                                label = "Birthday",
+                                placeholder = "Select birthday",
+                                readOnly = true,
+                                onTap = { showBirthdayPicker = true },
+                            )
+                        }
                     }
 
                     StandardTextField(

@@ -237,6 +237,62 @@ class UserRepositoryAuthTest {
     }
 
     @Test
+    fun login_populates_required_profile_prefill_values_from_profile() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/auth/login", request.url.encodedPath)
+            respond(
+                content = """
+                    {
+                      "user": { "id":"u_prefill", "email":"prefill@example.com", "name":"Prefill User" },
+                      "session": { "userId":"u_prefill", "isAdmin":false },
+                      "token":"prefill_token",
+                      "requiresProfileCompletion":true,
+                      "missingProfileFields":["dateOfBirth","userName"],
+                      "profile": {
+                        "id":"u_prefill",
+                        "firstName":"Pre",
+                        "lastName":"Fill",
+                        "userName":"prefilled_user",
+                        "dateOfBirth":"2009-02-03T00:00:00.000Z",
+                        "teamIds":[],
+                        "friendIds":[],
+                        "friendRequestIds":[],
+                        "friendRequestSentIds":[],
+                        "followingIds":[],
+                        "uploadedImages":[],
+                        "hasStripeAccount":false
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        repo.login("prefill@example.com", "password123").getOrThrow()
+
+        val state = repo.requiredProfileCompletionState.value
+        assertTrue(state.isRequired)
+        assertEquals(setOf(SignupProfileField.DATE_OF_BIRTH, SignupProfileField.USER_NAME), state.missingFields)
+        assertEquals("Pre", state.prefill.firstName)
+        assertEquals("Fill", state.prefill.lastName)
+        assertEquals("prefilled_user", state.prefill.userName)
+        assertEquals("2009-02-03", state.prefill.dateOfBirth)
+    }
+
+    @Test
     fun loginWithGoogleIdToken_stores_token_and_sets_current_user_and_account() = runTest {
         val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("")
         val userDao = FakeUserDataDao()
@@ -554,6 +610,98 @@ class UserRepositoryAuthTest {
         assertEquals("Email not verified. We sent a verification link to your email.", verificationException.message)
         assertEquals("", tokenStore.get())
         assertEquals("", currentUserDataSource.getUserId().first())
+    }
+
+    @Test
+    fun completeRequiredProfile_includes_username_in_patch_payload() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("complete_token")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+        var capturedPatchBody = ""
+
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> {
+                    respond(
+                        content = """
+                            {
+                              "user": { "id":"u_complete", "email":"complete@example.com", "name":"Complete User" },
+                              "session": { "userId":"u_complete", "isAdmin":false },
+                              "token":"complete_token",
+                              "profile": {
+                                "id":"u_complete",
+                                "firstName":"Complete",
+                                "lastName":"User",
+                                "userName":"initial_user",
+                                "teamIds":[],
+                                "friendIds":[],
+                                "friendRequestIds":[],
+                                "friendRequestSentIds":[],
+                                "followingIds":[],
+                                "uploadedImages":[],
+                                "hasStripeAccount":false
+                              }
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+                    )
+                }
+
+                "/api/users/u_complete" -> {
+                    assertEquals(HttpMethod.Patch, request.method)
+                    capturedPatchBody = (request.body as? OutgoingContent.ByteArrayContent)
+                        ?.bytes()
+                        ?.decodeToString()
+                        .orEmpty()
+                    respond(
+                        content = """
+                            {
+                              "user": {
+                                "id":"u_complete",
+                                "firstName":"Updated",
+                                "lastName":"Profile",
+                                "userName":"updated_user",
+                                "teamIds":[],
+                                "friendIds":[],
+                                "friendRequestIds":[],
+                                "friendRequestSentIds":[],
+                                "followingIds":[],
+                                "uploadedImages":[],
+                                "hasStripeAccount":false
+                              }
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+                    )
+                }
+
+                else -> error("Unexpected path: ${request.url.encodedPath}")
+            }
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(db, api, tokenStore, currentUserDataSource)
+
+        repo.getCurrentAccount().getOrThrow()
+        val updated = repo.completeRequiredProfile(
+            firstName = "Updated",
+            lastName = "Profile",
+            userName = "updated_user",
+            dateOfBirth = "2008-05-02",
+        ).getOrThrow()
+
+        assertEquals(true, capturedPatchBody.contains("\"userName\":\"updated_user\""))
+        assertEquals(true, capturedPatchBody.contains("\"dateOfBirth\":\"2008-05-02\""))
+        assertEquals("updated_user", updated.userName)
+        assertEquals("updated_user", repo.currentUser.value.getOrThrow().userName)
+        assertEquals(RequiredProfileCompletionState(), repo.requiredProfileCompletionState.value)
     }
 
     @Test

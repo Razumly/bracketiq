@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -36,32 +37,42 @@ import kotlinx.datetime.toLocalDateTime
 fun ProfileCompletionScreen(component: ProfileCompletionComponent) {
     val currentUser by component.currentUser.collectAsState()
     val missingFields by component.missingFields.collectAsState()
+    val prefillProfile by component.prefillProfile.collectAsState()
     val isSubmitting by component.isSubmitting.collectAsState()
     val errorMessage by component.errorMessage.collectAsState()
 
     var firstName by remember { mutableStateOf("") }
     var lastName by remember { mutableStateOf("") }
+    var userName by remember { mutableStateOf("") }
     var dateOfBirth by remember { mutableStateOf("") }
     var showBirthdayPicker by remember { mutableStateOf(false) }
 
-    LaunchedEffect(currentUser.id) {
+    LaunchedEffect(currentUser.id, prefillProfile) {
         if (firstName.isBlank()) {
-            firstName = currentUser.firstName
+            firstName = currentUser.firstName.ifBlank { prefillProfile.firstName.orEmpty() }
         }
         if (lastName.isBlank()) {
-            lastName = currentUser.lastName
+            lastName = currentUser.lastName.ifBlank { prefillProfile.lastName.orEmpty() }
+        }
+        if (userName.isBlank()) {
+            userName = currentUser.userName.ifBlank { prefillProfile.userName.orEmpty() }
+        }
+        if (dateOfBirth.isBlank()) {
+            dateOfBirth = prefillProfile.dateOfBirth.orEmpty()
         }
     }
 
     val missingSummary = remember(missingFields) {
-        missingFields.joinToString { field ->
+        SignupProfileField.entries
+            .filter(missingFields::contains)
+            .joinToString { field ->
             when (field) {
                 SignupProfileField.FIRST_NAME -> "first name"
                 SignupProfileField.LAST_NAME -> "last name"
                 SignupProfileField.DATE_OF_BIRTH -> "birthday"
                 SignupProfileField.USER_NAME -> "username"
             }
-        }
+            }
     }
 
     Box(
@@ -82,7 +93,7 @@ fun ProfileCompletionScreen(component: ProfileCompletionComponent) {
                 style = MaterialTheme.typography.headlineMedium,
             )
             Text(
-                text = "We need your first name, last name, and birthday before you can continue.",
+                text = "We need a few details before you can continue.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -102,38 +113,58 @@ fun ProfileCompletionScreen(component: ProfileCompletionComponent) {
                 }
             }
 
-            StandardTextField(
-                value = firstName,
-                onValueChange = {
-                    firstName = it
-                    component.clearError()
-                },
-                label = "First Name",
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-            )
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                StandardTextField(
+                    value = firstName,
+                    onValueChange = {
+                        firstName = it
+                        component.clearError()
+                    },
+                    label = "First Name",
+                    modifier = Modifier.weight(1f),
+                )
 
-            StandardTextField(
-                value = lastName,
-                onValueChange = {
-                    lastName = it
-                    component.clearError()
-                },
-                label = "Last Name",
-                modifier = Modifier.fillMaxWidth(),
-            )
+                StandardTextField(
+                    value = lastName,
+                    onValueChange = {
+                        lastName = it
+                        component.clearError()
+                    },
+                    label = "Last Name",
+                    modifier = Modifier.weight(1f),
+                )
+            }
 
-            StandardTextField(
-                value = dateOfBirth,
-                onValueChange = {},
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-                label = "Birthday",
-                placeholder = "Select birthday",
-                readOnly = true,
-                onTap = {
-                    component.clearError()
-                    showBirthdayPicker = true
-                },
-            )
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                StandardTextField(
+                    value = userName,
+                    onValueChange = {
+                        userName = it
+                        component.clearError()
+                    },
+                    label = "Username",
+                    modifier = Modifier.weight(1f),
+                )
+
+                StandardTextField(
+                    value = dateOfBirth,
+                    onValueChange = {},
+                    modifier = Modifier.weight(1f),
+                    label = "Birthday",
+                    placeholder = "Select birthday",
+                    readOnly = true,
+                    onTap = {
+                        component.clearError()
+                        showBirthdayPicker = true
+                    },
+                )
+            }
 
             if (!errorMessage.isNullOrBlank()) {
                 Surface(
@@ -157,6 +188,7 @@ fun ProfileCompletionScreen(component: ProfileCompletionComponent) {
                     component.submit(
                         firstName = firstName,
                         lastName = lastName,
+                        userName = userName,
                         dateOfBirth = dateOfBirth,
                     )
                 },

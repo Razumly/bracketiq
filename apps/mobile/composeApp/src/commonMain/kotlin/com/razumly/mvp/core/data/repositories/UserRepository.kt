@@ -66,6 +66,7 @@ sealed class StartupAuthState {
 data class RequiredProfileCompletionState(
     val isRequired: Boolean = false,
     val missingFields: Set<SignupProfileField> = emptySet(),
+    val prefill: SignupProfileSnapshot = SignupProfileSnapshot(),
 )
 
 private val defaultStartupAuthStateFlow =
@@ -283,6 +284,7 @@ interface IUserRepository : IMVPRepository {
     suspend fun completeRequiredProfile(
         firstName: String,
         lastName: String,
+        userName: String,
         dateOfBirth: String,
     ): Result<UserData> = Result.failure(NotImplementedError("Profile completion is not implemented"))
 
@@ -722,6 +724,15 @@ class UserRepository(
         )
     }
 
+    private fun UserProfileDto?.toSignupProfileSnapshot(): SignupProfileSnapshot {
+        return SignupProfileSnapshot(
+            firstName = normalizeName(this?.firstName),
+            lastName = normalizeName(this?.lastName),
+            userName = this?.userName?.trim()?.takeIf(String::isNotBlank),
+            dateOfBirth = normalizeDateOnly(this?.dateOfBirth),
+        )
+    }
+
     private fun SignupProfileSelection.toDto(): RegisterProfileSelectionDto {
         return RegisterProfileSelectionDto(
             firstName = normalizeName(firstName),
@@ -750,6 +761,7 @@ class UserRepository(
         return RequiredProfileCompletionState(
             isRequired = requiresProfileCompletion == true || resolvedMissingFields.isNotEmpty(),
             missingFields = resolvedMissingFields,
+            prefill = profile.toSignupProfileSnapshot(),
         )
     }
 
@@ -1159,14 +1171,17 @@ class UserRepository(
     override suspend fun completeRequiredProfile(
         firstName: String,
         lastName: String,
+        userName: String,
         dateOfBirth: String,
     ): Result<UserData> = runCatching {
+        val currentUserData = currentUser.value.getOrNull()
         val currentId = currentUser.value.getOrNull()?.id
             ?: currentAccount.value.getOrNull()?.id
             ?: error("No user")
 
         val normalizedFirstName = normalizeRequiredName(firstName)
         val normalizedLastName = normalizeRequiredName(lastName)
+        val normalizedUserName = userName.trim().takeIf(String::isNotBlank)
         val normalizedDateOfBirth = normalizeDateOnly(dateOfBirth)
             ?: error("Birthday is required")
 
@@ -1174,6 +1189,7 @@ class UserRepository(
             data = UserUpdateDto(
                 firstName = normalizedFirstName,
                 lastName = normalizedLastName,
+                userName = normalizedUserName,
                 dateOfBirth = normalizedDateOfBirth,
             ),
         )
@@ -1187,10 +1203,12 @@ class UserRepository(
             ?.copy(
                 firstName = normalizeName(response.user.firstName) ?: normalizedFirstName,
                 lastName = normalizeName(response.user.lastName) ?: normalizedLastName,
+                userName = response.user.userName ?: normalizedUserName ?: currentUserData?.userName.orEmpty(),
             )
-            ?: currentUser.value.getOrNull()?.copy(
+            ?: currentUserData?.copy(
                 firstName = normalizedFirstName,
                 lastName = normalizedLastName,
+                userName = normalizedUserName ?: currentUserData.userName,
             )
             ?: error("Profile completion response missing user")
 

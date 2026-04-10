@@ -5,6 +5,7 @@ import com.arkivanov.essenty.lifecycle.coroutines.coroutineScope
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.SignupProfileField
+import com.razumly.mvp.core.data.repositories.SignupProfileSnapshot
 import com.razumly.mvp.core.network.userMessage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -19,11 +20,12 @@ import kotlinx.coroutines.launch
 interface ProfileCompletionComponent {
     val currentUser: StateFlow<UserData>
     val missingFields: StateFlow<Set<SignupProfileField>>
+    val prefillProfile: StateFlow<SignupProfileSnapshot>
     val isSubmitting: StateFlow<Boolean>
     val errorMessage: StateFlow<String?>
 
     fun clearError()
-    fun submit(firstName: String, lastName: String, dateOfBirth: String)
+    fun submit(firstName: String, lastName: String, userName: String, dateOfBirth: String)
     fun logout()
 }
 
@@ -50,6 +52,15 @@ class DefaultProfileCompletionComponent(
                 initialValue = emptySet(),
             )
 
+    override val prefillProfile: StateFlow<SignupProfileSnapshot> =
+        userRepository.requiredProfileCompletionState
+            .map { it.prefill }
+            .stateIn(
+                scope = scope,
+                started = SharingStarted.Eagerly,
+                initialValue = SignupProfileSnapshot(),
+            )
+
     private val _isSubmitting = MutableStateFlow(false)
     override val isSubmitting: StateFlow<Boolean> = _isSubmitting.asStateFlow()
 
@@ -60,13 +71,14 @@ class DefaultProfileCompletionComponent(
         _errorMessage.value = null
     }
 
-    override fun submit(firstName: String, lastName: String, dateOfBirth: String) {
+    override fun submit(firstName: String, lastName: String, userName: String, dateOfBirth: String) {
         scope.launch {
             _isSubmitting.value = true
             _errorMessage.value = null
             userRepository.completeRequiredProfile(
                 firstName = firstName,
                 lastName = lastName,
+                userName = userName,
                 dateOfBirth = dateOfBirth,
             ).onFailure { throwable ->
                 _errorMessage.value = throwable.userMessage("Failed to update your profile.")

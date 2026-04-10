@@ -85,23 +85,23 @@ fun StandardTextField(
         .then(if (height != null) Modifier.height(height) else Modifier)
         .then(if (contentPadding != null) Modifier.padding(contentPadding) else Modifier)
 
-    val isSecureField = isPassword || keyboardType == "password"
+    val usesPasswordKeyboard = isPassword || keyboardType == "password"
     val keyboardTypeValue = when {
-        isSecureField -> KeyboardType.Password
+        usesPasswordKeyboard -> KeyboardType.Password
         keyboardType == "email" -> KeyboardType.Email
         keyboardType == "number" || keyboardType == "numbers" || keyboardType == "money" -> KeyboardType.Number
         else -> KeyboardType.Text
     }
 
     val visualTransformation = when {
-        isSecureField -> PasswordVisualTransformation()
+        isPassword -> PasswordVisualTransformation()
         keyboardType == "money" -> CurrencyAmountInputVisualTransformation()
         else -> VisualTransformation.None
     }
     val keyboardOptionsValue = KeyboardOptions(
         keyboardType = keyboardTypeValue,
         imeAction = imeAction,
-        autoCorrectEnabled = if (isSecureField) false else null,
+        autoCorrectEnabled = if (usesPasswordKeyboard) false else null,
     )
 
     // Keep compatibility with existing signature while migrating call sites.
