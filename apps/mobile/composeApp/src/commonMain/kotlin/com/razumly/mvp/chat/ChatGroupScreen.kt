@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -72,6 +73,7 @@ import kotlin.time.Instant
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatGroupScreen(component: ChatGroupComponent) {
+    val verticalShift = 4.dp
     val input by component.messageInput.collectAsState()
     val chatGroupWithRelations by component.chatGroup.collectAsState()
     val friends by component.friends.collectAsState()
@@ -125,6 +127,7 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
     Scaffold(
         topBar = {
             TopAppBar(
+                modifier = Modifier.offset(y = -verticalShift),
                 title = { Text(chatTitle) },
                 navigationIcon = {
                     PlatformBackButton(
@@ -185,7 +188,7 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(
-                    top = paddingValues.calculateTopPadding(),
+                    top = paddingValues.calculateTopPadding() - verticalShift,
                 )
         ) {
             LazyColumn(
@@ -235,7 +238,7 @@ fun ChatGroupScreen(component: ChatGroupComponent) {
                             start = 16.dp,
                             top = 8.dp,
                             end = 16.dp,
-                            bottom = 24.dp,
+                            bottom = 20.dp,
                         ),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)

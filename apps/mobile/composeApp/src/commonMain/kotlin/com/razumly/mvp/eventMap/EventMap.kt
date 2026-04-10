@@ -12,9 +12,15 @@ expect fun EventMap(
     onEventSelected: (event: Event) -> Unit,
     onPlaceSelected: (place: MVPPlace) -> Unit,
     onPlaceSelectionPoint: (x: Float, y: Float) -> Unit = { _, _ -> },
+    selectionRequiresConfirmation: Boolean = false,
+    originalPlace: MVPPlace? = null,
+    selectedPlace: MVPPlace? = null,
+    onPlaceSelectionCleared: () -> Unit = {},
     canClickPOI: Boolean,
     modifier: Modifier = Modifier,
     focusedLocation: LatLng,
     focusedEvent: Event?,
+    mapActionLabel: String = "Close Map",
+    usePrimaryActionButton: Boolean = false,
     onBackPressed: (() -> Unit)? = null
 )

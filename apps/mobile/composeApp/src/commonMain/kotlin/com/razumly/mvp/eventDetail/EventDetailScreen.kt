@@ -106,6 +106,7 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.divisionPriceRange
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfig
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
+import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
@@ -1775,8 +1776,20 @@ fun EventDetailScreen(
     var showBuildBracketConfirmDialog by remember { mutableStateOf(false) }
     var showStickyDockByScroll by remember { mutableStateOf(true) }
     var mapRevealCenter by remember { mutableStateOf(Offset.Zero) }
-    var previousMapSelection by remember { mutableStateOf<LatLng?>(null) }
+    var pendingMapPlace by remember { mutableStateOf<MVPPlace?>(null) }
+    var isLocationPickerMapMode by remember { mutableStateOf(false) }
     var isManagingParticipants by rememberSaveable { mutableStateOf(false) }
+    fun originalLocationPlace(): MVPPlace? {
+        val lat = editedEvent.lat
+        val long = editedEvent.long
+        if (editedEvent.location.isBlank() || (lat == 0.0 && long == 0.0)) return null
+        return MVPPlace(
+            name = editedEvent.location,
+            id = "__selected_event_location__",
+            coordinates = listOf(long, lat),
+            address = editedEvent.address,
+        )
+    }
     val hasAnyPaidDivision = remember(
         selectedEvent.event.priceCents,
         selectedEvent.event.divisions,
@@ -2156,6 +2169,20 @@ fun EventDetailScreen(
         }
     }
 
+    LaunchedEffect(isEditing) {
+        if (!isEditing) {
+            pendingMapPlace = null
+            isLocationPickerMapMode = false
+        }
+    }
+
+    LaunchedEffect(showMap) {
+        if (!showMap) {
+            pendingMapPlace = null
+            isLocationPickerMapMode = false
+        }
+    }
+
     CompositionLocalProvider(LocalTournamentComponent provides component) {
         CircularRevealUnderlay(
             isRevealed = showMap,
@@ -2166,32 +2193,56 @@ fun EventDetailScreen(
                 EventMap(
                     component = mapComponent,
                     onEventSelected = { _ ->
+                        pendingMapPlace = null
+                        isLocationPickerMapMode = false
                         mapComponent.toggleMap()
                     },
                     onPlaceSelected = { place ->
-                        if (isEditing) {
-                            component.selectPlace(place)
-                            previousMapSelection = LatLng(place.latitude, place.longitude)
-                            mapComponent.toggleMap()
+                        if (isLocationPickerMapMode) {
+                            pendingMapPlace = place
                         }
                     },
                     onPlaceSelectionPoint = { x, y ->
                         mapRevealCenter = Offset(x, y)
                     },
-                    canClickPOI = isEditing,
-                    focusedLocation = if (editedEvent.location.isNotBlank()) {
-                        LatLng(editedEvent.lat, editedEvent.long)
-                    } else if (previousMapSelection != null) {
-                        previousMapSelection!!
-                    } else {
-                        mapComponent.currentLocation.value ?: LatLng(0.0, 0.0)
+                    selectionRequiresConfirmation = isLocationPickerMapMode,
+                    originalPlace = originalLocationPlace(),
+                    selectedPlace = pendingMapPlace,
+                    onPlaceSelectionCleared = {
+                        pendingMapPlace = null
                     },
-                    focusedEvent = if (!isEditing && selectedEvent.event.location.isNotBlank()) {
+                    canClickPOI = isLocationPickerMapMode,
+                    focusedLocation = when {
+                        pendingMapPlace != null -> {
+                            LatLng(pendingMapPlace!!.latitude, pendingMapPlace!!.longitude)
+                        }
+                        originalLocationPlace() != null -> {
+                            LatLng(originalLocationPlace()!!.latitude, originalLocationPlace()!!.longitude)
+                        }
+                        editedEvent.location.isNotBlank() -> {
+                            LatLng(editedEvent.lat, editedEvent.long)
+                        }
+                        else -> {
+                            mapComponent.currentLocation.value ?: LatLng(0.0, 0.0)
+                        }
+                    },
+                    focusedEvent = if (!isLocationPickerMapMode && selectedEvent.event.location.isNotBlank()) {
                         selectedEvent.event
                     } else {
                         null
                     },
-                    onBackPressed = mapComponent::toggleMap,
+                    mapActionLabel = if (pendingMapPlace != null) {
+                        "Select Location"
+                    } else {
+                        "Close Map"
+                    },
+                    usePrimaryActionButton = pendingMapPlace != null,
+                    onBackPressed = {
+                        pendingMapPlace?.let(component::selectPlace)
+                        pendingMapPlace = null
+                        isLocationPickerMapMode = false
+                        mapComponent.toggleMap()
+                    },
                 )
             },
         ) {
@@ -2221,6 +2272,11 @@ fun EventDetailScreen(
                             editView = isEditing,
                             showOfficialsPanel = showOfficialsPanel,
                             isNewEvent = false,
+                            onOpenLocationMap = {
+                                pendingMapPlace = null
+                                isLocationPickerMapMode = true
+                                mapComponent.toggleMap()
+                            },
                             onAddCurrentUser = {},
                             imageScheme = imageScheme,
                             imageIds = eventImageIds,

@@ -9,7 +9,7 @@ PODS:
     - GoogleUtilities/Environment (~> 8.0)
     - GoogleUtilities/UserDefaults (~> 8.0)
     - PromisesObjC (~> 2.4)
-  - composeApp (1.2.2):
+  - composeApp (1.3.0):
     - FirebaseCore
     - FirebaseMessaging
     - GooglePlaces
@@ -156,7 +156,7 @@ EXTERNAL SOURCES:
 SPEC CHECKSUMS:
   AppAuth: 1c1a8afa7e12f2ec3a294d9882dfa5ab7d3cb063
   AppCheckCore: cc8fd0a3a230ddd401f326489c99990b013f0c4f
-  composeApp: 247fe7ddcd46092584d0ad35cea99b82fadbc376
+  composeApp: e5828aa28d7eff0b742462e9117e6f55b9786cf4
   FirebaseCore: 5a452ffa66f37c8e281076996837626c5d08c090
   FirebaseCoreInternal: ff526c22671bb564d1b34a47615e29ba99389dee
   FirebaseInstallations: 6836550c466a6c3f753a777bec6f4e58ea228779

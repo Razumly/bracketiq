@@ -224,6 +224,7 @@ fun EventDetails(
     isNewEvent: Boolean,
     rentalTimeLocked: Boolean = false,
     onHostCreateAccount: () -> Unit,
+    onOpenLocationMap: () -> Unit,
     onPlaceSelected: (MVPPlace?) -> Unit,
     onEditEvent: (Event.() -> Event) -> Unit,
     onEditTournament: (Event.() -> Event) -> Unit,
@@ -1734,7 +1735,7 @@ fun EventDetails(
                                 Button(
                                     onClick = {
                                         onMapRevealCenterChange(editLocationButtonCenter)
-                                        mapComponent.toggleMap()
+                                        onOpenLocationMap()
                                     },
                                     modifier = Modifier.onGloballyPositioned {
                                         editLocationButtonCenter = it.boundsInWindow().center
