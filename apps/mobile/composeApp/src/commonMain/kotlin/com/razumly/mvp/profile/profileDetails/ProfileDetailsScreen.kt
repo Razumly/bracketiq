@@ -47,6 +47,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.composables.NetworkAvatar
 import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.util.LocalLoadingHandler
@@ -293,6 +294,8 @@ fun ProfileDetailsScreen(
         )
     }
 
+    val navPadding = LocalNavBarPadding.current
+
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(title = { Text("Profile Details") }, navigationIcon = {
@@ -302,7 +305,10 @@ fun ProfileDetailsScreen(
             })
         }) { innerPadding ->
         Column(
-            modifier = Modifier.fillMaxSize().padding(innerPadding).padding(horizontal = 16.dp)
+            modifier = Modifier.fillMaxSize()
+                .padding(innerPadding)
+                .padding(navPadding)
+                .padding(horizontal = 16.dp)
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
