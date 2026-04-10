@@ -63,8 +63,15 @@ sealed class StartupAuthState {
     data object Unauthenticated : StartupAuthState()
 }
 
+data class RequiredProfileCompletionState(
+    val isRequired: Boolean = false,
+    val missingFields: Set<SignupProfileField> = emptySet(),
+)
+
 private val defaultStartupAuthStateFlow =
     MutableStateFlow<StartupAuthState>(StartupAuthState.Unauthenticated)
+private val defaultRequiredProfileCompletionStateFlow =
+    MutableStateFlow(RequiredProfileCompletionState())
 
 data class FamilyChild(
     val userId: String,
@@ -184,6 +191,8 @@ interface IUserRepository : IMVPRepository {
     val currentAccount: StateFlow<Result<AuthAccount>>
     val startupAuthState: StateFlow<StartupAuthState>
         get() = defaultStartupAuthStateFlow
+    val requiredProfileCompletionState: StateFlow<RequiredProfileCompletionState>
+        get() = defaultRequiredProfileCompletionStateFlow
 
     suspend fun login(email: String, password: String): Result<UserData>
     suspend fun logout(): Result<Unit>
@@ -271,6 +280,11 @@ interface IUserRepository : IMVPRepository {
         userName: String,
         profileImageId: String?,
     ): Result<Unit>
+    suspend fun completeRequiredProfile(
+        firstName: String,
+        lastName: String,
+        dateOfBirth: String,
+    ): Result<UserData> = Result.failure(NotImplementedError("Profile completion is not implemented"))
 
     suspend fun getCurrentAccount(): Result<Unit>
 
@@ -297,6 +311,9 @@ class UserRepository(
     override val currentAccount: StateFlow<Result<AuthAccount>> = _currentAccount.asStateFlow()
     private val _startupAuthState = MutableStateFlow<StartupAuthState>(StartupAuthState.Checking)
     override val startupAuthState: StateFlow<StartupAuthState> = _startupAuthState.asStateFlow()
+    private val _requiredProfileCompletionState = MutableStateFlow(RequiredProfileCompletionState())
+    override val requiredProfileCompletionState: StateFlow<RequiredProfileCompletionState> =
+        _requiredProfileCompletionState.asStateFlow()
 
     init {
         scope.launch { runCatching { loadCurrentUser() }.onFailure { Napier.w("loadCurrentUser failed", it) } }
@@ -318,6 +335,7 @@ class UserRepository(
         val account = res.user?.toAuthAccountOrNull()
             ?: error("Login response missing user")
         _currentAccount.value = Result.success(account)
+        updateRequiredProfileCompletionState(res.toRequiredProfileCompletionState())
 
         val profile = res.profile?.toUserDataOrNull() ?: fetchUserProfile(account.id)
             ?: error("Login response missing profile")
@@ -346,6 +364,7 @@ class UserRepository(
         val account = res.user?.toAuthAccountOrNull()
             ?: error("Google login response missing user")
         _currentAccount.value = Result.success(account)
+        updateRequiredProfileCompletionState(res.toRequiredProfileCompletionState())
 
         val profile = res.profile?.toUserDataOrNull() ?: fetchUserProfile(account.id)
             ?: error("Google login response missing profile")
@@ -389,6 +408,7 @@ class UserRepository(
         val account = res.user?.toAuthAccountOrNull()
             ?: error("Apple login response missing user")
         _currentAccount.value = Result.success(account)
+        updateRequiredProfileCompletionState(res.toRequiredProfileCompletionState())
 
         val profile = res.profile?.toUserDataOrNull() ?: fetchUserProfile(account.id)
             ?: error("Apple login response missing profile")
@@ -457,6 +477,7 @@ class UserRepository(
         val account = res.user?.toAuthAccountOrNull()
             ?: error("Register response missing user")
         _currentAccount.value = Result.success(account)
+        updateRequiredProfileCompletionState(res.toRequiredProfileCompletionState())
 
         val profile = res.profile?.toUserDataOrNull()
             ?: error("Register response missing profile")
@@ -536,6 +557,7 @@ class UserRepository(
             }
 
             _currentAccount.value = Result.success(account)
+            updateRequiredProfileCompletionState(me.toRequiredProfileCompletionState())
 
             val refreshed = me.token?.takeIf(String::isNotBlank)
             if (!refreshed.isNullOrBlank() && refreshed != token) {
@@ -568,6 +590,7 @@ class UserRepository(
         val refreshed = me.token?.takeIf(String::isNotBlank) ?: return false
         tokenStore.set(refreshed)
         _currentAccount.value = Result.success(account)
+        updateRequiredProfileCompletionState(me.toRequiredProfileCompletionState())
 
         val remoteProfile = me.profile?.toUserDataOrNull() ?: fetchUserProfile(account.id)
         if (remoteProfile != null) {
@@ -596,6 +619,7 @@ class UserRepository(
         runCatching { currentUserDataSource.saveUserId("") }
         _currentUser.value = Result.failure(Exception("No User"))
         _currentAccount.value = Result.failure(Exception("No Account"))
+        updateRequiredProfileCompletionState(RequiredProfileCompletionState())
         _startupAuthState.value = StartupAuthState.Unauthenticated
     }
 
@@ -717,6 +741,20 @@ class UserRepository(
     private fun normalizeDateOnly(value: String?): String? {
         val trimmed = value?.trim()?.takeIf(String::isNotBlank) ?: return null
         return trimmed.substringBefore('T')
+    }
+
+    private fun AuthResponseDto.toRequiredProfileCompletionState(): RequiredProfileCompletionState {
+        val resolvedMissingFields = missingProfileFields
+            .mapNotNull(SignupProfileField::fromApiName)
+            .toSet()
+        return RequiredProfileCompletionState(
+            isRequired = requiresProfileCompletion == true || resolvedMissingFields.isNotEmpty(),
+            missingFields = resolvedMissingFields,
+        )
+    }
+
+    private fun updateRequiredProfileCompletionState(state: RequiredProfileCompletionState) {
+        _requiredProfileCompletionState.value = state
     }
 
     private fun isMinorDateOfBirth(dateOfBirth: String, ageThreshold: Int): Boolean {
@@ -1116,6 +1154,50 @@ class UserRepository(
         if (email != currentAccount.value.getOrNull()?.email) {
             Napier.w("Email update requested but not supported by API yet")
         }
+    }
+
+    override suspend fun completeRequiredProfile(
+        firstName: String,
+        lastName: String,
+        dateOfBirth: String,
+    ): Result<UserData> = runCatching {
+        val currentId = currentUser.value.getOrNull()?.id
+            ?: currentAccount.value.getOrNull()?.id
+            ?: error("No user")
+
+        val normalizedFirstName = normalizeRequiredName(firstName)
+        val normalizedLastName = normalizeRequiredName(lastName)
+        val normalizedDateOfBirth = normalizeDateOnly(dateOfBirth)
+            ?: error("Birthday is required")
+
+        val request = UpdateUserRequestDto(
+            data = UserUpdateDto(
+                firstName = normalizedFirstName,
+                lastName = normalizedLastName,
+                dateOfBirth = normalizedDateOfBirth,
+            ),
+        )
+
+        val response = api.patch<UpdateUserRequestDto, UserResponseDto>(
+            path = "api/users/$currentId",
+            body = request,
+        )
+
+        val updatedUser = response.user?.toUserDataOrNull()
+            ?.copy(
+                firstName = normalizeName(response.user.firstName) ?: normalizedFirstName,
+                lastName = normalizeName(response.user.lastName) ?: normalizedLastName,
+            )
+            ?: currentUser.value.getOrNull()?.copy(
+                firstName = normalizedFirstName,
+                lastName = normalizedLastName,
+            )
+            ?: error("Profile completion response missing user")
+
+        databaseService.getUserDataDao.upsertUserWithRelations(updatedUser)
+        _currentUser.value = Result.success(updatedUser)
+        updateRequiredProfileCompletionState(RequiredProfileCompletionState())
+        updatedUser
     }
 
     override suspend fun sendFriendRequest(user: UserData): Result<Unit> {

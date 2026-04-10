@@ -59,6 +59,7 @@ import com.razumly.mvp.matchDetail.MatchDetailScreen
 import com.razumly.mvp.organizationDetail.OrganizationDetailScreen
 import com.razumly.mvp.profile.ProfileScreen
 import com.razumly.mvp.profile.profileDetails.ProfileDetailsScreen
+import com.razumly.mvp.profileCompletion.ProfileCompletionScreen
 import com.razumly.mvp.refundManager.RefundManagerScreen
 import com.razumly.mvp.teamManagement.TeamManagementScreen
 import com.razumly.mvp.userAuth.AuthScreen
@@ -140,7 +141,8 @@ fun App(root: RootComponent) {
 
                 val shouldShowBottomNav = currentChild !is RootComponent.Child.Login &&
                     currentChild !is RootComponent.Child.Splash &&
-                    currentChild !is RootComponent.Child.Chat
+                    currentChild !is RootComponent.Child.Chat &&
+                    currentChild !is RootComponent.Child.ProfileCompletion
 
                 MVPBottomNavBar(
                     selectedPage = selectedPage,
@@ -221,6 +223,10 @@ private fun AppContent(
 
                 is RootComponent.Child.Login -> {
                     AuthScreen(instance.component as DefaultAuthComponent)
+                }
+
+                is RootComponent.Child.ProfileCompletion -> {
+                    ProfileCompletionScreen(instance.component)
                 }
 
                 is RootComponent.Child.Search -> {

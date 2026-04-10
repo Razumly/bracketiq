@@ -130,6 +130,8 @@ data class AuthResponseDto(
     val email: String? = null,
     val requiresEmailVerification: Boolean? = null,
     val verificationEmailSent: Boolean? = null,
+    val requiresProfileCompletion: Boolean? = null,
+    val missingProfileFields: List<String> = emptyList(),
     val user: AuthUserDto? = null,
     val session: AuthSessionDto? = null,
     val token: String? = null,
@@ -165,6 +167,7 @@ data class UpdateUserRequestDto(
 data class UserUpdateDto(
     val firstName: String? = null,
     val lastName: String? = null,
+    val dateOfBirth: String? = null,
     val userName: String? = null,
     val teamIds: List<String>? = null,
     val friendIds: List<String>? = null,

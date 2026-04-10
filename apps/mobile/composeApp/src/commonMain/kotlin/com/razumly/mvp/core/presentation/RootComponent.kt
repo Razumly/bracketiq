@@ -29,6 +29,7 @@ import com.razumly.mvp.eventSearch.EventSearchComponent
 import com.razumly.mvp.matchDetail.MatchContentComponent
 import com.razumly.mvp.profile.ProfileComponent
 import com.razumly.mvp.profile.profileDetails.ProfileDetailsComponent
+import com.razumly.mvp.profileCompletion.ProfileCompletionComponent
 import com.razumly.mvp.refundManager.RefundManagerComponent
 import com.razumly.mvp.teamManagement.TeamManagementComponent
 import com.razumly.mvp.organizationDetail.OrganizationDetailComponent
@@ -143,7 +144,11 @@ class RootComponent(
                         startupDecisionMade = true
                         _isStartupInProgress.value = false
                         if (currentConfig == AppConfig.Splash || currentConfig == AppConfig.Login) {
-                            handleDeepLinkOrDefault()
+                            if (userRepository.requiredProfileCompletionState.value.isRequired) {
+                                navigateToRequiredProfileCompletion()
+                            } else {
+                                handleDeepLinkOrDefault()
+                            }
                         }
                     }
 
@@ -167,6 +172,26 @@ class RootComponent(
                 _startupNotice.value = STARTUP_TIMEOUT_NOTICE
                 setDefaultNavigationDirection()
                 navigation.replaceAll(AppConfig.Login)
+            }
+        }
+
+        scope.launch {
+            userRepository.requiredProfileCompletionState.collect { state ->
+                val currentConfig = childStack.value.active.configuration
+                if (userRepository.startupAuthState.value != StartupAuthState.Authenticated) {
+                    return@collect
+                }
+
+                if (state.isRequired) {
+                    if (currentConfig != AppConfig.ProfileCompletion) {
+                        navigateToRequiredProfileCompletion()
+                    }
+                    return@collect
+                }
+
+                if (currentConfig == AppConfig.ProfileCompletion) {
+                    handleDeepLinkOrDefault()
+                }
             }
         }
 
@@ -228,6 +253,11 @@ class RootComponent(
 
     fun onStartupNoticeShown() {
         _startupNotice.value = null
+    }
+
+    private fun navigateToRequiredProfileCompletion() {
+        setDefaultNavigationDirection()
+        navigation.replaceAll(AppConfig.ProfileCompletion)
     }
 
     private fun handleDeepLinkOrDefault() {
@@ -538,6 +568,10 @@ class RootComponent(
             _koin.get { parametersOf(componentContext, this@RootComponent) }
         )
 
+        AppConfig.ProfileCompletion -> Child.ProfileCompletion(
+            _koin.get { parametersOf(componentContext) }
+        )
+
         is AppConfig.Search -> Child.Search(
             _koin.get {
                 parametersOf(componentContext, config.eventId, this@RootComponent)
@@ -604,6 +638,7 @@ class RootComponent(
     sealed class Child {
         data object Splash : Child()
         data class Login(val component: AuthComponent) : Child()
+        data class ProfileCompletion(val component: ProfileCompletionComponent) : Child()
         data class Search(val component: EventSearchComponent, val mapComponent: MapComponent) : Child()
         data class EventContent(val component: EventDetailComponent, val mapComponent: MapComponent) : Child()
         data class OrganizationDetail(val component: OrganizationDetailComponent) : Child()
