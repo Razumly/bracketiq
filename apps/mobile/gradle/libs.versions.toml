@@ -63,6 +63,7 @@ browser = "1.9.0"
 credentials = "1.5.0"
 googleId = "1.2.0"
 splashscreen = "1.2.0"
+androidxComposeUiTest = "1.10.5"
 
 [libraries]
 androidx-core = { module = "androidx.test:core", version.ref = "core" }
@@ -145,6 +146,8 @@ robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectr
 runtime = { module = "org.jetbrains.compose.runtime:runtime", version.ref = "runtimeSaveable" }
 runtime-saveable = { module = "org.jetbrains.compose.runtime:runtime-saveable", version.ref = "runtimeSaveable" }
 androidx-animation-android = { group = "androidx.compose.animation", name = "animation-android", version.ref = "animationAndroid" }
+androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4", version.ref = "androidxComposeUiTest" }
+androidx-compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest", version.ref = "androidxComposeUiTest" }
 stripe-android = { group = "com.stripe", name = "stripe-android", version.ref = "stripeAndroid" }
 financial-connections = { group = "com.stripe", name = "financial-connections", version.ref = "stripeAndroid" }
 turbine = { module = "app.cash.turbine:turbine", version.ref = "turbine" }

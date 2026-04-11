@@ -32,8 +32,8 @@ compose.resources {
     generateResClass = always
 }
 
-val mvpVersion = "1.3.3"
-val mvpVersionCode = 29
+val mvpVersion = "1.3.4"
+val mvpVersionCode = 30
 kotlin {
     compilerOptions {
         freeCompilerArgs.add("-Xexpect-actual-classes")
@@ -225,6 +225,7 @@ kotlin {
                 implementation(libs.mockk)
                 implementation(libs.robolectric)
                 implementation(libs.androidx.core)
+                implementation(libs.androidx.compose.ui.test.junit4)
             }
         }
 
@@ -309,6 +310,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose.android)
     implementation(libs.androidx.animation.android)
     debugImplementation("org.jetbrains.compose.ui:ui-tooling:${libs.versions.uiVersion.get()}")
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
     add("kspAndroid", libs.androidx.room.compiler)
     add("kspIosX64", libs.androidx.room.compiler)
     add("kspIosArm64", libs.androidx.room.compiler)

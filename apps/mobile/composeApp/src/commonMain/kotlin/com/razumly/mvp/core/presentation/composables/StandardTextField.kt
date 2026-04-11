@@ -84,6 +84,13 @@ fun StandardTextField(
     val finalModifier = modifier
         .then(if (height != null) Modifier.height(height) else Modifier)
         .then(if (contentPadding != null) Modifier.padding(contentPadding) else Modifier)
+        .then(
+            if (externalFocusManager != null) {
+                Modifier.platformFocusable(externalFocusManager, enabled)
+            } else {
+                Modifier
+            }
+        )
 
     val usesPasswordKeyboard = isPassword || keyboardType == "password"
     val keyboardTypeValue = when {
@@ -103,9 +110,6 @@ fun StandardTextField(
         imeAction = imeAction,
         autoCorrectEnabled = if (usesPasswordKeyboard) false else null,
     )
-
-    // Keep compatibility with existing signature while migrating call sites.
-    @Suppress("UNUSED_VARIABLE") val ignoredFocusManager = externalFocusManager
 
     val defaultColors = OutlinedTextFieldDefaults.colors(
         focusedTextColor = MaterialTheme.colorScheme.onSurface,
