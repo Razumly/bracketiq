@@ -1,15 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.MvpApp" parent="@android:style/Theme.Material.NoActionBar">
-        <item name="android:statusBarColor">@android:color/transparent</item>
-        <item name="android:navigationBarColor">@android:color/transparent</item>
-    </style>
+    <style name="Theme.MvpApp" parent="@android:style/Theme.Material.NoActionBar" />
 
     <style name="Theme.MvpApp.Starting" parent="Theme.SplashScreen">
         <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher_biq</item>
         <item name="windowSplashScreenBackground">@color/launcher_icon_background</item>
-        <item name="android:statusBarColor">@android:color/transparent</item>
-        <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="postSplashScreenTheme">@style/Theme.MvpApp</item>
     </style>
 </resources>
