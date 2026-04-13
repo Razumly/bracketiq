@@ -821,9 +821,15 @@ class DefaultCreateEventComponent(
         _currentEventType.value = type
         updateEventField {
             when (type) {
-                EventType.LEAGUE, EventType.TOURNAMENT, EventType.WEEKLY_EVENT -> copy(
+                EventType.LEAGUE, EventType.TOURNAMENT -> copy(
                     eventType = type,
                     teamSignup = true,
+                    singleDivision = true,
+                    noFixedEndDateTime = true,
+                )
+
+                EventType.WEEKLY_EVENT -> copy(
+                    eventType = type,
                     singleDivision = true,
                     noFixedEndDateTime = true,
                 )

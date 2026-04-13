@@ -10,11 +10,13 @@ import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventTeamCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
 import com.razumly.mvp.core.data.dataTypes.daos.ChatGroupDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventDao
+import com.razumly.mvp.core.data.dataTypes.daos.EventRegistrationDao
 import com.razumly.mvp.core.data.dataTypes.daos.FieldDao
 import com.razumly.mvp.core.data.dataTypes.daos.MatchDao
 import com.razumly.mvp.core.data.dataTypes.daos.MessageDao
@@ -152,6 +154,7 @@ private class EventRepositoryHttp_FakeDatabaseService(
 ) : DatabaseService {
     override val getMatchDao: MatchDao get() = error("unused")
     override val getFieldDao: FieldDao get() = error("unused")
+    override val getEventRegistrationDao: EventRegistrationDao get() = error("unused")
     override val getChatGroupDao: ChatGroupDao get() = error("unused")
     override val getMessageDao: MessageDao get() = error("unused")
     override val getRefundRequestDao: RefundRequestDao get() = error("unused")
@@ -847,6 +850,7 @@ class EventRepositoryHttpTest {
         val eventDao = EventRepositoryHttp_FakeEventDao()
         val db = EventRepositoryHttp_FakeDatabaseService(eventDao, EventRepositoryHttp_FakeUserDataDao(), EventRepositoryHttp_FakeTeamDao())
         val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+        var participantIds = emptyList<String>()
 
         val engine = MockEngine { request ->
             assertEquals("/api/events/e1/participants", request.url.encodedPath)
@@ -866,7 +870,9 @@ class EventRepositoryHttpTest {
                         "teamIds": []
                       }
                     }
-                """.trimIndent()
+                """.trimIndent().also {
+                    participantIds = listOf("u1")
+                }
                 HttpMethod.Delete -> """
                     {
                       "event": {
@@ -879,6 +885,31 @@ class EventRepositoryHttpTest {
                         "userIds": [],
                         "teamIds": []
                       }
+                    }
+                """.trimIndent().also {
+                    participantIds = emptyList()
+                }
+                HttpMethod.Get -> """
+                    {
+                      "event": {
+                        "id": "e1",
+                        "name": "Event One",
+                        "hostId": "h1",
+                        "start": "2026-02-10T00:00:00Z",
+                        "end": "2026-02-10T01:00:00Z",
+                        "coordinates": [-80.0, 25.0],
+                        "userIds": ${if (participantIds.isEmpty()) "[]" else """["u1"]"""},
+                        "teamIds": []
+                      },
+                      "participants": {
+                        "teams": [],
+                        "users": ${if (participantIds.isEmpty()) "[]" else """[{"registrantId":"u1","registrantType":"SELF","rosterRole":"PARTICIPANT"}]"""},
+                        "children": [],
+                        "waitlist": [],
+                        "freeAgents": []
+                      },
+                      "users": ${if (participantIds.isEmpty()) "[]" else """[{"id":"u1","firstName":"Test","lastName":"User","userName":"u1"}]"""},
+                      "participantCount": ${participantIds.size}
                     }
                 """.trimIndent()
                 else -> error("unexpected method: ${request.method}")
@@ -904,11 +935,111 @@ class EventRepositoryHttpTest {
 
         repo.removeCurrentUserFromEvent(baseEvent).getOrThrow()
         assertEquals(emptyList<String>(), eventDao.getEventById("e1")?.userIds)
+    }
 
-        // Ensure we refreshed users for host + participant.
-        val requested = userRepo.requestedUserIds
-        assertTrue("u1" in requested)
-        assertTrue("h1" in requested)
+    @Test
+    fun addCurrentUserToEvent_succeeds_when_participant_refresh_fails_after_post() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+
+        val engine = MockEngine { request ->
+            when (request.method) {
+                HttpMethod.Post -> respond(
+                    content = """
+                        {
+                          "event": {
+                            "id": "e1",
+                            "name": "Event One",
+                            "hostId": "h1",
+                            "start": "2026-02-10T00:00:00Z",
+                            "end": "2026-02-10T01:00:00Z",
+                            "coordinates": [-80.0, 25.0],
+                            "userIds": ["u1"],
+                            "teamIds": []
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                HttpMethod.Get -> respond(
+                    content = """{"error":"temporary participant sync failure"}""",
+                    status = HttpStatusCode.InternalServerError,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                else -> error("unexpected method: ${request.method}")
+            }
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+        val baseEvent = makeEvent(id = "e1", hostId = "h1", userIds = emptyList()).copy(
+            teamSignup = false,
+        )
+
+        repo.addCurrentUserToEvent(baseEvent).getOrThrow()
+
+        assertEquals(listOf("u1"), eventDao.getEventById("e1")?.userIds)
+    }
+
+    @Test
+    fun syncEventParticipants_clears_cached_participants_when_weekly_selection_is_required() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+
+        val engine = MockEngine { request ->
+            assertEquals(HttpMethod.Get, request.method)
+            respond(
+                content = """
+                    {
+                      "participants": {
+                        "teams": [],
+                        "users": [],
+                        "children": [],
+                        "waitlist": [],
+                        "freeAgents": []
+                      },
+                      "teams": [],
+                      "users": [],
+                      "participantCount": 0,
+                      "participantCapacity": 8,
+                      "weeklySelectionRequired": true
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+        val baseEvent = makeEvent(id = "e1", hostId = "h1", userIds = listOf("u1"))
+
+        eventDao.upsertEvent(baseEvent)
+
+        val result = repo.syncEventParticipants(baseEvent).getOrThrow()
+
+        assertTrue(result.weeklySelectionRequired)
+        assertEquals(emptyList(), result.event.userIds)
+        assertEquals(emptyList(), result.event.teamIds)
+        assertEquals(emptyList(), eventDao.getEventById("e1")?.userIds)
+        assertEquals(emptyList(), eventDao.getEventById("e1")?.teamIds)
     }
 
     @Test
@@ -925,32 +1056,64 @@ class EventRepositoryHttpTest {
 
         val engine = MockEngine { request ->
             assertEquals("/api/events/e1/participants", request.url.encodedPath)
-            assertEquals(HttpMethod.Delete, request.method)
             assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+            when (request.method) {
+                HttpMethod.Delete -> {
+                    capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                        ?.bytes()
+                        ?.decodeToString()
+                        .orEmpty()
+                    respond(
+                        content = """
+                            {
+                              "event": {
+                                "id": "e1",
+                                "name": "Event One",
+                                "hostId": "h1",
+                                "start": "2026-02-10T00:00:00Z",
+                                "end": "2026-02-10T01:00:00Z",
+                                "coordinates": [-80.0, 25.0],
+                                "userIds": [],
+                                "teamIds": []
+                              }
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
 
-            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
-                ?.bytes()
-                ?.decodeToString()
-                .orEmpty()
+                HttpMethod.Get -> respond(
+                    content = """
+                        {
+                          "event": {
+                            "id": "e1",
+                            "name": "Event One",
+                            "hostId": "h1",
+                            "start": "2026-02-10T00:00:00Z",
+                            "end": "2026-02-10T01:00:00Z",
+                            "coordinates": [-80.0, 25.0],
+                            "userIds": [],
+                            "teamIds": []
+                          },
+                          "participants": {
+                            "teams": [],
+                            "users": [],
+                            "children": [],
+                            "waitlist": [],
+                            "freeAgents": []
+                          },
+                          "teams": [],
+                          "users": [],
+                          "participantCount": 0
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
 
-            respond(
-                content = """
-                    {
-                      "event": {
-                        "id": "e1",
-                        "name": "Event One",
-                        "hostId": "h1",
-                        "start": "2026-02-10T00:00:00Z",
-                        "end": "2026-02-10T01:00:00Z",
-                        "coordinates": [-80.0, 25.0],
-                        "userIds": [],
-                        "teamIds": []
-                      }
-                    }
-                """.trimIndent(),
-                status = HttpStatusCode.OK,
-                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
-            )
+                else -> error("unexpected method: ${request.method}")
+            }
         }
 
         val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
@@ -997,34 +1160,69 @@ class EventRepositoryHttpTest {
         var capturedPath = ""
 
         val engine = MockEngine { request ->
-            capturedPath = request.url.encodedPath
-            assertEquals(HttpMethod.Post, request.method)
-            respond(
-                content = """
-                    {
-                      "event": {
-                        "id": "e1",
-                        "name": "Event One",
-                        "hostId": "h1",
-                        "start": "2026-02-10T00:00:00Z",
-                        "end": "2026-02-10T01:00:00Z",
-                        "coordinates": [-80.0, 25.0],
-                        "userIds": [],
-                        "freeAgentIds": ["u1"],
-                        "teamIds": []
-                      }
-                    }
-                """.trimIndent(),
-                status = HttpStatusCode.OK,
-                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
-            )
+            when (request.method) {
+                HttpMethod.Post -> {
+                    capturedPath = request.url.encodedPath
+                    respond(
+                        content = """
+                            {
+                              "event": {
+                                "id": "e1",
+                                "name": "Event One",
+                                "hostId": "h1",
+                                "start": "2026-02-10T00:00:00Z",
+                                "end": "2026-02-10T01:00:00Z",
+                                "coordinates": [-80.0, 25.0],
+                                "userIds": [],
+                                "freeAgentIds": ["u1"],
+                                "teamIds": []
+                              }
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                HttpMethod.Get -> respond(
+                    content = """
+                        {
+                          "event": {
+                            "id": "e1",
+                            "name": "Event One",
+                            "hostId": "h1",
+                            "start": "2026-02-10T00:00:00Z",
+                            "end": "2026-02-10T01:00:00Z",
+                            "coordinates": [-80.0, 25.0],
+                            "userIds": [],
+                            "teamIds": []
+                          },
+                          "participants": {
+                            "teams": [],
+                            "users": [],
+                            "children": [],
+                            "waitlist": [],
+                            "freeAgents": [{"registrantId":"u1","registrantType":"SELF","rosterRole":"FREE_AGENT"}]
+                          },
+                          "users": [{"id":"u1","firstName":"Test","lastName":"User","userName":"u1"}],
+                          "participantCount": 0
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                else -> error("unexpected method: ${request.method}")
+            }
         }
 
         val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
         val api = MvpApiClient(http, "http://example.test", tokenStore)
         val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
 
-        val teamSignupEvent = makeEvent(id = "e1", hostId = "h1", userIds = emptyList())
+        val teamSignupEvent = makeEvent(id = "e1", hostId = "h1", userIds = emptyList()).copy(
+            teamSignup = true,
+        )
 
         repo.addCurrentUserToEvent(teamSignupEvent).getOrThrow()
 
@@ -1050,32 +1248,65 @@ class EventRepositoryHttpTest {
 
         val engine = MockEngine { request ->
             assertEquals("/api/events/e1/participants", request.url.encodedPath)
-            assertEquals(HttpMethod.Post, request.method)
             assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
-            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
-                ?.bytes()
-                ?.decodeToString()
-                .orEmpty()
+            when (request.method) {
+                HttpMethod.Post -> {
+                    capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                        ?.bytes()
+                        ?.decodeToString()
+                        .orEmpty()
 
-            respond(
-                content = """
-                    {
-                      "event": {
-                        "id": "e1",
-                        "name": "Event One",
-                        "hostId": "h1",
-                        "start": "2026-02-10T00:00:00Z",
-                        "end": "2026-02-10T01:00:00Z",
-                        "coordinates": [-80.0, 25.0],
-                        "userIds": [],
-                        "teamIds": []
-                      },
-                      "requiresParentApproval": true
-                    }
-                """.trimIndent(),
-                status = HttpStatusCode.OK,
-                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
-            )
+                    respond(
+                        content = """
+                            {
+                              "event": {
+                                "id": "e1",
+                                "name": "Event One",
+                                "hostId": "h1",
+                                "start": "2026-02-10T00:00:00Z",
+                                "end": "2026-02-10T01:00:00Z",
+                                "coordinates": [-80.0, 25.0],
+                                "userIds": [],
+                                "teamIds": []
+                              },
+                              "requiresParentApproval": true
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                HttpMethod.Get -> respond(
+                    content = """
+                        {
+                          "event": {
+                            "id": "e1",
+                            "name": "Event One",
+                            "hostId": "h1",
+                            "start": "2026-02-10T00:00:00Z",
+                            "end": "2026-02-10T01:00:00Z",
+                            "coordinates": [-80.0, 25.0],
+                            "userIds": [],
+                            "teamIds": []
+                          },
+                          "participants": {
+                            "teams": [],
+                            "users": [],
+                            "children": [],
+                            "waitlist": [],
+                            "freeAgents": []
+                          },
+                          "users": [],
+                          "participantCount": 0
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                else -> error("unexpected method: ${request.method}")
+            }
         }
 
         val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
@@ -1143,22 +1374,49 @@ class EventRepositoryHttpTest {
         var capturedPath = ""
 
         val engine = MockEngine { request ->
-            capturedPath = request.url.encodedPath
+            if (request.method != HttpMethod.Get) {
+                capturedPath = request.url.encodedPath
+            }
             respond(
-                content = """
-                    {
-                      "event": {
-                        "id": "e1",
-                        "name": "Event One",
-                        "hostId": "h1",
-                        "start": "2026-02-10T00:00:00Z",
-                        "end": "2026-02-10T01:00:00Z",
-                        "coordinates": [-80.0, 25.0],
-                        "userIds": ["existing_user", "existing_user_2"],
-                        "teamIds": []
-                      }
-                    }
-                """.trimIndent(),
+                content = when (request.method) {
+                    HttpMethod.Get -> """
+                        {
+                          "event": {
+                            "id": "e1",
+                            "name": "Event One",
+                            "hostId": "h1",
+                            "start": "2026-02-10T00:00:00Z",
+                            "end": "2026-02-10T01:00:00Z",
+                            "coordinates": [-80.0, 25.0],
+                            "userIds": ["existing_user", "existing_user_2"],
+                            "teamIds": []
+                          },
+                          "participants": {
+                            "teams": [],
+                            "users": [{"registrantId":"existing_user","registrantType":"SELF","rosterRole":"PARTICIPANT"},{"registrantId":"existing_user_2","registrantType":"SELF","rosterRole":"PARTICIPANT"}],
+                            "children": [],
+                            "waitlist": [{"registrantId":"u_new","registrantType":"SELF","rosterRole":"WAITLIST"}],
+                            "freeAgents": []
+                          },
+                          "users": [],
+                          "participantCount": 2
+                        }
+                    """.trimIndent()
+                    else -> """
+                        {
+                          "event": {
+                            "id": "e1",
+                            "name": "Event One",
+                            "hostId": "h1",
+                            "start": "2026-02-10T00:00:00Z",
+                            "end": "2026-02-10T01:00:00Z",
+                            "coordinates": [-80.0, 25.0],
+                            "userIds": ["existing_user", "existing_user_2"],
+                            "teamIds": []
+                          }
+                        }
+                    """.trimIndent()
+                },
                 status = HttpStatusCode.OK,
                 headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
             )
@@ -1257,30 +1515,65 @@ class EventRepositoryHttpTest {
         }
 
         val engine = MockEngine { request ->
-            capturedPath = request.url.encodedPath
-            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
-                ?.bytes()
-                ?.decodeToString()
-                .orEmpty()
+            when (request.method) {
+                HttpMethod.Post -> {
+                    capturedPath = request.url.encodedPath
+                    capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                        ?.bytes()
+                        ?.decodeToString()
+                        .orEmpty()
 
-            respond(
-                content = """
-                    {
-                      "event": {
-                        "id": "e1",
-                        "name": "Event One",
-                        "hostId": "h1",
-                        "start": "2026-02-10T00:00:00Z",
-                        "end": "2026-02-10T01:00:00Z",
-                        "coordinates": [-80.0, 25.0],
-                        "userIds": [],
-                        "teamIds": ["t1"]
-                      }
-                    }
-                """.trimIndent(),
-                status = HttpStatusCode.OK,
-                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
-            )
+                    respond(
+                        content = """
+                            {
+                              "event": {
+                                "id": "e1",
+                                "name": "Event One",
+                                "hostId": "h1",
+                                "start": "2026-02-10T00:00:00Z",
+                                "end": "2026-02-10T01:00:00Z",
+                                "coordinates": [-80.0, 25.0],
+                                "userIds": [],
+                                "teamIds": ["t1"]
+                              }
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                HttpMethod.Get -> respond(
+                    content = """
+                        {
+                          "event": {
+                            "id": "e1",
+                            "name": "Event One",
+                            "hostId": "h1",
+                            "start": "2026-02-10T00:00:00Z",
+                            "end": "2026-02-10T01:00:00Z",
+                            "coordinates": [-80.0, 25.0],
+                            "userIds": [],
+                            "teamIds": ["t1"]
+                          },
+                          "participants": {
+                            "teams": [{"registrantId":"t1","registrantType":"TEAM","rosterRole":"PARTICIPANT"}],
+                            "users": [],
+                            "children": [],
+                            "waitlist": [],
+                            "freeAgents": []
+                          },
+                          "teams": [{"id":"t1","name":"Team One","captainId":"u1","managerId":"u1","playerIds":["u1"],"teamSize":2,"division":"open","divisionTypeId":"a","divisionTypeName":"A","skillDivisionTypeId":"a","skillDivisionTypeName":"A","ageDivisionTypeId":"open","ageDivisionTypeName":"Open","divisionGender":"F"}],
+                          "users": [],
+                          "participantCount": 1
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                else -> error("unexpected method: ${request.method}")
+            }
         }
 
         val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
@@ -1335,6 +1628,119 @@ class EventRepositoryHttpTest {
     }
 
     @Test
+    fun addCurrentUserToEvent_uses_occurrence_scoped_participant_snapshot_for_weekly_events() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+        val participantQueries = mutableListOf<Pair<String?, String?>>()
+        var capturedPostBody = ""
+
+        val engine = MockEngine { request ->
+            when (request.method) {
+                HttpMethod.Get -> {
+                    if (request.url.encodedPath == "/api/events/e1/participants") {
+                        participantQueries += request.url.parameters["slotId"] to request.url.parameters["occurrenceDate"]
+                    }
+                    respond(
+                        content = """
+                            {
+                              "event": {
+                                "id": "e1",
+                                "name": "Weekly Event",
+                                "hostId": "h1",
+                                "eventType": "WEEKLY_EVENT",
+                                "start": "2026-04-12T00:00:00Z",
+                                "end": "2026-04-12T01:00:00Z",
+                                "coordinates": [-80.0, 25.0],
+                                "userIds": [],
+                                "teamIds": []
+                              },
+                              "participants": {
+                                "teams": [],
+                                "users": [],
+                                "children": [],
+                                "waitlist": [],
+                                "freeAgents": []
+                              },
+                              "users": [],
+                              "participantCount": 0,
+                              "participantCapacity": 8
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                HttpMethod.Post -> {
+                    capturedPostBody = (request.body as? OutgoingContent.ByteArrayContent)
+                        ?.bytes()
+                        ?.decodeToString()
+                        .orEmpty()
+                    respond(
+                        content = """
+                            {
+                              "event": {
+                                "id": "e1",
+                                "name": "Weekly Event",
+                                "hostId": "h1",
+                                "eventType": "WEEKLY_EVENT",
+                                "start": "2026-04-12T00:00:00Z",
+                                "end": "2026-04-12T01:00:00Z",
+                                "coordinates": [-80.0, 25.0],
+                                "userIds": ["u1"],
+                                "teamIds": []
+                              }
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                else -> error("unexpected method: ${request.method}")
+            }
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val weeklyEvent = Event(
+            id = "e1",
+            name = "Weekly Event",
+            hostId = "h1",
+            coordinates = listOf(-80.0, 25.0),
+            start = Instant.parse("2026-04-12T00:00:00Z"),
+            end = Instant.parse("2026-04-12T01:00:00Z"),
+            eventType = EventType.WEEKLY_EVENT,
+            maxParticipants = 8,
+            teamSignup = false,
+        )
+        val occurrence = EventOccurrenceSelection(
+            slotId = "slot-1",
+            occurrenceDate = "2026-04-14",
+        )
+
+        repo.addCurrentUserToEvent(
+            event = weeklyEvent,
+            occurrence = occurrence,
+        ).getOrThrow()
+
+        assertTrue(
+            participantQueries.contains("slot-1" to "2026-04-14"),
+            "Expected weekly participant queries to carry slotId and occurrenceDate.",
+        )
+        assertTrue(capturedPostBody.contains("\"slotId\":\"slot-1\""))
+        assertTrue(capturedPostBody.contains("\"occurrenceDate\":\"2026-04-14\""))
+    }
+
+    @Test
     fun registerChildForEvent_posts_child_registration_payload() = runTest {
         val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
         val eventDao = EventRepositoryHttp_FakeEventDao()
@@ -1361,7 +1767,7 @@ class EventRepositoryHttpTest {
                     {
                       "registration": {
                         "id": "reg_1",
-                        "status": "PENDINGCONSENT",
+                        "status": "ACTIVE",
                         "consentStatus": "child_email_required"
                       },
                       "consent": {
@@ -1385,8 +1791,9 @@ class EventRepositoryHttpTest {
         val result = repo.registerChildForEvent(eventId = "e1", childUserId = "child_1").getOrThrow()
 
         assertTrue(capturedBody.contains("\"childId\":\"child_1\""))
-        assertEquals("PENDINGCONSENT", result.registrationStatus)
+        assertEquals("ACTIVE", result.registrationStatus)
         assertEquals("child_email_required", result.consentStatus)
+        assertFalse(result.requiresParentApproval)
         assertTrue(result.requiresChildEmail)
         assertTrue(result.warnings.isNotEmpty())
     }
@@ -1405,34 +1812,68 @@ class EventRepositoryHttpTest {
         var capturedBody = ""
 
         val engine = MockEngine { request ->
-            capturedPath = request.url.encodedPath
-            assertEquals(HttpMethod.Post, request.method)
             assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
-            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
-                ?.bytes()
-                ?.decodeToString()
-                .orEmpty()
+            when (request.method) {
+                HttpMethod.Post -> {
+                    capturedPath = request.url.encodedPath
+                    capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                        ?.bytes()
+                        ?.decodeToString()
+                        .orEmpty()
 
-            respond(
-                content = """
-                    {
-                      "event": {
-                        "id": "e1",
-                        "name": "Event One",
-                        "hostId": "h1",
-                        "start": "2026-02-10T00:00:00Z",
-                        "end": "2026-02-10T01:00:00Z",
-                        "coordinates": [-80.0, 25.0],
-                        "userIds": [],
-                        "teamIds": [],
-                        "waitListIds": ["child_1"]
-                      },
-                      "requiresParentApproval": false
-                    }
-                """.trimIndent(),
-                status = HttpStatusCode.OK,
-                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
-            )
+                    respond(
+                        content = """
+                            {
+                              "event": {
+                                "id": "e1",
+                                "name": "Event One",
+                                "hostId": "h1",
+                                "start": "2026-02-10T00:00:00Z",
+                                "end": "2026-02-10T01:00:00Z",
+                                "coordinates": [-80.0, 25.0],
+                                "userIds": [],
+                                "teamIds": [],
+                                "waitListIds": ["child_1"]
+                              },
+                              "requiresParentApproval": false
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                HttpMethod.Get -> respond(
+                    content = """
+                        {
+                          "event": {
+                            "id": "e1",
+                            "name": "Event One",
+                            "hostId": "h1",
+                            "start": "2026-02-10T00:00:00Z",
+                            "end": "2026-02-10T01:00:00Z",
+                            "coordinates": [-80.0, 25.0],
+                            "userIds": [],
+                            "teamIds": [],
+                            "waitListIds": ["child_1"]
+                          },
+                          "participants": {
+                            "teams": [],
+                            "users": [],
+                            "children": [],
+                            "waitlist": [{"registrantId":"child_1","registrantType":"CHILD","rosterRole":"WAITLIST"}],
+                            "freeAgents": []
+                          },
+                          "users": [],
+                          "participantCount": 0
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                else -> error("unexpected method: ${request.method}")
+            }
         }
 
         val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }

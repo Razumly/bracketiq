@@ -2953,11 +2953,22 @@ fun EventDetails(
                     ) {
                         Box(modifier = Modifier.weight(1f)) {
                             LabeledCheckboxRow(
-                                checked = if (editEvent.eventType == EventType.EVENT) editEvent.teamSignup else true,
+                                checked = if (
+                                    editEvent.eventType == EventType.EVENT ||
+                                    editEvent.eventType == EventType.WEEKLY_EVENT
+                                ) {
+                                    editEvent.teamSignup
+                                } else {
+                                    true
+                                },
                                 label = "Team Event",
-                                enabled = editEvent.eventType == EventType.EVENT,
+                                enabled = editEvent.eventType == EventType.EVENT ||
+                                    editEvent.eventType == EventType.WEEKLY_EVENT,
                                 onCheckedChange = { checked ->
-                                    if (editEvent.eventType == EventType.EVENT) {
+                                    if (
+                                        editEvent.eventType == EventType.EVENT ||
+                                        editEvent.eventType == EventType.WEEKLY_EVENT
+                                    ) {
                                         onEditEvent { copy(teamSignup = checked) }
                                     }
                         },

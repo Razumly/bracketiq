@@ -312,16 +312,6 @@ data class EventResponseDto(
 )
 
 @Serializable
-data class WeeklySessionCreateRequestDto(
-    val sessionStart: String,
-    val sessionEnd: String,
-    val slotId: String? = null,
-    val divisionId: String? = null,
-    val divisionTypeId: String? = null,
-    val divisionTypeKey: String? = null,
-)
-
-@Serializable
 data class ScheduleEventRequestDto(
     val participantCount: Int? = null,
 )
@@ -367,9 +357,8 @@ data class EventParticipantsRequestDto(
     val divisionId: String? = null,
     val divisionTypeId: String? = null,
     val divisionTypeKey: String? = null,
-    val sessionStart: String? = null,
-    val sessionEnd: String? = null,
     val slotId: String? = null,
+    val occurrenceDate: String? = null,
     val refundMode: String? = null,
     val refundReason: String? = null,
 )
@@ -384,6 +373,8 @@ data class EventParticipantsResponseDto(
 @Serializable
 data class EventChildRegistrationRequestDto(
     val childId: String,
+    val slotId: String? = null,
+    val occurrenceDate: String? = null,
 )
 
 @Serializable
@@ -407,6 +398,76 @@ data class EventChildRegistrationResponseDto(
     val requiresParentApproval: Boolean? = null,
     val warnings: List<String> = emptyList(),
     val error: String? = null,
+)
+
+@Serializable
+data class EventParticipantEntryDto(
+    val registrationId: String? = null,
+    val registrantId: String? = null,
+    val registrantType: String? = null,
+    val rosterRole: String? = null,
+    val status: String? = null,
+    val parentId: String? = null,
+    val divisionId: String? = null,
+    val divisionTypeId: String? = null,
+    val divisionTypeKey: String? = null,
+    val consentDocumentId: String? = null,
+    val consentStatus: String? = null,
+    val slotId: String? = null,
+    val occurrenceDate: String? = null,
+    val createdAt: String? = null,
+    val updatedAt: String? = null,
+)
+
+@Serializable
+data class EventParticipantSectionsDto(
+    val teams: List<EventParticipantEntryDto> = emptyList(),
+    val users: List<EventParticipantEntryDto> = emptyList(),
+    val children: List<EventParticipantEntryDto> = emptyList(),
+    val waitlist: List<EventParticipantEntryDto> = emptyList(),
+    val freeAgents: List<EventParticipantEntryDto> = emptyList(),
+)
+
+@Serializable
+data class EventOccurrenceDto(
+    val slotId: String? = null,
+    val occurrenceDate: String? = null,
+)
+
+@Serializable
+data class EventParticipantsSnapshotResponseDto(
+    val event: EventApiDto? = null,
+    val participants: EventParticipantSectionsDto = EventParticipantSectionsDto(),
+    val teams: List<TeamApiDto> = emptyList(),
+    val users: List<UserProfileDto> = emptyList(),
+    val participantCount: Int? = null,
+    val participantCapacity: Int? = null,
+    val occurrence: EventOccurrenceDto? = null,
+    val weeklySelectionRequired: Boolean? = null,
+    val error: String? = null,
+)
+
+@Serializable
+data class CurrentUserEventRegistrationDto(
+    val id: String? = null,
+    val eventId: String? = null,
+    val registrantId: String? = null,
+    val parentId: String? = null,
+    val registrantType: String? = null,
+    val rosterRole: String? = null,
+    val status: String? = null,
+    val divisionId: String? = null,
+    val divisionTypeId: String? = null,
+    val divisionTypeKey: String? = null,
+    val slotId: String? = null,
+    val occurrenceDate: String? = null,
+    val createdAt: String? = null,
+    val updatedAt: String? = null,
+)
+
+@Serializable
+data class CurrentUserEventRegistrationsResponseDto(
+    val registrations: List<CurrentUserEventRegistrationDto> = emptyList(),
 )
 
 @Serializable
@@ -442,8 +503,6 @@ data class EventUpdateDto(
     val price: Int? = null,
     val singleDivision: Boolean? = null,
     val registrationByDivisionType: Boolean? = null,
-    val waitListIds: List<String>? = null,
-    val freeAgentIds: List<String>? = null,
     val cancellationRefundHours: Int? = null,
     val teamSignup: Boolean? = null,
     val prize: String? = null,
@@ -472,8 +531,6 @@ data class EventUpdateDto(
     val fieldIds: List<String>? = null,
     val fields: List<Field>? = null,
     val timeSlots: List<TimeSlot>? = null,
-    val teamIds: List<String>? = null,
-    val userIds: List<String>? = null,
     val leagueScoringConfigId: String? = null,
     val leagueScoringConfig: LeagueScoringConfigDTO? = null,
     val organizationId: String? = null,
@@ -619,8 +676,6 @@ fun Event.toUpdateDto(
         price = priceCents,
         singleDivision = singleDivision,
         registrationByDivisionType = registrationByDivisionType,
-        waitListIds = waitListIds,
-        freeAgentIds = freeAgentIds,
         cancellationRefundHours = cancellationRefundHours,
         teamSignup = teamSignup,
         prize = prize,
@@ -653,8 +708,6 @@ fun Event.toUpdateDto(
         fieldIds = fieldIds,
         fields = if (includeFieldObjects) fieldsOverride else null,
         timeSlots = if (includeTimeSlotObjects) timeSlotsOverride else null,
-        teamIds = teamIds,
-        userIds = userIds,
         leagueScoringConfigId = leagueScoringConfigId,
         leagueScoringConfig = leagueScoringConfigOverride,
         organizationId = if (includeOrganizationId) organizationId else null,

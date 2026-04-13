@@ -427,6 +427,23 @@ class DefaultCreateEventComponentTest : MainDispatcherTest() {
     }
 
     @Test
+    fun selecting_weekly_event_keeps_existing_team_signup_choice() = runTest(testDispatcher) {
+        val harness = CreateEventHarness()
+        advance()
+
+        harness.component.updateEventField { copy(teamSignup = false) }
+        advance()
+
+        harness.component.onTypeSelected(EventType.WEEKLY_EVENT)
+        advance()
+
+        assertEquals(EventType.WEEKLY_EVENT, harness.component.newEventState.value.eventType)
+        assertFalse(harness.component.newEventState.value.teamSignup)
+        assertTrue(harness.component.newEventState.value.noFixedEndDateTime)
+        assertTrue(harness.component.newEventState.value.singleDivision)
+    }
+
+    @Test
     fun given_rental_context_when_updating_event_then_rental_constraints_lock_schedule_and_pricing_but_keep_selected_type() = runTest(testDispatcher) {
         val rentalContext = RentalCreateContext(
             organizationId = "org-1",

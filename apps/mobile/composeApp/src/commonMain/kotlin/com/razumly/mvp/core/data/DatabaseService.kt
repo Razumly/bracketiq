@@ -2,6 +2,7 @@ package com.razumly.mvp.core.data
 
 import com.razumly.mvp.core.data.dataTypes.daos.ChatGroupDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventDao
+import com.razumly.mvp.core.data.dataTypes.daos.EventRegistrationDao
 import com.razumly.mvp.core.data.dataTypes.daos.FieldDao
 import com.razumly.mvp.core.data.dataTypes.daos.MatchDao
 import com.razumly.mvp.core.data.dataTypes.daos.MessageDao
@@ -15,6 +16,7 @@ interface DatabaseService {
     val getFieldDao: FieldDao
     val getUserDataDao: UserDataDao
     val getEventDao: EventDao
+    val getEventRegistrationDao: EventRegistrationDao
     val getChatGroupDao: ChatGroupDao
     val getMessageDao: MessageDao
     val getRefundRequestDao: RefundRequestDao

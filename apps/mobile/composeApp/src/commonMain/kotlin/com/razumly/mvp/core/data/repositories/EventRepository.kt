@@ -1,9 +1,11 @@
 package com.razumly.mvp.core.data.repositories
 
+import com.razumly.mvp.core.data.CurrentUserDataSource
 import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.Bounds
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.EventRegistrationCacheEntry
 import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.Field
@@ -14,6 +16,7 @@ import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventTeamCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.EventUserCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
@@ -26,9 +29,11 @@ import com.razumly.mvp.core.util.calcDistance
 import dev.icerock.moko.geo.LatLng
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.dto.CreateEventRequestDto
+import com.razumly.mvp.core.network.dto.CurrentUserEventRegistrationsResponseDto
 import com.razumly.mvp.core.network.dto.EventApiDto
 import com.razumly.mvp.core.network.dto.EventChildRegistrationRequestDto
 import com.razumly.mvp.core.network.dto.EventChildRegistrationResponseDto
+import com.razumly.mvp.core.network.dto.EventParticipantsSnapshotResponseDto
 import com.razumly.mvp.core.network.dto.EventParticipantsRequestDto
 import com.razumly.mvp.core.network.dto.EventParticipantsResponseDto
 import com.razumly.mvp.core.network.dto.EventResponseDto
@@ -44,7 +49,7 @@ import com.razumly.mvp.core.network.dto.StandingsConfirmResponseDto
 import com.razumly.mvp.core.network.dto.StandingsDivisionDto
 import com.razumly.mvp.core.network.dto.StandingsResponseDto
 import com.razumly.mvp.core.network.dto.UpdateEventRequestDto
-import com.razumly.mvp.core.network.dto.WeeklySessionCreateRequestDto
+import com.razumly.mvp.core.network.dto.toUserDataOrNull
 import com.razumly.mvp.core.network.dto.toUpdateDto
 import io.ktor.http.encodeURLQueryComponent
 import kotlinx.coroutines.CoroutineScope
@@ -57,6 +62,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlin.time.Clock
 import kotlin.time.Instant
 
 interface IEventRepository : IMVPRepository {
@@ -74,12 +80,6 @@ interface IEventRepository : IMVPRepository {
         leagueScoringConfig: LeagueScoringConfigDTO? = null,
         fields: List<Field>? = null,
         timeSlots: List<TimeSlot>? = null,
-    ): Result<Event>
-    suspend fun createWeeklySession(
-        parentEventId: String,
-        sessionStart: Instant,
-        sessionEnd: Instant,
-        slotId: String? = null,
     ): Result<Event>
     suspend fun scheduleEvent(eventId: String, participantCount: Int? = null): Result<Event>
     suspend fun updateEvent(
@@ -112,24 +112,37 @@ interface IEventRepository : IMVPRepository {
     suspend fun addCurrentUserToEvent(
         event: Event,
         preferredDivisionId: String? = null,
+        occurrence: EventOccurrenceSelection? = null,
     ): Result<SelfRegistrationResult>
     suspend fun requestCurrentUserRegistration(
         event: Event,
         preferredDivisionId: String? = null,
+        occurrence: EventOccurrenceSelection? = null,
     ): Result<SelfRegistrationResult> = addCurrentUserToEvent(
         event = event,
         preferredDivisionId = preferredDivisionId,
+        occurrence = occurrence,
     )
     suspend fun registerChildForEvent(
         eventId: String,
         childUserId: String,
         joinWaitlist: Boolean = false,
+        occurrence: EventOccurrenceSelection? = null,
     ): Result<ChildRegistrationResult>
     suspend fun addTeamToEvent(
         event: Event,
         team: Team,
         preferredDivisionId: String? = null,
+        occurrence: EventOccurrenceSelection? = null,
     ): Result<Unit>
+    suspend fun syncEventParticipants(
+        event: Event,
+        occurrence: EventOccurrenceSelection? = null,
+    ): Result<EventParticipantsSyncResult>
+    suspend fun getEventParticipantsSummary(
+        eventId: String,
+        occurrence: EventOccurrenceSelection? = null,
+    ): Result<EventParticipantsSummary> = Result.success(EventParticipantsSummary())
     suspend fun getLeagueDivisionStandings(eventId: String, divisionId: String): Result<LeagueDivisionStandings>
     suspend fun confirmLeagueDivisionStandings(
         eventId: String,
@@ -141,9 +154,18 @@ interface IEventRepository : IMVPRepository {
         teamWithPlayers: TeamWithPlayers,
         refundMode: EventParticipantRefundMode? = null,
         refundReason: String? = null,
+        occurrence: EventOccurrenceSelection? = null,
     ): Result<Unit>
-    suspend fun removeCurrentUserFromEvent(event: Event, targetUserId: String? = null): Result<Unit>
+    suspend fun removeCurrentUserFromEvent(
+        event: Event,
+        targetUserId: String? = null,
+        occurrence: EventOccurrenceSelection? = null,
+    ): Result<Unit>
     suspend fun getMySchedule(): Result<UserScheduleSnapshot> = Result.success(UserScheduleSnapshot())
+    suspend fun syncCurrentUserRegistrationCache(): Result<Unit> = Result.success(Unit)
+    fun observeCurrentUserRegistrationsForEvent(eventId: String): Flow<List<EventRegistrationCacheEntry>> =
+        flowOf(emptyList())
+    suspend fun clearCurrentUserRegistrationCache(): Result<Unit> = Result.success(Unit)
 }
 
 enum class EventParticipantRefundMode(val wireValue: String) {
@@ -154,6 +176,25 @@ enum class EventParticipantRefundMode(val wireValue: String) {
 data class SelfRegistrationResult(
     val requiresParentApproval: Boolean = false,
     val joinedWaitlist: Boolean = false,
+)
+
+data class EventOccurrenceSelection(
+    val slotId: String,
+    val occurrenceDate: String,
+    val label: String? = null,
+)
+
+data class EventParticipantsSyncResult(
+    val event: Event,
+    val participantCount: Int = 0,
+    val participantCapacity: Int? = null,
+    val weeklySelectionRequired: Boolean = false,
+)
+
+data class EventParticipantsSummary(
+    val participantCount: Int = 0,
+    val participantCapacity: Int? = null,
+    val weeklySelectionRequired: Boolean = false,
 )
 
 data class ChildRegistrationResult(
@@ -214,6 +255,7 @@ class EventRepository(
     private val api: MvpApiClient,
     private val teamRepository: ITeamRepository,
     private val userRepository: IUserRepository,
+    private val currentUserDataSource: CurrentUserDataSource? = null,
 ) : IEventRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val eventPageSize = 50
@@ -307,6 +349,39 @@ class EventRepository(
         return res.events.mapNotNull { it.toEventOrNull() }
     }
 
+    private suspend fun fetchCurrentUserRegistrations(updatedAfter: Instant?): List<EventRegistrationCacheEntry> {
+        val path = buildString {
+            append("api/profile/registrations")
+            updatedAfter?.let { timestamp ->
+                append("?updatedAfter=")
+                append(timestamp.toString().encodeURLQueryComponent())
+            }
+        }
+        val response = api.get<CurrentUserEventRegistrationsResponseDto>(path)
+        return response.registrations.mapNotNull { dto ->
+            val id = dto.id?.trim()?.takeIf(String::isNotBlank) ?: return@mapNotNull null
+            val eventId = dto.eventId?.trim()?.takeIf(String::isNotBlank) ?: return@mapNotNull null
+            val registrantId = dto.registrantId?.trim()?.takeIf(String::isNotBlank) ?: return@mapNotNull null
+            val registrantType = dto.registrantType?.trim()?.takeIf(String::isNotBlank) ?: return@mapNotNull null
+            EventRegistrationCacheEntry(
+                id = id,
+                eventId = eventId,
+                registrantId = registrantId,
+                parentId = dto.parentId?.trim()?.takeIf(String::isNotBlank),
+                registrantType = registrantType,
+                rosterRole = dto.rosterRole?.trim()?.takeIf(String::isNotBlank),
+                status = dto.status?.trim()?.takeIf(String::isNotBlank),
+                divisionId = dto.divisionId?.trim()?.takeIf(String::isNotBlank),
+                divisionTypeId = dto.divisionTypeId?.trim()?.takeIf(String::isNotBlank),
+                divisionTypeKey = dto.divisionTypeKey?.trim()?.takeIf(String::isNotBlank),
+                slotId = dto.slotId?.trim()?.takeIf(String::isNotBlank),
+                occurrenceDate = dto.occurrenceDate?.trim()?.takeIf(String::isNotBlank),
+                createdAt = dto.createdAt?.trim()?.takeIf(String::isNotBlank),
+                updatedAt = dto.updatedAt?.trim()?.takeIf(String::isNotBlank),
+            )
+        }
+    }
+
     private suspend fun insertEventCrossReferences(
         eventId: String,
         players: List<UserData>,
@@ -334,6 +409,104 @@ class EventRepository(
             })
     }
 
+    private fun appendOccurrenceQuery(
+        basePath: String,
+        occurrence: EventOccurrenceSelection?,
+    ): String {
+        val normalizedSlotId = occurrence?.slotId?.trim()?.takeIf(String::isNotBlank)
+        val normalizedOccurrenceDate = occurrence?.occurrenceDate?.trim()?.takeIf(String::isNotBlank)
+        if (normalizedSlotId == null || normalizedOccurrenceDate == null) {
+            return basePath
+        }
+        return buildString {
+            append(basePath)
+            append("?slotId=")
+            append(normalizedSlotId.encodeURLQueryComponent())
+            append("&occurrenceDate=")
+            append(normalizedOccurrenceDate.encodeURLQueryComponent())
+        }
+    }
+
+    private fun participantRegistrantIds(
+        entries: List<com.razumly.mvp.core.network.dto.EventParticipantEntryDto>,
+    ): List<String> = entries
+        .mapNotNull { entry -> entry.registrantId?.trim()?.takeIf(String::isNotBlank) }
+        .distinct()
+
+    private suspend fun fetchEventParticipantsSnapshot(
+        eventId: String,
+        occurrence: EventOccurrenceSelection?,
+    ): EventParticipantsSnapshotResponseDto {
+        val normalizedEventId = eventId.trim().takeIf(String::isNotBlank)
+            ?: error("Event id is required.")
+        return api.get(
+            appendOccurrenceQuery(
+                basePath = "api/events/$normalizedEventId/participants",
+                occurrence = occurrence,
+            ),
+        )
+    }
+
+    private suspend fun mergeEventParticipantsSnapshot(
+        baseEvent: Event,
+        snapshot: EventParticipantsSnapshotResponseDto,
+    ): EventParticipantsSyncResult {
+        snapshot.error?.takeIf(String::isNotBlank)?.let { error(it) }
+
+        if (snapshot.weeklySelectionRequired == true) {
+            val clearedEvent = baseEvent.copy(
+                teamIds = emptyList(),
+                userIds = emptyList(),
+                waitListIds = emptyList(),
+                freeAgentIds = emptyList(),
+            )
+            databaseService.getEventDao.upsertEvent(clearedEvent)
+            persistEventRelations(
+                event = clearedEvent,
+                allowWeeklyParticipantRoster = true,
+            )
+            return EventParticipantsSyncResult(
+                event = clearedEvent,
+                participantCount = 0,
+                participantCapacity = snapshot.participantCapacity,
+                weeklySelectionRequired = true,
+            )
+        }
+
+        val participantSections = snapshot.participants
+        val mergedEvent = (snapshot.event?.toEventOrNull() ?: baseEvent).copy(
+            teamIds = participantRegistrantIds(participantSections.teams),
+            userIds = (
+                participantRegistrantIds(participantSections.users) +
+                    participantRegistrantIds(participantSections.children)
+                ).distinct(),
+            waitListIds = participantRegistrantIds(participantSections.waitlist),
+            freeAgentIds = participantRegistrantIds(participantSections.freeAgents),
+        )
+        val teams = snapshot.teams.mapNotNull { dto -> dto.toTeamOrNull() }
+        val users = snapshot.users.mapNotNull { dto -> dto.toUserDataOrNull() }
+
+        if (teams.isNotEmpty()) {
+            databaseService.getTeamDao.upsertTeamsWithRelations(teams)
+        }
+        if (users.isNotEmpty()) {
+            databaseService.getUserDataDao.upsertUsersWithRelations(users)
+        }
+
+        databaseService.getEventDao.upsertEvent(mergedEvent)
+        persistEventRelations(
+            event = mergedEvent,
+            allowWeeklyParticipantRoster = true,
+        )
+
+        return EventParticipantsSyncResult(
+            event = mergedEvent,
+            participantCount = snapshot.participantCount ?: 0,
+            participantCapacity = snapshot.participantCapacity,
+            weeklySelectionRequired = snapshot.weeklySelectionRequired == true,
+        )
+    }
+
     override suspend fun getEvent(eventId: String): Result<Event> =
         singleResponse(networkCall = {
             fetchRemoteEvent(eventId)
@@ -344,6 +517,83 @@ class EventRepository(
             databaseService.getEventDao.getEventById(eventId)
                 ?: throw IllegalStateException("Event $eventId not cached")
         })
+
+    override suspend fun syncEventParticipants(
+        event: Event,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<EventParticipantsSyncResult> = runCatching {
+        val snapshot = fetchEventParticipantsSnapshot(event.id, occurrence)
+        mergeEventParticipantsSnapshot(
+            baseEvent = event,
+            snapshot = snapshot,
+        )
+    }
+
+    override suspend fun getEventParticipantsSummary(
+        eventId: String,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<EventParticipantsSummary> = runCatching {
+        val snapshot = fetchEventParticipantsSnapshot(eventId, occurrence)
+        snapshot.error?.takeIf(String::isNotBlank)?.let { error(it) }
+        EventParticipantsSummary(
+            participantCount = snapshot.participantCount ?: 0,
+            participantCapacity = snapshot.participantCapacity,
+            weeklySelectionRequired = snapshot.weeklySelectionRequired == true,
+        )
+    }
+
+    override suspend fun syncCurrentUserRegistrationCache(): Result<Unit> = runCatching {
+        val dataSource = currentUserDataSource ?: return@runCatching
+        val currentUserId = dataSource.getUserIdNow().trim()
+        if (currentUserId.isBlank()) {
+            dataSource.clearRegistrationSyncState()
+            databaseService.getEventRegistrationDao.clearAll()
+            return@runCatching
+        }
+
+        val storedUserId = dataSource.getRegistrationSyncUserId()
+        val updatedAfter = if (storedUserId == currentUserId) {
+            dataSource.getRegistrationSyncStartedAt()
+        } else {
+            databaseService.getEventRegistrationDao.clearAll()
+            null
+        }
+        val syncStartedAt = Clock.System.now()
+        dataSource.saveRegistrationSyncState(
+            userId = currentUserId,
+            startedAt = syncStartedAt,
+        )
+
+        val registrations = fetchCurrentUserRegistrations(updatedAfter = updatedAfter)
+        if (registrations.isNotEmpty()) {
+            databaseService.getEventRegistrationDao.upsertRegistrations(registrations)
+        }
+    }
+
+    override fun observeCurrentUserRegistrationsForEvent(eventId: String): Flow<List<EventRegistrationCacheEntry>> {
+        val normalizedEventId = eventId.trim()
+        if (normalizedEventId.isBlank()) {
+            return flowOf(emptyList())
+        }
+        return databaseService.getEventRegistrationDao.observeRegistrationsForEvent(normalizedEventId)
+    }
+
+    override suspend fun clearCurrentUserRegistrationCache(): Result<Unit> = runCatching {
+        currentUserDataSource?.clearRegistrationSyncState()
+        databaseService.getEventRegistrationDao.clearAll()
+    }
+
+    private suspend fun syncEventParticipantsAfterMutation(
+        event: Event,
+        occurrence: EventOccurrenceSelection?,
+    ) {
+        syncCurrentUserRegistrationCache().getOrNull()
+        syncEventParticipants(event, occurrence)
+            .onFailure {
+                databaseService.getEventDao.upsertEvent(event)
+                persistEventRelations(event)
+            }
+    }
 
     override suspend fun getLeagueScoringConfig(eventId: String): Result<LeagueScoringConfig?> = runCatching {
         val normalizedEventId = eventId.trim().takeIf(String::isNotBlank) ?: return@runCatching null
@@ -433,40 +683,6 @@ class EventRepository(
         }, onReturn = { event ->
             event
         })
-
-    override suspend fun createWeeklySession(
-        parentEventId: String,
-        sessionStart: Instant,
-        sessionEnd: Instant,
-        slotId: String?,
-    ): Result<Event> =
-        singleResponse(
-            networkCall = {
-                val normalizedParentEventId = parentEventId.trim()
-                if (normalizedParentEventId.isEmpty()) {
-                    error("Weekly session creation requires a parent event id")
-                }
-                if (sessionEnd <= sessionStart) {
-                    error("Weekly session end must be after session start")
-                }
-                val normalizedSlotId = slotId?.trim()?.takeIf(String::isNotBlank)
-                api.post<WeeklySessionCreateRequestDto, EventResponseDto>(
-                    path = "api/events/$normalizedParentEventId/weekly-sessions",
-                    body = WeeklySessionCreateRequestDto(
-                        sessionStart = sessionStart.toString(),
-                        sessionEnd = sessionEnd.toString(),
-                        slotId = normalizedSlotId,
-                    ),
-                ).event?.toEventOrNull() ?: error("Create weekly session response missing event")
-            },
-            saveCall = { event ->
-                databaseService.getEventDao.upsertEvent(event)
-                persistEventRelations(event)
-            },
-            onReturn = { event ->
-                event
-            },
-        )
 
     override suspend fun scheduleEvent(eventId: String, participantCount: Int?): Result<Event> =
         singleResponse(
@@ -684,10 +900,15 @@ class EventRepository(
     override suspend fun addCurrentUserToEvent(
         event: Event,
         preferredDivisionId: String?,
+        occurrence: EventOccurrenceSelection?,
     ): Result<SelfRegistrationResult> =
         runCatching {
             val currentUser = userRepository.currentUser.value.getOrThrow()
-            val eventAtCapacity = isEventAtCapacity(event, preferredDivisionId)
+            val eventAtCapacity = isEventAtCapacity(
+                event = event,
+                preferredDivisionId = preferredDivisionId,
+                occurrence = occurrence,
+            )
             val divisionPayload = resolveRegistrationDivisionPayload(
                 event = event,
                 preferredDivisionId = preferredDivisionId,
@@ -697,6 +918,8 @@ class EventRepository(
                 divisionId = divisionPayload.divisionId,
                 divisionTypeId = divisionPayload.divisionTypeId,
                 divisionTypeKey = divisionPayload.divisionTypeKey,
+                slotId = occurrence?.slotId,
+                occurrenceDate = occurrence?.occurrenceDate,
             )
             val response = when {
                 eventAtCapacity -> {
@@ -709,7 +932,11 @@ class EventRepository(
                 event.teamSignup -> {
                     api.post<EventParticipantsRequestDto, EventParticipantsResponseDto>(
                         path = "api/events/${event.id}/free-agents",
-                        body = EventParticipantsRequestDto(userId = currentUser.id),
+                        body = EventParticipantsRequestDto(
+                            userId = currentUser.id,
+                            slotId = occurrence?.slotId,
+                            occurrenceDate = occurrence?.occurrenceDate,
+                        ),
                     )
                 }
 
@@ -725,10 +952,8 @@ class EventRepository(
                 error(errorMessage)
             }
 
-            response.event?.toEventOrNull()?.let { updated ->
-                databaseService.getEventDao.upsertEvent(updated)
-                persistEventRelations(updated)
-            }
+            val updatedEvent = response.event?.toEventOrNull() ?: event
+            syncEventParticipantsAfterMutation(updatedEvent, occurrence)
 
             SelfRegistrationResult(
                 requiresParentApproval = response.requiresParentApproval == true,
@@ -739,6 +964,7 @@ class EventRepository(
     override suspend fun requestCurrentUserRegistration(
         event: Event,
         preferredDivisionId: String?,
+        occurrence: EventOccurrenceSelection?,
     ): Result<SelfRegistrationResult> =
         runCatching {
             val currentUser = userRepository.currentUser.value.getOrThrow()
@@ -753,6 +979,8 @@ class EventRepository(
                     divisionId = divisionPayload.divisionId,
                     divisionTypeId = divisionPayload.divisionTypeId,
                     divisionTypeKey = divisionPayload.divisionTypeKey,
+                    slotId = occurrence?.slotId,
+                    occurrenceDate = occurrence?.occurrenceDate,
                 ),
             )
             response.error?.takeIf(String::isNotBlank)?.let { error(it) }
@@ -760,8 +988,7 @@ class EventRepository(
                 ?.trim()
                 ?.uppercase()
             SelfRegistrationResult(
-                requiresParentApproval = response.requiresParentApproval == true ||
-                    registrationStatus == "PENDINGCONSENT",
+                requiresParentApproval = response.requiresParentApproval == true,
                 joinedWaitlist = registrationStatus == "WAITLISTED",
             )
         }
@@ -770,6 +997,7 @@ class EventRepository(
         eventId: String,
         childUserId: String,
         joinWaitlist: Boolean,
+        occurrence: EventOccurrenceSelection?,
     ): Result<ChildRegistrationResult> =
         runCatching {
             val normalizedEventId = eventId.trim()
@@ -781,17 +1009,21 @@ class EventRepository(
             if (joinWaitlist) {
                 val waitlistResponse = api.post<EventParticipantsRequestDto, EventParticipantsResponseDto>(
                     path = "api/events/$normalizedEventId/waitlist",
-                    body = EventParticipantsRequestDto(userId = normalizedChildUserId),
+                    body = EventParticipantsRequestDto(
+                        userId = normalizedChildUserId,
+                        slotId = occurrence?.slotId,
+                        occurrenceDate = occurrence?.occurrenceDate,
+                    ),
                 )
                 waitlistResponse.error?.takeIf(String::isNotBlank)?.let { error(it) }
-                waitlistResponse.event?.toEventOrNull()?.let { updated ->
-                    databaseService.getEventDao.upsertEvent(updated)
-                    persistEventRelations(updated)
-                }
+                val baseEvent = waitlistResponse.event?.toEventOrNull()
+                    ?: databaseService.getEventDao.getEventById(normalizedEventId)
+                    ?: error("Updated event not found after waitlist response.")
+                syncEventParticipantsAfterMutation(baseEvent, occurrence)
 
                 return@runCatching ChildRegistrationResult(
                     registrationStatus = if (waitlistResponse.requiresParentApproval == true) {
-                        "PENDINGCONSENT"
+                        null
                     } else {
                         "WAITLISTED"
                     },
@@ -802,7 +1034,11 @@ class EventRepository(
 
             val response = api.post<EventChildRegistrationRequestDto, EventChildRegistrationResponseDto>(
                 path = "api/events/$normalizedEventId/registrations/child",
-                body = EventChildRegistrationRequestDto(childId = normalizedChildUserId),
+                body = EventChildRegistrationRequestDto(
+                    childId = normalizedChildUserId,
+                    slotId = occurrence?.slotId,
+                    occurrenceDate = occurrence?.occurrenceDate,
+                ),
             )
             response.error?.takeIf(String::isNotBlank)?.let { error(it) }
             ChildRegistrationResult(
@@ -819,6 +1055,7 @@ class EventRepository(
         event: Event,
         team: Team,
         preferredDivisionId: String?,
+        occurrence: EventOccurrenceSelection?,
     ): Result<Unit> =
         runCatching {
             if (event.waitList.contains(team.id)) {
@@ -834,8 +1071,16 @@ class EventRepository(
                 divisionId = divisionPayload.divisionId,
                 divisionTypeId = divisionPayload.divisionTypeId,
                 divisionTypeKey = divisionPayload.divisionTypeKey,
+                slotId = occurrence?.slotId,
+                occurrenceDate = occurrence?.occurrenceDate,
             )
-            val updated = if (isEventAtCapacity(event, divisionPreference)) {
+            val updated = if (
+                isEventAtCapacity(
+                    event = event,
+                    preferredDivisionId = divisionPreference,
+                    occurrence = occurrence,
+                )
+            ) {
                 api.post<EventParticipantsRequestDto, EventResponseDto>(
                     path = "api/events/${event.id}/waitlist",
                     body = request,
@@ -845,10 +1090,9 @@ class EventRepository(
                     path = "api/events/${event.id}/participants",
                     body = request,
                 )
-            }.event?.toEventOrNull() ?: error("Participant update response missing event")
+            }.event?.toEventOrNull() ?: event
 
-            databaseService.getEventDao.upsertEvent(updated)
-            persistEventRelations(updated)
+            syncEventParticipantsAfterMutation(updated, occurrence)
         }
 
     override suspend fun getLeagueDivisionStandings(
@@ -899,34 +1143,43 @@ class EventRepository(
         teamWithPlayers: TeamWithPlayers,
         refundMode: EventParticipantRefundMode?,
         refundReason: String?,
+        occurrence: EventOccurrenceSelection?,
     ): Result<Unit> =
         runCatching {
             val updated = api.delete<EventParticipantsRequestDto, EventResponseDto>(
                 path = "api/events/${event.id}/participants",
                 body = EventParticipantsRequestDto(
                     teamId = teamWithPlayers.team.id,
+                    slotId = occurrence?.slotId,
+                    occurrenceDate = occurrence?.occurrenceDate,
                     refundMode = refundMode?.wireValue,
                     refundReason = refundReason
                         ?.trim()
                         ?.takeIf(String::isNotBlank),
                 ),
-            ).event?.toEventOrNull() ?: error("Participant update response missing event")
+            ).event?.toEventOrNull() ?: event
 
-            databaseService.getEventDao.upsertEvent(updated)
-            persistEventRelations(updated)
+            syncEventParticipantsAfterMutation(updated, occurrence)
         }
 
-    override suspend fun removeCurrentUserFromEvent(event: Event, targetUserId: String?): Result<Unit> {
+    override suspend fun removeCurrentUserFromEvent(
+        event: Event,
+        targetUserId: String?,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<Unit> {
         val currentUser = userRepository.currentUser.value.getOrThrow()
         val resolvedUserId = targetUserId?.trim()?.takeIf(String::isNotBlank) ?: currentUser.id
         return runCatching {
             val updated = api.delete<EventParticipantsRequestDto, EventResponseDto>(
                 path = "api/events/${event.id}/participants",
-                body = EventParticipantsRequestDto(userId = resolvedUserId),
-            ).event?.toEventOrNull() ?: error("Participant update response missing event")
+                body = EventParticipantsRequestDto(
+                    userId = resolvedUserId,
+                    slotId = occurrence?.slotId,
+                    occurrenceDate = occurrence?.occurrenceDate,
+                ),
+            ).event?.toEventOrNull() ?: event
 
-            databaseService.getEventDao.upsertEvent(updated)
-            persistEventRelations(updated)
+            syncEventParticipantsAfterMutation(updated, occurrence)
         }
     }
 
@@ -963,7 +1216,13 @@ class EventRepository(
         databaseService.getEventDao.deleteEventWithCrossRefs(eventId)
     }
 
-    private suspend fun persistEventRelations(event: Event) {
+    private suspend fun persistEventRelations(
+        event: Event,
+        allowWeeklyParticipantRoster: Boolean = false,
+    ) {
+        if (event.eventType == EventType.WEEKLY_EVENT && !allowWeeklyParticipantRoster) {
+            return
+        }
         val teams = if (event.teamIds.isNotEmpty()) {
             teamRepository.getTeams(event.teamIds).getOrThrow()
         } else {
@@ -1051,8 +1310,20 @@ class EventRepository(
         )
     }
 
-    private suspend fun isEventAtCapacity(event: Event, preferredDivisionId: String? = null): Boolean {
-        val maxParticipants = if (event.singleDivision) {
+    private suspend fun isEventAtCapacity(
+        event: Event,
+        preferredDivisionId: String? = null,
+        occurrence: EventOccurrenceSelection? = null,
+    ): Boolean {
+        val participantSnapshot = runCatching {
+            fetchEventParticipantsSnapshot(event.id, occurrence)
+        }.getOrNull()
+
+        if (participantSnapshot?.weeklySelectionRequired == true) {
+            return false
+        }
+
+        val maxParticipants = participantSnapshot?.participantCapacity ?: if (event.singleDivision) {
             event.maxParticipants
         } else {
             resolveSelectedDivisionDetail(event, preferredDivisionId)?.maxParticipants ?: event.maxParticipants
@@ -1062,7 +1333,7 @@ class EventRepository(
             return false
         }
 
-        val participantCount = if (event.teamSignup) {
+        val participantCount = participantSnapshot?.participantCount ?: if (event.teamSignup) {
             val teamIds = event.teamIds
                 .map(String::trim)
                 .filter(String::isNotBlank)

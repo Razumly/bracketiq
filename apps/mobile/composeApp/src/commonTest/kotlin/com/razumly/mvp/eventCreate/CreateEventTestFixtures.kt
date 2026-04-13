@@ -51,7 +51,9 @@ import com.razumly.mvp.core.data.repositories.ChildRegistrationResult
 import com.razumly.mvp.core.data.repositories.CreateBillRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillCreateRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
+import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.repositories.EventParticipantRefundMode
+import com.razumly.mvp.core.data.repositories.EventParticipantsSyncResult
 import com.razumly.mvp.core.data.repositories.SelfRegistrationResult
 import com.razumly.mvp.core.data.repositories.SignerContext
 import com.razumly.mvp.core.data.repositories.SignStep
@@ -340,13 +342,6 @@ internal class CreateEvent_FakeEventRepository(
         newEvent
     }
 
-    override suspend fun createWeeklySession(
-        parentEventId: String,
-        sessionStart: Instant,
-        sessionEnd: Instant,
-        slotId: String?,
-    ): Result<Event> = Result.failure(IllegalStateException("unused"))
-
     override suspend fun scheduleEvent(eventId: String, participantCount: Int?): Result<Event> =
         Result.failure(IllegalStateException("unused"))
 
@@ -387,17 +382,26 @@ internal class CreateEvent_FakeEventRepository(
     override suspend fun addCurrentUserToEvent(
         event: Event,
         preferredDivisionId: String?,
+        occurrence: EventOccurrenceSelection?,
     ): Result<SelfRegistrationResult> = Result.success(SelfRegistrationResult())
     override suspend fun registerChildForEvent(
         eventId: String,
         childUserId: String,
         joinWaitlist: Boolean,
+        occurrence: EventOccurrenceSelection?,
     ): Result<ChildRegistrationResult> = Result.failure(NotImplementedError("unused"))
     override suspend fun addTeamToEvent(
         event: Event,
         team: Team,
         preferredDivisionId: String?,
+        occurrence: EventOccurrenceSelection?,
     ): Result<Unit> = Result.success(Unit)
+    override suspend fun syncEventParticipants(
+        event: Event,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<EventParticipantsSyncResult> = Result.success(
+        EventParticipantsSyncResult(event = event)
+    )
     override suspend fun getLeagueDivisionStandings(
         eventId: String,
         divisionId: String,
@@ -412,10 +416,14 @@ internal class CreateEvent_FakeEventRepository(
         teamWithPlayers: TeamWithPlayers,
         refundMode: EventParticipantRefundMode?,
         refundReason: String?,
+        occurrence: EventOccurrenceSelection?,
     ): Result<Unit> =
         Result.success(Unit)
-    override suspend fun removeCurrentUserFromEvent(event: Event, targetUserId: String?): Result<Unit> =
-        Result.success(Unit)
+    override suspend fun removeCurrentUserFromEvent(
+        event: Event,
+        targetUserId: String?,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<Unit> = Result.success(Unit)
 }
 
 internal class CreateEvent_FakeFieldRepository : IFieldRepository {
@@ -551,6 +559,7 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
         teamId: String?,
         priceCents: Int?,
         timeSlotContext: PurchaseIntentTimeSlotContext?,
+        occurrence: EventOccurrenceSelection?,
     ): Result<PurchaseIntent> {
         purchaseIntentCalls += PurchaseIntentCall(
             event = event,

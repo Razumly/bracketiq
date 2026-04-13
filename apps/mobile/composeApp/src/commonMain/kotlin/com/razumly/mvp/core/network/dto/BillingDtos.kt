@@ -47,6 +47,8 @@ data class PurchaseIntentRequestDto(
     val event: BillingEventRefDto? = null,
     val team: BillingTeamRefDto? = null,
     val timeSlot: BillingTimeSlotRefDto? = null,
+    val slotId: String? = null,
+    val occurrenceDate: String? = null,
     val productId: String? = null,
     val billingAddress: BillingAddressDto? = null,
 )

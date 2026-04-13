@@ -106,7 +106,9 @@ class RootComponent(
     private var deepLinkNavigationJob: Job? = null
     private var chatStartupSyncJob: Job? = null
     private var chatRefreshJob: Job? = null
+    private var registrationSyncJob: Job? = null
     private var activeChatRefreshUserId: String? = null
+    private var activeRegistrationSyncUserId: String? = null
 
     private val _selectedPage = MutableStateFlow<AppConfig>(AppConfig.Search())
     val selectedPage: StateFlow<AppConfig> = _selectedPage.asStateFlow()
@@ -200,19 +202,24 @@ class RootComponent(
                 userResult.fold(
                     onSuccess = { userData ->
                         if (userData.id.isNotBlank()) {
+                            refreshRegistrationCacheOnStartupIfNeeded(userData.id)
                             registerPushTargetIfNeeded(userData.id)
                             refreshChatsOnStartupIfNeeded(userData.id)
                             startChatRefreshLoopIfNeeded(userData.id)
-                        } else {
+                        } else if (userRepository.startupAuthState.value == StartupAuthState.Unauthenticated) {
+                            clearRegistrationCacheSyncState()
                             clearPushTargetIfNeeded()
                             clearChatStartupSyncState()
                             clearChatRefreshLoop()
                         }
                     },
                     onFailure = {
-                        clearPushTargetIfNeeded()
-                        clearChatStartupSyncState()
-                        clearChatRefreshLoop()
+                        if (userRepository.startupAuthState.value == StartupAuthState.Unauthenticated) {
+                            clearRegistrationCacheSyncState()
+                            clearPushTargetIfNeeded()
+                            clearChatStartupSyncState()
+                            clearChatRefreshLoop()
+                        }
                     }
                 )
             }
@@ -372,6 +379,31 @@ class RootComponent(
             pushNotificationsRepository.removeDeviceAsTarget().onFailure {
                 Napier.w("Push target cleanup failed: ${it.message}")
             }
+        }
+    }
+
+    private fun refreshRegistrationCacheOnStartupIfNeeded(userId: String) {
+        if (activeRegistrationSyncUserId == userId) return
+
+        registrationSyncJob?.cancel()
+        activeRegistrationSyncUserId = userId
+        registrationSyncJob = scope.launch(Dispatchers.Default) {
+            eventRepository.syncCurrentUserRegistrationCache()
+                .onFailure { throwable ->
+                    Napier.w("Startup registration sync failed for user $userId: ${throwable.message}")
+                }
+        }
+    }
+
+    private fun clearRegistrationCacheSyncState() {
+        activeRegistrationSyncUserId = null
+        registrationSyncJob?.cancel()
+        registrationSyncJob = null
+        scope.launch(Dispatchers.Default) {
+            eventRepository.clearCurrentUserRegistrationCache()
+                .onFailure { throwable ->
+                    Napier.w("Failed to clear cached current-user registrations: ${throwable.message}")
+                }
         }
     }
 

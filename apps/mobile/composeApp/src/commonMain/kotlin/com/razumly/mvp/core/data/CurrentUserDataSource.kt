@@ -4,14 +4,18 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlin.time.Instant
 
 class CurrentUserDataSource(private val dataStore: DataStore<Preferences>) {
     private val idKey = stringPreferencesKey("id")
     private val pushToken = stringPreferencesKey("token")
     private val pushTarget = stringPreferencesKey("target")
     private val mutedChatIds = stringPreferencesKey("muted_chat_ids")
+    private val registrationSyncStartedAt = stringPreferencesKey("registration_sync_started_at")
+    private val registrationSyncUserId = stringPreferencesKey("registration_sync_user_id")
 
     suspend fun saveUserId(userId: String) {
         dataStore.edit { dataStore ->
@@ -24,6 +28,9 @@ class CurrentUserDataSource(private val dataStore: DataStore<Preferences>) {
             it[idKey] ?: ""
         }
     }
+
+    suspend fun getUserIdNow(): String =
+        dataStore.data.first()[idKey].orEmpty()
 
     suspend fun savePushToken(token: String) {
         dataStore.edit { dataStore ->
@@ -70,6 +77,36 @@ class CurrentUserDataSource(private val dataStore: DataStore<Preferences>) {
 
         return dataStore.data.map { preferences ->
             parseIdSet(preferences[mutedChatIds]).contains(normalizedChatId)
+        }
+    }
+
+    suspend fun getRegistrationSyncStartedAt(): Instant? =
+        dataStore.data.first()[registrationSyncStartedAt]
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+            ?.let { raw -> runCatching { Instant.parse(raw) }.getOrNull() }
+
+    suspend fun getRegistrationSyncUserId(): String? =
+        dataStore.data.first()[registrationSyncUserId]
+            ?.trim()
+            ?.takeIf(String::isNotBlank)
+
+    suspend fun saveRegistrationSyncState(
+        userId: String,
+        startedAt: Instant,
+    ) {
+        val normalizedUserId = userId.trim()
+        if (normalizedUserId.isBlank()) return
+        dataStore.edit { preferences ->
+            preferences[registrationSyncUserId] = normalizedUserId
+            preferences[registrationSyncStartedAt] = startedAt.toString()
+        }
+    }
+
+    suspend fun clearRegistrationSyncState() {
+        dataStore.edit { preferences ->
+            preferences.remove(registrationSyncUserId)
+            preferences.remove(registrationSyncStartedAt)
         }
     }
 

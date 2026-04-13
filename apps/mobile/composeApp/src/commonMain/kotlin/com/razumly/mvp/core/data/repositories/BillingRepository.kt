@@ -231,6 +231,7 @@ interface IBillingRepository : IMVPRepository {
         teamId: String? = null,
         priceCents: Int? = null,
         timeSlotContext: PurchaseIntentTimeSlotContext? = null,
+        occurrence: EventOccurrenceSelection? = null,
     ): Result<PurchaseIntent>
     suspend fun getRequiredSignLinks(eventId: String): Result<List<SignStep>>
     suspend fun getRequiredSignLinks(
@@ -317,6 +318,7 @@ class BillingRepository(
         teamId: String?,
         priceCents: Int?,
         timeSlotContext: PurchaseIntentTimeSlotContext?,
+        occurrence: EventOccurrenceSelection?,
     ): Result<PurchaseIntent> = runCatching {
         val user = userRepository.currentUser.value.getOrThrow()
         val email = userRepository.currentAccount.value.getOrNull()?.email
@@ -361,6 +363,8 @@ class BillingRepository(
                             .distinct(),
                     )
                 },
+                slotId = occurrence?.slotId?.trim()?.takeIf(String::isNotBlank),
+                occurrenceDate = occurrence?.occurrenceDate?.trim()?.takeIf(String::isNotBlank),
             ),
         )
 

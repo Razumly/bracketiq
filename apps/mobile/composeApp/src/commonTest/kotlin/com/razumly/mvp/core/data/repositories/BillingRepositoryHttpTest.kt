@@ -7,6 +7,7 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.daos.ChatGroupDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventDao
+import com.razumly.mvp.core.data.dataTypes.daos.EventRegistrationDao
 import com.razumly.mvp.core.data.dataTypes.daos.FieldDao
 import com.razumly.mvp.core.data.dataTypes.daos.MatchDao
 import com.razumly.mvp.core.data.dataTypes.daos.MessageDao
@@ -54,6 +55,7 @@ private class BillingRepositoryHttp_FakeDatabaseService : DatabaseService {
     override val getFieldDao: FieldDao get() = error("unused")
     override val getUserDataDao: UserDataDao get() = error("unused")
     override val getEventDao: EventDao get() = error("unused")
+    override val getEventRegistrationDao: EventRegistrationDao get() = error("unused")
     override val getChatGroupDao: ChatGroupDao get() = error("unused")
     override val getMessageDao: MessageDao get() = error("unused")
     override val getRefundRequestDao: RefundRequestDao get() = error("unused")
@@ -163,12 +165,6 @@ private object BillingRepositoryHttp_UnusedEventRepository : IEventRepository {
         fields: List<com.razumly.mvp.core.data.dataTypes.Field>?,
         timeSlots: List<com.razumly.mvp.core.data.dataTypes.TimeSlot>?,
     ): Result<Event> = error("unused")
-    override suspend fun createWeeklySession(
-        parentEventId: String,
-        sessionStart: kotlin.time.Instant,
-        sessionEnd: kotlin.time.Instant,
-        slotId: String?,
-    ): Result<Event> = error("unused")
     override suspend fun scheduleEvent(eventId: String, participantCount: Int?): Result<Event> = error("unused")
     override suspend fun updateEvent(
         newEvent: Event,
@@ -198,17 +194,24 @@ private object BillingRepositoryHttp_UnusedEventRepository : IEventRepository {
     override suspend fun addCurrentUserToEvent(
         event: Event,
         preferredDivisionId: String?,
+        occurrence: EventOccurrenceSelection?,
     ): Result<SelfRegistrationResult> = error("unused")
     override suspend fun registerChildForEvent(
         eventId: String,
         childUserId: String,
         joinWaitlist: Boolean,
+        occurrence: EventOccurrenceSelection?,
     ): Result<ChildRegistrationResult> = error("unused")
     override suspend fun addTeamToEvent(
         event: Event,
         team: com.razumly.mvp.core.data.dataTypes.Team,
         preferredDivisionId: String?,
+        occurrence: EventOccurrenceSelection?,
     ): Result<Unit> = error("unused")
+    override suspend fun syncEventParticipants(
+        event: Event,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<EventParticipantsSyncResult> = error("unused")
     override suspend fun getLeagueDivisionStandings(
         eventId: String,
         divisionId: String,
@@ -223,8 +226,13 @@ private object BillingRepositoryHttp_UnusedEventRepository : IEventRepository {
         teamWithPlayers: com.razumly.mvp.core.data.dataTypes.TeamWithPlayers,
         refundMode: EventParticipantRefundMode?,
         refundReason: String?,
+        occurrence: EventOccurrenceSelection?,
     ): Result<Unit> = error("unused")
-    override suspend fun removeCurrentUserFromEvent(event: Event, targetUserId: String?): Result<Unit> = error("unused")
+    override suspend fun removeCurrentUserFromEvent(
+        event: Event,
+        targetUserId: String?,
+        occurrence: EventOccurrenceSelection?,
+    ): Result<Unit> = error("unused")
 }
 
 @Suppress("SameParameterValue")

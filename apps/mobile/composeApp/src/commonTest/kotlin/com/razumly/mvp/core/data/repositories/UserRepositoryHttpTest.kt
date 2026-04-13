@@ -16,6 +16,7 @@ import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPendingPlayerCrossRef
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
 import com.razumly.mvp.core.data.dataTypes.daos.ChatGroupDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventDao
+import com.razumly.mvp.core.data.dataTypes.daos.EventRegistrationDao
 import com.razumly.mvp.core.data.dataTypes.daos.FieldDao
 import com.razumly.mvp.core.data.dataTypes.daos.MatchDao
 import com.razumly.mvp.core.data.dataTypes.daos.MessageDao
@@ -147,6 +148,7 @@ private class UserRepositoryHttp_FakeDatabaseService : DatabaseService {
     override val getFieldDao: FieldDao get() = error("unused")
     override val getUserDataDao: UserDataDao = UserRepositoryHttp_FakeUserDataDao()
     override val getEventDao: EventDao = UserRepositoryHttp_UnusedEventDao()
+    override val getEventRegistrationDao: EventRegistrationDao get() = error("unused")
     override val getChatGroupDao: ChatGroupDao get() = error("unused")
     override val getMessageDao: MessageDao get() = error("unused")
     override val getRefundRequestDao: RefundRequestDao get() = error("unused")
