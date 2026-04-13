@@ -73,6 +73,7 @@ fun SearchBox(
     onFocusChange: (Boolean) -> Unit,
     onPositionChange: (Offset, IntSize) -> Unit,
     onToggleFilter: (Boolean) -> Unit,
+    trailingAction: (@Composable (() -> Unit))? = null,
     rowAction: (@Composable RowScope.() -> Unit)? = null,
 ) {
     var searchInput by remember { mutableStateOf("") }
@@ -109,7 +110,7 @@ fun SearchBox(
                         contentDescription = "Search"
                     )
                 },
-                trailingIcon = {
+                trailingIcon = trailingAction ?: {
                     if (searchInput.isNotEmpty()) {
                         IconButton(onClick = {
                             searchInput = ""

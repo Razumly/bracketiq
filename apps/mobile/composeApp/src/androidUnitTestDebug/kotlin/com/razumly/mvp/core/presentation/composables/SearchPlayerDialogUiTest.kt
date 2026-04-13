@@ -2,14 +2,18 @@ package com.razumly.mvp.core.presentation.composables
 
 import android.app.Application
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import com.razumly.mvp.core.data.dataTypes.UserData
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -53,7 +57,40 @@ class SearchPlayerDialogUiTest {
             composeRule.onAllNodesWithText("Example User").fetchSemanticsNodes().isNotEmpty()
         }
 
-        composeRule.onNodeWithText("Example User").assertIsDisplayed()
+        assertTrue(
+            composeRule.onAllNodesWithText("Example User").fetchSemanticsNodes().isNotEmpty()
+        )
+    }
+
+    @Test
+    fun close_button_dismisses_dialog() {
+        composeRule.setContent {
+            var isDialogVisible by mutableStateOf(true)
+
+            MaterialTheme {
+                if (isDialogVisible) {
+                    SearchPlayerDialog(
+                        freeAgents = emptyList(),
+                        friends = emptyList(),
+                        onSearch = {},
+                        onPlayerSelected = {},
+                        onDismiss = { isDialogVisible = false },
+                        suggestions = emptyList(),
+                        eventName = "",
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithContentDescription("Close search dialog").performClick()
+
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            composeRule.onAllNodesWithText("Add User").fetchSemanticsNodes().isEmpty()
+        }
+
+        assertTrue(
+            composeRule.onAllNodesWithText("Add User").fetchSemanticsNodes().isEmpty()
+        )
     }
 
     private fun user(
