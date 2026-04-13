@@ -54,6 +54,8 @@ import com.razumly.mvp.core.data.repositories.CreateBillRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillCreateRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
 import com.razumly.mvp.core.data.repositories.EventParticipantRefundMode
+import com.razumly.mvp.core.data.repositories.EventParticipantManagementEntry
+import com.razumly.mvp.core.data.repositories.EventParticipantManagementSnapshot
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.repositories.EventParticipantsSyncResult
 import com.razumly.mvp.core.data.repositories.UserVisibilityContext
@@ -126,6 +128,8 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     val losersBracket: StateFlow<Boolean>
     val showDetails: StateFlow<Boolean>
     val eventTeamsAndParticipantsLoading: StateFlow<Boolean>
+    val participantManagementSnapshot: StateFlow<EventParticipantManagementSnapshot>
+    val participantManagementLoading: StateFlow<Boolean>
     val eventMatchesLoading: StateFlow<Boolean>
     val errorState: StateFlow<ErrorMessage?>
     val eventWithRelations: StateFlow<EventWithFullRelations>
@@ -217,6 +221,8 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun openEventDirections()
     fun createNewTeam()
     fun inviteFreeAgentToTeam(userId: String)
+    fun startManagingParticipants()
+    fun stopManagingParticipants()
     fun removeTeamParticipant(team: TeamWithPlayers)
     fun removeUserParticipant(userId: String)
     suspend fun getParticipantBillingSnapshot(teamId: String): Result<EventTeamBillingSnapshot>
@@ -903,12 +909,20 @@ class DefaultEventDetailComponent(
     private val _eventTeamsAndParticipantsLoading = MutableStateFlow(false)
     override val eventTeamsAndParticipantsLoading = _eventTeamsAndParticipantsLoading.asStateFlow()
 
+    private val _participantManagementSnapshot = MutableStateFlow(EventParticipantManagementSnapshot())
+    override val participantManagementSnapshot = _participantManagementSnapshot.asStateFlow()
+
+    private val _participantManagementLoading = MutableStateFlow(false)
+    override val participantManagementLoading = _participantManagementLoading.asStateFlow()
+
     private val _eventMatchesLoading = MutableStateFlow(false)
     override val eventMatchesLoading = _eventMatchesLoading.asStateFlow()
 
     private var eventDetailHydrationJob: Job? = null
     private var eventDetailHydrationToken: Long = 0L
     private var weeklyOccurrenceSummaryPrefetchJob: Job? = null
+    private var participantManagementActive: Boolean = false
+    private var participantManagementRequestToken: Long = 0L
 
     private val _showFeeBreakdown = MutableStateFlow(false)
     override val showFeeBreakdown = _showFeeBreakdown.asStateFlow()
@@ -1516,6 +1530,57 @@ class DefaultEventDetailComponent(
         )
     }
 
+    private suspend fun loadParticipantManagementSnapshot(
+        event: Event = selectedEvent.value,
+        reportErrors: Boolean = true,
+    ) {
+        val eventId = event.id.trim()
+        if (!participantManagementActive || eventId.isEmpty()) {
+            _participantManagementLoading.value = false
+            return
+        }
+        if (isWeeklyParentEvent(event) && currentWeeklyOccurrenceSelection() == null) {
+            _participantManagementSnapshot.value = EventParticipantManagementSnapshot()
+            _participantManagementLoading.value = false
+            return
+        }
+
+        participantManagementRequestToken += 1
+        val requestToken = participantManagementRequestToken
+        _participantManagementLoading.value = true
+        eventRepository.getEventParticipantManagementSnapshot(
+            eventId = eventId,
+            occurrence = currentWeeklyOccurrenceSelection(),
+        ).onSuccess { snapshot ->
+            if (requestToken != participantManagementRequestToken) return@onSuccess
+            _participantManagementSnapshot.value = snapshot
+        }.onFailure { throwable ->
+            if (requestToken != participantManagementRequestToken) return@onFailure
+            if (reportErrors) {
+                _errorState.value = ErrorMessage(
+                    throwable.userMessage("Failed to load participant registrations."),
+                )
+            } else {
+                Napier.w("Failed to refresh participant registrations.", throwable)
+            }
+        }
+        if (requestToken == participantManagementRequestToken) {
+            _participantManagementLoading.value = false
+        }
+    }
+
+    private suspend fun refreshParticipantManagementSnapshotIfNeeded(
+        event: Event = selectedEvent.value,
+    ) {
+        if (!participantManagementActive) {
+            return
+        }
+        loadParticipantManagementSnapshot(
+            event = event,
+            reportErrors = false,
+        )
+    }
+
     private fun requireSelectedWeeklyOccurrence(
         event: Event = selectedEvent.value,
         errorMessage: String = "Select an occurrence before continuing.",
@@ -1623,6 +1688,7 @@ class DefaultEventDetailComponent(
                     rememberWeeklyOccurrenceSummary(occurrence, summary)
                 }
             }
+            refreshParticipantManagementSnapshotIfNeeded(result.event)
         }.onFailure { throwable ->
             if (reportErrors) {
                 _errorState.value = ErrorMessage(
@@ -1652,6 +1718,9 @@ class DefaultEventDetailComponent(
         eventRepository.getEvent(eventId)
             .onSuccess { refreshed ->
                 refreshSelectedWeeklyOccurrenceSummaryIfNeeded(refreshed)
+                if (!isWeeklyParentEvent(refreshed) || currentWeeklyOccurrenceSelection() == null) {
+                    refreshParticipantManagementSnapshotIfNeeded(refreshed)
+                }
             }.onFailure { throwable ->
                 Napier.w(warningMessage, throwable)
             }
@@ -1782,6 +1851,11 @@ class DefaultEventDetailComponent(
 
     override fun clearSelectedWeeklySession() {
         _selectedWeeklyOccurrence.value = null
+        if (participantManagementActive) {
+            participantManagementRequestToken += 1
+            _participantManagementSnapshot.value = EventParticipantManagementSnapshot()
+            _participantManagementLoading.value = false
+        }
     }
 
     private suspend fun resumePendingSignatureFlowIfNeeded(): Boolean {
@@ -2952,6 +3026,7 @@ class DefaultEventDetailComponent(
                     } else {
                         null
                     }
+                    refreshParticipantManagementSnapshotIfNeeded(result.event)
                 }.onFailure { throwable ->
                     if (requestToken != eventDetailHydrationToken) return@onFailure
                     _errorState.value = ErrorMessage(
@@ -3360,6 +3435,30 @@ class DefaultEventDetailComponent(
             selectedEvent.value,
             selectedFreeAgentId = normalizedUserId,
         )
+    }
+
+    override fun startManagingParticipants() {
+        scope.launch {
+            val event = selectedEvent.value
+            if (isWeeklyParentEvent(event)) {
+                requireSelectedWeeklyOccurrence(
+                    event = event,
+                    errorMessage = "Select an occurrence before managing participants.",
+                ) ?: return@launch
+            }
+            participantManagementActive = true
+            loadParticipantManagementSnapshot(
+                event = event,
+                reportErrors = true,
+            )
+        }
+    }
+
+    override fun stopManagingParticipants() {
+        participantManagementActive = false
+        participantManagementRequestToken += 1
+        _participantManagementLoading.value = false
+        _participantManagementSnapshot.value = EventParticipantManagementSnapshot()
     }
 
     override fun removeTeamParticipant(team: TeamWithPlayers) {

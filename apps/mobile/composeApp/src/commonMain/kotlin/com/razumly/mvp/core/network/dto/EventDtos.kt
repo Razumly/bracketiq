@@ -420,7 +420,27 @@ data class EventParticipantEntryDto(
 )
 
 @Serializable
-data class EventParticipantSectionsDto(
+data class EventParticipantDivisionIdsDto(
+    val divisionId: String? = null,
+    val divisionTypeId: String? = null,
+    val divisionTypeKey: String? = null,
+    val teamIds: List<String> = emptyList(),
+    val userIds: List<String> = emptyList(),
+    val waitListIds: List<String> = emptyList(),
+    val freeAgentIds: List<String> = emptyList(),
+)
+
+@Serializable
+data class EventParticipantIdsSnapshotDto(
+    val teamIds: List<String> = emptyList(),
+    val userIds: List<String> = emptyList(),
+    val waitListIds: List<String> = emptyList(),
+    val freeAgentIds: List<String> = emptyList(),
+    val divisions: List<EventParticipantDivisionIdsDto> = emptyList(),
+)
+
+@Serializable
+data class EventParticipantRegistrationSectionsDto(
     val teams: List<EventParticipantEntryDto> = emptyList(),
     val users: List<EventParticipantEntryDto> = emptyList(),
     val children: List<EventParticipantEntryDto> = emptyList(),
@@ -437,7 +457,8 @@ data class EventOccurrenceDto(
 @Serializable
 data class EventParticipantsSnapshotResponseDto(
     val event: EventApiDto? = null,
-    val participants: EventParticipantSectionsDto = EventParticipantSectionsDto(),
+    val participants: EventParticipantIdsSnapshotDto = EventParticipantIdsSnapshotDto(),
+    val registrations: EventParticipantRegistrationSectionsDto? = null,
     val teams: List<TeamApiDto> = emptyList(),
     val users: List<UserProfileDto> = emptyList(),
     val participantCount: Int? = null,

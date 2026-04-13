@@ -902,11 +902,11 @@ class EventRepositoryHttpTest {
                         "teamIds": []
                       },
                       "participants": {
-                        "teams": [],
-                        "users": ${if (participantIds.isEmpty()) "[]" else """[{"registrantId":"u1","registrantType":"SELF","rosterRole":"PARTICIPANT"}]"""},
-                        "children": [],
-                        "waitlist": [],
-                        "freeAgents": []
+                        "teamIds": [],
+                        "userIds": ${if (participantIds.isEmpty()) "[]" else """["u1"]"""},
+                        "waitListIds": [],
+                        "freeAgentIds": [],
+                        "divisions": []
                       },
                       "users": ${if (participantIds.isEmpty()) "[]" else """[{"id":"u1","firstName":"Test","lastName":"User","userName":"u1"}]"""},
                       "participantCount": ${participantIds.size}
@@ -1008,11 +1008,11 @@ class EventRepositoryHttpTest {
                 content = """
                     {
                       "participants": {
-                        "teams": [],
-                        "users": [],
-                        "children": [],
-                        "waitlist": [],
-                        "freeAgents": []
+                        "teamIds": [],
+                        "userIds": [],
+                        "waitListIds": [],
+                        "freeAgentIds": [],
+                        "divisions": []
                       },
                       "teams": [],
                       "users": [],
@@ -1097,11 +1097,11 @@ class EventRepositoryHttpTest {
                             "teamIds": []
                           },
                           "participants": {
-                            "teams": [],
-                            "users": [],
-                            "children": [],
-                            "waitlist": [],
-                            "freeAgents": []
+                            "teamIds": [],
+                            "userIds": [],
+                            "waitListIds": [],
+                            "freeAgentIds": [],
+                            "divisions": []
                           },
                           "teams": [],
                           "users": [],
@@ -1198,11 +1198,11 @@ class EventRepositoryHttpTest {
                             "teamIds": []
                           },
                           "participants": {
-                            "teams": [],
-                            "users": [],
-                            "children": [],
-                            "waitlist": [],
-                            "freeAgents": [{"registrantId":"u1","registrantType":"SELF","rosterRole":"FREE_AGENT"}]
+                            "teamIds": [],
+                            "userIds": [],
+                            "waitListIds": [],
+                            "freeAgentIds": ["u1"],
+                            "divisions": []
                           },
                           "users": [{"id":"u1","firstName":"Test","lastName":"User","userName":"u1"}],
                           "participantCount": 0
@@ -1291,11 +1291,11 @@ class EventRepositoryHttpTest {
                             "teamIds": []
                           },
                           "participants": {
-                            "teams": [],
-                            "users": [],
-                            "children": [],
-                            "waitlist": [],
-                            "freeAgents": []
+                            "teamIds": [],
+                            "userIds": [],
+                            "waitListIds": [],
+                            "freeAgentIds": [],
+                            "divisions": []
                           },
                           "users": [],
                           "participantCount": 0
@@ -1392,11 +1392,11 @@ class EventRepositoryHttpTest {
                             "teamIds": []
                           },
                           "participants": {
-                            "teams": [],
-                            "users": [{"registrantId":"existing_user","registrantType":"SELF","rosterRole":"PARTICIPANT"},{"registrantId":"existing_user_2","registrantType":"SELF","rosterRole":"PARTICIPANT"}],
-                            "children": [],
-                            "waitlist": [{"registrantId":"u_new","registrantType":"SELF","rosterRole":"WAITLIST"}],
-                            "freeAgents": []
+                            "teamIds": [],
+                            "userIds": ["existing_user", "existing_user_2"],
+                            "waitListIds": ["u_new"],
+                            "freeAgentIds": [],
+                            "divisions": []
                           },
                           "users": [],
                           "participantCount": 2
@@ -1557,11 +1557,11 @@ class EventRepositoryHttpTest {
                             "teamIds": ["t1"]
                           },
                           "participants": {
-                            "teams": [{"registrantId":"t1","registrantType":"TEAM","rosterRole":"PARTICIPANT"}],
-                            "users": [],
-                            "children": [],
-                            "waitlist": [],
-                            "freeAgents": []
+                            "teamIds": ["t1"],
+                            "userIds": [],
+                            "waitListIds": [],
+                            "freeAgentIds": [],
+                            "divisions": []
                           },
                           "teams": [{"id":"t1","name":"Team One","captainId":"u1","managerId":"u1","playerIds":["u1"],"teamSize":2,"division":"open","divisionTypeId":"a","divisionTypeName":"A","skillDivisionTypeId":"a","skillDivisionTypeName":"A","ageDivisionTypeId":"open","ageDivisionTypeName":"Open","divisionGender":"F"}],
                           "users": [],
@@ -1661,11 +1661,11 @@ class EventRepositoryHttpTest {
                                 "teamIds": []
                               },
                               "participants": {
-                                "teams": [],
-                                "users": [],
-                                "children": [],
-                                "waitlist": [],
-                                "freeAgents": []
+                                "teamIds": [],
+                                "userIds": [],
+                                "waitListIds": [],
+                                "freeAgentIds": [],
+                                "divisions": []
                               },
                               "users": [],
                               "participantCount": 0,
@@ -1858,11 +1858,11 @@ class EventRepositoryHttpTest {
                             "waitListIds": ["child_1"]
                           },
                           "participants": {
-                            "teams": [],
-                            "users": [],
-                            "children": [],
-                            "waitlist": [{"registrantId":"child_1","registrantType":"CHILD","rosterRole":"WAITLIST"}],
-                            "freeAgents": []
+                            "teamIds": [],
+                            "userIds": [],
+                            "waitListIds": ["child_1"],
+                            "freeAgentIds": [],
+                            "divisions": []
                           },
                           "users": [],
                           "participantCount": 0

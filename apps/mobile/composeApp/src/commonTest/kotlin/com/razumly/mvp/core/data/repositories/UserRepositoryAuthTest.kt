@@ -142,35 +142,46 @@ class UserRepositoryAuthTest {
         var capturedBody = ""
 
         val engine = MockEngine { request ->
-            assertEquals("/api/auth/login", request.url.encodedPath)
-            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
-                ?.bytes()
-                ?.decodeToString()
-                .orEmpty()
-            respond(
-                content = """
-                    {
-                      "user": { "id":"u1", "email":"u1@example.com", "name":"U1" },
-                      "session": { "userId":"u1", "isAdmin":false },
-                      "token":"t123",
-                      "profile": {
-                        "id":"u1",
-                        "firstName":"A",
-                        "lastName":"B",
-                        "userName":"ab",
-                        "teamIds":[],
-                        "friendIds":[],
-                        "friendRequestIds":[],
-                        "friendRequestSentIds":[],
-                        "followingIds":[],
-                        "uploadedImages":[],
-                        "hasStripeAccount":false
-                      }
-                    }
-                """.trimIndent(),
-                status = HttpStatusCode.OK,
-                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
-            )
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> respond(
+                    content = """{"user":null,"session":null}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                "/api/auth/login" -> {
+                    capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                        ?.bytes()
+                        ?.decodeToString()
+                        .orEmpty()
+                    respond(
+                        content = """
+                            {
+                              "user": { "id":"u1", "email":"u1@example.com", "name":"U1" },
+                              "session": { "userId":"u1", "isAdmin":false },
+                              "token":"t123",
+                              "profile": {
+                                "id":"u1",
+                                "firstName":"A",
+                                "lastName":"B",
+                                "userName":"ab",
+                                "teamIds":[],
+                                "friendIds":[],
+                                "friendRequestIds":[],
+                                "friendRequestSentIds":[],
+                                "followingIds":[],
+                                "uploadedImages":[],
+                                "hasStripeAccount":false
+                              }
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
         }
 
         val http = HttpClient(engine) {
@@ -194,31 +205,40 @@ class UserRepositoryAuthTest {
         val currentUserDataSource = CurrentUserDataSource(prefsStore)
 
         val engine = MockEngine { request ->
-            assertEquals("/api/auth/login", request.url.encodedPath)
-            respond(
-                content = """
-                    {
-                      "user": { "id":"u1", "email":"u1@example.com", "name":"U1" },
-                      "session": { "userId":"u1", "isAdmin":false },
-                      "token":"t123",
-                      "profile": {
-                        "id":"u1",
-                        "firstName":"A",
-                        "lastName":"B",
-                        "userName":"ab",
-                        "teamIds":[],
-                        "friendIds":[],
-                        "friendRequestIds":[],
-                        "friendRequestSentIds":[],
-                        "followingIds":[],
-                        "uploadedImages":[],
-                        "hasStripeAccount":false
-                      }
-                    }
-                """.trimIndent(),
-                status = HttpStatusCode.OK,
-                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
-            )
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> respond(
+                    content = """{"user":null,"session":null}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                "/api/auth/login" -> respond(
+                    content = """
+                        {
+                          "user": { "id":"u1", "email":"u1@example.com", "name":"U1" },
+                          "session": { "userId":"u1", "isAdmin":false },
+                          "token":"t123",
+                          "profile": {
+                            "id":"u1",
+                            "firstName":"A",
+                            "lastName":"B",
+                            "userName":"ab",
+                            "teamIds":[],
+                            "friendIds":[],
+                            "friendRequestIds":[],
+                            "friendRequestSentIds":[],
+                            "followingIds":[],
+                            "uploadedImages":[],
+                            "hasStripeAccount":false
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
         }
 
         val http = HttpClient(engine) {
@@ -247,34 +267,43 @@ class UserRepositoryAuthTest {
         val currentUserDataSource = CurrentUserDataSource(prefsStore)
 
         val engine = MockEngine { request ->
-            assertEquals("/api/auth/login", request.url.encodedPath)
-            respond(
-                content = """
-                    {
-                      "user": { "id":"u_prefill", "email":"prefill@example.com", "name":"Prefill User" },
-                      "session": { "userId":"u_prefill", "isAdmin":false },
-                      "token":"prefill_token",
-                      "requiresProfileCompletion":true,
-                      "missingProfileFields":["dateOfBirth","userName"],
-                      "profile": {
-                        "id":"u_prefill",
-                        "firstName":"Pre",
-                        "lastName":"Fill",
-                        "userName":"prefilled_user",
-                        "dateOfBirth":"2009-02-03T00:00:00.000Z",
-                        "teamIds":[],
-                        "friendIds":[],
-                        "friendRequestIds":[],
-                        "friendRequestSentIds":[],
-                        "followingIds":[],
-                        "uploadedImages":[],
-                        "hasStripeAccount":false
-                      }
-                    }
-                """.trimIndent(),
-                status = HttpStatusCode.OK,
-                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
-            )
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> respond(
+                    content = """{"user":null,"session":null}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                "/api/auth/login" -> respond(
+                    content = """
+                        {
+                          "user": { "id":"u_prefill", "email":"prefill@example.com", "name":"Prefill User" },
+                          "session": { "userId":"u_prefill", "isAdmin":false },
+                          "token":"prefill_token",
+                          "requiresProfileCompletion":true,
+                          "missingProfileFields":["dateOfBirth","userName"],
+                          "profile": {
+                            "id":"u_prefill",
+                            "firstName":"Pre",
+                            "lastName":"Fill",
+                            "userName":"prefilled_user",
+                            "dateOfBirth":"2009-02-03T00:00:00.000Z",
+                            "teamIds":[],
+                            "friendIds":[],
+                            "friendRequestIds":[],
+                            "friendRequestSentIds":[],
+                            "followingIds":[],
+                            "uploadedImages":[],
+                            "hasStripeAccount":false
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
         }
 
         val http = HttpClient(engine) {
@@ -303,31 +332,40 @@ class UserRepositoryAuthTest {
         val currentUserDataSource = CurrentUserDataSource(prefsStore)
 
         val engine = MockEngine { request ->
-            assertEquals("/api/auth/google/mobile", request.url.encodedPath)
-            respond(
-                content = """
-                    {
-                      "user": { "id":"u_google", "email":"google@example.com", "name":"Google User" },
-                      "session": { "userId":"u_google", "isAdmin":false },
-                      "token":"google_token_123",
-                      "profile": {
-                        "id":"u_google",
-                        "firstName":"Google",
-                        "lastName":"User",
-                        "userName":"google_user",
-                        "teamIds":[],
-                        "friendIds":[],
-                        "friendRequestIds":[],
-                        "friendRequestSentIds":[],
-                        "followingIds":[],
-                        "uploadedImages":[],
-                        "hasStripeAccount":false
-                      }
-                    }
-                """.trimIndent(),
-                status = HttpStatusCode.OK,
-                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
-            )
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> respond(
+                    content = """{"user":null,"session":null}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                "/api/auth/google/mobile" -> respond(
+                    content = """
+                        {
+                          "user": { "id":"u_google", "email":"google@example.com", "name":"Google User" },
+                          "session": { "userId":"u_google", "isAdmin":false },
+                          "token":"google_token_123",
+                          "profile": {
+                            "id":"u_google",
+                            "firstName":"Google",
+                            "lastName":"User",
+                            "userName":"google_user",
+                            "teamIds":[],
+                            "friendIds":[],
+                            "friendRequestIds":[],
+                            "friendRequestSentIds":[],
+                            "followingIds":[],
+                            "uploadedImages":[],
+                            "hasStripeAccount":false
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
         }
 
         val http = HttpClient(engine) {
@@ -357,35 +395,46 @@ class UserRepositoryAuthTest {
         var capturedBody = ""
 
         val engine = MockEngine { request ->
-            assertEquals("/api/auth/apple/mobile", request.url.encodedPath)
-            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
-                ?.bytes()
-                ?.decodeToString()
-                .orEmpty()
-            respond(
-                content = """
-                    {
-                      "user": { "id":"u_apple", "email":"apple@example.com", "name":"Apple User" },
-                      "session": { "userId":"u_apple", "isAdmin":false },
-                      "token":"apple_token_123",
-                      "profile": {
-                        "id":"u_apple",
-                        "firstName":"Apple",
-                        "lastName":"User",
-                        "userName":"apple_user",
-                        "teamIds":[],
-                        "friendIds":[],
-                        "friendRequestIds":[],
-                        "friendRequestSentIds":[],
-                        "followingIds":[],
-                        "uploadedImages":[],
-                        "hasStripeAccount":false
-                      }
-                    }
-                """.trimIndent(),
-                status = HttpStatusCode.OK,
-                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
-            )
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> respond(
+                    content = """{"user":null,"session":null}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                "/api/auth/apple/mobile" -> {
+                    capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                        ?.bytes()
+                        ?.decodeToString()
+                        .orEmpty()
+                    respond(
+                        content = """
+                            {
+                              "user": { "id":"u_apple", "email":"apple@example.com", "name":"Apple User" },
+                              "session": { "userId":"u_apple", "isAdmin":false },
+                              "token":"apple_token_123",
+                              "profile": {
+                                "id":"u_apple",
+                                "firstName":"Apple",
+                                "lastName":"User",
+                                "userName":"apple_user",
+                                "teamIds":[],
+                                "friendIds":[],
+                                "friendRequestIds":[],
+                                "friendRequestSentIds":[],
+                                "followingIds":[],
+                                "uploadedImages":[],
+                                "hasStripeAccount":false
+                              }
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
         }
 
         val http = HttpClient(engine) {
@@ -499,36 +548,47 @@ class UserRepositoryAuthTest {
         var capturedBody = ""
 
         val engine = MockEngine { request ->
-            assertEquals("/api/auth/register", request.url.encodedPath)
-            assertEquals(HttpMethod.Post, request.method)
-            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
-                ?.bytes()
-                ?.decodeToString()
-                .orEmpty()
-            respond(
-                content = """
-                    {
-                      "user": { "id":"u_signup", "email":"signup@example.com", "name":"Signup User" },
-                      "session": { "userId":"u_signup", "isAdmin":false },
-                      "token":"signup_token",
-                      "profile": {
-                        "id":"u_signup",
-                        "firstName":"Sign",
-                        "lastName":"Up",
-                        "userName":"signup_user",
-                        "teamIds":[],
-                        "friendIds":[],
-                        "friendRequestIds":[],
-                        "friendRequestSentIds":[],
-                        "followingIds":[],
-                        "uploadedImages":[],
-                        "hasStripeAccount":false
-                      }
-                    }
-                """.trimIndent(),
-                status = HttpStatusCode.OK,
-                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
-            )
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> respond(
+                    content = """{"user":null,"session":null}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                "/api/auth/register" -> {
+                    assertEquals(HttpMethod.Post, request.method)
+                    capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                        ?.bytes()
+                        ?.decodeToString()
+                        .orEmpty()
+                    respond(
+                        content = """
+                            {
+                              "user": { "id":"u_signup", "email":"signup@example.com", "name":"Signup User" },
+                              "session": { "userId":"u_signup", "isAdmin":false },
+                              "token":"signup_token",
+                              "profile": {
+                                "id":"u_signup",
+                                "firstName":"Sign",
+                                "lastName":"Up",
+                                "userName":"signup_user",
+                                "teamIds":[],
+                                "friendIds":[],
+                                "friendRequestIds":[],
+                                "friendRequestSentIds":[],
+                                "followingIds":[],
+                                "uploadedImages":[],
+                                "hasStripeAccount":false
+                              }
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
         }
 
         val http = HttpClient(engine) {
@@ -561,34 +621,43 @@ class UserRepositoryAuthTest {
         val currentUserDataSource = CurrentUserDataSource(prefsStore)
 
         val engine = MockEngine { request ->
-            assertEquals("/api/auth/register", request.url.encodedPath)
-            respond(
-                content = """
-                    {
-                      "error":"Email not verified. We sent a verification link to your email.",
-                      "code":"EMAIL_NOT_VERIFIED",
-                      "email":"signup@example.com",
-                      "requiresEmailVerification":true,
-                      "verificationEmailSent":true,
-                      "user": { "id":"u_signup", "email":"signup@example.com", "name":"Signup User" },
-                      "profile": {
-                        "id":"u_signup",
-                        "firstName":"Sign",
-                        "lastName":"Up",
-                        "userName":"signup_user",
-                        "teamIds":[],
-                        "friendIds":[],
-                        "friendRequestIds":[],
-                        "friendRequestSentIds":[],
-                        "followingIds":[],
-                        "uploadedImages":[],
-                        "hasStripeAccount":false
-                      }
-                    }
-                """.trimIndent(),
-                status = HttpStatusCode.Accepted,
-                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
-            )
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> respond(
+                    content = """{"user":null,"session":null}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                "/api/auth/register" -> respond(
+                    content = """
+                        {
+                          "error":"Email not verified. We sent a verification link to your email.",
+                          "code":"EMAIL_NOT_VERIFIED",
+                          "email":"signup@example.com",
+                          "requiresEmailVerification":true,
+                          "verificationEmailSent":true,
+                          "user": { "id":"u_signup", "email":"signup@example.com", "name":"Signup User" },
+                          "profile": {
+                            "id":"u_signup",
+                            "firstName":"Sign",
+                            "lastName":"Up",
+                            "userName":"signup_user",
+                            "teamIds":[],
+                            "friendIds":[],
+                            "friendRequestIds":[],
+                            "friendRequestSentIds":[],
+                            "followingIds":[],
+                            "uploadedImages":[],
+                            "hasStripeAccount":false
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.Accepted,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
         }
 
         val http = HttpClient(engine) {
@@ -973,29 +1042,59 @@ class UserRepositoryAuthTest {
         val currentUserDataSource = CurrentUserDataSource(prefsStore)
 
         val engine = MockEngine { request ->
-            assertEquals("/api/family/children", request.url.encodedPath)
-            assertEquals(HttpMethod.Get, request.method)
-            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
-            respond(
-                content = """
-                    {
-                      "children": [
+            when (request.url.encodedPath) {
+                "/api/auth/me" -> respond(
+                    content = """
                         {
-                          "userId": "child_1",
-                          "firstName": "Kid",
-                          "lastName": "One",
-                          "dateOfBirth": "2015-04-12T00:00:00.000Z",
-                          "age": 10,
-                          "linkStatus": "active",
-                          "email": null,
-                          "hasEmail": false
+                          "user": { "id":"u1", "email":"u1@example.com", "name":"U1" },
+                          "session": { "userId":"u1", "isAdmin":false },
+                          "token":"t123",
+                          "profile": {
+                            "id":"u1",
+                            "firstName":"A",
+                            "lastName":"B",
+                            "userName":"ab",
+                            "teamIds":[],
+                            "friendIds":[],
+                            "friendRequestIds":[],
+                            "friendRequestSentIds":[],
+                            "followingIds":[],
+                            "uploadedImages":[],
+                            "hasStripeAccount":false
+                          }
                         }
-                      ]
-                    }
-                """.trimIndent(),
-                status = HttpStatusCode.OK,
-                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
-            )
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+
+                "/api/family/children" -> {
+                    assertEquals(HttpMethod.Get, request.method)
+                    assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+                    respond(
+                        content = """
+                            {
+                              "children": [
+                                {
+                                  "userId": "child_1",
+                                  "firstName": "Kid",
+                                  "lastName": "One",
+                                  "dateOfBirth": "2015-04-12T00:00:00.000Z",
+                                  "age": 10,
+                                  "linkStatus": "active",
+                                  "email": null,
+                                  "hasEmail": false
+                                }
+                              ]
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
         }
 
         val http = HttpClient(engine) {

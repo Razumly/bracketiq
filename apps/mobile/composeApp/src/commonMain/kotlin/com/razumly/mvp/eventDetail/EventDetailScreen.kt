@@ -3561,9 +3561,11 @@ fun EventDetailScreen(
                                         isManagingParticipants = isManagingParticipants,
                                         onStartManagingParticipants = {
                                             isManagingParticipants = true
+                                            component.startManagingParticipants()
                                         },
                                         onStopManagingParticipants = {
                                             isManagingParticipants = false
+                                            component.stopManagingParticipants()
                                         },
                                         selectedWeeklyOccurrenceLabel = selectedWeeklyOccurrence?.label,
                                         onClearSelectedWeeklyOccurrence = if (isWeeklyParentEvent) {

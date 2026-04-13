@@ -28,12 +28,15 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -463,10 +466,13 @@ class TeamRepositoryTeamsFetchTest {
 
         repo.getTeamsWithPlayersFlow("u_manager").first()
 
-        var pollAttempts = 0
-        while (teamDao.getTeamsForUser("u_manager").isEmpty() && pollAttempts < 100) {
-            Thread.sleep(10)
-            pollAttempts += 1
+        for (attempt in 0 until 100) {
+            if (teamDao.getTeamsForUser("u_manager").isNotEmpty()) {
+                break
+            }
+            withContext(Dispatchers.Default) {
+                delay(10)
+            }
         }
 
         val cachedTeams = teamDao.getTeamsForUser("u_manager")

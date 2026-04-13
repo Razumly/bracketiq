@@ -37,9 +37,11 @@ import com.razumly.mvp.core.presentation.util.toNameCase
 import com.razumly.mvp.core.util.jsonMVP
 import io.github.aakira.napier.Napier
 import io.ktor.http.encodeURLQueryComponent
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -305,6 +307,13 @@ class UserRepository(
     private val currentUserDataSource: CurrentUserDataSource,
 ) : IUserRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val startupLoadJob = scope.launch {
+        runCatching { loadCurrentUser() }.onFailure { throwable ->
+            if (throwable !is CancellationException) {
+                Napier.w("loadCurrentUser failed", throwable)
+            }
+        }
+    }
 
     private val _currentUser = MutableStateFlow(Result.failure<UserData>(Exception("No User")))
     override val currentUser: StateFlow<Result<UserData>> = _currentUser.asStateFlow()
@@ -317,11 +326,8 @@ class UserRepository(
     override val requiredProfileCompletionState: StateFlow<RequiredProfileCompletionState> =
         _requiredProfileCompletionState.asStateFlow()
 
-    init {
-        scope.launch { runCatching { loadCurrentUser() }.onFailure { Napier.w("loadCurrentUser failed", it) } }
-    }
-
     override suspend fun login(email: String, password: String): Result<UserData> = runCatching {
+        cancelStartupLoadIfRunning()
         val normalizedEmail = normalizeEmail(email)
         if (normalizedEmail.isBlank()) error("Email is required")
         Napier.d(tag = USER_REPOSITORY_LOG_TAG) { "Email login started for ${maskEmail(normalizedEmail)}" }
@@ -353,6 +359,7 @@ class UserRepository(
     }
 
     suspend fun loginWithGoogleIdToken(idToken: String): Result<UserData> = runCatching {
+        cancelStartupLoadIfRunning()
         Napier.d(tag = USER_REPOSITORY_LOG_TAG) { "Google login started" }
         val res = api.post<GoogleMobileLoginRequestDto, AuthResponseDto>(
             path = "api/auth/google/mobile",
@@ -389,6 +396,7 @@ class UserRepository(
         firstName: String? = null,
         lastName: String? = null,
     ): Result<UserData> = runCatching {
+        cancelStartupLoadIfRunning()
         Napier.d(tag = USER_REPOSITORY_LOG_TAG) { "Apple login started" }
         val res = api.post<AppleMobileLoginRequestDto, AuthResponseDto>(
             path = "api/auth/apple/mobile",
@@ -434,6 +442,7 @@ class UserRepository(
         dateOfBirth: String?,
         profileSelection: SignupProfileSelection?,
     ): Result<UserData> = runCatching {
+        cancelStartupLoadIfRunning()
         val normalizedEmail = normalizeEmail(email)
         val normalizedFirstName = normalizeRequiredName(firstName)
         val normalizedLastName = normalizeRequiredName(lastName)
@@ -522,6 +531,12 @@ class UserRepository(
         loadCurrentUser()
     }
 
+    private suspend fun cancelStartupLoadIfRunning() {
+        if (startupLoadJob.isActive) {
+            startupLoadJob.cancelAndJoin()
+        }
+    }
+
     private suspend fun loadCurrentUser() {
         _startupAuthState.value = StartupAuthState.Checking
         try {
@@ -572,6 +587,9 @@ class UserRepository(
             }
             updateStartupAuthStateFromCurrentUser()
         } catch (throwable: Throwable) {
+            if (throwable is CancellationException) {
+                throw throwable
+            }
             Napier.w(tag = USER_REPOSITORY_LOG_TAG) {
                 "loadCurrentUser failed: ${throwable.message}"
             }

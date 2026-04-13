@@ -36,6 +36,7 @@ import com.razumly.mvp.core.data.util.isPlaceholderSlot
 import com.razumly.mvp.core.data.repositories.EventTeamBillCreateRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
 import com.razumly.mvp.core.data.repositories.EventTeamBillingUserOption
+import com.razumly.mvp.core.data.repositories.EventParticipantManagementEntry
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.UserVisibilityContext
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
@@ -86,6 +87,39 @@ private data class ParticipantRemoveTarget(
     val userId: String? = null,
 )
 
+private fun EventParticipantManagementEntry.requiresDocumentAttention(): Boolean {
+    val normalizedConsentStatus = consentStatus?.trim()?.lowercase()
+    return status.equals("STARTED", ignoreCase = true) ||
+        normalizedConsentStatus == "guardian_approval_required" ||
+        normalizedConsentStatus == "child_email_required" ||
+        normalizedConsentStatus == "send_failed" ||
+        normalizedConsentStatus == "sent"
+}
+
+private fun EventParticipantManagementEntry.hostStatusText(): String {
+    val normalizedConsentStatus = consentStatus?.trim()?.lowercase()
+    return when {
+        normalizedConsentStatus == "child_email_required" -> "Missing child email for required documents"
+        normalizedConsentStatus == "guardian_approval_required" -> "Parent approval required"
+        normalizedConsentStatus == "send_failed" -> "Required documents failed to send"
+        normalizedConsentStatus == "sent" || status.equals("STARTED", ignoreCase = true) ->
+            "Required documents pending"
+        normalizedConsentStatus == "completed" || status.equals("ACTIVE", ignoreCase = true) ->
+            "Registered"
+        status.equals("BLOCKED", ignoreCase = true) -> "Registration blocked"
+        status.equals("CANCELLED", ignoreCase = true) -> "Registration cancelled"
+        status.equals("CONSENTFAILED", ignoreCase = true) -> "Required documents failed"
+        else -> "Registration status unavailable"
+    }
+}
+
+private fun preferredRegistrationEntry(
+    entries: List<EventParticipantManagementEntry>,
+): EventParticipantManagementEntry? {
+    return entries.firstOrNull(EventParticipantManagementEntry::requiresDocumentAttention)
+        ?: entries.firstOrNull()
+}
+
 @Composable
 fun ParticipantsView(
     showFab: (Boolean) -> Unit,
@@ -98,6 +132,8 @@ fun ParticipantsView(
     val divisionTeams by component.divisionTeams.collectAsState()
     val selectedEvent by component.eventWithRelations.collectAsState()
     val currentUser by component.currentUser.collectAsState()
+    val participantManagementSnapshot by component.participantManagementSnapshot.collectAsState()
+    val participantManagementLoading by component.participantManagementLoading.collectAsState()
     val participants = selectedEvent.players
     val teamSignup = selectedEvent.event.teamSignup
     val participantIds = remember(selectedEvent.event.playerIds) {
@@ -311,6 +347,12 @@ fun ParticipantsView(
         )
     }
 
+    val participantRegistrationByUserId = remember(participantManagementSnapshot) {
+        (participantManagementSnapshot.userRegistrations + participantManagementSnapshot.childRegistrations)
+            .groupBy(EventParticipantManagementEntry::registrantId)
+            .mapValues { (_, entries) -> preferredRegistrationEntry(entries) }
+    }
+
     fun closeRefundModal() {
         refundContext = null
         refundSnapshot = null
@@ -484,6 +526,15 @@ fun ParticipantsView(
                 } else {
                     participantUsersFromEvent.ifEmpty { participants }
                 }
+                if (manageMode && canManageParticipants && participantManagementLoading) {
+                    item(key = "participants-manage-loading") {
+                        Text(
+                            "Loading registration status...",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
                 if (visibleParticipants.isEmpty()) {
                     item(key = "participants-empty") {
                         Text(
@@ -495,6 +546,7 @@ fun ParticipantsView(
                 } else {
                     items(visibleParticipants, key = { it.id }) { participant ->
                         val billingContext = buildUserBillingContext(participant)
+                        val registrationEntry = participantRegistrationByUserId[participant.id]
                         Column(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -515,6 +567,17 @@ fun ParticipantsView(
                                     playerInteractionComponent.unfollowUser(user)
                                 }
                             )
+                            if (manageMode && canManageParticipants && registrationEntry != null) {
+                                Text(
+                                    text = registrationEntry.hostStatusText(),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (registrationEntry.requiresDocumentAttention()) {
+                                        MaterialTheme.colorScheme.error
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                )
+                            }
                             if (manageMode && canManageParticipants) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
