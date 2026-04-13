@@ -47,6 +47,7 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.Product
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
+import com.razumly.mvp.core.data.dataTypes.canUsePaidBilling
 import com.razumly.mvp.core.presentation.LockedRentalSelection
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.OrganizationDetailTab
@@ -729,7 +730,7 @@ private fun StoreTabContent(
     bottomPadding: androidx.compose.ui.unit.Dp,
     onPurchase: (Product) -> Unit,
 ) {
-    val hasStripeAccount = organization?.hasStripeAccount == true
+    val paymentsEnabled = organization?.canUsePaidBilling() == true
     val isCheckoutStarting = !startingProductCheckoutId.isNullOrBlank()
 
     if (isLoading) {
@@ -742,7 +743,7 @@ private fun StoreTabContent(
         contentPadding = listTabPadding(bottomPadding),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        if (!hasStripeAccount) {
+        if (!paymentsEnabled) {
             item {
                 Text(
                     text = "Payments are not available for this organization yet.",
@@ -761,7 +762,7 @@ private fun StoreTabContent(
             items(products, key = { product -> product.id }) { product ->
                 ProductCard(
                     product = product,
-                    hasStripeAccount = hasStripeAccount,
+                    paymentsEnabled = paymentsEnabled,
                     isStartingCheckout = startingProductCheckoutId == product.id,
                     isCheckoutLocked = isCheckoutStarting,
                     onPurchase = onPurchase,
@@ -793,7 +794,7 @@ private fun SectionCard(
 @Composable
 private fun ProductCard(
     product: Product,
-    hasStripeAccount: Boolean,
+    paymentsEnabled: Boolean,
     isStartingCheckout: Boolean,
     isCheckoutLocked: Boolean,
     onPurchase: (Product) -> Unit,
@@ -845,7 +846,7 @@ private fun ProductCard(
 
             Button(
                 onClick = { onPurchase(product) },
-                enabled = hasStripeAccount && isActive && !isCheckoutLocked,
+                enabled = paymentsEnabled && isActive && !isCheckoutLocked,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 if (isStartingCheckout) {
@@ -858,7 +859,7 @@ private fun ProductCard(
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(text = "Preparing checkout...")
                 } else {
-                    Text(text = if (hasStripeAccount) product.purchaseButtonLabel() else "Payments unavailable")
+                    Text(text = if (paymentsEnabled) product.purchaseButtonLabel() else "Payments unavailable")
                 }
             }
         }

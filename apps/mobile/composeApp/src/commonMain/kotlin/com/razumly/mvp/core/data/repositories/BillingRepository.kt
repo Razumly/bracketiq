@@ -8,6 +8,8 @@ import com.razumly.mvp.core.data.dataTypes.BillingAddressProfile
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
 import com.razumly.mvp.core.data.dataTypes.Organization
+import com.razumly.mvp.core.data.dataTypes.resolveOrganizationVerificationReviewStatus
+import com.razumly.mvp.core.data.dataTypes.resolveOrganizationVerificationStatus
 import com.razumly.mvp.core.data.dataTypes.Product
 import com.razumly.mvp.core.data.dataTypes.ProductTaxCategory
 import com.razumly.mvp.core.data.dataTypes.RefundRequest
@@ -1707,8 +1709,14 @@ private data class OrganizationApiDto(
     val ownerId: String? = null,
     val hostIds: List<String>? = null,
     val website: String? = null,
+    val sports: List<String>? = null,
     val officialIds: List<String>? = null,
     val hasStripeAccount: Boolean? = null,
+    val verificationStatus: String? = null,
+    val verifiedAt: String? = null,
+    val verificationReviewStatus: String? = null,
+    val verificationReviewNotes: String? = null,
+    val verificationReviewUpdatedAt: String? = null,
     val coordinates: List<Double>? = null,
     val fieldIds: List<String>? = null,
     val productIds: List<String>? = null,
@@ -1732,8 +1740,22 @@ private data class OrganizationApiDto(
             ownerId = resolvedOwnerId,
             hostIds = hostIds ?: emptyList(),
             website = website,
+            sports = sports
+                ?.map(String::trim)
+                ?.filter(String::isNotBlank)
+                ?: emptyList(),
             officialIds = officialIds ?: emptyList(),
             hasStripeAccount = hasStripeAccount ?: false,
+            verificationStatus = resolveOrganizationVerificationStatus(
+                verificationStatus = verificationStatus,
+                hasStripeAccount = hasStripeAccount,
+            ),
+            verifiedAt = verifiedAt?.trim()?.takeIf(String::isNotBlank),
+            verificationReviewStatus = resolveOrganizationVerificationReviewStatus(
+                reviewStatus = verificationReviewStatus,
+            ),
+            verificationReviewNotes = verificationReviewNotes?.trim()?.takeIf(String::isNotBlank),
+            verificationReviewUpdatedAt = verificationReviewUpdatedAt?.trim()?.takeIf(String::isNotBlank),
             coordinates = coordinates,
             fieldIds = fieldIds ?: emptyList(),
             productIds = productIds ?: emptyList(),

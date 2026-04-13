@@ -4,6 +4,8 @@ import com.razumly.mvp.core.data.DatabaseService
 import com.razumly.mvp.core.data.dataTypes.AuthAccount
 import com.razumly.mvp.core.data.dataTypes.BillingAddressDraft
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.OrganizationVerificationReviewStatus
+import com.razumly.mvp.core.data.dataTypes.OrganizationVerificationStatus
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.daos.ChatGroupDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventDao
@@ -444,11 +446,16 @@ class BillingRepositoryHttpTest {
                       "organizations": [
                         {
                           "id": "org_1",
-                          "name": "Indoor Soccer Arena"
+                          "name": "Indoor Soccer Arena",
+                          "sports": ["Soccer", " Futsal "],
+                          "verificationStatus": "VERIFIED",
+                          "verifiedAt": "2026-04-13T20:30:00.000Z",
+                          "verificationReviewStatus": "RESOLVED"
                         },
                         {
                           "id": "org_2",
-                          "name": "Indoor Sports Complex"
+                          "name": "Indoor Sports Complex",
+                          "hasStripeAccount": true
                         }
                       ]
                     }
@@ -467,6 +474,66 @@ class BillingRepositoryHttpTest {
         assertEquals(2, organizations.size)
         assertEquals("org_1", organizations[0].id)
         assertEquals("Indoor Soccer Arena", organizations[0].name)
+        assertEquals(listOf("Soccer", "Futsal"), organizations[0].sports)
+        assertEquals(OrganizationVerificationStatus.VERIFIED, organizations[0].verificationStatus)
+        assertEquals("2026-04-13T20:30:00.000Z", organizations[0].verifiedAt)
+        assertEquals(OrganizationVerificationReviewStatus.RESOLVED, organizations[0].verificationReviewStatus)
+        assertEquals(OrganizationVerificationStatus.LEGACY_CONNECTED, organizations[1].verificationStatus)
+    }
+
+    @Test
+    fun getOrganizationsByIds_maps_verification_fallbacks() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/organizations", request.url.encodedPath)
+            assertEquals("ids=org_legacy,org_pending&limit=100", request.url.encodedQuery)
+            assertEquals(HttpMethod.Get, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+
+            respond(
+                content = """
+                    {
+                      "organizations": [
+                        {
+                          "id": "org_legacy",
+                          "name": "Legacy Connected Org",
+                          "hasStripeAccount": true
+                        },
+                        {
+                          "id": "org_pending",
+                          "name": "Pending Org",
+                          "hasStripeAccount": false,
+                          "verificationStatus": "PENDING",
+                          "verificationReviewStatus": "OPEN",
+                          "verificationReviewNotes": "Waiting on payout details",
+                          "verificationReviewUpdatedAt": "2026-04-13T21:00:00.000Z"
+                        }
+                      ]
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = BillingRepository(api, userRepo, BillingRepositoryHttp_UnusedEventRepository, db)
+
+        val organizations = repo.getOrganizationsByIds(listOf("org_legacy", "org_pending")).getOrThrow()
+
+        assertEquals(2, organizations.size)
+        assertEquals(OrganizationVerificationStatus.LEGACY_CONNECTED, organizations[0].verificationStatus)
+        assertEquals(OrganizationVerificationStatus.PENDING, organizations[1].verificationStatus)
+        assertEquals(OrganizationVerificationReviewStatus.OPEN, organizations[1].verificationReviewStatus)
+        assertEquals("Waiting on payout details", organizations[1].verificationReviewNotes)
+        assertEquals("2026-04-13T21:00:00.000Z", organizations[1].verificationReviewUpdatedAt)
     }
 
     @Test

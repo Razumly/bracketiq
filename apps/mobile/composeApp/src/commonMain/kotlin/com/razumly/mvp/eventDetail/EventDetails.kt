@@ -118,6 +118,7 @@ import com.razumly.mvp.core.data.util.buildEventDivisionId
 import com.razumly.mvp.core.data.util.buildGenderSkillAgeDivisionToken
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
 import com.razumly.mvp.core.data.util.normalizeDivisionDetail
+import com.razumly.mvp.core.presentation.composables.OrganizationVerificationBadge
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.data.util.divisionsEquivalent
@@ -4723,12 +4724,20 @@ private fun OrganizationHostCardWithMenu(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    Text(
-                        text = organizationName,
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontWeight = FontWeight.SemiBold,
-                        ),
-                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            modifier = Modifier.weight(1f),
+                            text = organizationName,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontWeight = FontWeight.SemiBold,
+                            ),
+                            maxLines = 1,
+                        )
+                        OrganizationVerificationBadge(organization = organization)
+                    }
                     organization.location
                         ?.takeIf(String::isNotBlank)
                         ?.let { location ->
