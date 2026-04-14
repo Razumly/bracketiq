@@ -41,6 +41,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -1431,6 +1433,40 @@ class UserRepositoryAuthTest {
 
         assertEquals(StartupAuthState.Checking, repo.startupAuthState.value)
         repo.getCurrentAccount()
+    }
+
+    @Test
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun startup_load_initializes_state_before_running_auth_restore() = runTest {
+        val tokenStore = UserRepositoryAuth_InMemoryAuthTokenStore("")
+        val userDao = FakeUserDataDao()
+        val db = UserRepositoryAuth_FakeDatabaseService(userDao)
+        val prefsStore = InMemoryPreferencesDataStore()
+        val currentUserDataSource = CurrentUserDataSource(prefsStore)
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/auth/me", request.url.encodedPath)
+            respond(
+                content = """{"user":null,"session":null}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = UserRepository(
+            databaseService = db,
+            api = api,
+            tokenStore = tokenStore,
+            currentUserDataSource = currentUserDataSource,
+            startupDispatcher = UnconfinedTestDispatcher(testScheduler),
+        )
+
+        repo.getCurrentAccount().getOrThrow()
+        assertEquals(StartupAuthState.Unauthenticated, repo.startupAuthState.value)
     }
 
     @Test

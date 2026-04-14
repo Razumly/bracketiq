@@ -38,6 +38,7 @@ import com.razumly.mvp.core.util.jsonMVP
 import io.github.aakira.napier.Napier
 import io.ktor.http.encodeURLQueryComponent
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -305,15 +306,9 @@ class UserRepository(
     private val api: MvpApiClient,
     private val tokenStore: AuthTokenStore,
     private val currentUserDataSource: CurrentUserDataSource,
+    private val startupDispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : IUserRepository {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val startupLoadJob = scope.launch {
-        runCatching { loadCurrentUser() }.onFailure { throwable ->
-            if (throwable !is CancellationException) {
-                Napier.w("loadCurrentUser failed", throwable)
-            }
-        }
-    }
+    private val scope = CoroutineScope(SupervisorJob() + startupDispatcher)
 
     private val _currentUser = MutableStateFlow(Result.failure<UserData>(Exception("No User")))
     override val currentUser: StateFlow<Result<UserData>> = _currentUser.asStateFlow()
@@ -325,6 +320,13 @@ class UserRepository(
     private val _requiredProfileCompletionState = MutableStateFlow(RequiredProfileCompletionState())
     override val requiredProfileCompletionState: StateFlow<RequiredProfileCompletionState> =
         _requiredProfileCompletionState.asStateFlow()
+    private val startupLoadJob = scope.launch {
+        runCatching { loadCurrentUser() }.onFailure { throwable ->
+            if (throwable !is CancellationException) {
+                Napier.w("loadCurrentUser failed", throwable)
+            }
+        }
+    }
 
     override suspend fun login(email: String, password: String): Result<UserData> = runCatching {
         cancelStartupLoadIfRunning()
