@@ -4,6 +4,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -11,14 +12,19 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Message
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PersonRemove
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -41,11 +47,16 @@ fun PlayerCardWithActions(
     onSendFriendRequest: (UserData) -> Unit,
     onFollow: (UserData) -> Unit,
     onUnfollow: (UserData) -> Unit,
+    onBlock: (UserData, Boolean) -> Unit,
+    onUnblock: (UserData) -> Unit,
     onInviteToTeam: ((UserData) -> Unit)? = null,
 ) {
     var showPopup by remember { mutableStateOf(false) }
+    var showBlockDialog by remember(player.id) { mutableStateOf(false) }
+    var leaveSharedChatsOnBlock by remember(player.id) { mutableStateOf(true) }
     val isFollowing = currentUser.followingIds.contains(player.id)
     val isFriend = currentUser.friendIds.contains(player.id)
+    val isBlocked = currentUser.blockedUserIds.contains(player.id)
     val hasSentFriendRequest = currentUser.friendRequestSentIds.contains(player.id)
     val isCurrentUser = currentUser.id == player.id
     val isActionRestricted = player.shouldRestrictSocialActions
@@ -53,12 +64,12 @@ fun PlayerCardWithActions(
     Box {
         PlayerCard(
             player = player,
-            modifier = modifier.clickable(enabled = !isCurrentUser && !isActionRestricted) {
+            modifier = modifier.clickable(enabled = !isCurrentUser) {
                 showPopup = true
             }
         )
 
-        if (showPopup && !isCurrentUser && !isActionRestricted) {
+        if (showPopup && !isCurrentUser) {
             Popup(
                 alignment = Alignment.Center,
                 properties = PopupProperties(
@@ -71,6 +82,8 @@ fun PlayerCardWithActions(
                     player = player,
                     isFollowing = isFollowing,
                     isFriend = isFriend,
+                    isBlocked = isBlocked,
+                    isActionRestricted = isActionRestricted,
                     hasSentFriendRequest = hasSentFriendRequest,
                     onMessage = {
                         onMessage(player)
@@ -94,9 +107,55 @@ fun PlayerCardWithActions(
                             showPopup = false
                         }
                     },
-                    onDismiss = { showPopup = false }
+                    onBlock = {
+                        leaveSharedChatsOnBlock = true
+                        showPopup = false
+                        showBlockDialog = true
+                    },
+                    onUnblock = {
+                        onUnblock(player)
+                        showPopup = false
+                    },
                 )
             }
+        }
+
+        if (showBlockDialog) {
+            AlertDialog(
+                onDismissRequest = { showBlockDialog = false },
+                title = { Text("Block ${player.displayName.ifBlank { "user" }}?") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text("Blocking removes social links and can hide every shared chat from your feed immediately.")
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Checkbox(
+                                checked = leaveSharedChatsOnBlock,
+                                onCheckedChange = { checked -> leaveSharedChatsOnBlock = checked },
+                            )
+                            Text("Leave all chats with this user")
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            onBlock(player, leaveSharedChatsOnBlock)
+                            showBlockDialog = false
+                        }
+                    ) {
+                        Text("Block")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showBlockDialog = false }) {
+                        Text("Cancel")
+                    }
+                },
+            )
         }
     }
 }
@@ -106,12 +165,15 @@ private fun PlayerActionPopup(
     player: UserData,
     isFollowing: Boolean,
     isFriend: Boolean,
+    isBlocked: Boolean,
+    isActionRestricted: Boolean,
     hasSentFriendRequest: Boolean,
     onMessage: () -> Unit,
     onSendFriendRequest: () -> Unit,
     onFollow: () -> Unit,
     onInviteToTeam: (() -> Unit)? = null,
-    onDismiss: () -> Unit
+    onBlock: () -> Unit,
+    onUnblock: () -> Unit,
 ) {
     Card(
         modifier = Modifier
@@ -138,50 +200,72 @@ private fun PlayerActionPopup(
 
             HorizontalDivider()
 
-            OutlinedButton(
-                onClick = onMessage,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(Icons.AutoMirrored.Filled.Message, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("Message")
-            }
-
-            onInviteToTeam?.let { inviteAction ->
+            if (!isBlocked && !isActionRestricted) {
                 OutlinedButton(
-                    onClick = inviteAction,
+                    onClick = onMessage,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Icon(Icons.Default.PersonAdd, contentDescription = null)
+                    Icon(Icons.AutoMirrored.Filled.Message, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
-                    Text("Invite to Team")
+                    Text("Message")
                 }
-            }
 
-            if (!isFriend) {
+                onInviteToTeam?.let { inviteAction ->
+                    OutlinedButton(
+                        onClick = inviteAction,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.PersonAdd, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Invite to Team")
+                    }
+                }
+
+                if (!isFriend) {
+                    OutlinedButton(
+                        onClick = onSendFriendRequest,
+                        enabled = !hasSentFriendRequest,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.PersonAdd, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            if (hasSentFriendRequest) "Request Sent" else "Add Friend"
+                        )
+                    }
+                }
+
                 OutlinedButton(
-                    onClick = onSendFriendRequest,
-                    enabled = !hasSentFriendRequest,
+                    onClick = onFollow,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Icon(Icons.Default.PersonAdd, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        if (hasSentFriendRequest) "Request Sent" else "Add Friend"
+                    Icon(
+                        if (isFollowing) Icons.Default.PersonRemove else Icons.Default.Person,
+                        contentDescription = null
                     )
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (isFollowing) "Unfollow" else "Follow")
                 }
             }
 
-            OutlinedButton(
-                onClick = onFollow,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(
-                    if (isFollowing) Icons.Default.PersonRemove else Icons.Default.Person,
-                    contentDescription = null
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(if (isFollowing) "Unfollow" else "Follow")
+            if (isBlocked) {
+                OutlinedButton(
+                    onClick = onUnblock,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.PersonRemove, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Unblock user")
+                }
+            } else {
+                OutlinedButton(
+                    onClick = onBlock,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Block, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Block user")
+                }
             }
         }
     }

@@ -35,6 +35,7 @@ import com.razumly.mvp.core.data.repositories.FamilyJoinRequest
 import com.razumly.mvp.core.data.repositories.FamilyJoinRequestAction
 import com.razumly.mvp.core.data.repositories.FamilyJoinRequestResolution
 import com.razumly.mvp.core.data.repositories.BoldSignOperationStatus
+import com.razumly.mvp.core.data.repositories.ChatTermsConsentState
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
@@ -199,6 +200,15 @@ internal class CreateEvent_FakeUserRepository : IUserRepository {
     var createdInvitesResult: List<com.razumly.mvp.core.data.dataTypes.Invite> = emptyList()
     var emailMembershipMatches: List<UserEmailMembershipMatch> = emptyList()
     var searchResults: List<UserData> = emptyList()
+    var chatTermsConsentState = ChatTermsConsentState(
+        version = "2026-04-14",
+        url = "/terms",
+        summary = listOf("There is no tolerance for objectionable content or abusive users."),
+        accepted = true,
+        acceptedAt = "2026-04-14T12:00:00Z",
+    )
+    var getChatTermsConsentStateCalls = 0
+    var acceptChatTermsConsentCalls = 0
 
     override val currentUser: StateFlow<Result<UserData>> = MutableStateFlow(Result.success(user))
     override val currentAccount: StateFlow<Result<AuthAccount>> = MutableStateFlow(Result.success(account))
@@ -292,6 +302,20 @@ internal class CreateEvent_FakeUserRepository : IUserRepository {
     override suspend fun followUser(userId: String): Result<Unit> = Result.success(Unit)
     override suspend fun unfollowUser(userId: String): Result<Unit> = Result.success(Unit)
     override suspend fun removeFriend(userId: String): Result<Unit> = Result.success(Unit)
+    override suspend fun getChatTermsConsentState(): Result<ChatTermsConsentState> =
+        Result.success(chatTermsConsentState).also {
+            getChatTermsConsentStateCalls += 1
+        }
+    override suspend fun acceptChatTermsConsent(): Result<ChatTermsConsentState> =
+        Result.success(
+            chatTermsConsentState.copy(
+                accepted = true,
+                acceptedAt = chatTermsConsentState.acceptedAt ?: "2026-04-14T12:00:00Z",
+            )
+        ).also { result ->
+            acceptChatTermsConsentCalls += 1
+            chatTermsConsentState = result.getOrThrow()
+        }
 }
 
 internal data class CreateEventCall(

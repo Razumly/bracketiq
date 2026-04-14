@@ -287,6 +287,8 @@ fun EventDetails(
     onHostSendFriendRequest: (UserData) -> Unit = {},
     onHostFollowUser: (UserData) -> Unit = {},
     onHostUnfollowUser: (UserData) -> Unit = {},
+    onHostBlockUser: (UserData, Boolean) -> Unit = { _, _ -> },
+    onHostUnblockUser: (UserData) -> Unit = {},
     onHostFollowOrganization: (Organization) -> Unit = {},
     onMapRevealCenterChange: (Offset) -> Unit = {},
     onFloatingDockVisibilityChange: (Boolean) -> Unit = {},
@@ -1802,6 +1804,8 @@ fun EventDetails(
                             onSendFriendRequest = onHostSendFriendRequest,
                             onFollowUser = onHostFollowUser,
                             onUnfollowUser = onHostUnfollowUser,
+                            onBlockUser = onHostBlockUser,
+                            onUnblockUser = onHostUnblockUser,
                             onFollowOrganization = onHostFollowOrganization,
                         )
                         HorizontalDivider(
@@ -4621,6 +4625,8 @@ private fun HostedByReadOnlyRow(
     onSendFriendRequest: (UserData) -> Unit,
     onFollowUser: (UserData) -> Unit,
     onUnfollowUser: (UserData) -> Unit,
+    onBlockUser: (UserData, Boolean) -> Unit,
+    onUnblockUser: (UserData) -> Unit,
     onFollowOrganization: (Organization) -> Unit,
 ) {
     Row(
@@ -4662,6 +4668,10 @@ private fun HostedByReadOnlyRow(
                         onSendFriendRequest = onSendFriendRequest,
                         onFollow = onFollowUser,
                         onUnfollow = onUnfollowUser,
+                        onBlock = { user, leaveSharedChats ->
+                            onBlockUser(user, leaveSharedChats)
+                        },
+                        onUnblock = onUnblockUser,
                     )
                 }
 

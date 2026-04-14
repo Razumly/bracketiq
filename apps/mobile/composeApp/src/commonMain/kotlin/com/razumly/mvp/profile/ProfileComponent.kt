@@ -160,6 +160,7 @@ data class ProfileConnectionsState(
     val currentUser: UserData? = null,
     val friends: List<UserData> = emptyList(),
     val following: List<UserData> = emptyList(),
+    val blockedUsers: List<UserData> = emptyList(),
     val incomingFriendRequests: List<UserData> = emptyList(),
     val outgoingFriendRequests: List<UserData> = emptyList(),
     val searchQuery: String = "",
@@ -289,6 +290,8 @@ interface ProfileComponent : IPaymentProcessor {
     fun followUser(user: UserData)
     fun unfollowUser(user: UserData)
     fun removeFriend(user: UserData)
+    fun blockUser(user: UserData, leaveSharedChats: Boolean = true)
+    fun unblockUser(user: UserData)
     fun refreshDocuments()
     fun refreshMySchedule()
     fun refreshInvites()
@@ -1290,6 +1293,10 @@ class DefaultProfileComponent(
                 if (failureMessage == null) failureMessage = throwable.userMessage("Failed to load following users.")
                 emptyList()
             }
+            val blockedUsers = userRepository.getUsers(currentUser.blockedUserIds).getOrElse { throwable ->
+                if (failureMessage == null) failureMessage = throwable.userMessage("Failed to load blocked users.")
+                emptyList()
+            }
             val incomingFriendRequests = userRepository.getUsers(currentUser.friendRequestIds).getOrElse { throwable ->
                 if (failureMessage == null) failureMessage = throwable.userMessage("Failed to load incoming friend requests.")
                 emptyList()
@@ -1315,6 +1322,7 @@ class DefaultProfileComponent(
                 currentUser = currentUser,
                 friends = friends,
                 following = following,
+                blockedUsers = blockedUsers,
                 incomingFriendRequests = incomingFriendRequests,
                 outgoingFriendRequests = outgoingFriendRequests,
                 searchResults = searchResults,
@@ -1415,6 +1423,28 @@ class DefaultProfileComponent(
             successMessage = "Friend removed.",
         ) {
             userRepository.removeFriend(user.id)
+        }
+    }
+
+    override fun blockUser(user: UserData, leaveSharedChats: Boolean) {
+        performConnectionAction(
+            user = user,
+            successMessage = if (leaveSharedChats) {
+                "User blocked. Shared chats were hidden."
+            } else {
+                "User blocked."
+            },
+        ) {
+            userRepository.blockUser(user.id, leaveSharedChats).map { }
+        }
+    }
+
+    override fun unblockUser(user: UserData) {
+        performConnectionAction(
+            user = user,
+            successMessage = "User unblocked.",
+        ) {
+            userRepository.unblockUser(user.id)
         }
     }
 

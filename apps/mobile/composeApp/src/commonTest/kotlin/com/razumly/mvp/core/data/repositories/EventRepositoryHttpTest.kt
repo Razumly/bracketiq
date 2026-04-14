@@ -62,6 +62,9 @@ private class EventRepositoryHttp_InMemoryAuthTokenStore(
 
 private class EventRepositoryHttp_FakeEventDao : EventDao {
     private val events = MutableStateFlow<Map<String, Event>>(emptyMap())
+    val deleteEventsByIdCalls = mutableListOf<List<String>>()
+    val deleteEventsWithCrossRefsCalls = mutableListOf<List<String>>()
+    val deleteEventWithCrossRefsCalls = mutableListOf<String>()
 
     override suspend fun upsertEvent(game: Event) {
         events.value = events.value + (game.id to game)
@@ -76,6 +79,7 @@ private class EventRepositoryHttp_FakeEventDao : EventDao {
     }
 
     override suspend fun deleteEventsById(ids: List<String>) {
+        deleteEventsByIdCalls += ids
         events.value = events.value - ids.toSet()
     }
 
@@ -96,7 +100,14 @@ private class EventRepositoryHttp_FakeEventDao : EventDao {
     override suspend fun getEventWithRelationsById(id: String): EventWithRelations = error("unused")
     override fun getEventWithRelationsFlow(id: String): Flow<EventWithRelations> = error("unused")
     override suspend fun upsertEventWithRelations(event: Event) { upsertEvent(event) }
-    override suspend fun deleteEventWithCrossRefs(eventId: String) { deleteEventById(eventId) }
+    override suspend fun deleteEventWithCrossRefs(eventId: String) {
+        deleteEventWithCrossRefsCalls += eventId
+        deleteEventById(eventId)
+    }
+    override suspend fun deleteEventsWithCrossRefs(eventIds: List<String>) {
+        deleteEventsWithCrossRefsCalls += eventIds
+        eventIds.forEach { deleteEventWithCrossRefs(it) }
+    }
     override suspend fun deleteEventCrossRefs(eventId: String) {}
     override suspend fun deleteEventUserCrossRefsByEventId(eventId: String) {}
     override suspend fun deleteEventTeamCrossRefsByEventId(eventId: String) {}
@@ -200,7 +211,8 @@ private fun makeUser(id: String): UserData {
 private class EventRepositoryHttp_FakeUserRepository(
     initialCurrentUser: UserData,
 ) : IUserRepository {
-    override val currentUser: StateFlow<Result<UserData>> = MutableStateFlow(Result.success(initialCurrentUser))
+    private val currentUserState = MutableStateFlow(Result.success(initialCurrentUser))
+    override val currentUser: StateFlow<Result<UserData>> = currentUserState
     override val currentAccount: StateFlow<Result<AuthAccount>> = MutableStateFlow(Result.failure(Exception("unused")))
 
     var lastGetUsersInput: List<String>? = null
@@ -292,6 +304,10 @@ private class EventRepositoryHttp_FakeUserRepository(
     override suspend fun followUser(userId: String): Result<Unit> = error("unused")
     override suspend fun unfollowUser(userId: String): Result<Unit> = error("unused")
     override suspend fun removeFriend(userId: String): Result<Unit> = error("unused")
+    override suspend fun setCachedCurrentUserProfile(profile: UserData): Result<UserData> {
+        currentUserState.value = Result.success(profile)
+        return Result.success(profile)
+    }
 }
 
 private object EventRepositoryHttp_UnusedTeamRepository : ITeamRepository {
@@ -319,6 +335,86 @@ private object EventRepositoryHttp_UnusedTeamRepository : ITeamRepository {
 }
 
 class EventRepositoryHttpTest {
+    @Test
+    fun getCachedEventsFlow_filters_hidden_events_from_cached_results() = runTest {
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        eventDao.upsertEvents(
+            listOf(
+                makeEvent(id = "hidden_event", hostId = "u1"),
+                makeEvent(id = "visible_event", hostId = "u2"),
+            )
+        )
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(
+            makeUser("u1").copy(hiddenEventIds = listOf("hidden_event"))
+        )
+        val api = MvpApiClient(
+            HttpClient(MockEngine { error("HTTP should not be used in cached-events test") }) {
+                install(ContentNegotiation) { json(jsonMVP) }
+            },
+            "http://localhost",
+            EventRepositoryHttp_InMemoryAuthTokenStore(),
+        )
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        val events = repo.getCachedEventsFlow().first().getOrThrow()
+
+        assertEquals(listOf("visible_event"), events.map { it.id })
+    }
+
+    @Test
+    fun reportEvent_removes_hidden_events_from_cache_and_updates_current_user() = runTest {
+        val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val eventDao = EventRepositoryHttp_FakeEventDao()
+        eventDao.upsertEvents(
+            listOf(
+                makeEvent(id = "event_1", hostId = "u1"),
+                makeEvent(id = "event_2", hostId = "u2"),
+            )
+        )
+        val db = EventRepositoryHttp_FakeDatabaseService(
+            eventDao,
+            EventRepositoryHttp_FakeUserDataDao(),
+            EventRepositoryHttp_FakeTeamDao(),
+        )
+        val userRepo = EventRepositoryHttp_FakeUserRepository(makeUser("u1"))
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/moderation/reports", request.url.encodedPath)
+            assertEquals(HttpMethod.Post, request.method)
+            respond(
+                content = """
+                    {
+                      "hiddenEventIds": ["event_1"],
+                      "removedChatIds": []
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.Created,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://localhost", tokenStore)
+        val repo = EventRepository(db, api, EventRepositoryHttp_UnusedTeamRepository, userRepo)
+
+        repo.reportEvent("event_1", "spam").getOrThrow()
+
+        val cachedEvents = eventDao.getAllCachedEvents().first()
+        val cachedUser = userRepo.currentUser.value.getOrNull()
+
+        assertEquals(listOf("event_2"), cachedEvents.map { it.id })
+        assertEquals(listOf("event_1"), cachedUser?.hiddenEventIds)
+        assertEquals(listOf(listOf("event_1")), eventDao.deleteEventsWithCrossRefsCalls)
+        assertTrue(eventDao.deleteEventsByIdCalls.isEmpty())
+    }
+
     @Test
     fun getEventsByIds_requests_batched_ids_query() = runTest {
         val tokenStore = EventRepositoryHttp_InMemoryAuthTokenStore("t123")

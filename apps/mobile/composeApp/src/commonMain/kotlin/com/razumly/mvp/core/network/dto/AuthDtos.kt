@@ -108,6 +108,8 @@ data class UserProfileDto(
     val friendRequestIds: List<String>? = null,
     val friendRequestSentIds: List<String>? = null,
     val followingIds: List<String>? = null,
+    val blockedUserIds: List<String>? = null,
+    val hiddenEventIds: List<String>? = null,
     val userName: String? = null,
     val hasStripeAccount: Boolean? = null,
     val uploadedImages: List<String>? = null,
@@ -115,6 +117,8 @@ data class UserProfileDto(
     val displayName: String? = null,
     val isMinor: Boolean? = null,
     val isIdentityHidden: Boolean? = null,
+    val chatTermsAcceptedAt: String? = null,
+    val chatTermsVersion: String? = null,
     // Server includes fields not present in app UserData; we keep them here only to avoid decode failures.
     val dateOfBirth: String? = null,
     val createdAt: String? = null,
@@ -195,6 +199,8 @@ fun UserProfileDto.toUserDataOrNull(): UserData? {
         friendRequestIds = friendRequestIds ?: emptyList(),
         friendRequestSentIds = friendRequestSentIds ?: emptyList(),
         followingIds = followingIds ?: emptyList(),
+        blockedUserIds = blockedUserIds ?: emptyList(),
+        hiddenEventIds = hiddenEventIds ?: emptyList(),
         userName = userName.orEmpty(),
         hasStripeAccount = hasStripeAccount,
         uploadedImages = uploadedImages ?: emptyList(),
@@ -202,6 +208,8 @@ fun UserProfileDto.toUserDataOrNull(): UserData? {
         privacyDisplayName = displayName,
         isMinor = isMinor ?: false,
         isIdentityHidden = isIdentityHidden ?: false,
+        chatTermsAcceptedAt = chatTermsAcceptedAt,
+        chatTermsVersion = chatTermsVersion,
         id = resolvedId,
     )
 }

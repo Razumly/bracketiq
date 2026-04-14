@@ -2071,6 +2071,8 @@ fun EventDetailScreen(
     var showDeleteConfirmation by remember { mutableStateOf(false) }
     var showWithdrawTargetDialog by remember { mutableStateOf(false) }
     var showRefundReasonDialog by remember { mutableStateOf(false) }
+    var showReportEventDialog by remember { mutableStateOf(false) }
+    var reportEventNotes by remember { mutableStateOf("") }
     var selectedWithdrawalTarget by remember { mutableStateOf<WithdrawTargetOption?>(null) }
     var refundReason by remember { mutableStateOf("") }
     var showNotifyDialog by remember { mutableStateOf(false) }
@@ -2767,6 +2769,12 @@ fun EventDetailScreen(
                             onHostUnfollowUser = { user ->
                                 playerInteractionComponent.unfollowUser(user)
                             },
+                            onHostBlockUser = { user, leaveSharedChats ->
+                                playerInteractionComponent.blockUser(user, leaveSharedChats)
+                            },
+                            onHostUnblockUser = { user ->
+                                playerInteractionComponent.unblockUser(user)
+                            },
                             onHostFollowOrganization = { _ ->
                                 popupHandler.showPopup(
                                     com.razumly.mvp.core.util.ErrorMessage(
@@ -3053,6 +3061,19 @@ fun EventDetailScreen(
                                     }, leadingIcon = {
                                         Icon(Icons.Default.Share, contentDescription = null)
                                     })
+
+                                    if (!isHost) {
+                                        DropdownMenuItem(
+                                            text = { Text("Report Event") },
+                                            onClick = {
+                                                showReportEventDialog = true
+                                                showOptionsDropdown = false
+                                            },
+                                            leadingIcon = {
+                                                Icon(Icons.Default.Close, contentDescription = null)
+                                            },
+                                        )
+                                    }
 
                                     if (canRequestRefundAfterStart || canLeaveEvent) {
                                         DropdownMenuItem(
@@ -3865,6 +3886,45 @@ fun EventDetailScreen(
                 }, onDismiss = {
                     showNotifyDialog = false
                 })
+            }
+
+            if (showReportEventDialog) {
+                AlertDialog(
+                    onDismissRequest = { showReportEventDialog = false },
+                    title = { Text("Report event") },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Text("Report objectionable content or abusive behavior tied to this event.")
+                            StandardTextField(
+                                value = reportEventNotes,
+                                onValueChange = { reportEventNotes = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                label = "Notes (optional)",
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                component.reportEvent(reportEventNotes)
+                                reportEventNotes = ""
+                                showReportEventDialog = false
+                            }
+                        ) {
+                            Text("Report")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(
+                            onClick = {
+                                reportEventNotes = ""
+                                showReportEventDialog = false
+                            }
+                        ) {
+                            Text("Cancel")
+                        }
+                    },
+                )
             }
 
             if (showRefundReasonDialog) {

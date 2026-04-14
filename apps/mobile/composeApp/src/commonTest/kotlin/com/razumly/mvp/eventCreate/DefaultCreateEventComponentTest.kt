@@ -23,6 +23,39 @@ import kotlin.test.assertTrue
 
 class DefaultCreateEventComponentTest : MainDispatcherTest() {
     @Test
+    fun create_screen_loads_existing_terms_consent_state_on_init() = runTest(testDispatcher) {
+        val harness = CreateEventHarness().apply {
+            userRepository.chatTermsConsentState = userRepository.chatTermsConsentState.copy(
+                accepted = false,
+                acceptedAt = null,
+            )
+        }
+
+        advance()
+
+        assertEquals(1, harness.userRepository.getChatTermsConsentStateCalls)
+        assertFalse(harness.component.termsConsentState.value.accepted)
+    }
+
+    @Test
+    fun accepting_terms_updates_create_screen_consent_state() = runTest(testDispatcher) {
+        val harness = CreateEventHarness().apply {
+            userRepository.chatTermsConsentState = userRepository.chatTermsConsentState.copy(
+                accepted = false,
+                acceptedAt = null,
+            )
+        }
+        advance()
+
+        harness.component.acceptTermsConsent()
+        advance()
+
+        assertEquals(1, harness.userRepository.acceptChatTermsConsentCalls)
+        assertTrue(harness.component.termsConsentState.value.accepted)
+        assertTrue(harness.component.termsConsentState.value.acceptedAt != null)
+    }
+
+    @Test
     fun updating_host_and_assistant_hosts_normalizes_ids_and_prevents_host_duplication() = runTest(testDispatcher) {
         val harness = CreateEventHarness()
         advance()

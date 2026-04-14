@@ -30,7 +30,9 @@ fun TeamDetailsDialog(
     knownUsers: List<UserData> = emptyList(),
     onDismiss: () -> Unit,
     onPlayerMessage: (UserData) -> Unit,
-    onPlayerAction: (UserData, PlayerAction) -> Unit = { _, _ -> }
+    onPlayerAction: (UserData, PlayerAction) -> Unit = { _, _ -> },
+    onBlockPlayer: (UserData, Boolean) -> Unit = { _, _ -> },
+    onUnblockPlayer: (UserData) -> Unit = {},
 ) {
     Dialog(onDismissRequest = onDismiss) {
         Card(
@@ -130,6 +132,8 @@ fun TeamDetailsDialog(
                             },
                             onFollow = { user -> onPlayerAction(user, PlayerAction.FOLLOW) },
                             onUnfollow = { user -> onPlayerAction(user, PlayerAction.UNFOLLOW) },
+                            onBlock = onBlockPlayer,
+                            onUnblock = onUnblockPlayer,
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
@@ -176,5 +180,5 @@ fun TeamDetailsDialog(
 enum class PlayerAction {
     FRIEND_REQUEST,
     FOLLOW,
-    UNFOLLOW
+    UNFOLLOW,
 }

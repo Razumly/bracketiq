@@ -46,6 +46,7 @@ import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.composables.BillingAddressDialog
 import com.razumly.mvp.core.presentation.composables.EmbeddedWebModal
 import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
+import com.razumly.mvp.core.presentation.composables.TermsConsentDialog
 import com.razumly.mvp.core.presentation.util.backAnimation
 import com.razumly.mvp.core.presentation.util.CircularRevealUnderlay
 import com.razumly.mvp.core.util.LocalLoadingHandler
@@ -101,6 +102,8 @@ fun CreateEventScreen(
     val textSignaturePrompt by component.textSignaturePrompt.collectAsState()
     val webSignaturePrompt by component.webSignaturePrompt.collectAsState()
     val billingAddressPrompt by component.billingAddressPrompt.collectAsState()
+    val termsConsentState by component.termsConsentState.collectAsState()
+    val termsConsentLoading by component.termsConsentLoading.collectAsState()
     val showMap by mapComponent.showMap.collectAsState()
     val isEditing = true
     val currentUser by component.currentUser.collectAsState()
@@ -109,6 +112,16 @@ fun CreateEventScreen(
     val errorHandler = LocalPopupHandler.current
 
     PreparePaymentProcessor(component)
+
+    if (termsConsentLoading || !termsConsentState.accepted) {
+        TermsConsentDialog(
+            state = termsConsentState,
+            loading = termsConsentLoading,
+            onAccept = component::acceptTermsConsent,
+            onDismiss = null,
+            intro = "Creating an event in Bracket IQ requires agreement to the Terms and EULA.",
+        )
+    }
 
     LaunchedEffect(Unit) {
         component.setLoadingHandler(loadingHandler)

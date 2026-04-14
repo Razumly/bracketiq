@@ -34,6 +34,7 @@ import com.razumly.mvp.core.data.dataTypes.normalizedScheduledFieldIds
 import com.razumly.mvp.core.data.util.DEFAULT_DIVISION
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.data.repositories.IBillingRepository
+import com.razumly.mvp.core.data.repositories.ChatTermsConsentState
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
 import com.razumly.mvp.core.data.repositories.IImagesRepository
@@ -106,6 +107,8 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     val leagueScoringConfig: StateFlow<LeagueScoringConfigDTO>
     val suggestedUsers: StateFlow<List<UserData>>
     val pendingStaffInvites: StateFlow<List<PendingStaffInviteDraft>>
+    val termsConsentState: StateFlow<ChatTermsConsentState>
+    val termsConsentLoading: StateFlow<Boolean>
 
     fun onBackClicked()
     fun updateEventField(update: Event.() -> Event)
@@ -154,6 +157,7 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     fun dismissWebSignaturePrompt()
     fun submitBillingAddress(address: BillingAddressDraft)
     fun dismissBillingAddressPrompt()
+    fun acceptTermsConsent()
     fun onUploadSelected(photo: GalleryPhotoResult)
     fun deleteImage(url: String)
 
@@ -221,6 +225,10 @@ class DefaultCreateEventComponent(
     override val suggestedUsers = _suggestedUsers.asStateFlow()
     private val _pendingStaffInvites = MutableStateFlow<List<PendingStaffInviteDraft>>(emptyList())
     override val pendingStaffInvites = _pendingStaffInvites.asStateFlow()
+    private val _termsConsentState = MutableStateFlow(ChatTermsConsentState())
+    override val termsConsentState = _termsConsentState.asStateFlow()
+    private val _termsConsentLoading = MutableStateFlow(false)
+    override val termsConsentLoading = _termsConsentLoading.asStateFlow()
 
     override val eventImageUrls = imageRepository
         .getUserImageIdsFlow()
@@ -279,6 +287,7 @@ class DefaultCreateEventComponent(
         childStack.subscribe {}
         applyRentalDefaults()
         loadSports()
+        refreshTermsConsentState()
         scope.launch {
             _newEventState
                 .map { draft -> draft.organizationId?.trim().orEmpty() }
@@ -343,6 +352,22 @@ class DefaultCreateEventComponent(
                     }
                 }
             }
+        }
+    }
+
+    override fun acceptTermsConsent() {
+        scope.launch {
+            _termsConsentLoading.value = true
+            userRepository.acceptChatTermsConsent()
+                .onSuccess { state ->
+                    _termsConsentState.value = state
+                }
+                .onFailure { throwable ->
+                    _errorState.value = ErrorMessage(
+                        throwable.userMessage("Failed to record Terms and EULA consent.")
+                    )
+                }
+            _termsConsentLoading.value = false
         }
     }
 
@@ -521,6 +546,22 @@ class DefaultCreateEventComponent(
             )
         }.onFailure { error ->
             _errorState.value = ErrorMessage(error.userMessage())
+        }
+    }
+
+    private fun refreshTermsConsentState() {
+        scope.launch {
+            _termsConsentLoading.value = true
+            userRepository.getChatTermsConsentState()
+                .onSuccess { state ->
+                    _termsConsentState.value = state
+                }
+                .onFailure { throwable ->
+                    _errorState.value = ErrorMessage(
+                        throwable.userMessage("Failed to load Terms and EULA consent.")
+                    )
+                }
+            _termsConsentLoading.value = false
         }
     }
 

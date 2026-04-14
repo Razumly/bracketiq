@@ -20,6 +20,8 @@ interface PlayerInteractionComponent {
     fun sendFriendRequest(user: UserData)
     fun followUser(user: UserData)
     fun unfollowUser(user: UserData)
+    fun blockUser(user: UserData, leaveSharedChats: Boolean = true)
+    fun unblockUser(user: UserData)
 }
 
 class DefaultPlayerInteractionComponent(
@@ -63,6 +65,26 @@ class DefaultPlayerInteractionComponent(
         scope.launch {
             _loadingHandler.showLoading("Unfollowing User ...")
             userRepository.unfollowUser(user.id).onFailure {
+                _errorState.value = ErrorMessage(it.userMessage())
+            }
+            _loadingHandler.hideLoading()
+        }
+    }
+
+    override fun blockUser(user: UserData, leaveSharedChats: Boolean) {
+        scope.launch {
+            _loadingHandler.showLoading("Blocking User ...")
+            userRepository.blockUser(user.id, leaveSharedChats).onFailure {
+                _errorState.value = ErrorMessage(it.userMessage())
+            }
+            _loadingHandler.hideLoading()
+        }
+    }
+
+    override fun unblockUser(user: UserData) {
+        scope.launch {
+            _loadingHandler.showLoading("Unblocking User ...")
+            userRepository.unblockUser(user.id).onFailure {
                 _errorState.value = ErrorMessage(it.userMessage())
             }
             _loadingHandler.hideLoading()

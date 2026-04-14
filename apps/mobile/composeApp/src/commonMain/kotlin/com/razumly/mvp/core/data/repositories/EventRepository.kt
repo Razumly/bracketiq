@@ -60,10 +60,12 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
 import kotlin.time.Clock
 import kotlin.time.Instant
 
@@ -172,6 +174,8 @@ interface IEventRepository : IMVPRepository {
     fun observeCurrentUserRegistrationsForEvent(eventId: String): Flow<List<EventRegistrationCacheEntry>> =
         flowOf(emptyList())
     suspend fun clearCurrentUserRegistrationCache(): Result<Unit> = Result.success(Unit)
+    suspend fun reportEvent(eventId: String, notes: String? = null): Result<Unit> =
+        Result.failure(NotImplementedError("Event reporting is not implemented"))
 }
 
 enum class EventParticipantRefundMode(val wireValue: String) {
@@ -334,13 +338,28 @@ class EventRepository(
         }
     }
 
+    private fun filterHiddenEvents(events: List<Event>, currentUser: UserData?): List<Event> {
+        val hiddenEventIds = currentUser?.hiddenEventIds
+            ?.map { hiddenId -> hiddenId.trim() }
+            ?.filter(String::isNotBlank)
+            ?.toSet()
+            ?: emptySet()
+        if (hiddenEventIds.isEmpty()) {
+            return events
+        }
+        return events.filterNot { event -> hiddenEventIds.contains(event.id) }
+    }
+
     override fun resetCursor() {
         // Paging is currently handled by the UI by re-issuing search calls; keep this as a no-op for now.
     }
 
     override fun getCachedEventsFlow(): Flow<Result<List<Event>>> =
-        databaseService.getEventDao.getAllCachedEvents().map { cached ->
-            Result.success(cached)
+        combine(
+            databaseService.getEventDao.getAllCachedEvents(),
+            userRepository.currentUser,
+        ) { cached, currentUserResult ->
+            Result.success(filterHiddenEvents(cached, currentUserResult.getOrNull()))
         }
 
     override fun getEventWithRelationsFlow(eventId: String): Flow<Result<EventWithRelations>> =
@@ -844,8 +863,12 @@ class EventRepository(
     }
 
     override fun getEventsInBoundsFlow(bounds: Bounds): Flow<Result<List<Event>>> {
-        return databaseService.getEventDao.getAllCachedEvents().map { cached ->
-            val inBounds = cached.filter { event ->
+        return combine(
+            databaseService.getEventDao.getAllCachedEvents(),
+            userRepository.currentUser,
+        ) { cached, currentUserResult ->
+            val visibleEvents = filterHiddenEvents(cached, currentUserResult.getOrNull())
+            val inBounds = visibleEvents.filter { event ->
                 calcDistance(bounds.center, LatLng(event.lat, event.long)) <= bounds.radiusMiles
             }
             Result.success(inBounds.sortedBy { calcDistance(bounds.center, LatLng(it.lat, it.long)) })
@@ -896,7 +919,10 @@ class EventRepository(
                 ),
             )
 
-            val events = res.events.mapNotNull { it.toEventOrNull() }
+            val events = filterHiddenEvents(
+                res.events.mapNotNull { it.toEventOrNull() },
+                userRepository.currentUser.value.getOrNull(),
+            )
             databaseService.getEventDao.upsertEvents(events)
             val orderedEvents = if (includeDistanceFilter) {
                 events.sortedBy { calcDistance(bounds.center, LatLng(it.lat, it.long)) }
@@ -929,7 +955,10 @@ class EventRepository(
                 ),
             )
 
-            val events = res.events.mapNotNull { it.toEventOrNull() }
+            val events = filterHiddenEvents(
+                res.events.mapNotNull { it.toEventOrNull() },
+                userRepository.currentUser.value.getOrNull(),
+            )
             databaseService.getEventDao.upsertEvents(events)
 
             Pair(
@@ -937,6 +966,39 @@ class EventRepository(
                 events.size == normalizedLimit,
             )
         }
+    }
+
+    override suspend fun reportEvent(eventId: String, notes: String?): Result<Unit> = runCatching {
+        val normalizedEventId = eventId.trim().takeIf(String::isNotBlank) ?: error("Event id is required.")
+        val response = api.post<EventModerationReportRequestDto, EventModerationReportResponseDto>(
+            path = "api/moderation/reports",
+            body = EventModerationReportRequestDto(
+                targetType = "EVENT",
+                targetId = normalizedEventId,
+                category = "report_event",
+                notes = notes?.trim()?.takeIf(String::isNotBlank),
+            ),
+        )
+
+        val hiddenIds = response.hiddenEventIds
+            .map { hiddenId -> hiddenId.trim() }
+            .filter(String::isNotBlank)
+            .distinct()
+        if (hiddenIds.isNotEmpty()) {
+            databaseService.getEventDao.deleteEventsWithCrossRefs(hiddenIds)
+        }
+
+        val currentProfile = userRepository.currentUser.value.getOrNull()
+            ?: error("No current user profile available.")
+        userRepository.setCachedCurrentUserProfile(
+            currentProfile.copy(
+                hiddenEventIds = if (hiddenIds.isNotEmpty()) {
+                    hiddenIds
+                } else {
+                    (currentProfile.hiddenEventIds + normalizedEventId).distinct()
+                },
+            )
+        ).getOrThrow()
     }
 
     override fun getEventsByHostFlow(hostId: String): Flow<Result<List<Event>>> =
@@ -955,7 +1017,7 @@ class EventRepository(
                         .filter { it.hostId == hostId }
                     val staleIds = localHostEvents.map { it.id }.toSet() - remote.map { it.id }.toSet()
                     if (staleIds.isNotEmpty()) {
-                        databaseService.getEventDao.deleteEventsById(staleIds.toList())
+                        databaseService.getEventDao.deleteEventsWithCrossRefs(staleIds.toList())
                     }
 
                     databaseService.getEventDao.upsertEvents(remote)
@@ -992,7 +1054,7 @@ class EventRepository(
                         }
                     val staleIds = localTemplateEvents.map { it.id }.toSet() - remote.map { it.id }.toSet()
                     if (staleIds.isNotEmpty()) {
-                        databaseService.getEventDao.deleteEventsById(staleIds.toList())
+                        databaseService.getEventDao.deleteEventsWithCrossRefs(staleIds.toList())
                     }
 
                     databaseService.getEventDao.upsertEvents(remote)
@@ -1468,3 +1530,16 @@ class EventRepository(
         return participantCount >= maxParticipants
     }
 }
+
+@Serializable
+private data class EventModerationReportRequestDto(
+    val targetType: String,
+    val targetId: String,
+    val category: String,
+    val notes: String? = null,
+)
+
+@Serializable
+private data class EventModerationReportResponseDto(
+    val hiddenEventIds: List<String> = emptyList(),
+)

@@ -21,6 +21,7 @@ import com.razumly.mvp.core.network.dto.UpdateChatGroupRequestDto
 import io.github.aakira.napier.Napier
 import io.ktor.http.encodeURLPathPart
 import io.ktor.http.encodeURLQueryComponent
+import kotlinx.serialization.Serializable
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -45,6 +46,8 @@ interface IChatGroupRepository : IMVPRepository {
     suspend fun addUserToChatGroup(chatGroup: ChatGroup, userId: String): Result<Unit>
     suspend fun getCurrentUserMuteStatus(chatGroupId: String): Result<Boolean>
     suspend fun setCurrentUserMuteStatus(chatGroupId: String, muted: Boolean): Result<Boolean>
+    suspend fun reportChat(chatGroupId: String, notes: String? = null, leaveChat: Boolean = false): Result<List<String>> =
+        Result.failure(NotImplementedError("Chat reporting is not implemented"))
 }
 
 class ChatGroupRepository(
@@ -226,6 +229,33 @@ class ChatGroupRepository(
         ).muted
     }
 
+    override suspend fun reportChat(
+        chatGroupId: String,
+        notes: String?,
+        leaveChat: Boolean,
+    ): Result<List<String>> = runCatching {
+        val normalizedId = chatGroupId.trim().takeIf(String::isNotBlank) ?: error("Chat group id cannot be blank.")
+        val response = api.post<ModerationReportRequestDto, ChatModerationResponseDto>(
+            path = "api/moderation/reports",
+            body = ModerationReportRequestDto(
+                targetType = "CHAT_GROUP",
+                targetId = normalizedId,
+                category = "report_chat",
+                notes = notes?.trim()?.takeIf(String::isNotBlank),
+                metadata = ModerationReportMetadataDto(leaveChat = leaveChat),
+            ),
+        )
+
+        val removedChatIds = response.removedChatIds
+            .map { it.trim() }
+            .filter(String::isNotBlank)
+            .distinct()
+        if (removedChatIds.isNotEmpty()) {
+            databaseService.getChatGroupDao.deleteChatGroupsByIds(removedChatIds)
+        }
+        removedChatIds
+    }
+
     private fun resolveDisplayName(
         chatGroup: ChatGroup,
         otherUsers: List<UserData>,
@@ -333,3 +363,22 @@ class ChatGroupRepository(
             newChatGroup
         }
 }
+
+@Serializable
+private data class ModerationReportRequestDto(
+    val targetType: String,
+    val targetId: String,
+    val category: String,
+    val notes: String? = null,
+    val metadata: ModerationReportMetadataDto? = null,
+)
+
+@Serializable
+private data class ModerationReportMetadataDto(
+    val leaveChat: Boolean? = null,
+)
+
+@Serializable
+private data class ChatModerationResponseDto(
+    val removedChatIds: List<String> = emptyList(),
+)

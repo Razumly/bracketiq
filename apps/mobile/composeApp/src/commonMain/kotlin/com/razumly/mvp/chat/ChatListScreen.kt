@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -25,6 +26,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -42,15 +44,19 @@ import androidx.compose.ui.window.Dialog
 import com.razumly.mvp.chat.composables.ChatListItem
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.composables.InvitePlayerCard
-import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.SearchPlayerDialog
+import com.razumly.mvp.core.presentation.composables.StandardTextField
+import com.razumly.mvp.core.presentation.composables.TermsConsentDialog
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatListScreen(component: ChatListComponent) {
     val chatList by component.chatGroups.collectAsState()
     val chatSummaries by component.chatSummaries.collectAsState()
+    val chatTermsState by component.chatTermsState.collectAsState()
+    val isCheckingChatTerms by component.isCheckingChatTerms.collectAsState()
+    val showChatTermsPrompt by component.showChatTermsPrompt.collectAsState()
     var showNewChatDialog by remember { mutableStateOf(false) }
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
@@ -85,17 +91,45 @@ fun ChatListScreen(component: ChatListComponent) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            items(chatList) {
-                ChatListItem(
-                    modifier = Modifier.clickable { component.onChatSelected(it) },
-                    chatGroup = it,
-                    currentUserId = component.currentUser.id,
-                    summary = chatSummaries[it.chatGroup.id],
-                )
+            if (isCheckingChatTerms) {
+                item {
+                    Text(
+                        text = "Checking chat access...",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else if (!chatTermsState.accepted) {
+                item {
+                    Text(
+                        text = "Agree to the Terms and EULA to view or create chats.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else {
+                items(chatList) {
+                    ChatListItem(
+                        modifier = Modifier.clickable { component.onChatSelected(it) },
+                        chatGroup = it,
+                        currentUserId = component.currentUser.id,
+                        summary = chatSummaries[it.chatGroup.id],
+                    )
+                }
             }
         }
         AnimatedVisibility(showNewChatDialog) {
             NewChatDialog(component) { showNewChatDialog = false }
+        }
+
+        if (showChatTermsPrompt) {
+            TermsConsentDialog(
+                state = chatTermsState,
+                loading = false,
+                onAccept = component::acceptChatTermsPrompt,
+                onDismiss = component::dismissChatTermsPrompt,
+                intro = "Opening chats or creating events in Bracket IQ requires agreement to the Terms and EULA.",
+            )
         }
     }
 }

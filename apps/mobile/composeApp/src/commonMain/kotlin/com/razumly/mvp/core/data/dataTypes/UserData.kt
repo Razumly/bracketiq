@@ -16,6 +16,8 @@ data class UserData(
     val friendRequestIds: List<String>,
     val friendRequestSentIds: List<String>,
     val followingIds: List<String>,
+    val blockedUserIds: List<String> = emptyList(),
+    val hiddenEventIds: List<String> = emptyList(),
     val userName: String,
     val hasStripeAccount: Boolean?,
     val uploadedImages: List<String>,
@@ -23,6 +25,8 @@ data class UserData(
     val privacyDisplayName: String? = null,
     val isMinor: Boolean = false,
     val isIdentityHidden: Boolean = false,
+    val chatTermsAcceptedAt: String? = null,
+    val chatTermsVersion: String? = null,
     @PrimaryKey override val id: String,
 ) : MVPDocument, DisplayableEntity {
     override val displayName: String get() = fullName
@@ -43,10 +47,14 @@ data class UserData(
                 friendRequestIds = emptyList(),
                 friendRequestSentIds = emptyList(),
                 followingIds = emptyList(),
+                blockedUserIds = emptyList(),
+                hiddenEventIds = emptyList(),
                 profileImageId = null,
                 privacyDisplayName = null,
                 isMinor = false,
                 isIdentityHidden = false,
+                chatTermsAcceptedAt = null,
+                chatTermsVersion = null,
                 id = ""
             )
         }
@@ -91,6 +99,8 @@ data class UserData(
             friendRequestIds = friendRequestIds,
             friendRequestSentIds = friendRequestSentIds,
             followingIds = followingIds,
+            blockedUserIds = blockedUserIds,
+            hiddenEventIds = hiddenEventIds,
             userName = userName,
             hasStripeAccount = hasStripeAccount,
             uploadedImages = uploadedImages,
@@ -98,6 +108,8 @@ data class UserData(
             displayName = privacyDisplayName,
             isMinor = isMinor,
             isIdentityHidden = isIdentityHidden,
+            chatTermsAcceptedAt = chatTermsAcceptedAt,
+            chatTermsVersion = chatTermsVersion,
             id = id,
         )
     }

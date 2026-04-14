@@ -21,12 +21,14 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -825,6 +827,9 @@ fun ProfileChildrenScreen(component: ProfileComponent) {
 fun ProfileConnectionsScreen(component: ProfileComponent) {
     val state by component.connectionsState.collectAsState()
     val currentUser = state.currentUser
+    var pendingBlockUser by remember { mutableStateOf<UserData?>(null) }
+    var pendingUnblockUser by remember { mutableStateOf<UserData?>(null) }
+    var leaveSharedChatsOnBlock by rememberSaveable { mutableStateOf(true) }
 
     LaunchedEffect(component) {
         component.refreshConnections()
@@ -876,6 +881,7 @@ fun ProfileConnectionsScreen(component: ProfileComponent) {
                         val candidateId = candidate.id
                         val isFriend = currentUser?.friendIds?.contains(candidateId) == true
                         val isFollowing = currentUser?.followingIds?.contains(candidateId) == true
+                        val isBlocked = currentUser?.blockedUserIds?.contains(candidateId) == true
                         val hasIncomingRequest = currentUser?.friendRequestIds?.contains(candidateId) == true
                         val hasOutgoingRequest = currentUser?.friendRequestSentIds?.contains(candidateId) == true
                         val isActionInProgress = state.activeUserId == candidateId
@@ -886,6 +892,16 @@ fun ProfileConnectionsScreen(component: ProfileComponent) {
                             isActionInProgress = isActionInProgress,
                             primaryActions = {
                                 when {
+                                    isBlocked -> {
+                                        Button(
+                                            modifier = Modifier.weight(1f),
+                                            onClick = { pendingUnblockUser = candidate },
+                                            enabled = !isActionInProgress,
+                                        ) {
+                                            Text(if (isActionInProgress) "Working..." else "Unblock")
+                                        }
+                                    }
+
                                     isFriend -> {
                                         Button(
                                             modifier = Modifier.weight(1f),
@@ -935,21 +951,39 @@ fun ProfileConnectionsScreen(component: ProfileComponent) {
                                 }
                             },
                             secondaryActions = {
-                                Button(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    onClick = {
-                                        if (isFollowing) {
-                                            component.unfollowUser(candidate)
-                                        } else {
-                                            component.followUser(candidate)
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    if (!isBlocked) {
+                                        Button(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            onClick = {
+                                                if (isFollowing) {
+                                                    component.unfollowUser(candidate)
+                                                } else {
+                                                    component.followUser(candidate)
+                                                }
+                                            },
+                                            enabled = !isActionInProgress && (isFollowing || !isActionRestricted),
+                                        ) {
+                                            when {
+                                                isActionInProgress -> Text("Working...")
+                                                isFollowing -> Text("Unfollow")
+                                                else -> Text("Follow")
+                                            }
                                         }
-                                    },
-                                    enabled = !isActionInProgress && (isFollowing || !isActionRestricted),
-                                ) {
-                                    when {
-                                        isActionInProgress -> Text("Working...")
-                                        isFollowing -> Text("Unfollow")
-                                        else -> Text("Follow")
+                                    }
+                                    Button(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        onClick = {
+                                            if (isBlocked) {
+                                                pendingUnblockUser = candidate
+                                            } else {
+                                                leaveSharedChatsOnBlock = true
+                                                pendingBlockUser = candidate
+                                            }
+                                        },
+                                        enabled = !isActionInProgress,
+                                    ) {
+                                        Text(if (isBlocked) "Unblock user" else "Block user")
                                     }
                                 }
                             },
@@ -1038,6 +1072,18 @@ fun ProfileConnectionsScreen(component: ProfileComponent) {
                                 Text(if (isActionInProgress) "Working..." else "Remove friend")
                             }
                         },
+                        secondaryActions = {
+                            Button(
+                                modifier = Modifier.fillMaxWidth(),
+                                onClick = {
+                                    leaveSharedChatsOnBlock = true
+                                    pendingBlockUser = friend
+                                },
+                                enabled = !isActionInProgress,
+                            ) {
+                                Text(if (isActionInProgress) "Working..." else "Block user")
+                            }
+                        },
                     )
                 }
             }
@@ -1072,10 +1118,119 @@ fun ProfileConnectionsScreen(component: ProfileComponent) {
                                 Text(if (isActionInProgress) "Working..." else "Unfollow")
                             }
                         },
+                        secondaryActions = {
+                            Button(
+                                modifier = Modifier.fillMaxWidth(),
+                                onClick = {
+                                    leaveSharedChatsOnBlock = true
+                                    pendingBlockUser = followedUser
+                                },
+                                enabled = !isActionInProgress,
+                            ) {
+                                Text(if (isActionInProgress) "Working..." else "Block user")
+                            }
+                        },
                     )
                 }
             }
         }
+
+        SectionHeaderRow(title = "Blocked users")
+        if (state.isLoading) {
+            Text(
+                text = "Loading blocked users...",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else if (state.blockedUsers.isEmpty()) {
+            Text(
+                text = "No blocked users.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                state.blockedUsers.forEach { blockedUser ->
+                    val isActionInProgress = state.activeUserId == blockedUser.id
+                    ConnectionUserCard(
+                        user = blockedUser,
+                        isActionInProgress = isActionInProgress,
+                        primaryActions = {
+                            Button(
+                                modifier = Modifier.fillMaxWidth(),
+                                onClick = { pendingUnblockUser = blockedUser },
+                                enabled = !isActionInProgress,
+                            ) {
+                                Text(if (isActionInProgress) "Working..." else "Unblock")
+                            }
+                        },
+                    )
+                }
+            }
+        }
+    }
+
+    pendingBlockUser?.let { user ->
+        AlertDialog(
+            onDismissRequest = { pendingBlockUser = null },
+            title = { Text("Block ${user.displayName.ifBlank { "user" }}?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Blocking removes social links and can hide every shared chat from your feed immediately.")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Checkbox(
+                            checked = leaveSharedChatsOnBlock,
+                            onCheckedChange = { checked -> leaveSharedChatsOnBlock = checked },
+                        )
+                        Text("Leave all chats with this user")
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        component.blockUser(user, leaveSharedChatsOnBlock)
+                        pendingBlockUser = null
+                    }
+                ) {
+                    Text("Block")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingBlockUser = null }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+
+    pendingUnblockUser?.let { user ->
+        AlertDialog(
+            onDismissRequest = { pendingUnblockUser = null },
+            title = { Text("Unblock ${user.displayName.ifBlank { "user" }}?") },
+            text = {
+                Text("This removes the block and clears the block report created for this user.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        component.unblockUser(user)
+                        pendingUnblockUser = null
+                    }
+                ) {
+                    Text("Unblock")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingUnblockUser = null }) {
+                    Text("Cancel")
+                }
+            },
+        )
     }
 }
 

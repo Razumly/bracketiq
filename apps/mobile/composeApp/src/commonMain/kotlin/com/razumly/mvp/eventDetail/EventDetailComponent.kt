@@ -217,6 +217,7 @@ interface EventDetailComponent : ComponentContext, IPaymentProcessor {
     fun createTemplateFromCurrentEvent()
     fun publishEvent()
     fun deleteEvent()
+    fun reportEvent(notes: String? = null)
     fun shareEvent()
     fun openEventDirections()
     fun createNewTeam()
@@ -4293,6 +4294,20 @@ class DefaultEventDetailComponent(
                 backCallback.onBack()
             }
             loadingHandler.hideLoading()
+        }
+    }
+
+    override fun reportEvent(notes: String?) {
+        val currentEvent = selectedEvent.value
+        scope.launch {
+            eventRepository.reportEvent(currentEvent.id, notes)
+                .onSuccess {
+                    _errorState.value = ErrorMessage("Event reported. It will be hidden from your searches.")
+                    backCallback.onBack()
+                }
+                .onFailure {
+                    _errorState.value = ErrorMessage(it.userMessage("Failed to report event."))
+                }
         }
     }
 

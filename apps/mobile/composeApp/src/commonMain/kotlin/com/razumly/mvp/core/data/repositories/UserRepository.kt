@@ -59,6 +59,7 @@ import kotlin.time.Clock
 
 private const val USER_REPOSITORY_LOG_TAG = "UserRepository"
 private const val EMAIL_NOT_VERIFIED_CODE = "EMAIL_NOT_VERIFIED"
+private const val CHAT_TERMS_REQUIRED_CODE = "CHAT_TERMS_REQUIRED"
 
 sealed class StartupAuthState {
     data object Checking : StartupAuthState()
@@ -174,6 +175,14 @@ data class UserEmailMembershipMatch(
 data class UserVisibilityContext(
     val teamId: String? = null,
     val eventId: String? = null,
+)
+
+data class ChatTermsConsentState(
+    val version: String = "",
+    val url: String = "/terms",
+    val summary: List<String> = emptyList(),
+    val accepted: Boolean = false,
+    val acceptedAt: String? = null,
 )
 
 class SignupProfileConflictException(
@@ -299,6 +308,18 @@ interface IUserRepository : IMVPRepository {
     suspend fun followUser(userId: String): Result<Unit>
     suspend fun unfollowUser(userId: String): Result<Unit>
     suspend fun removeFriend(userId: String): Result<Unit>
+    suspend fun blockUser(userId: String, leaveSharedChats: Boolean = true): Result<List<String>> =
+        Result.failure(NotImplementedError("Blocking users is not implemented"))
+    suspend fun unblockUser(userId: String): Result<Unit> =
+        Result.failure(NotImplementedError("Unblocking users is not implemented"))
+    suspend fun getChatTermsConsentState(): Result<ChatTermsConsentState> =
+        Result.failure(NotImplementedError("Chat terms consent is not implemented"))
+    suspend fun acceptChatTermsConsent(): Result<ChatTermsConsentState> =
+        Result.failure(NotImplementedError("Chat terms consent is not implemented"))
+    suspend fun refreshCurrentUserProfile(): Result<UserData> =
+        Result.failure(NotImplementedError("Refreshing the current user profile is not implemented"))
+    suspend fun setCachedCurrentUserProfile(profile: UserData): Result<UserData> =
+        Result.failure(NotImplementedError("Caching the current user profile is not implemented"))
 }
 
 class UserRepository(
@@ -636,6 +657,11 @@ class UserRepository(
         _startupAuthState.value = StartupAuthState.Authenticated
     }
 
+    override suspend fun setCachedCurrentUserProfile(profile: UserData): Result<UserData> = runCatching {
+        cacheCurrentUserProfile(profile)
+        profile
+    }
+
     private suspend fun clearLoginState() {
         runCatching { tokenStore.clear() }
         runCatching { currentUserDataSource.saveUserId("") }
@@ -659,6 +685,15 @@ class UserRepository(
             val res = api.get<UserResponseDto>("api/users/$userId")
             res.user?.toUserDataOrNull()
         }.getOrNull()
+    }
+
+    override suspend fun refreshCurrentUserProfile(): Result<UserData> = runCatching {
+        val currentId = currentUser.value.getOrNull()?.id
+            ?: currentAccount.value.getOrNull()?.id
+            ?: error("No user")
+        val profile = fetchUserProfile(currentId) ?: error("Failed to load current user profile.")
+        cacheCurrentUserProfile(profile)
+        profile
     }
 
     private fun UserVisibilityContext.toQuerySuffix(): String {
@@ -1316,6 +1351,66 @@ class UserRepository(
         }
     }
 
+    override suspend fun blockUser(userId: String, leaveSharedChats: Boolean): Result<List<String>> {
+        return runCatching {
+            val targetUserId = userId.trim()
+            if (targetUserId.isBlank()) error("Target user id is required.")
+
+            val response = api.post<BlockUserRequestDto, SocialBlockResponseDto>(
+                path = "api/users/social/blocked",
+                body = BlockUserRequestDto(
+                    targetUserId = targetUserId,
+                    leaveSharedChats = leaveSharedChats,
+                ),
+            )
+            refreshCurrentUserFromSocialResponse(response.user)
+
+            val removedChatIds = response.removedChatIds
+                .map { chatId -> chatId.trim() }
+                .filter(String::isNotBlank)
+                .distinct()
+            if (removedChatIds.isNotEmpty()) {
+                databaseService.getChatGroupDao.deleteChatGroupsByIds(removedChatIds)
+            }
+            removedChatIds
+        }
+    }
+
+    override suspend fun unblockUser(userId: String): Result<Unit> {
+        return runCatching {
+            val targetUserId = userId.trim()
+            if (targetUserId.isBlank()) error("Target user id is required.")
+
+            val response = api.delete<SocialEmptyRequestDto, UserResponseDto>(
+                path = "api/users/social/blocked/${targetUserId.encodeURLQueryComponent()}",
+                body = SocialEmptyRequestDto(),
+            )
+            refreshCurrentUserFromSocialResponse(response.user)
+        }
+    }
+
+    override suspend fun getChatTermsConsentState(): Result<ChatTermsConsentState> = runCatching {
+        api.get<ChatTermsConsentResponseDto>("api/chat/terms-consent").toState()
+    }
+
+    override suspend fun acceptChatTermsConsent(): Result<ChatTermsConsentState> = runCatching {
+        val response = api.post<ChatTermsConsentRequestDto, ChatTermsConsentResponseDto>(
+            path = "api/chat/terms-consent",
+            body = ChatTermsConsentRequestDto(accepted = true),
+        )
+        val state = response.toState()
+        val currentProfile = currentUser.value.getOrNull()
+        if (currentProfile != null) {
+            cacheCurrentUserProfile(
+                currentProfile.copy(
+                    chatTermsAcceptedAt = state.acceptedAt,
+                    chatTermsVersion = state.version.takeIf(String::isNotBlank),
+                )
+            )
+        }
+        state
+    }
+
     private suspend fun refreshCurrentUserFromSocialResponse(responseUser: UserProfileDto?) {
         val updated = responseUser?.toUserDataOrNull()
             ?: currentUser.value.getOrNull()?.id?.let { fetchUserProfile(it) }
@@ -1333,6 +1428,54 @@ private data class SocialEmptyRequestDto(
 private data class SocialTargetRequestDto(
     val targetUserId: String,
 )
+
+@Serializable
+private data class BlockUserRequestDto(
+    val targetUserId: String,
+    val leaveSharedChats: Boolean = true,
+)
+
+@Serializable
+private data class SocialBlockResponseDto(
+    val user: UserProfileDto? = null,
+    val removedChatIds: List<String> = emptyList(),
+)
+
+@Serializable
+private data class ChatTermsConsentRequestDto(
+    val accepted: Boolean,
+)
+
+@Serializable
+private data class ChatTermsConsentResponseDto(
+    val error: String? = null,
+    val code: String? = null,
+    val version: String? = null,
+    val url: String? = null,
+    val summary: List<String> = emptyList(),
+    val accepted: Boolean? = null,
+    val acceptedAt: String? = null,
+) {
+    fun toState(): ChatTermsConsentState {
+        if (code == CHAT_TERMS_REQUIRED_CODE) {
+            return ChatTermsConsentState(
+                version = version.orEmpty(),
+                url = url?.trim()?.takeIf(String::isNotBlank) ?: "/terms",
+                summary = summary,
+                accepted = false,
+                acceptedAt = null,
+            )
+        }
+
+        return ChatTermsConsentState(
+            version = version.orEmpty(),
+            url = url?.trim()?.takeIf(String::isNotBlank) ?: "/terms",
+            summary = summary,
+            accepted = accepted == true,
+            acceptedAt = acceptedAt?.trim()?.takeIf(String::isNotBlank),
+        )
+    }
+}
 
 @Serializable
 private data class FamilyChildrenResponseDto(

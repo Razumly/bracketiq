@@ -510,6 +510,12 @@ fun ParticipantsView(
                             onUnfollow = { user ->
                                 playerInteractionComponent.unfollowUser(user)
                             },
+                            onBlock = { user, leaveSharedChats ->
+                                playerInteractionComponent.blockUser(user, leaveSharedChats)
+                            },
+                            onUnblock = { user ->
+                                playerInteractionComponent.unblockUser(user)
+                            },
                             onInviteToTeam = if (canInviteToTeam) {
                                 { user -> component.inviteFreeAgentToTeam(user.id) }
                             } else {
@@ -565,7 +571,13 @@ fun ParticipantsView(
                                 },
                                 onUnfollow = { user ->
                                     playerInteractionComponent.unfollowUser(user)
-                                }
+                                },
+                                onBlock = { user, leaveSharedChats ->
+                                    playerInteractionComponent.blockUser(user, leaveSharedChats)
+                                },
+                                onUnblock = { user ->
+                                    playerInteractionComponent.unblockUser(user)
+                                },
                             )
                             if (manageMode && canManageParticipants && registrationEntry != null) {
                                 Text(
@@ -640,7 +652,13 @@ fun ParticipantsView(
                     PlayerAction.FOLLOW -> playerInteractionComponent.followUser(user)
                     PlayerAction.UNFOLLOW -> playerInteractionComponent.unfollowUser(user)
                 }
-            }
+            },
+            onBlockPlayer = { user, leaveSharedChats ->
+                playerInteractionComponent.blockUser(user, leaveSharedChats)
+            },
+            onUnblockPlayer = { user ->
+                playerInteractionComponent.unblockUser(user)
+            },
         )
     }
 
