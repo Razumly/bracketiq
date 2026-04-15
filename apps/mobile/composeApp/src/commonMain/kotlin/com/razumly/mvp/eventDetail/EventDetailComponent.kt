@@ -440,11 +440,20 @@ internal fun registrationMatchesJoinConfirmationTarget(
     if (registration.normalizedRosterRole() != "PARTICIPANT") {
         return false
     }
-    if (registration.registrantId != target.registrantId) {
-        return false
-    }
     val expectedRegistrantType = target.registrantType.name
     if (!registration.registrantType.trim().equals(expectedRegistrantType, ignoreCase = true)) {
+        return false
+    }
+    val registrationMatchesRegistrant = when (expectedRegistrantType) {
+        "TEAM" -> setOf(
+            registration.registrantId,
+            registration.parentId,
+            registration.eventTeamId,
+        ).any { value -> value?.trim() == target.registrantId }
+
+        else -> registration.registrantId == target.registrantId
+    }
+    if (!registrationMatchesRegistrant) {
         return false
     }
     return if (target.occurrence != null) {
@@ -485,6 +494,23 @@ private fun EventRegistrationCacheEntry.isCancelledLike(): Boolean =
 
 private fun EventRegistrationCacheEntry.isActiveForMembership(): Boolean =
     !isCancelledLike() && normalizedStatus() != "CONSENTFAILED"
+
+private fun EventRegistrationCacheEntry.matchesCurrentUserTeamIds(currentUserTeamIds: Set<String>): Boolean {
+    if (currentUserTeamIds.isEmpty()) {
+        return false
+    }
+    return sequenceOf(
+        parentId,
+        eventTeamId,
+        registrantId,
+    )
+        .mapNotNull { value -> value?.trim()?.takeIf(String::isNotBlank) }
+        .any(currentUserTeamIds::contains)
+}
+
+private fun EventRegistrationCacheEntry.resolvedEventTeamId(): String? =
+    eventTeamId?.trim()?.takeIf(String::isNotBlank)
+        ?: registrantId.trim().takeIf(String::isNotBlank)
 
 private data class CurrentUserRegistrationMembershipState(
     val participant: Boolean = false,
@@ -4466,7 +4492,7 @@ class DefaultEventDetailComponent(
             }
             val matchesRegistrant = when (registration.registrantType.trim().uppercase()) {
                 "SELF" -> currentUserId.isNotBlank() && registration.registrantId == currentUserId
-                "TEAM" -> currentUserTeamIds.contains(registration.registrantId)
+                "TEAM" -> registration.matchesCurrentUserTeamIds(currentUserTeamIds)
                 else -> false
             }
             if (!matchesRegistrant) {
@@ -4496,7 +4522,7 @@ class DefaultEventDetailComponent(
         }
         val teamId = matchingRegistrations
             .firstOrNull { registration -> registration.registrantType.trim().uppercase() == "TEAM" }
-            ?.registrantId
+            ?.resolvedEventTeamId()
 
         return CurrentUserRegistrationMembershipState(
             participant = participant,
@@ -5449,6 +5475,15 @@ class DefaultEventDetailComponent(
         }.getOrNull() ?: return false
 
         refreshUiForJoinConfirmation(syncResult, confirmationTarget)
+        if (confirmationTarget.registrantType == JoinConfirmationRegistrantType.TEAM) {
+            val eventTeams = teamRepository.getTeams(syncResult.event.teamIds)
+                .getOrElse { emptyList() }
+            if (eventTeams.any { team ->
+                    team.id == confirmationTarget.registrantId || team.parentTeamId == confirmationTarget.registrantId
+                }) {
+                return true
+            }
+        }
         return eventSnapshotMatchesJoinConfirmationTarget(syncResult.event, confirmationTarget)
     }
 

@@ -5,8 +5,11 @@ import com.arkivanov.decompose.ComponentContext
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.TeamStaffAssignment
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.isActive
+import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.ISportsRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
@@ -335,13 +338,14 @@ class DefaultTeamManagementComponent(
             return
         }
 
-        val selectedTeamId = team.team.id
+        val syncedTeam = team.team.withSynchronizedMembership()
+        val selectedTeamId = syncedTeam.id
         val knownUsers = buildKnownUsers(team)
-        val staffIds = buildSet {
-            add(team.team.managerId ?: team.team.captainId)
-            team.team.headCoachId?.takeIf(String::isNotBlank)?.let(::add)
-            team.team.coachIds.filter(String::isNotBlank).forEach(::add)
-        }
+        val staffIds = syncedTeam.staffAssignments
+            .filter(TeamStaffAssignment::isActive)
+            .map(TeamStaffAssignment::userId)
+            .filter(String::isNotBlank)
+            .toSet()
 
         val missingUserIds = staffIds.filterNot { knownUsers.containsKey(it) }
         if (missingUserIds.isEmpty()) {

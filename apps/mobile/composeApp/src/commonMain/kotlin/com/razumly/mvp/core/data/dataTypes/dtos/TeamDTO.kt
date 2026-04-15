@@ -1,6 +1,7 @@
 package com.razumly.mvp.core.data.dataTypes.dtos
 
 import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.util.normalizeDivisionLabel
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
@@ -53,5 +54,5 @@ fun TeamDTO.toTeam(id: String): Team {
         ageDivisionTypeId = ageDivisionTypeId,
         ageDivisionTypeName = ageDivisionTypeName,
         divisionGender = divisionGender,
-    )
+    ).withSynchronizedMembership()
 }

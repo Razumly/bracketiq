@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.razumly.mvp.core.data.dataTypes.isCaptainOrManager
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.composables.PlatformBackButton
 import com.razumly.mvp.core.presentation.composables.PlayerCard
@@ -59,7 +60,7 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
     val selectedTeam by component.selectedTeam.collectAsState()
     val staffUsersById by component.staffUsersById.collectAsState()
     val currentUser = component.currentUser
-    val isCaptain = selectedTeam?.team?.captainId == currentUser.id || selectedTeam?.team?.managerId == currentUser.id
+    val isCaptain = selectedTeam?.team?.isCaptainOrManager(currentUser.id) == true
     var createTeam by remember { mutableStateOf(false) }
     val deleteEnabled by component.enableDeleteTeam.collectAsState()
 

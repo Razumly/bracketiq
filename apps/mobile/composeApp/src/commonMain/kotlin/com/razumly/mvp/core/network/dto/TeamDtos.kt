@@ -1,23 +1,49 @@
 package com.razumly.mvp.core.network.dto
 
 import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
+import com.razumly.mvp.core.data.dataTypes.TeamStaffAssignment
+import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.util.DEFAULT_DIVISION
 import com.razumly.mvp.core.data.util.normalizeDivisionLabel
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
+data class TeamPlayerRegistrationApiDto(
+    val id: String? = null,
+    val teamId: String? = null,
+    val userId: String? = null,
+    val status: String? = null,
+    val jerseyNumber: String? = null,
+    val position: String? = null,
+    val isCaptain: Boolean? = null,
+)
+
+@Serializable
+data class TeamStaffAssignmentApiDto(
+    val id: String? = null,
+    val teamId: String? = null,
+    val userId: String? = null,
+    val role: String? = null,
+    val status: String? = null,
+)
+
+@Serializable
 data class TeamApiDto(
     val id: String? = null,
     @SerialName("\$id") val legacyId: String? = null,
     val name: String = "",
+    val kind: String? = null,
     val division: String? = null,
     val playerIds: List<String>? = null,
+    val playerRegistrationIds: List<String>? = null,
     val captainId: String? = null,
     val managerId: String? = null,
     val headCoachId: String? = null,
     val assistantCoachIds: List<String>? = null,
     val coachIds: List<String>? = null,
+    val staffAssignmentIds: List<String>? = null,
     val parentTeamId: String? = null,
     val pending: List<String>? = null,
     val teamSize: Int? = null,
@@ -30,24 +56,54 @@ data class TeamApiDto(
     val ageDivisionTypeId: String? = null,
     val ageDivisionTypeName: String? = null,
     val divisionGender: String? = null,
+    val playerRegistrations: List<TeamPlayerRegistrationApiDto>? = null,
+    val staffAssignments: List<TeamStaffAssignmentApiDto>? = null,
 ) {
     fun toTeamOrNull(): Team? {
         val resolvedId = id ?: legacyId
-        val resolvedCaptainId = captainId
-        if (resolvedId.isNullOrBlank() || resolvedCaptainId.isNullOrBlank()) return null
+        if (resolvedId.isNullOrBlank()) return null
 
         val resolvedTeamSize = (teamSize ?: 0).takeIf { it > 0 } ?: 2
+        val resolvedPlayerRegistrations = playerRegistrations
+            ?.mapNotNull { registration ->
+                val userId = registration.userId?.trim()?.takeIf(String::isNotBlank) ?: return@mapNotNull null
+                TeamPlayerRegistration(
+                    id = registration.id?.trim().orEmpty(),
+                    teamId = registration.teamId?.trim()?.takeIf(String::isNotBlank),
+                    userId = userId,
+                    status = registration.status?.trim().orEmpty(),
+                    jerseyNumber = registration.jerseyNumber?.trim()?.takeIf(String::isNotBlank),
+                    position = registration.position?.trim()?.takeIf(String::isNotBlank),
+                    isCaptain = registration.isCaptain == true,
+                )
+            }
+            .orEmpty()
+        val resolvedStaffAssignments = staffAssignments
+            ?.mapNotNull { assignment ->
+                val userId = assignment.userId?.trim()?.takeIf(String::isNotBlank) ?: return@mapNotNull null
+                TeamStaffAssignment(
+                    id = assignment.id?.trim().orEmpty(),
+                    teamId = assignment.teamId?.trim()?.takeIf(String::isNotBlank),
+                    userId = userId,
+                    role = assignment.role?.trim().orEmpty(),
+                    status = assignment.status?.trim().orEmpty(),
+                )
+            }
+            .orEmpty()
 
         return Team(
             division = (division ?: DEFAULT_DIVISION).normalizeDivisionLabel(),
             name = name,
-            captainId = resolvedCaptainId,
-            managerId = managerId ?: resolvedCaptainId,
+            kind = kind?.trim()?.takeIf(String::isNotBlank),
+            captainId = captainId?.trim().orEmpty(),
+            managerId = managerId?.trim()?.takeIf(String::isNotBlank),
             headCoachId = headCoachId,
             coachIds = assistantCoachIds ?: coachIds ?: emptyList(),
             parentTeamId = parentTeamId,
             playerIds = playerIds ?: emptyList(),
+            playerRegistrationIds = playerRegistrationIds ?: emptyList(),
             pending = pending ?: emptyList(),
+            staffAssignmentIds = staffAssignmentIds ?: emptyList(),
             teamSize = resolvedTeamSize,
             profileImageId = profileImageId,
             sport = sport,
@@ -58,8 +114,10 @@ data class TeamApiDto(
             ageDivisionTypeId = ageDivisionTypeId,
             ageDivisionTypeName = ageDivisionTypeName,
             divisionGender = divisionGender,
+            playerRegistrations = resolvedPlayerRegistrations,
+            staffAssignments = resolvedStaffAssignments,
             id = resolvedId,
-        )
+        ).withSynchronizedMembership()
     }
 }
 
@@ -105,26 +163,27 @@ data class UpdateTeamRequestDto(
 )
 
 fun Team.toUpdateDto(): TeamUpdateDto {
+    val synced = withSynchronizedMembership()
     return TeamUpdateDto(
-        name = name,
-        division = division,
-        playerIds = playerIds,
-        captainId = captainId,
-        managerId = managerId,
-        headCoachId = headCoachId,
-        assistantCoachIds = assistantCoachIds,
-        coachIds = coachIds,
-        parentTeamId = parentTeamId,
-        pending = pending,
-        teamSize = teamSize,
-        profileImageId = profileImageId,
-        sport = sport,
-        divisionTypeId = divisionTypeId,
-        divisionTypeName = divisionTypeName,
-        skillDivisionTypeId = skillDivisionTypeId,
-        skillDivisionTypeName = skillDivisionTypeName,
-        ageDivisionTypeId = ageDivisionTypeId,
-        ageDivisionTypeName = ageDivisionTypeName,
-        divisionGender = divisionGender,
+        name = synced.name,
+        division = synced.division,
+        playerIds = synced.playerIds,
+        captainId = synced.captainId,
+        managerId = synced.managerId,
+        headCoachId = synced.headCoachId,
+        assistantCoachIds = synced.assistantCoachIds,
+        coachIds = synced.coachIds,
+        parentTeamId = synced.parentTeamId,
+        pending = synced.pending,
+        teamSize = synced.teamSize,
+        profileImageId = synced.profileImageId,
+        sport = synced.sport,
+        divisionTypeId = synced.divisionTypeId,
+        divisionTypeName = synced.divisionTypeName,
+        skillDivisionTypeId = synced.skillDivisionTypeId,
+        skillDivisionTypeName = synced.skillDivisionTypeName,
+        ageDivisionTypeId = synced.ageDivisionTypeId,
+        ageDivisionTypeName = synced.ageDivisionTypeName,
+        divisionGender = synced.divisionGender,
     )
 }

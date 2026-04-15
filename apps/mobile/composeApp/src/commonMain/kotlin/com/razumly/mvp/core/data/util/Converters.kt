@@ -6,6 +6,8 @@ import com.razumly.mvp.core.data.dataTypes.EventOfficial
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.MatchOfficialAssignment
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
+import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
+import com.razumly.mvp.core.data.dataTypes.TeamStaffAssignment
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.normalizeDivisionDetails
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
@@ -110,6 +112,24 @@ class Converters {
     @TypeConverter
     fun toMatchOfficialAssignments(value: String): List<MatchOfficialAssignment> =
         runCatching { Json.decodeFromString<List<MatchOfficialAssignment>>(value) }
+            .getOrDefault(emptyList())
+
+    @TypeConverter
+    fun fromTeamPlayerRegistrations(value: List<TeamPlayerRegistration>): String =
+        Json.encodeToString(value)
+
+    @TypeConverter
+    fun toTeamPlayerRegistrations(value: String): List<TeamPlayerRegistration> =
+        runCatching { Json.decodeFromString<List<TeamPlayerRegistration>>(value) }
+            .getOrDefault(emptyList())
+
+    @TypeConverter
+    fun fromTeamStaffAssignments(value: List<TeamStaffAssignment>): String =
+        Json.encodeToString(value)
+
+    @TypeConverter
+    fun toTeamStaffAssignments(value: String): List<TeamStaffAssignment> =
+        runCatching { Json.decodeFromString<List<TeamStaffAssignment>>(value) }
             .getOrDefault(emptyList())
 }
 

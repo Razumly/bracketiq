@@ -20,8 +20,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import com.razumly.mvp.core.data.dataTypes.TeamStaffAssignment
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.isActive
+import com.razumly.mvp.core.data.dataTypes.normalizedRole
+import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 
 @Composable
 fun TeamDetailsDialog(
@@ -45,36 +49,28 @@ fun TeamDetailsDialog(
             Column(
                 modifier = Modifier.padding(24.dp)
             ) {
+                val syncedTeam = team.team.withSynchronizedMembership()
                 val knownUsersById = (knownUsers + team.players + team.pendingPlayers + listOfNotNull(team.captain, currentUser))
                     .associateBy { it.id }
-                val managerId = (team.team.managerId ?: team.team.captainId)
-                    .trim()
-                    .takeIf(String::isNotBlank)
-                val managerLabel = managerId?.let { id ->
-                    knownUsersById[id]?.displayName ?: id
-                } ?: "Unassigned"
-                val headCoachLabel = team.team.headCoachId
-                    ?.trim()
-                    ?.takeIf(String::isNotBlank)
-                    ?.let { headCoachId ->
-                    knownUsersById[headCoachId]?.displayName ?: headCoachId
-                } ?: "Unassigned"
-                val assistantCoachIds = team.team.assistantCoachIds
-                    .map(String::trim)
-                    .filter(String::isNotBlank)
-                val assistantCoachLabel = if (assistantCoachIds.isNotEmpty()) {
-                    assistantCoachIds.joinToString { assistantCoachId ->
-                        knownUsersById[assistantCoachId]?.displayName ?: assistantCoachId
-                    }
-                } else {
-                    "Unassigned"
-                }
+                val activeStaffAssignments = syncedTeam.staffAssignments
+                    .filter(TeamStaffAssignment::isActive)
+                    .sortedWith(
+                        compareBy<TeamStaffAssignment> { assignment ->
+                            when (assignment.normalizedRole()) {
+                                "MANAGER" -> 0
+                                "HEAD_COACH" -> 1
+                                else -> 2
+                            }
+                        }.thenBy(TeamStaffAssignment::userId),
+                    )
 
                 // Team Header
                 Text(
                     text = team.team.name.ifBlank { "Team ${
                         team.players.joinToString(" & ") {
-                            "${it.firstName} ${it.lastName.first()}."
+                            val firstName = it.firstName.trim().ifBlank { "Player" }
+                            val lastInitial = it.lastName.trim().firstOrNull()?.let { initial -> "$initial." }.orEmpty()
+                            "$firstName $lastInitial".trim()
                         }
                     }" },
                     style = MaterialTheme.typography.headlineSmall,
@@ -87,25 +83,40 @@ fun TeamDetailsDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                    text = "Manager: $managerLabel",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = "Head Coach: $headCoachLabel",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = "Assistant Coaches: $assistantCoachLabel",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
                 Spacer(modifier = Modifier.height(16.dp))
+
+                if (activeStaffAssignments.isNotEmpty()) {
+                    Text(
+                        text = "Team Staff",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    activeStaffAssignments.forEach { assignment ->
+                        val staffUser = knownUsersById[assignment.userId]
+                        val roleLabel = when (assignment.normalizedRole()) {
+                            "MANAGER" -> "Manager"
+                            "HEAD_COACH" -> "Head Coach"
+                            else -> "Assistant Coach"
+                        }
+                        if (staffUser != null) {
+                            UnifiedCard(
+                                entity = staffUser,
+                                subtitle = roleLabel,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        } else {
+                            Text(
+                                text = "$roleLabel: ${assignment.userId}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                }
 
                 // Players List
                 Text(

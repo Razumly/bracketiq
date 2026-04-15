@@ -32,6 +32,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.activePlayerRegistrations
+import com.razumly.mvp.core.data.dataTypes.activeStaffAssignments
+import com.razumly.mvp.core.data.dataTypes.isCaptainOrManager
+import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.util.isPlaceholderSlot
 import com.razumly.mvp.core.data.repositories.EventTeamBillCreateRequest
 import com.razumly.mvp.core.data.repositories.EventTeamBillingSnapshot
@@ -163,13 +167,11 @@ fun ParticipantsView(
     val participantsTeamsByUserId = remember(selectedEvent.teams) {
         mutableMapOf<String, TeamWithPlayers>().apply {
             selectedEvent.teams.forEach { teamWithPlayers: TeamWithPlayers ->
-                val team = teamWithPlayers.team
+                val team = teamWithPlayers.team.withSynchronizedMembership()
                 val memberIds = buildSet {
-                    addAll(team.playerIds)
-                    add(team.captainId)
-                    team.managerId?.let { add(it) }
-                    team.headCoachId?.let { add(it) }
-                    addAll(team.coachIds)
+                    addAll(team.activePlayerRegistrations().map { it.userId })
+                    team.captainId.takeIf(String::isNotBlank)?.let(::add)
+                    addAll(team.activeStaffAssignments().map { it.userId })
                 }.map(String::trim).filter(String::isNotBlank)
 
                 memberIds.forEach { memberId ->
@@ -182,8 +184,7 @@ fun ParticipantsView(
     }
     val canInviteToTeam = remember(selectedEvent.teams, currentUser.id) {
         selectedEvent.teams.any { teamWithPlayers ->
-            teamWithPlayers.team.captainId == currentUser.id ||
-                teamWithPlayers.team.managerId == currentUser.id
+            teamWithPlayers.team.isCaptainOrManager(currentUser.id)
         }
     }
     val navPadding = LocalNavBarPadding.current
@@ -249,12 +250,11 @@ fun ParticipantsView(
             .distinctBy(UserData::id)
             .associateBy(UserData::id)
         teamDialogKnownUsers = baseKnownUsers
+        val syncedTeam = team.team.withSynchronizedMembership()
 
         val roleIds = buildSet {
-            add(team.team.captainId)
-            team.team.managerId?.let(::add)
-            team.team.headCoachId?.let(::add)
-            addAll(team.team.assistantCoachIds)
+            syncedTeam.captainId.takeIf(String::isNotBlank)?.let(::add)
+            addAll(syncedTeam.activeStaffAssignments().map { it.userId })
         }
             .map(String::trim)
             .filter(String::isNotBlank)
@@ -287,12 +287,11 @@ fun ParticipantsView(
 
     fun resolveTeamUsers(team: TeamWithPlayers): List<EventTeamBillingUserOption> {
         val usersById = selectedEvent.players.associateBy(UserData::id)
+        val syncedTeam = team.team.withSynchronizedMembership()
         val uniqueIds = buildSet {
-            addAll(team.team.playerIds)
-            add(team.team.captainId)
-            team.team.managerId?.let { add(it) }
-            team.team.headCoachId?.let { add(it) }
-            addAll(team.team.coachIds)
+            addAll(syncedTeam.activePlayerRegistrations().map { it.userId })
+            syncedTeam.captainId.takeIf(String::isNotBlank)?.let(::add)
+            addAll(syncedTeam.activeStaffAssignments().map { it.userId })
         }.map(String::trim).filter(String::isNotBlank)
 
         return uniqueIds.map { userId ->

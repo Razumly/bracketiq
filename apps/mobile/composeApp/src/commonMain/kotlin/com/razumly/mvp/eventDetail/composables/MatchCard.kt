@@ -45,9 +45,12 @@ import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.activePlayerRegistrations
+import com.razumly.mvp.core.data.dataTypes.activeStaffAssignments
 import com.razumly.mvp.core.data.dataTypes.assignedOfficialUserIds
 import com.razumly.mvp.core.data.dataTypes.officialAssignmentLabels
 import com.razumly.mvp.core.data.dataTypes.normalizedOfficialAssignments
+import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.divisionsEquivalent
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
@@ -337,11 +340,10 @@ private fun resolveMatchTeam(
 }
 
 private fun Team.includesUser(userId: String): Boolean {
-    return captainId.trim() == userId ||
-        managerId?.trim() == userId ||
-        headCoachId?.trim() == userId ||
-        coachIds.any { coachId -> coachId.trim() == userId } ||
-        playerIds.any { playerId -> playerId.trim() == userId }
+    val syncedTeam = withSynchronizedMembership()
+    return syncedTeam.captainId.trim() == userId ||
+        syncedTeam.activeStaffAssignments().any { assignment -> assignment.userId == userId } ||
+        syncedTeam.activePlayerRegistrations().any { registration -> registration.userId == userId }
 }
 
 @Composable

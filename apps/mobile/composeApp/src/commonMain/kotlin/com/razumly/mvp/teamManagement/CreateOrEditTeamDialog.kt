@@ -36,8 +36,13 @@ import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
+import com.razumly.mvp.core.data.dataTypes.TeamStaffAssignment
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.activeStaffAssignments
+import com.razumly.mvp.core.data.dataTypes.normalizedRole
+import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.util.DEFAULT_AGE_DIVISION
 import com.razumly.mvp.core.data.util.DEFAULT_AGE_DIVISION_OPTIONS
 import com.razumly.mvp.core.data.util.DEFAULT_DIVISION
@@ -93,6 +98,7 @@ fun CreateOrEditTeamDialog(
     onEnsureUserByEmail: (suspend (email: String) -> Result<UserData>)? = null,
     onInviteTeamRole: ((teamId: String, userId: String, inviteType: String) -> Unit)? = null,
 ) {
+    val syncedTeam = remember(team.team) { team.team.withSynchronizedMembership() }
     var teamName by remember { mutableStateOf(team.team.name) }
     var teamSizeInput by remember { mutableStateOf(team.team.teamSize.toString()) }
     var showSearchDialog by remember { mutableStateOf(false) }
@@ -322,14 +328,98 @@ fun CreateOrEditTeamDialog(
             ?.takeIf(String::isNotBlank)
             ?.let { knownUsersById[it]?.displayName ?: "Unknown user" }
     }
-    val managerLabel = resolveUserName(team.team.managerId ?: team.team.captainId) ?: "Unassigned"
-    val headCoachLabel = resolveUserName(team.team.headCoachId) ?: "Unassigned"
-    val assistantCoachLabel = if (team.team.coachIds.isNotEmpty()) {
-        team.team.coachIds.joinToString { coachId ->
+    val activeStaffAssignments = remember(syncedTeam) { syncedTeam.activeStaffAssignments() }
+    val managerLabel = activeStaffAssignments
+        .firstOrNull { assignment -> assignment.normalizedRole() == "MANAGER" }
+        ?.userId
+        ?.let(resolveUserName)
+        ?: resolveUserName(syncedTeam.managerId ?: syncedTeam.captainId)
+        ?: "Unassigned"
+    val headCoachLabel = activeStaffAssignments
+        .firstOrNull { assignment -> assignment.normalizedRole() == "HEAD_COACH" }
+        ?.userId
+        ?.let(resolveUserName)
+        ?: resolveUserName(syncedTeam.headCoachId)
+        ?: "Unassigned"
+    val assistantCoachIds = activeStaffAssignments
+        .filter { assignment -> assignment.normalizedRole() == "ASSISTANT_COACH" }
+        .map(TeamStaffAssignment::userId)
+        .ifEmpty { syncedTeam.coachIds }
+    val assistantCoachLabel = if (assistantCoachIds.isNotEmpty()) {
+        assistantCoachIds.joinToString { coachId ->
             resolveUserName(coachId) ?: "Unknown user"
         }
     } else {
         "Unassigned"
+    }
+    val existingPlayerRegistrationsByUserId = remember(syncedTeam.playerRegistrations) {
+        syncedTeam.playerRegistrations.associateBy(TeamPlayerRegistration::userId)
+    }
+
+    fun buildUpdatedTeam(
+        activePlayers: List<UserData>,
+        invitedPlayers: List<UserData>,
+        resolvedName: String,
+        resolvedSize: Int,
+    ): Team {
+        val activePlayerIds = activePlayers.map(UserData::id).distinct()
+        val invitedPlayerIds = invitedPlayers
+            .map(UserData::id)
+            .distinct()
+            .filterNot(activePlayerIds::contains)
+        val resolvedCaptainId = syncedTeam.captainId
+            .takeIf(activePlayerIds::contains)
+            ?: activePlayerIds.firstOrNull()
+            .orEmpty()
+        val updatedPlayerRegistrations = buildList {
+            activePlayerIds.forEach { userId ->
+                val existing = existingPlayerRegistrationsByUserId[userId]
+                add(
+                    TeamPlayerRegistration(
+                        id = existing?.id ?: "${syncedTeam.id}__player__active__${userId}",
+                        teamId = syncedTeam.id,
+                        userId = userId,
+                        status = "ACTIVE",
+                        jerseyNumber = existing?.jerseyNumber,
+                        position = existing?.position,
+                        isCaptain = userId == resolvedCaptainId,
+                    )
+                )
+            }
+            invitedPlayerIds.forEach { userId ->
+                val existing = existingPlayerRegistrationsByUserId[userId]
+                add(
+                    TeamPlayerRegistration(
+                        id = existing?.id ?: "${syncedTeam.id}__player__invited__${userId}",
+                        teamId = syncedTeam.id,
+                        userId = userId,
+                        status = "INVITED",
+                        jerseyNumber = existing?.jerseyNumber,
+                        position = existing?.position,
+                        isCaptain = false,
+                    )
+                )
+            }
+        }
+
+        return syncedTeam.copy(
+            name = resolvedName,
+            sport = normalizedSportName.ifBlank { null },
+            teamSize = resolvedSize,
+            division = resolvedDivisionToken,
+            divisionTypeId = resolvedDivisionTypeId,
+            divisionTypeName = resolvedDivisionTypeName,
+            skillDivisionTypeId = normalizedSkillDivisionTypeId,
+            skillDivisionTypeName = resolvedSkillDivisionTypeName,
+            ageDivisionTypeId = normalizedAgeDivisionTypeId,
+            ageDivisionTypeName = resolvedAgeDivisionTypeName,
+            divisionGender = normalizedDivisionGender,
+            captainId = resolvedCaptainId,
+            playerIds = activePlayerIds,
+            pending = invitedPlayerIds,
+            playerRegistrations = updatedPlayerRegistrations,
+            staffAssignments = syncedTeam.staffAssignments,
+        ).withSynchronizedMembership()
     }
 
     Card(
@@ -552,19 +642,11 @@ fun CreateOrEditTeamDialog(
                 if (showEditDetails) {
                     Button(onClick = {
                         onFinish(
-                            team.team.copy(playerIds = playersInTeam.map { it.id },
-                                pending = invitedPlayers.map { it.id },
-                                name = normalizedTeamName,
-                                sport = normalizedSportName.ifBlank { null },
-                                teamSize = resolvedTeamSize,
-                                division = resolvedDivisionToken,
-                                divisionTypeId = resolvedDivisionTypeId,
-                                divisionTypeName = resolvedDivisionTypeName,
-                                skillDivisionTypeId = normalizedSkillDivisionTypeId,
-                                skillDivisionTypeName = resolvedSkillDivisionTypeName,
-                                ageDivisionTypeId = normalizedAgeDivisionTypeId,
-                                ageDivisionTypeName = resolvedAgeDivisionTypeName,
-                                divisionGender = normalizedDivisionGender,
+                            buildUpdatedTeam(
+                                activePlayers = playersInTeam,
+                                invitedPlayers = invitedPlayers,
+                                resolvedName = normalizedTeamName,
+                                resolvedSize = resolvedTeamSize,
                             )
                         )
                     }, enabled = isTeamSizeValid && isTeamDivisionValid && isTeamNameValid) {
@@ -622,10 +704,11 @@ fun CreateOrEditTeamDialog(
             confirmButton = {
                 Button(onClick = {
                     onFinish(
-                        team.team.copy(playerIds = (playersInTeam - currentUser).map { it.id },
-                            pending = invitedPlayers.map { it.id },
-                            name = normalizedTeamName,
-                            teamSize = resolvedTeamSize
+                        buildUpdatedTeam(
+                            activePlayers = playersInTeam - currentUser,
+                            invitedPlayers = invitedPlayers,
+                            resolvedName = normalizedTeamName,
+                            resolvedSize = resolvedTeamSize,
                         )
                     )
                     showLeaveTeamDialog = false
