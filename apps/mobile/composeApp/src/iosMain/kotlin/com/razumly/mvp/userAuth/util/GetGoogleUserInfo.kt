@@ -6,7 +6,6 @@ import io.ktor.client.call.body
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.get
 import io.ktor.client.request.headers
-import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
@@ -30,7 +29,6 @@ suspend fun getGoogleUserInfo(accessToken: String): GoogleUserInfo {
                 append(HttpHeaders.Authorization, "Bearer $accessToken")
             }
         }
-        Napier.d("Google user info: ${response.bodyAsText()}")
 
         if (response.status.isSuccess()) {
             return response.body<GoogleUserInfo>()

@@ -42,6 +42,7 @@ material3 = "1.9.0"
 materialIconsExtended = "1.7.3"
 materialKolor = "4.1.1"
 mockk = "1.14.9"
+multiplatformSettings = "1.3.0"
 napier = "2.7.1"
 navigationCommonKtx = "2.9.7"
 performanceAnnotation = "1.0.0-alpha01"
@@ -64,6 +65,7 @@ credentials = "1.6.0"
 googleId = "1.2.0"
 splashscreen = "1.2.0"
 androidxComposeUiTest = "1.10.6"
+androidxSecurityCrypto = "1.1.0-alpha06"
 
 [libraries]
 androidx-core = { module = "androidx.test:core", version.ref = "core" }
@@ -134,6 +136,7 @@ ktor-client-darwin = { group = "io.ktor", name = "ktor-client-darwin", version.r
 ktor-serialization-kotlinx-json = { group = "io.ktor", name = "ktor-serialization-kotlinx-json", version.ref = "ktor" }
 maps-compose = { module = "com.google.maps.android:maps-compose", version.ref = "mapsCompose" }
 mockk = { module = "io.mockk:mockk", version.ref = "mockk" }
+multiplatform-settings = { module = "com.russhwolf:multiplatform-settings", version.ref = "multiplatformSettings" }
 napier = { module = "io.github.aakira:napier", version.ref = "napier" }
 permissions = { module = "dev.icerock.moko:permissions", version.ref = "permissions" }
 permissions-location = { module = "dev.icerock.moko:permissions-location", version.ref = "permissions" }
@@ -156,6 +159,7 @@ androidx-credentials = { module = "androidx.credentials:credentials", version.re
 androidx-credentials-play-services-auth = { module = "androidx.credentials:credentials-play-services-auth", version.ref = "credentials" }
 googleid = { module = "com.google.android.libraries.identity.googleid:googleid", version.ref = "googleId" }
 androidx-core-splashscreen = { module = "androidx.core:core-splashscreen", version.ref = "splashscreen" }
+androidx-security-crypto = { module = "androidx.security:security-crypto", version.ref = "androidxSecurityCrypto" }
 
 
 [plugins]

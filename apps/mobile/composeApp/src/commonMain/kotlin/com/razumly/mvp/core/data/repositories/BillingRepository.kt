@@ -1013,12 +1013,17 @@ class BillingRepository(
             val serverRefunds = api.get<RefundRequestsResponseDto>("api/refund-requests?hostId=$encoded&limit=200").refunds
             databaseService.getRefundRequestDao.upsertRefundRequests(serverRefunds)
 
-            serverRefunds.forEach { refund ->
-                userRepository.getUsers(listOf(refund.userId)).onFailure { e ->
-                    Napier.e("Failed to cache user for refund ${refund.id}", e)
+            val refundUserIds = serverRefunds.map { refund -> refund.userId }.distinct()
+            if (refundUserIds.isNotEmpty()) {
+                userRepository.getUsers(refundUserIds).onFailure { e ->
+                    Napier.e("Failed to cache users for refund hydration", e)
                 }
-                eventRepository.getEvent(refund.eventId).onFailure { e ->
-                    Napier.e("Failed to cache event for refund ${refund.id}", e)
+            }
+
+            val refundEventIds = serverRefunds.map { refund -> refund.eventId }.distinct()
+            if (refundEventIds.isNotEmpty()) {
+                eventRepository.getEventsByIds(refundEventIds).onFailure { e ->
+                    Napier.e("Failed to cache events for refund hydration", e)
                 }
             }
 

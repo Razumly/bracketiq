@@ -157,7 +157,7 @@ data class EventApiDto(
         val resolvedFieldCount = resolvedFieldIds.size.takeIf { count -> count > 0 }
         val resolvedPriceCents = (price ?: 0).coerceAtLeast(0)
         val resolvedMaxParticipants = (maxParticipants ?: 0).coerceAtLeast(0)
-        val resolvedEventPlayoffTeamCount = playoffTeamCount?.coerceAtLeast(2)
+        val resolvedEventPlayoffTeamCount = playoffTeamCount
         val resolvedEventInstallmentAmounts = (installmentAmounts ?: emptyList())
             .map { amount -> amount.coerceAtLeast(0) }
         val resolvedEventInstallmentDueDates = (installmentDueDates ?: emptyList())
@@ -187,7 +187,7 @@ data class EventApiDto(
                 playoffTeamCount = when {
                     includePlayoffs != true -> null
                     singleDivision != false -> resolvedEventPlayoffTeamCount
-                    else -> (detail.playoffTeamCount ?: resolvedEventPlayoffTeamCount)?.coerceAtLeast(2)
+                    else -> detail.playoffTeamCount
                 },
                 allowPaymentPlans = if (singleDivision != false) {
                     resolvedEventAllowPaymentPlans
@@ -262,11 +262,7 @@ data class EventApiDto(
             fieldCount = resolvedFieldCount,
             gamesPerOpponent = gamesPerOpponent,
             includePlayoffs = includePlayoffs ?: false,
-            playoffTeamCount = if (singleDivision == false) {
-                null
-            } else {
-                resolvedEventPlayoffTeamCount
-            },
+            playoffTeamCount = resolvedEventPlayoffTeamCount,
             doubleElimination = doubleElimination ?: false,
             winnerSetCount = winnerSetCount ?: 1,
             loserSetCount = loserSetCount ?: 0,
@@ -642,8 +638,8 @@ fun Event.toUpdateDto(
             },
             playoffTeamCount = when {
                 !includePlayoffs -> null
-                singleDivision -> playoffTeamCount?.coerceAtLeast(2)
-                else -> (detail.playoffTeamCount ?: playoffTeamCount)?.coerceAtLeast(2)
+                singleDivision -> playoffTeamCount
+                else -> detail.playoffTeamCount
             },
             allowPaymentPlans = if (singleDivision) {
                 defaultAllowPaymentPlans
@@ -709,8 +705,8 @@ fun Event.toUpdateDto(
         coordinates = coordinates,
         gamesPerOpponent = gamesPerOpponent,
         includePlayoffs = includePlayoffs,
-        playoffTeamCount = if (includePlayoffs && singleDivision) {
-            playoffTeamCount?.coerceAtLeast(2)
+        playoffTeamCount = if (includePlayoffs) {
+            playoffTeamCount
         } else {
             null
         },

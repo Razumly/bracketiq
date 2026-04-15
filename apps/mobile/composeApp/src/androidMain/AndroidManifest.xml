@@ -8,7 +8,7 @@
 
     <application
         android:name=".MvpApp"
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:enableOnBackInvokedCallback="true"
         android:icon="@mipmap/ic_launcher_biq"
         android:label="@string/app_name"
@@ -55,10 +55,6 @@
                     android:scheme="https"
                     android:host="bracket-iq.com"
                     android:pathPrefix="/" />
-                <data
-                    android:scheme="http"
-                    android:host="bracket-iq.com"
-                    android:pathPrefix="/" />
             </intent-filter>
 
             <intent-filter android:label="@string/app_deep_links" android:autoVerify="true">
@@ -67,10 +63,6 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data
                     android:scheme="https"
-                    android:host="www.bracket-iq.com"
-                    android:pathPrefix="/" />
-                <data
-                    android:scheme="http"
                     android:host="www.bracket-iq.com"
                     android:pathPrefix="/" />
             </intent-filter>

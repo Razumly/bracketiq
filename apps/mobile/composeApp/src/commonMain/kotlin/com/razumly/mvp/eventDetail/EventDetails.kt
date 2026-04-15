@@ -428,15 +428,8 @@ fun EventDetails(
                 },
                 playoffTeamCount = when {
                     !editEvent.includePlayoffs -> null
-                    editEvent.singleDivision -> (
-                        editEvent.playoffTeamCount
-                            ?: detail.playoffTeamCount
-                            ?: fallbackMaxParticipants
-                        ).coerceAtLeast(2)
-                    else -> (
-                        detail.playoffTeamCount
-                            ?: fallbackMaxParticipants
-                        ).coerceAtLeast(2)
+                    editEvent.singleDivision -> editEvent.playoffTeamCount ?: detail.playoffTeamCount
+                    else -> detail.playoffTeamCount
                 },
                 allowPaymentPlans = detailAllowPaymentPlans,
                 installmentCount = when {
@@ -487,7 +480,7 @@ fun EventDetails(
             defaultDivisionEditorState(
                 defaultPriceCents = editEvent.priceCents,
                 defaultMaxParticipants = editEvent.maxParticipants,
-                defaultPlayoffTeamCount = editEvent.playoffTeamCount ?: editEvent.maxParticipants,
+                defaultPlayoffTeamCount = editEvent.playoffTeamCount,
                 defaultAllowPaymentPlans = editEvent.allowPaymentPlans == true,
                 defaultInstallmentCount = editEvent.installmentCount,
                 defaultInstallmentDueDates = editEvent.installmentDueDates,
@@ -519,7 +512,7 @@ fun EventDetails(
         divisionEditor = defaultDivisionEditorState(
             defaultPriceCents = editEvent.priceCents,
             defaultMaxParticipants = editEvent.maxParticipants,
-            defaultPlayoffTeamCount = editEvent.playoffTeamCount ?: editEvent.maxParticipants,
+            defaultPlayoffTeamCount = editEvent.playoffTeamCount,
             defaultAllowPaymentPlans = editEvent.allowPaymentPlans == true,
             defaultInstallmentCount = editEvent.installmentCount,
             defaultInstallmentDueDates = editEvent.installmentDueDates,
@@ -810,14 +803,22 @@ fun EventDetails(
         } else {
             divisionEditor.maxParticipants.coerceAtLeast(2)
         }
+        val divisionPlayoffTeamCount = divisionEditor.playoffTeamCount
+        if (
+            editEvent.eventType == EventType.LEAGUE &&
+            editEvent.includePlayoffs &&
+            !editEvent.singleDivision &&
+            (divisionPlayoffTeamCount == null || divisionPlayoffTeamCount < 2)
+        ) {
+            divisionEditor = divisionEditor.copy(
+                error = "Playoff team count is required for each division when playoffs are enabled.",
+            )
+            return
+        }
         val normalizedPlayoffTeamCount = when {
             editEvent.eventType != EventType.LEAGUE || !editEvent.includePlayoffs -> null
-            editEvent.singleDivision -> (
-                editEvent.playoffTeamCount
-                    ?: divisionEditor.playoffTeamCount
-                ).coerceAtLeast(2)
-
-            else -> divisionEditor.playoffTeamCount.coerceAtLeast(2)
+            editEvent.singleDivision -> editEvent.playoffTeamCount ?: divisionPlayoffTeamCount
+            else -> divisionPlayoffTeamCount
         }
         val defaultInstallmentAmounts = editEvent.installmentAmounts.map { amount ->
             amount.coerceAtLeast(0)
@@ -946,8 +947,7 @@ fun EventDetails(
                     includePlayoffs &&
                     singleDivision
                 ) {
-                    mergedDivisionDetails.firstOrNull()?.playoffTeamCount
-                        ?: fallbackMaxParticipants
+                    playoffTeamCount ?: mergedDivisionDetails.firstOrNull()?.playoffTeamCount
                 } else {
                     playoffTeamCount
                 },
@@ -978,12 +978,11 @@ fun EventDetails(
                 detail.maxParticipants
                     ?: editEvent.maxParticipants
                 ).coerceAtLeast(2),
-            playoffTeamCount = (
+            playoffTeamCount = if (editEvent.singleDivision) {
+                editEvent.playoffTeamCount ?: detail.playoffTeamCount
+            } else {
                 detail.playoffTeamCount
-                    ?: detail.maxParticipants
-                    ?: editEvent.playoffTeamCount
-                    ?: editEvent.maxParticipants
-                ).coerceAtLeast(2),
+            },
             allowPaymentPlans = detail.allowPaymentPlans == true,
             installmentCount = maxOf(
                 detail.installmentCount ?: 0,
@@ -1015,7 +1014,7 @@ fun EventDetails(
                     includePlayoffs &&
                     singleDivision
                 ) {
-                    mergedDivisionDetails.firstOrNull()?.playoffTeamCount
+                    playoffTeamCount ?: mergedDivisionDetails.firstOrNull()?.playoffTeamCount
                 } else {
                     playoffTeamCount
                 },
@@ -2089,50 +2088,40 @@ fun EventDetails(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     verticalAlignment = Alignment.Top,
                                 ) {
-                                    Box(modifier = Modifier.weight(1f)) {
-                                        LabeledCheckboxRow(
-                                            checked = editEvent.includePlayoffs,
-                                            label = "Include Playoffs",
-                                            onCheckedChange = { checked ->
-                                                val fallbackMaxParticipants =
-                                                    editEvent.maxParticipants.coerceAtLeast(2)
-                                                val fallbackSingleDivisionPlayoffCount = (
-                                                    editEvent.playoffTeamCount
-                                                        ?: divisionDetailsForSettings.firstOrNull()?.playoffTeamCount
-                                                        ?: fallbackMaxParticipants
-                                                    ).coerceAtLeast(2)
-                                                onEditEvent {
-                                                    val nextDivisionDetails = mergeDivisionDetailsForDivisions(
-                                                        divisions = divisions,
-                                                        existingDetails = divisionDetails,
-                                                        eventId = id,
-                                                    ).map { detail ->
-                                                        when {
-                                                            !checked -> detail.copy(playoffTeamCount = null)
-                                                            singleDivision -> detail.copy(
-                                                                playoffTeamCount = fallbackSingleDivisionPlayoffCount,
-                                                            )
-                                                            else -> detail.copy(
-                                                                playoffTeamCount = (
-                                                                    detail.playoffTeamCount
-                                                                        ?: (detail.maxParticipants ?: fallbackMaxParticipants)
-                                                                    ).coerceAtLeast(2),
-                                                            )
+                                        Box(modifier = Modifier.weight(1f)) {
+                                            LabeledCheckboxRow(
+                                                checked = editEvent.includePlayoffs,
+                                                label = "Include Playoffs",
+                                                onCheckedChange = { checked ->
+                                                    onEditEvent {
+                                                        val nextDivisionDetails = mergeDivisionDetailsForDivisions(
+                                                            divisions = divisions,
+                                                            existingDetails = divisionDetails,
+                                                            eventId = id,
+                                                        ).map { detail ->
+                                                            when {
+                                                                !checked -> detail.copy(playoffTeamCount = null)
+                                                                singleDivision -> detail.copy(
+                                                                    playoffTeamCount = playoffTeamCount
+                                                                        ?: detail.playoffTeamCount,
+                                                                )
+                                                                else -> detail
+                                                            }
                                                         }
+                                                        copy(
+                                                            includePlayoffs = checked,
+                                                            playoffTeamCount = when {
+                                                                !checked -> null
+                                                                singleDivision -> playoffTeamCount
+                                                                    ?: nextDivisionDetails.firstOrNull()?.playoffTeamCount
+                                                                else -> playoffTeamCount
+                                                            },
+                                                            divisionDetails = nextDivisionDetails,
+                                                        )
                                                     }
-                                                    copy(
-                                                        includePlayoffs = checked,
-                                                        playoffTeamCount = if (checked) {
-                                                            fallbackSingleDivisionPlayoffCount
-                                                        } else {
-                                                            null
-                                                        },
-                                                        divisionDetails = nextDivisionDetails,
-                                                    )
-                                                }
-                                            },
-                                        )
-                                    }
+                                                },
+                                            )
+                                        }
                                     NumberInputField(
                                         modifier = Modifier.weight(1f),
                                         value = editEvent.playoffTeamCount?.toString().orEmpty(),
@@ -2144,9 +2133,9 @@ fun EventDetails(
                                         enabled = editEvent.includePlayoffs,
                                         onValueChange = { newValue ->
                                             if (!editEvent.includePlayoffs) return@NumberInputField
-                                            if (!newValue.all { it.isDigit() }) return@NumberInputField
+                                            if (newValue.isNotEmpty() && !newValue.all { it.isDigit() }) return@NumberInputField
                                             onEditEvent {
-                                                copy(playoffTeamCount = newValue.toIntOrNull()?.coerceAtLeast(2))
+                                                copy(playoffTeamCount = if (newValue.isBlank()) null else newValue.toIntOrNull())
                                             }
                                         },
                                         isError = editEvent.includePlayoffs &&
@@ -2879,7 +2868,7 @@ fun EventDetails(
                                                 DetailRowSpec(
                                                     "Playoffs",
                                                     if (event.singleDivision) {
-                                                        "${event.playoffTeamCount ?: 0} teams"
+                                                        event.playoffTeamCount?.let { "$it teams" } ?: "Not set"
                                                     } else {
                                                         "Configured per division"
                                                     },
@@ -2988,12 +2977,9 @@ fun EventDetails(
                                     if (isNewEvent) {
                                         return@LabeledCheckboxRow
                                     }
-                                    val fallbackMaxParticipants = editEvent.maxParticipants.coerceAtLeast(2)
-                                    val fallbackPlayoffCount = (
+                                    val explicitPlayoffCount =
                                         editEvent.playoffTeamCount
                                             ?: divisionDetailsForSettings.firstOrNull()?.playoffTeamCount
-                                            ?: fallbackMaxParticipants
-                                        ).coerceAtLeast(2)
                                     val defaultInstallmentAmounts = editEvent.installmentAmounts.map { amount ->
                                         amount.coerceAtLeast(0)
                                     }
@@ -3018,12 +3004,9 @@ fun EventDetails(
                                             val nextPlayoffCount = if (!includePlayoffs) {
                                                 null
                                             } else if (checked) {
-                                                fallbackPlayoffCount
+                                                explicitPlayoffCount ?: existing.playoffTeamCount
                                             } else {
-                                                (
-                                                    existing.playoffTeamCount
-                                                        ?: fallbackMaxParticipants
-                                                    ).coerceAtLeast(2)
+                                                existing.playoffTeamCount ?: playoffTeamCount
                                             }
                                             if (checked) {
                                                 existing.copy(
@@ -3089,9 +3072,9 @@ fun EventDetails(
                                             singleDivision = checked,
                                             playoffTeamCount = if (includePlayoffs) {
                                                 if (checked) {
-                                                    fallbackPlayoffCount
+                                                    explicitPlayoffCount
                                                 } else {
-                                                    (playoffTeamCount ?: fallbackPlayoffCount).coerceAtLeast(2)
+                                                    playoffTeamCount
                                                 }
                                             } else {
                                                 null
@@ -3263,9 +3246,9 @@ fun EventDetails(
                         NumberInputField(
                             modifier = Modifier.fillMaxWidth(),
                             value = if (editEvent.singleDivision) {
-                                (editEvent.playoffTeamCount ?: editEvent.maxParticipants.coerceAtLeast(2)).toString()
+                                editEvent.playoffTeamCount?.toString().orEmpty()
                             } else {
-                                divisionEditor.playoffTeamCount.coerceAtLeast(2).toString()
+                                divisionEditor.playoffTeamCount?.toString().orEmpty()
                             },
                             label = "Division Playoff Team Count",
                             enabled = !editEvent.singleDivision && editEvent.includePlayoffs && divisionEditorReady,
@@ -3277,8 +3260,8 @@ fun EventDetails(
                                 ) {
                                     return@NumberInputField
                                 }
-                                if (value.all { it.isDigit() }) {
-                                    val parsed = value.toIntOrNull()?.coerceAtLeast(2) ?: 2
+                                if (value.isEmpty() || value.all { it.isDigit() }) {
+                                    val parsed = if (value.isBlank()) null else value.toIntOrNull()
                                     divisionEditor = divisionEditor.copy(
                                         playoffTeamCount = parsed,
                                         error = null,
@@ -3462,9 +3445,9 @@ fun EventDetails(
                                     editEvent.includePlayoffs
                                 ) {
                                     if (editEvent.singleDivision) {
-                                        editEvent.playoffTeamCount ?: maxParticipants
+                                        editEvent.playoffTeamCount ?: detail.playoffTeamCount
                                     } else {
-                                        detail.playoffTeamCount ?: maxParticipants
+                                        detail.playoffTeamCount
                                     }
                                 } else {
                                     null
@@ -3526,7 +3509,7 @@ fun EventDetails(
                                         }
                                         if (playoffTeams != null) {
                                             Text(
-                                                text = "Playoff teams: ${playoffTeams.coerceAtLeast(2)}",
+                                                text = "Playoff teams: $playoffTeams",
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             )
@@ -4539,7 +4522,7 @@ private fun buildScheduleDetailsRows(
                         DetailRowSpec(
                             "Playoffs",
                             if (event.singleDivision) {
-                                "${(event.playoffTeamCount ?: event.maxParticipants).coerceAtLeast(2)} teams"
+                                event.playoffTeamCount?.let { "$it teams" } ?: "Not set"
                             } else {
                                 "Configured per division"
                             },
@@ -5085,7 +5068,7 @@ private fun ReadOnlyDivisionCard(
         event.includePlayoffs &&
         !event.singleDivision
     ) {
-        detail.playoffTeamCount?.coerceAtLeast(2)
+        detail.playoffTeamCount
     } else {
         null
     }
@@ -5572,7 +5555,7 @@ internal data class DivisionEditorState(
     val name: String = "",
     val priceCents: Int = 0,
     val maxParticipants: Int = 2,
-    val playoffTeamCount: Int = 2,
+    val playoffTeamCount: Int? = null,
     val allowPaymentPlans: Boolean = false,
     val installmentCount: Int = 0,
     val installmentDueDates: List<String> = emptyList(),
@@ -5607,7 +5590,7 @@ internal fun defaultDivisionEditorState(
     defaultInstallmentAmounts: List<Int>,
 ): DivisionEditorState {
     val fallbackMax = defaultMaxParticipants.coerceAtLeast(2)
-    val fallbackPlayoff = (defaultPlayoffTeamCount ?: fallbackMax).coerceAtLeast(2)
+    val fallbackPlayoff = defaultPlayoffTeamCount?.coerceAtLeast(2)
     val normalizedInstallmentAmounts = defaultInstallmentAmounts.map { amount ->
         amount.coerceAtLeast(0)
     }
@@ -6219,15 +6202,17 @@ private fun computeEventValidationResult(
         isLeagueGamesValid = (editEvent.gamesPerOpponent ?: 1) >= 1
         isLeaguePlayoffTeamsValid = if (!editEvent.includePlayoffs) {
             true
-        } else if (editEvent.singleDivision) {
-            (editEvent.playoffTeamCount ?: 0) >= 2
         } else {
+            val hasEventPlayoffCount = (editEvent.playoffTeamCount ?: 0) >= 2
             val details = mergeDivisionDetailsForDivisions(
                 divisions = editEvent.divisions,
                 existingDetails = editEvent.divisionDetails,
                 eventId = editEvent.id,
             )
-            details.isNotEmpty() && details.all { detail -> (detail.playoffTeamCount ?: 0) >= 2 }
+            hasEventPlayoffCount && (
+                editEvent.singleDivision ||
+                    (details.isNotEmpty() && details.all { detail -> (detail.playoffTeamCount ?: 0) >= 2 })
+                )
         }
         if (editEvent.usesSets) {
             isLeagueDurationValid = setCount != null && (editEvent.setDurationMinutes ?: 0) >= 5

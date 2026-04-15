@@ -306,7 +306,7 @@ class EventDtosTest {
         val dto = event.toUpdateDto()
         val detail = dto.divisionDetails.first()
 
-        assertNull(dto.playoffTeamCount)
+        assertEquals(12, dto.playoffTeamCount)
         assertEquals(6, detail.playoffTeamCount)
     }
 
@@ -553,7 +553,7 @@ class EventDtosTest {
     }
 
     @Test
-    fun event_api_dto_applies_event_playoff_count_to_multi_division_details_when_missing() {
+    fun event_api_dto_preserves_missing_multi_division_playoff_count_until_explicitly_set() {
         val dto = EventApiDto(
             id = "event-16",
             name = "API League",
@@ -583,7 +583,7 @@ class EventDtosTest {
 
         val event = dto.toEventOrNull()
 
-        assertEquals(null, event?.playoffTeamCount)
-        assertEquals(10, event?.divisionDetails?.firstOrNull()?.playoffTeamCount)
+        assertEquals(10, event?.playoffTeamCount)
+        assertEquals(null, event?.divisionDetails?.firstOrNull()?.playoffTeamCount)
     }
 }

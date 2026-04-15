@@ -35,6 +35,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.test.runTest
 import org.junit.After
+import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -59,9 +60,22 @@ class LeaguePlayoffMobileApiIntegrationTest {
 
     @Before
     fun ensureBackendFixtures() {
-        if (!backendFixturesReady()) {
-            runTargetedBackendSeed()
+        if (backendFixturesReady()) return
+
+        val fixturesPrepared = if (shouldAutoSeedBackendFixtures()) {
+            runCatching {
+                runTargetedBackendSeed()
+                backendFixturesReady()
+            }.getOrDefault(false)
+        } else {
+            false
         }
+
+        assumeTrue(
+            "Skipping mobile/backend integration test because backend fixtures are unavailable. " +
+                "Automatic backend seeding is disabled unless MVP_TEST_ALLOW_DB_SEED=1.",
+            fixturesPrepared,
+        )
     }
 
     @After
@@ -457,14 +471,25 @@ private class InMemoryPreferencesDataStore(
 }
 
 private fun resolveReachableBackendBaseUrl(): String {
-    val candidates = linkedSetOf(
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:3010",
-        "http://localhost:3000",
-        "http://localhost:3010",
-    )
+    val explicitOverride = System.getenv("MVP_TEST_BACKEND_URL")
+        ?.trim()
+        ?.takeIf(String::isNotEmpty)
+    val candidates = linkedSetOf<String>().apply {
+        explicitOverride?.let(::add)
+        add("http://127.0.0.1:3000")
+        add("http://127.0.0.1:3010")
+        add("http://localhost:3000")
+        add("http://localhost:3010")
+    }
     return candidates.firstOrNull { baseUrl -> isReachable(baseUrl) }
         ?: error("Unable to connect to the local mvp-site backend on ports 3000 or 3010.")
+}
+
+private fun shouldAutoSeedBackendFixtures(): Boolean {
+    return when (System.getenv("MVP_TEST_ALLOW_DB_SEED")?.trim()?.lowercase()) {
+        "1", "true", "yes" -> true
+        else -> false
+    }
 }
 
 private fun isReachable(baseUrl: String): Boolean {
@@ -484,7 +509,7 @@ private const val PARTICIPANT_EMAIL = "player@example.com"
 private const val PARTICIPANT_PASSWORD = "password123!"
 private const val PARTICIPANT_USER_ID = "user_participant"
 private const val SEEDED_DIVISION_ID = "division_open"
-private const val SEEDED_SPORT_ID = "volleyball"
+private const val SEEDED_SPORT_ID = "Indoor Volleyball"
 private const val UPLOADED_DOCUMENT_IMAGE_ID = "camka_upload_upscaled_cc_indoor_sports_024be2e8d5cdead5_jpg"
 private const val TEST_EVENT_ID = "mobile_api_league_playoff_regression"
 private const val TEST_FIELD_ID = "mobile_api_league_playoff_field"

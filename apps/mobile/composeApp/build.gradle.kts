@@ -200,11 +200,13 @@ kotlin {
                 implementation(libs.stripe.android)
                 implementation(libs.financial.connections)
                 implementation(libs.androidx.browser)
+                implementation(libs.androidx.security.crypto)
                 implementation(libs.ktor.client.okhttp)
             }
         }
         iosMain {
             dependencies {
+                implementation(libs.multiplatform.settings)
                 implementation(libs.ktor.client.darwin)
             }
         }

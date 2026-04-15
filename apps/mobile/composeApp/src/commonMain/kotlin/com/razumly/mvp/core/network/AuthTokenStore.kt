@@ -12,6 +12,8 @@ interface AuthTokenStore {
     suspend fun clear()
 }
 
+expect fun createSecureAuthTokenStore(): AuthTokenStore
+
 class DataStoreAuthTokenStore(
     private val dataStore: DataStore<Preferences>,
 ) : AuthTokenStore {
@@ -31,4 +33,3 @@ class DataStoreAuthTokenStore(
         }
     }
 }
-
