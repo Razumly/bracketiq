@@ -217,6 +217,15 @@ private object NoopMatchRepository : IMatchRepository {
     override suspend fun updateMatch(match: com.razumly.mvp.core.data.dataTypes.MatchMVP): Result<Unit> =
         Result.success(Unit)
 
+    override suspend fun updateMatchOperations(
+        match: com.razumly.mvp.core.data.dataTypes.MatchMVP,
+        segmentOperations: List<com.razumly.mvp.core.network.dto.MatchSegmentOperationDto>?,
+        incidentOperations: List<com.razumly.mvp.core.network.dto.MatchIncidentOperationDto>?,
+        officialCheckIn: com.razumly.mvp.core.network.dto.MatchOfficialCheckInOperationDto?,
+        finalize: Boolean,
+        time: kotlin.time.Instant?,
+    ): Result<com.razumly.mvp.core.data.dataTypes.MatchMVP> = Result.success(match)
+
     override suspend fun updateMatchesBulk(
         matches: List<com.razumly.mvp.core.data.dataTypes.MatchMVP>,
         creates: List<StagedMatchCreate>,

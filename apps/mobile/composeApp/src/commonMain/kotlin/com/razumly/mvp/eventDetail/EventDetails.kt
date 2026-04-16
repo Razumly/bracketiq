@@ -3,6 +3,7 @@ package com.razumly.mvp.eventDetail
 import com.razumly.mvp.core.network.userMessage
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -26,6 +27,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -79,6 +81,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.zIndex
 import coil3.compose.AsyncImage
 import com.kmpalette.loader.rememberNetworkLoader
 import com.kmpalette.rememberDominantColorState
@@ -88,11 +91,13 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
+import com.razumly.mvp.core.data.dataTypes.MatchRulesConfigMVP
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.OrganizationTemplateDocument
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Invite
+import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import com.razumly.mvp.core.data.dataTypes.Sport
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.UserData
@@ -243,6 +248,8 @@ fun EventDetails(
     onSelectFieldCount: (Int) -> Unit,
     onUpdateLocalFieldName: (Int, String) -> Unit = { _, _ -> },
     onUpdateLocalFieldDivisions: (Int, List<String>) -> Unit = { _, _ -> },
+    useManualTimeSlots: Boolean = true,
+    onUseManualTimeSlotsChange: (Boolean) -> Unit = {},
     onAddLeagueTimeSlot: () -> Unit = {},
     onUpdateLeagueTimeSlot: (Int, TimeSlot) -> Unit = { _, _ -> },
     onRemoveLeagueTimeSlot: (Int) -> Unit = {},
@@ -1064,6 +1071,39 @@ fun EventDetails(
             rentalTimeLocked = rentalTimeLocked,
         )
     }
+    val supportsOptionalManualTimeSlots = remember(
+        isNewEvent,
+        scheduleTimeLocked,
+        editEvent.eventType,
+        editEvent.noFixedEndDateTime,
+        editEvent.end,
+        editEvent.start,
+    ) {
+        isNewEvent &&
+            !scheduleTimeLocked &&
+            !editEvent.noFixedEndDateTime &&
+            editEvent.end > editEvent.start &&
+            (
+                editEvent.eventType == EventType.LEAGUE ||
+                    editEvent.eventType == EventType.TOURNAMENT
+                )
+    }
+    val slotEditorEnabled = remember(
+        editEvent.eventType,
+        scheduleTimeLocked,
+        supportsOptionalManualTimeSlots,
+        useManualTimeSlots,
+    ) {
+        when {
+            editEvent.eventType == EventType.WEEKLY_EVENT -> true
+            editEvent.eventType == EventType.LEAGUE || editEvent.eventType == EventType.TOURNAMENT -> {
+                !supportsOptionalManualTimeSlots || useManualTimeSlots
+            }
+
+            scheduleTimeLocked && editEvent.eventType == EventType.EVENT -> true
+            else -> false
+        }
+    }
     val leagueSlotErrors = remember(
         leagueTimeSlots,
         editEvent.eventType,
@@ -1160,6 +1200,7 @@ fun EventDetails(
                 fieldCount = fieldCount,
                 leagueTimeSlots = leagueTimeSlots,
                 leagueSlotErrors = leagueSlotErrors,
+                slotEditorEnabled = slotEditorEnabled,
                 divisionDetailsForSettings = divisionDetailsForSettings,
                 isColorLoaded = isColorLoaded,
                 scheduleTimeLocked = scheduleTimeLocked,
@@ -1245,6 +1286,51 @@ fun EventDetails(
             ?.takeIf(String::isNotBlank)
         normalizedSportId?.let { sportId ->
             sports.firstOrNull { sport -> sport.id == sportId }
+        }
+    }
+    val baseMatchRules = remember(editEvent.eventType, editEvent.usesSets, editEvent.setsPerMatch, editEvent.winnerSetCount, editEvent.officialPositions, selectedSportForOfficialDefaults) {
+        resolveEventMatchRules(
+            event = editEvent.copy(matchRulesOverride = null),
+            sport = selectedSportForOfficialDefaults,
+        )
+    }
+    val resolvedMatchRules = remember(editEvent, selectedSportForOfficialDefaults) {
+        resolveEventMatchRules(
+            event = editEvent,
+            sport = selectedSportForOfficialDefaults,
+        )
+    }
+    val autoPointIncidentType = remember(resolvedMatchRules.autoCreatePointIncidentType) {
+        (resolvedMatchRules.autoCreatePointIncidentType ?: "POINT")
+            .trim()
+            .ifBlank { "POINT" }
+    }
+    val availableMatchIncidentTypes = remember(baseMatchRules.supportedIncidentTypes, resolvedMatchRules.supportedIncidentTypes, autoPointIncidentType) {
+        (
+            listOf("POINT", "DISCIPLINE", "NOTE", "ADMIN") +
+                baseMatchRules.supportedIncidentTypes +
+                resolvedMatchRules.supportedIncidentTypes +
+                autoPointIncidentType
+            )
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .distinct()
+    }
+    val selectedMatchIncidentTypes = remember(resolvedMatchRules.supportedIncidentTypes) {
+        resolvedMatchRules.supportedIncidentTypes
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .distinct()
+    }
+    val matchRulesSummary = remember(resolvedMatchRules.scoringModel, resolvedMatchRules.segmentCount) {
+        "${matchScoringModelLabel(resolvedMatchRules.scoringModel)} · ${resolvedMatchRules.segmentCount}"
+    }
+    val matchIncidentOptions = remember(availableMatchIncidentTypes) {
+        availableMatchIncidentTypes.map { incidentType ->
+            DropdownOption(
+                value = incidentType,
+                label = matchIncidentTypeLabel(incidentType),
+            )
         }
     }
     var lastAutoLoadedOfficialDefaultsSportId by rememberSaveable(editEvent.id, editView) {
@@ -1580,7 +1666,7 @@ fun EventDetails(
     val heroHeight = (getScreenHeight() * heroHeightFraction).dp
     val statusBarInset = with(LocalDensity.current) { WindowInsets.statusBars.getTop(this).toDp() }
     val stickyHeaderTopInset = maxOf(topInset, statusBarInset + 12.dp)
-    val heroSpacerHeight = ((getScreenHeight() * heroSpacerFraction).dp - stickyHeaderTopInset).coerceAtLeast(0.dp)
+    val heroSpacerHeight = (getScreenHeight() * heroSpacerFraction).dp
     val heroSpacerHeightPx = with(LocalDensity.current) { heroSpacerHeight.toPx() }
     val heroParallaxOffset by remember(lazyListState, heroSpacerHeightPx) {
         derivedStateOf {
@@ -1603,9 +1689,7 @@ fun EventDetails(
             )
             LazyColumn(
                 state = lazyListState,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(top = stickyHeaderTopInset),
+                modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(
                     // Keep final content scrollable above the floating action dock in view mode.
                     bottom = navPadding.calculateBottomPadding() + if (editView) 32.dp else 120.dp,
@@ -1791,6 +1875,8 @@ fun EventDetails(
                     viewSummary = basicsSummaryLine,
                     requiredMissingCount = basicsMissingRequiredCount,
                     isEditMode = editView,
+                    lazyListState = lazyListState,
+                    stickyHeaderTopInset = stickyHeaderTopInset,
                     animationDelay = 100,
                     viewContent = {
                         HostedByReadOnlyRow(
@@ -1983,6 +2069,8 @@ fun EventDetails(
                     viewSummary = pricingSummaryLine,
                     requiredMissingCount = eventDetailsMissingRequiredCount,
                     isEditMode = editView,
+                    lazyListState = lazyListState,
+                    stickyHeaderTopInset = stickyHeaderTopInset,
                     animationDelay = 200,
                     viewContent = {
                         DetailKeyValueList(
@@ -2390,6 +2478,282 @@ fun EventDetails(
                     },
                 )
 
+                animatedCardSection(
+                    sectionId = "match_rules",
+                    sectionExpansionStates = sectionExpansionStates,
+                    sectionTitle = "Match Rules",
+                    collapsibleInEditMode = true,
+                    collapsibleInViewMode = true,
+                    viewSummary = matchRulesSummary,
+                    isEditMode = editView,
+                    lazyListState = lazyListState,
+                    stickyHeaderTopInset = stickyHeaderTopInset,
+                    animationDelay = 250,
+                    viewContent = {
+                        DetailKeyValueList(
+                            rows = buildList {
+                                add(
+                                    DetailRowSpec(
+                                        "Scoring model",
+                                        matchScoringModelLabel(resolvedMatchRules.scoringModel),
+                                    ),
+                                )
+                                add(
+                                    DetailRowSpec(
+                                        "${resolvedMatchRules.segmentLabel} count",
+                                        resolvedMatchRules.segmentCount.toString(),
+                                    ),
+                                )
+                                add(
+                                    DetailRowSpec(
+                                        "Point incident type",
+                                        matchIncidentTypeLabel(autoPointIncidentType),
+                                    ),
+                                )
+                                add(
+                                    DetailRowSpec(
+                                        "Allow draws",
+                                        if (resolvedMatchRules.supportsDraw) "Yes" else "No",
+                                    ),
+                                )
+                                add(
+                                    DetailRowSpec(
+                                        "Allow overtime",
+                                        if (resolvedMatchRules.supportsOvertime) "Yes" else "No",
+                                    ),
+                                )
+                                add(
+                                    DetailRowSpec(
+                                        "Allow shootout / tiebreak",
+                                        if (resolvedMatchRules.supportsShootout) "Yes" else "No",
+                                    ),
+                                )
+                                add(
+                                    DetailRowSpec(
+                                        "Automatic point incidents",
+                                        if (event.autoCreatePointMatchIncidents) "Yes" else "No",
+                                    ),
+                                )
+                                add(
+                                    DetailRowSpec(
+                                        "Point incidents require participant",
+                                        if (resolvedMatchRules.pointIncidentRequiresParticipant) "Yes" else "No",
+                                    ),
+                                )
+                                if (selectedMatchIncidentTypes.isNotEmpty()) {
+                                    add(
+                                        DetailRowSpec(
+                                            "Incident types",
+                                            selectedMatchIncidentTypes.joinToString(", ") { incidentType ->
+                                                matchIncidentTypeLabel(incidentType)
+                                            },
+                                        ),
+                                    )
+                                }
+                                if (resolvedMatchRules.officialRoles.isNotEmpty()) {
+                                    add(
+                                        DetailRowSpec(
+                                            "Suggested officials",
+                                            resolvedMatchRules.officialRoles.joinToString(", "),
+                                        ),
+                                    )
+                                }
+                            },
+                        )
+                    },
+                    editContent = {
+                        Text(
+                            text = "The sport defines the match format. This event can adjust segment count, result options, and incident capture without changing the sport default.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(localImageScheme.current.onSurfaceVariant),
+                        )
+                        DetailStatsGrid(
+                            items = listOf(
+                                DetailGridItem(
+                                    label = "Scoring model",
+                                    value = matchScoringModelLabel(resolvedMatchRules.scoringModel),
+                                ),
+                                DetailGridItem(
+                                    label = "Segment label",
+                                    value = resolvedMatchRules.segmentLabel,
+                                ),
+                                DetailGridItem(
+                                    label = "Point incident type",
+                                    value = matchIncidentTypeLabel(autoPointIncidentType),
+                                ),
+                            ),
+                        )
+                        FormSectionDivider()
+                        NumberInputField(
+                            value = editEvent.matchRulesOverride?.segmentCount?.toString().orEmpty(),
+                            label = "${resolvedMatchRules.segmentLabel} Count",
+                            placeholder = baseMatchRules.segmentCount.toString(),
+                            supportingText = "Leave blank to use the sport default of ${baseMatchRules.segmentCount}.",
+                            onValueChange = { newValue ->
+                                if (newValue.isNotEmpty() && !newValue.all { it.isDigit() }) return@NumberInputField
+                                val nextValue = newValue.toIntOrNull()
+                                    ?.takeIf { it > 0 }
+                                    ?.takeUnless { it == baseMatchRules.segmentCount }
+                                onEditEvent {
+                                    copy(
+                                        matchRulesOverride = copyMatchRulesOverride(
+                                            current = matchRulesOverride,
+                                            segmentCount = nextValue,
+                                        ),
+                                    )
+                                }
+                            },
+                            isError = false,
+                        )
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            LabeledCheckboxRow(
+                                checked = resolvedMatchRules.supportsDraw,
+                                label = "Allow draws",
+                                onCheckedChange = { checked ->
+                                    onEditEvent {
+                                        copy(
+                                            matchRulesOverride = copyMatchRulesOverride(
+                                                current = matchRulesOverride,
+                                                supportsDraw = checked.takeUnless { it == baseMatchRules.supportsDraw },
+                                            ),
+                                        )
+                                    }
+                                },
+                            )
+                            LabeledCheckboxRow(
+                                checked = resolvedMatchRules.supportsOvertime,
+                                label = "Allow overtime",
+                                onCheckedChange = { checked ->
+                                    onEditEvent {
+                                        copy(
+                                            matchRulesOverride = copyMatchRulesOverride(
+                                                current = matchRulesOverride,
+                                                supportsOvertime = checked.takeUnless { it == baseMatchRules.supportsOvertime },
+                                            ),
+                                        )
+                                    }
+                                },
+                            )
+                            LabeledCheckboxRow(
+                                checked = resolvedMatchRules.supportsShootout,
+                                label = "Allow shootout / tiebreak",
+                                onCheckedChange = { checked ->
+                                    onEditEvent {
+                                        copy(
+                                            matchRulesOverride = copyMatchRulesOverride(
+                                                current = matchRulesOverride,
+                                                supportsShootout = checked.takeUnless { it == baseMatchRules.supportsShootout },
+                                            ),
+                                        )
+                                    }
+                                },
+                            )
+                            LabeledCheckboxRow(
+                                checked = editEvent.autoCreatePointMatchIncidents,
+                                label = "Create a scoring incident for each point / goal",
+                                onCheckedChange = { checked ->
+                                    val enforcedIncidentTypes = enforceAutoPointIncidentType(
+                                        selected = selectedMatchIncidentTypes,
+                                        autoPointIncidentType = autoPointIncidentType,
+                                        enabled = checked,
+                                    )
+                                    val incidentOverride = supportedIncidentTypesOverrideOrNull(
+                                        selected = enforcedIncidentTypes,
+                                        defaults = baseMatchRules.supportedIncidentTypes,
+                                    )
+                                    onEditEvent {
+                                        copy(
+                                            autoCreatePointMatchIncidents = checked,
+                                            matchRulesOverride = copyMatchRulesOverride(
+                                                current = matchRulesOverride,
+                                                supportedIncidentTypes = incidentOverride,
+                                            ),
+                                        )
+                                    }
+                                },
+                            )
+                            Text(
+                                text = if (editEvent.autoCreatePointMatchIncidents) {
+                                    "${matchIncidentTypeLabel(autoPointIncidentType)} incidents will stay available while automatic scoring capture is on."
+                                } else {
+                                    "Officials can still add incidents manually when needed."
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(localImageScheme.current.onSurfaceVariant),
+                            )
+                            LabeledCheckboxRow(
+                                checked = resolvedMatchRules.pointIncidentRequiresParticipant,
+                                label = "Point incidents require a participant",
+                                onCheckedChange = { checked ->
+                                    onEditEvent {
+                                        copy(
+                                            matchRulesOverride = copyMatchRulesOverride(
+                                                current = matchRulesOverride,
+                                                pointIncidentRequiresParticipant = checked.takeUnless {
+                                                    it == baseMatchRules.pointIncidentRequiresParticipant
+                                                },
+                                            ),
+                                        )
+                                    }
+                                },
+                            )
+                        }
+                        PlatformDropdown(
+                            selectedValue = "",
+                            onSelectionChange = {},
+                            options = matchIncidentOptions,
+                            label = "Incident types available in matches",
+                            modifier = Modifier.fillMaxWidth(),
+                            multiSelect = true,
+                            selectedValues = selectedMatchIncidentTypes,
+                            onMultiSelectionChange = { selectedValues ->
+                                val enforcedIncidentTypes = enforceAutoPointIncidentType(
+                                    selected = selectedValues,
+                                    autoPointIncidentType = autoPointIncidentType,
+                                    enabled = editEvent.autoCreatePointMatchIncidents,
+                                )
+                                val incidentOverride = supportedIncidentTypesOverrideOrNull(
+                                    selected = enforcedIncidentTypes,
+                                    defaults = baseMatchRules.supportedIncidentTypes,
+                                )
+                                onEditEvent {
+                                    copy(
+                                        matchRulesOverride = copyMatchRulesOverride(
+                                            current = matchRulesOverride,
+                                            supportedIncidentTypes = incidentOverride,
+                                        ),
+                                    )
+                                }
+                            },
+                        )
+                        if (resolvedMatchRules.officialRoles.isNotEmpty()) {
+                            Text(
+                                text = "Suggested officials: ${resolvedMatchRules.officialRoles.joinToString(", ")}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(localImageScheme.current.onSurfaceVariant),
+                            )
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                        ) {
+                            TextButton(
+                                onClick = {
+                                    onEditEvent {
+                                        copy(matchRulesOverride = null)
+                                    }
+                                },
+                                enabled = editEvent.matchRulesOverride != null,
+                            ) {
+                                Text("Reset to sport defaults")
+                            }
+                        }
+                    },
+                )
+
                 if (showOfficialsPanel) {
                     animatedCardSection(
                         sectionId = "officials",
@@ -2399,6 +2763,8 @@ fun EventDetails(
                         collapsibleInViewMode = true,
                         viewSummary = "${assistantHostIds.size + event.officialIds.size} assigned",
                         isEditMode = editView,
+                        lazyListState = lazyListState,
+                        stickyHeaderTopInset = stickyHeaderTopInset,
                         animationDelay = 300,
                         viewContent = {
                             DetailKeyValueList(
@@ -2819,6 +3185,8 @@ fun EventDetails(
                         collapsibleInViewMode = true,
                         viewSummary = competitionSummaryLine,
                         isEditMode = editView,
+                        lazyListState = lazyListState,
+                        stickyHeaderTopInset = stickyHeaderTopInset,
                         animationDelay = 400,
                         requiredMissingCount = divisionSettingsMissingRequiredCount,
                         viewContent = {
@@ -3548,6 +3916,8 @@ fun EventDetails(
                         collapsibleInViewMode = true,
                         viewSummary = "Scoring rules",
                         isEditMode = editView,
+                        lazyListState = lazyListState,
+                        stickyHeaderTopInset = stickyHeaderTopInset,
                         animationDelay = 440,
                         viewContent = {
                             DetailKeyValueList(
@@ -3580,6 +3950,8 @@ fun EventDetails(
                         viewSummary = facilitiesSummaryLine,
                         requiredMissingCount = scheduleMissingRequiredCount,
                         isEditMode = editView,
+                        lazyListState = lazyListState,
+                        stickyHeaderTopInset = stickyHeaderTopInset,
                         animationDelay = 450,
                         viewContent = {
                             DetailKeyValueList(
@@ -3973,12 +4345,10 @@ fun EventDetails(
                                 onUpdateSlot = onUpdateLeagueTimeSlot,
                                 onRemoveSlot = onRemoveLeagueTimeSlot,
                                 slotErrors = leagueSlotErrors,
-                                showSlotEditor = (
-                                    editEvent.eventType == EventType.LEAGUE ||
-                                        editEvent.eventType == EventType.TOURNAMENT ||
-                                        editEvent.eventType == EventType.WEEKLY_EVENT ||
-                                        (scheduleTimeLocked && editEvent.eventType == EventType.EVENT)
-                                    ),
+                                showSlotEditor = slotEditorEnabled,
+                                showUseManualTimeSlotsToggle = supportsOptionalManualTimeSlots,
+                                useManualTimeSlots = useManualTimeSlots,
+                                onUseManualTimeSlotsChange = onUseManualTimeSlotsChange,
                                 slotDivisionOptions = slotDivisionOptions,
                                 lockSlotDivisions = editEvent.singleDivision,
                                 lockedDivisionIds = editEvent.divisions.normalizeDivisionIdentifiers(),
@@ -4228,6 +4598,8 @@ fun LazyListScope.animatedCardSection(
     viewSummary: String? = null,
     editSummary: String? = null,
     isEditMode: Boolean,
+    lazyListState: LazyListState? = null,
+    stickyHeaderTopInset: Dp = 0.dp,
     animationDelay: Int = 0,
     viewContent: @Composable() (ColumnScope.() -> Unit),
     editContent: @Composable() (ColumnScope.() -> Unit)
@@ -4236,17 +4608,27 @@ fun LazyListScope.animatedCardSection(
     val shouldUseStickyHeader = isCollapsible && sectionTitle != null
     val horizontalCardPadding = if (shouldUseStickyHeader) 0.dp else 16.dp
     val sectionStateKey = "$sectionId:${if (isEditMode) "edit" else "view"}"
+    val headerKey = "${sectionStateKey}_header"
     val expanded = sectionExpansionStates[sectionStateKey] ?: false
     val summaryText = if (isEditMode) editSummary else viewSummary
 
     if (shouldUseStickyHeader) {
-        stickyHeader(key = "${sectionStateKey}_header") {
+        stickyHeader(key = headerKey) {
+            val isPinned by remember(lazyListState, headerKey) {
+                derivedStateOf {
+                    lazyListState?.layoutInfo?.visibleItemsInfo?.any { itemInfo ->
+                        itemInfo.key == headerKey && itemInfo.offset <= 0
+                    } == true
+                }
+            }
             CollapsibleSectionHeaderCard(
                 title = sectionTitle,
                 expanded = expanded,
                 summaryText = summaryText,
                 requiredMissingCount = requiredMissingCount,
                 horizontalCardPadding = horizontalCardPadding,
+                topInset = stickyHeaderTopInset,
+                isPinned = isPinned,
                 onToggleExpanded = {
                     sectionExpansionStates[sectionStateKey] = !expanded
                 },
@@ -4315,22 +4697,32 @@ private fun CollapsibleSectionHeaderCard(
     summaryText: String?,
     requiredMissingCount: Int,
     horizontalCardPadding: Dp,
+    topInset: Dp,
+    isPinned: Boolean,
     onToggleExpanded: () -> Unit,
 ) {
     val bottomCornerSize = if (expanded) 0.dp else 16.dp
+    val stickyHeaderTopSpacing = 6.dp
+    val pinnedTopInset by animateDpAsState(
+        targetValue = if (isPinned) topInset else 0.dp,
+        label = "pinnedHeaderTopInset",
+    )
+    val pinnedHeaderOffset = (pinnedTopInset - stickyHeaderTopSpacing).coerceAtLeast(0.dp)
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
+            .zIndex(1f)
             .background(MaterialTheme.colorScheme.surface),
     ) {
         Card(
             modifier = Modifier
                 .fillMaxWidth()
+                .offset(y = pinnedHeaderOffset)
                 .padding(
                     start = horizontalCardPadding,
                     end = horizontalCardPadding,
-                    top = 6.dp,
+                    top = stickyHeaderTopSpacing,
                     bottom = if (expanded) 0.dp else 6.dp,
                 ),
             shape = RoundedCornerShape(
@@ -6128,6 +6520,7 @@ private fun computeEventValidationResult(
     fieldCount: Int,
     leagueTimeSlots: List<TimeSlot>,
     leagueSlotErrors: Map<Int, String>,
+    slotEditorEnabled: Boolean,
     divisionDetailsForSettings: List<DivisionDetail>,
     isColorLoaded: Boolean,
     scheduleTimeLocked: Boolean,
@@ -6149,6 +6542,7 @@ private fun computeEventValidationResult(
             eventType = editEvent.eventType,
             isNewEvent = isNewEvent,
             scheduleTimeLocked = scheduleTimeLocked,
+            slotEditorEnabled = slotEditorEnabled,
         )
     ) {
         leagueTimeSlots.isNotEmpty() && leagueSlotErrors.isEmpty()
@@ -6387,13 +6781,19 @@ internal fun requiresScheduleInputValidation(
     eventType: EventType,
     isNewEvent: Boolean,
     scheduleTimeLocked: Boolean,
+    slotEditorEnabled: Boolean = true,
 ): Boolean {
     return !scheduleTimeLocked &&
         isNewEvent &&
         (
-            eventType == EventType.LEAGUE ||
-                eventType == EventType.TOURNAMENT ||
-                eventType == EventType.WEEKLY_EVENT
+            eventType == EventType.WEEKLY_EVENT ||
+                (
+                    slotEditorEnabled &&
+                        (
+                            eventType == EventType.LEAGUE ||
+                                eventType == EventType.TOURNAMENT
+                            )
+                    )
             )
 }
 
@@ -6444,6 +6844,227 @@ private fun LabeledCheckboxRow(
             color = Color(localImageScheme.current.onSurface),
         )
     }
+}
+
+private fun matchScoringModelLabel(value: String?): String {
+    return when (value?.trim()?.uppercase()) {
+        "SETS" -> "Sets"
+        "INNINGS" -> "Innings"
+        "POINTS_ONLY" -> "Points only"
+        else -> "Periods"
+    }
+}
+
+private fun matchSegmentLabelForModel(value: String): String {
+    return when (value.trim().uppercase()) {
+        "SETS" -> "Set"
+        "INNINGS" -> "Inning"
+        "POINTS_ONLY" -> "Total"
+        else -> "Period"
+    }
+}
+
+private fun matchIncidentTypeLabel(value: String): String {
+    return when (value.trim().uppercase()) {
+        "POINT" -> "Point / Goal"
+        "DISCIPLINE" -> "Discipline"
+        "NOTE" -> "Note"
+        "ADMIN" -> "Admin"
+        else -> value
+            .trim()
+            .lowercase()
+            .replace("_", " ")
+            .split(" ")
+            .filter(String::isNotBlank)
+            .joinToString(" ") { token -> token.replaceFirstChar { character -> character.titlecase() } }
+    }
+}
+
+private fun normalizedMatchRuleStringList(values: List<String>?): List<String> =
+    values
+        .orEmpty()
+        .map(String::trim)
+        .filter(String::isNotBlank)
+        .distinct()
+
+private fun sameStringSet(left: List<String>, right: List<String>): Boolean {
+    if (left.size != right.size) {
+        return false
+    }
+    val leftSet = left.toSet()
+    return right.all(leftSet::contains)
+}
+
+private fun normalizeMatchRulesOverride(value: MatchRulesConfigMVP?): MatchRulesConfigMVP? {
+    if (value == null) {
+        return null
+    }
+
+    val segmentCount = value.segmentCount?.takeIf { it > 0 }
+    val supportedIncidentTypes = normalizedMatchRuleStringList(value.supportedIncidentTypes)
+        .takeIf { it.isNotEmpty() }
+
+    val normalized = MatchRulesConfigMVP(
+        segmentCount = segmentCount,
+        supportsDraw = value.supportsDraw,
+        supportsOvertime = value.supportsOvertime,
+        supportsShootout = value.supportsShootout,
+        supportedIncidentTypes = supportedIncidentTypes,
+        pointIncidentRequiresParticipant = value.pointIncidentRequiresParticipant,
+    )
+
+    return if (
+        normalized.segmentCount == null &&
+        normalized.supportsDraw == null &&
+        normalized.supportsOvertime == null &&
+        normalized.supportsShootout == null &&
+        normalized.supportedIncidentTypes == null &&
+        normalized.pointIncidentRequiresParticipant == null
+    ) {
+        null
+    } else {
+        normalized
+    }
+}
+
+private fun copyMatchRulesOverride(
+    current: MatchRulesConfigMVP?,
+    segmentCount: Int? = current?.segmentCount,
+    supportsDraw: Boolean? = current?.supportsDraw,
+    supportsOvertime: Boolean? = current?.supportsOvertime,
+    supportsShootout: Boolean? = current?.supportsShootout,
+    supportedIncidentTypes: List<String>? = current?.supportedIncidentTypes,
+    pointIncidentRequiresParticipant: Boolean? = current?.pointIncidentRequiresParticipant,
+): MatchRulesConfigMVP? {
+    return normalizeMatchRulesOverride(
+        MatchRulesConfigMVP(
+            segmentCount = segmentCount,
+            supportsDraw = supportsDraw,
+            supportsOvertime = supportsOvertime,
+            supportsShootout = supportsShootout,
+            supportedIncidentTypes = supportedIncidentTypes,
+            pointIncidentRequiresParticipant = pointIncidentRequiresParticipant,
+        ),
+    )
+}
+
+private fun enforceAutoPointIncidentType(
+    selected: List<String>,
+    autoPointIncidentType: String,
+    enabled: Boolean,
+): List<String> {
+    val normalized = normalizedMatchRuleStringList(selected)
+    if (!enabled) {
+        return normalized
+    }
+    val normalizedAutoType = autoPointIncidentType.trim().ifBlank { "POINT" }
+    return (normalized + normalizedAutoType).distinct()
+}
+
+private fun supportedIncidentTypesOverrideOrNull(
+    selected: List<String>,
+    defaults: List<String>,
+): List<String>? {
+    val normalizedSelected = normalizedMatchRuleStringList(selected)
+    if (normalizedSelected.isEmpty() || sameStringSet(normalizedSelected, normalizedMatchRuleStringList(defaults))) {
+        return null
+    }
+    return normalizedSelected
+}
+
+private fun resolveEventMatchRules(
+    event: Event,
+    sport: Sport?,
+): ResolvedMatchRulesMVP {
+    if (sport == null && event.matchRulesOverride == null && event.resolvedMatchRules != null) {
+        return event.resolvedMatchRules
+    }
+
+    val sportTemplate = sport?.matchRulesTemplate
+    val eventOverride = event.matchRulesOverride
+    val fallbackModel = when {
+        event.resolvedMatchRules?.scoringModel?.isNotBlank() == true -> event.resolvedMatchRules.scoringModel
+        event.usesSets -> "SETS"
+        else -> "POINTS_ONLY"
+    }
+    val scoringModel = (
+        eventOverride?.scoringModel
+            ?: sportTemplate?.scoringModel
+            ?: fallbackModel
+        )
+        .trim()
+        .uppercase()
+        .takeIf { it in setOf("SETS", "PERIODS", "INNINGS", "POINTS_ONLY") }
+        ?: "POINTS_ONLY"
+
+    val fallbackSegmentCount = when (scoringModel) {
+        "SETS" -> when (event.eventType) {
+            EventType.LEAGUE -> (event.setsPerMatch ?: event.winnerSetCount).coerceAtLeast(1)
+            EventType.TOURNAMENT -> event.winnerSetCount.coerceAtLeast(1)
+            EventType.EVENT, EventType.WEEKLY_EVENT -> 1
+        }
+
+        else -> event.resolvedMatchRules?.segmentCount?.takeIf { it > 0 } ?: 1
+    }
+    val segmentCount = eventOverride?.segmentCount
+        ?.takeIf { it > 0 }
+        ?: sportTemplate?.segmentCount?.takeIf { it > 0 }
+        ?: fallbackSegmentCount
+    val defaultIncidentTypes = event.resolvedMatchRules?.supportedIncidentTypes
+        ?.takeIf { it.isNotEmpty() }
+        ?: listOf("POINT", "DISCIPLINE", "NOTE", "ADMIN")
+    val officialRolesFromEvent = event.officialPositions
+        .map(EventOfficialPosition::name)
+        .map(String::trim)
+        .filter(String::isNotBlank)
+        .distinct()
+
+    return ResolvedMatchRulesMVP(
+        scoringModel = scoringModel,
+        segmentCount = segmentCount,
+        segmentLabel = eventOverride?.segmentLabel
+            ?.takeIf(String::isNotBlank)
+            ?: sportTemplate?.segmentLabel
+                ?.takeIf(String::isNotBlank)
+            ?: event.resolvedMatchRules?.segmentLabel
+            ?: matchSegmentLabelForModel(scoringModel),
+        supportsDraw = eventOverride?.supportsDraw
+            ?: sportTemplate?.supportsDraw
+            ?: event.resolvedMatchRules?.supportsDraw
+            ?: false,
+        supportsOvertime = eventOverride?.supportsOvertime
+            ?: sportTemplate?.supportsOvertime
+            ?: event.resolvedMatchRules?.supportsOvertime
+            ?: false,
+        supportsShootout = eventOverride?.supportsShootout
+            ?: sportTemplate?.supportsShootout
+            ?: event.resolvedMatchRules?.supportsShootout
+            ?: false,
+        officialRoles = normalizedMatchRuleStringList(eventOverride?.officialRoles)
+            .ifEmpty {
+                normalizedMatchRuleStringList(sportTemplate?.officialRoles)
+                    .ifEmpty {
+                        event.resolvedMatchRules?.officialRoles
+                            ?.takeIf { it.isNotEmpty() }
+                            ?: officialRolesFromEvent
+                    }
+            },
+        supportedIncidentTypes = normalizedMatchRuleStringList(eventOverride?.supportedIncidentTypes)
+            .ifEmpty {
+                normalizedMatchRuleStringList(sportTemplate?.supportedIncidentTypes)
+                    .ifEmpty { defaultIncidentTypes }
+            },
+        autoCreatePointIncidentType = eventOverride?.autoCreatePointIncidentType
+            ?.takeIf(String::isNotBlank)
+            ?: sportTemplate?.autoCreatePointIncidentType
+                ?.takeIf(String::isNotBlank)
+            ?: event.resolvedMatchRules?.autoCreatePointIncidentType
+            ?: "POINT",
+        pointIncidentRequiresParticipant = eventOverride?.pointIncidentRequiresParticipant
+            ?: sportTemplate?.pointIncidentRequiresParticipant
+            ?: event.resolvedMatchRules?.pointIncidentRequiresParticipant
+            ?: false,
+    )
 }
 
 internal fun computeLeagueSlotErrors(

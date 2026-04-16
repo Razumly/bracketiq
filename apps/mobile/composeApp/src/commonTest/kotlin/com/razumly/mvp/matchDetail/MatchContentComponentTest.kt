@@ -10,6 +10,7 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
+import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
@@ -17,11 +18,15 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.network.dto.MatchIncidentOperationDto
+import com.razumly.mvp.core.network.dto.MatchOfficialCheckInOperationDto
+import com.razumly.mvp.core.network.dto.MatchSegmentOperationDto
 import com.razumly.mvp.eventCreate.CreateEvent_FakeEventRepository
 import com.razumly.mvp.eventCreate.CreateEvent_FakeMatchRepository
 import com.razumly.mvp.eventCreate.CreateEvent_FakeUserRepository
 import com.razumly.mvp.eventCreate.MainDispatcherTest
 import com.razumly.mvp.eventDetail.data.IMatchRepository
+import com.razumly.mvp.eventDetail.data.StagedMatchCreate
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
@@ -169,6 +174,110 @@ class MatchContentComponentTest : MainDispatcherTest() {
         assertFalse(harness.component.officialCheckedIn.value)
         assertTrue(harness.component.showOfficialCheckInDialog.value)
     }
+
+    @Test
+    fun given_period_rules_when_loading_match_then_segments_are_normalized_to_rule_count() = runTest(testDispatcher) {
+        val user = createUser(id = "user-1", teamIds = listOf("team-c"))
+        val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c")).copy(usesSets = false)
+        val match = createMatch(
+            eventId = event.id,
+            team1Id = "team-a",
+            team2Id = "team-b",
+            teamOfficialId = "team-c",
+            officialCheckedIn = true,
+        ).copy(
+            resolvedMatchRules = ResolvedMatchRulesMVP(
+                scoringModel = "PERIODS",
+                segmentCount = 4,
+                segmentLabel = "Quarter",
+            ),
+            team1Points = listOf(0),
+            team2Points = listOf(0),
+            setResults = listOf(0),
+        )
+        val harness = MatchDetailHarness(
+            event = event,
+            initialMatch = match,
+            currentUser = user,
+            teams = listOf(
+                createTeam(id = "team-a", captainId = "captain-a"),
+                createTeam(id = "team-b", captainId = "captain-b"),
+                createTeam(id = "team-c", captainId = user.id, playerIds = listOf(user.id)),
+            ),
+        )
+
+        advance()
+
+        assertEquals(4, harness.component.matchWithTeams.value.match.segments.size)
+    }
+
+    @Test
+    fun given_auto_point_incidents_when_recording_score_then_repository_uses_incident_operations() = runTest(testDispatcher) {
+        val user = createUser(id = "user-1", teamIds = listOf("team-c"))
+        val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c")).copy(
+            usesSets = false,
+            autoCreatePointMatchIncidents = true,
+        )
+        val teamA = createTeam(
+            id = "team-a",
+            captainId = "captain-a",
+            playerIds = listOf("player-a"),
+        ).copy(
+            playerRegistrations = listOf(
+                com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration(
+                    id = "reg-a",
+                    teamId = "team-a",
+                    userId = "player-a",
+                    status = "ACTIVE",
+                    jerseyNumber = "9",
+                )
+            )
+        )
+        val harness = MatchDetailHarness(
+            event = event,
+            initialMatch = createMatch(
+                eventId = event.id,
+                team1Id = "team-a",
+                team2Id = "team-b",
+                teamOfficialId = "team-c",
+                officialCheckedIn = true,
+            ).copy(
+                resolvedMatchRules = ResolvedMatchRulesMVP(
+                    scoringModel = "POINTS_ONLY",
+                    segmentCount = 1,
+                    segmentLabel = "Total",
+                    pointIncidentRequiresParticipant = true,
+                )
+            ),
+            currentUser = user,
+            teams = listOf(
+                teamA,
+                createTeam(id = "team-b", captainId = "captain-b"),
+                createTeam(id = "team-c", captainId = user.id, playerIds = listOf(user.id)),
+            ),
+        )
+
+        advance()
+
+        harness.component.recordPointIncident(
+            isTeam1 = true,
+            eventRegistrationId = "reg-a",
+            participantUserId = "player-a",
+            minute = 12,
+            note = "Header",
+        )
+        advance()
+
+        val operationCall = harness.matchRepository.operationCalls.single()
+        val incident = operationCall.incidentOperations.single()
+        assertEquals("CREATE", incident.action)
+        assertEquals("team-a", incident.eventTeamId)
+        assertEquals("reg-a", incident.eventRegistrationId)
+        assertEquals("player-a", incident.participantUserId)
+        assertEquals(1, incident.linkedPointDelta)
+        assertEquals(12, incident.minute)
+        assertEquals("Header", incident.note)
+    }
 }
 
 private class MatchDetailHarness(
@@ -211,6 +320,7 @@ private class MatchDetailFakeMatchRepository(
 ) : IMatchRepository by CreateEvent_FakeMatchRepository() {
     private val matchFlow = MutableStateFlow(Result.success(initialMatch.toMatchWithRelations()))
     val updatedMatches = mutableListOf<MatchMVP>()
+    val operationCalls = mutableListOf<MatchOperationCall>()
 
     override suspend fun getMatch(matchId: String): Result<MatchMVP> =
         Result.success(matchFlow.value.getOrThrow().match)
@@ -222,7 +332,35 @@ private class MatchDetailFakeMatchRepository(
         matchFlow.value = Result.success(match.toMatchWithRelations())
         return Result.success(Unit)
     }
+
+    override suspend fun updateMatchOperations(
+        match: MatchMVP,
+        segmentOperations: List<MatchSegmentOperationDto>?,
+        incidentOperations: List<MatchIncidentOperationDto>?,
+        officialCheckIn: MatchOfficialCheckInOperationDto?,
+        finalize: Boolean,
+        time: Instant?,
+    ): Result<MatchMVP> {
+        operationCalls += MatchOperationCall(
+            match = match,
+            segmentOperations = segmentOperations.orEmpty(),
+            incidentOperations = incidentOperations.orEmpty(),
+            officialCheckIn = officialCheckIn,
+            finalize = finalize,
+            time = time,
+        )
+        return Result.success(match)
+    }
 }
+
+private data class MatchOperationCall(
+    val match: MatchMVP,
+    val segmentOperations: List<MatchSegmentOperationDto>,
+    val incidentOperations: List<MatchIncidentOperationDto>,
+    val officialCheckIn: MatchOfficialCheckInOperationDto?,
+    val finalize: Boolean,
+    val time: Instant?,
+)
 
 private class MatchDetailFakeUserRepository(
     currentUser: UserData,
@@ -419,5 +557,4 @@ private fun Team.toTeamWithRelations(usersById: Map<String, UserData>): TeamWith
         matchAsTeam2 = emptyList(),
     )
 }
-
 

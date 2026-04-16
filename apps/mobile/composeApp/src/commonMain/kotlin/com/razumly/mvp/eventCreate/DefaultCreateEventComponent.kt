@@ -104,6 +104,7 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     val billingAddressPrompt: StateFlow<BillingAddressDraft?>
     val localFields: StateFlow<List<Field>>
     val leagueSlots: StateFlow<List<TimeSlot>>
+    val useManualTimeSlots: StateFlow<Boolean>
     val leagueScoringConfig: StateFlow<LeagueScoringConfigDTO>
     val suggestedUsers: StateFlow<List<UserData>>
     val pendingStaffInvites: StateFlow<List<PendingStaffInviteDraft>>
@@ -147,6 +148,7 @@ interface CreateEventComponent : IPaymentProcessor, ComponentContext {
     fun selectFieldCount(count: Int)
     fun updateLocalFieldName(index: Int, name: String)
     fun updateLocalFieldDivisions(index: Int, divisions: List<String>)
+    fun setUseManualTimeSlots(enabled: Boolean)
     fun addLeagueTimeSlot()
     fun updateLeagueTimeSlot(index: Int, update: TimeSlot.() -> TimeSlot)
     fun removeLeagueTimeSlot(index: Int)
@@ -251,6 +253,8 @@ class DefaultCreateEventComponent(
     override val localFields = _localFields.asStateFlow()
     private val _leagueSlots = MutableStateFlow<List<TimeSlot>>(emptyList())
     override val leagueSlots = _leagueSlots.asStateFlow()
+    private val _useManualTimeSlots = MutableStateFlow(false)
+    override val useManualTimeSlots = _useManualTimeSlots.asStateFlow()
     private val _leagueScoringConfig = MutableStateFlow(LeagueScoringConfigDTO())
     override val leagueScoringConfig = _leagueScoringConfig.asStateFlow()
     private val _fieldCount = MutableStateFlow(0)
@@ -495,6 +499,7 @@ class DefaultCreateEventComponent(
                 _leagueScoringConfig.value = defaultLeagueScoringConfigForSport(normalized.sportId)
             }
             syncLeagueSlotDefaultStartDates(previousEvent = previous, updatedEvent = normalized)
+            syncLeagueSlotDefaultEndDates(previousEvent = previous, updatedEvent = normalized)
             syncLocalFieldsForEvent(normalized)
         }
     }
@@ -516,6 +521,7 @@ class DefaultCreateEventComponent(
                 _leagueScoringConfig.value = defaultLeagueScoringConfigForSport(normalized.sportId)
             }
             syncLeagueSlotDefaultStartDates(previousEvent = previous, updatedEvent = normalized)
+            syncLeagueSlotDefaultEndDates(previousEvent = previous, updatedEvent = normalized)
             syncLocalFieldsForEvent(normalized)
         }
     }
@@ -550,8 +556,8 @@ class DefaultCreateEventComponent(
     }
 
     private fun refreshTermsConsentState() {
+        _termsConsentLoading.value = true
         scope.launch {
-            _termsConsentLoading.value = true
             userRepository.getChatTermsConsentState()
                 .onSuccess { state ->
                     _termsConsentState.value = state
@@ -579,6 +585,7 @@ class DefaultCreateEventComponent(
 
             _newEventState.value = normalized
             syncLeagueSlotDefaultStartDates(previousEvent = previous, updatedEvent = normalized)
+            syncLeagueSlotDefaultEndDates(previousEvent = previous, updatedEvent = normalized)
             syncLocalFieldsForEvent(normalized)
         }
     }
@@ -859,6 +866,7 @@ class DefaultCreateEventComponent(
     }
 
     override fun onTypeSelected(type: EventType) {
+        val previousType = _newEventState.value.eventType
         _currentEventType.value = type
         updateEventField {
             when (type) {
@@ -882,6 +890,16 @@ class DefaultCreateEventComponent(
                 )
             }
         }
+        when (type) {
+            EventType.LEAGUE, EventType.TOURNAMENT -> {
+                if (previousType != EventType.LEAGUE && previousType != EventType.TOURNAMENT) {
+                    _useManualTimeSlots.value = false
+                }
+            }
+
+            EventType.WEEKLY_EVENT -> _useManualTimeSlots.value = true
+            EventType.EVENT -> _useManualTimeSlots.value = false
+        }
         if (type == EventType.LEAGUE || type == EventType.TOURNAMENT || type == EventType.WEEKLY_EVENT) {
             if (_fieldCount.value <= 0) {
                 val selectedCount = when {
@@ -893,6 +911,13 @@ class DefaultCreateEventComponent(
             }
         }
         if ((type == EventType.LEAGUE || type == EventType.TOURNAMENT || type == EventType.WEEKLY_EVENT) && _leagueSlots.value.isEmpty()) {
+            _leagueSlots.value = listOf(createDefaultLeagueSlot())
+        }
+    }
+
+    override fun setUseManualTimeSlots(enabled: Boolean) {
+        _useManualTimeSlots.value = enabled
+        if (enabled && _leagueSlots.value.isEmpty()) {
             _leagueSlots.value = listOf(createDefaultLeagueSlot())
         }
     }
@@ -1604,10 +1629,17 @@ class DefaultCreateEventComponent(
             preparedEvent.eventType == EventType.LEAGUE || preparedEvent.eventType == EventType.TOURNAMENT
         }
         if (shouldPersistManagedSlots) {
-            preparedTimeSlots = buildLeagueSlotDrafts(
-                event = preparedEvent,
-                fieldIdReplacements = fieldIdReplacements,
-            )
+            preparedTimeSlots = if (shouldUseConfiguredLeagueSlots(event = preparedEvent)) {
+                buildLeagueSlotDrafts(
+                    event = preparedEvent,
+                    fieldIdReplacements = fieldIdReplacements,
+                )
+            } else {
+                buildAutomaticEventRangeSlotDrafts(
+                    event = preparedEvent,
+                    fieldIds = preparedFields.map(Field::id).ifEmpty { preparedEvent.fieldIds.normalizeDistinctIds() },
+                )
+            }
 
             preparedEvent = preparedEvent.copy(timeSlotIds = preparedTimeSlots.map { it.id })
         }
@@ -1731,6 +1763,51 @@ class DefaultCreateEventComponent(
         }
     }
 
+    private fun shouldUseConfiguredLeagueSlots(event: Event): Boolean {
+        if (_isRentalFlow.value) {
+            return true
+        }
+        if (event.eventType == EventType.WEEKLY_EVENT) {
+            return true
+        }
+        if (event.eventType != EventType.LEAGUE && event.eventType != EventType.TOURNAMENT) {
+            return false
+        }
+        if (event.noFixedEndDateTime) {
+            return true
+        }
+        return _useManualTimeSlots.value
+    }
+
+    private fun buildAutomaticEventRangeSlotDrafts(
+        event: Event,
+        fieldIds: List<String>,
+    ): List<TimeSlot> {
+        val normalizedFieldIds = fieldIds.normalizeDistinctIds()
+        if (normalizedFieldIds.isEmpty()) {
+            return emptyList()
+        }
+        val slotStart = event.start
+        val slotEnd = event.end.takeIf { it > slotStart } ?: defaultEventEnd(slotStart)
+        val slotDayOfWeek = slotStart.toMondayFirstDay()
+        return listOf(
+            TimeSlot(
+                id = newId(),
+                dayOfWeek = slotDayOfWeek,
+                daysOfWeek = listOf(slotDayOfWeek),
+                divisions = defaultFieldDivisions(event),
+                startTimeMinutes = slotStart.toMinutesOfDay(),
+                endTimeMinutes = slotEnd.toMinutesOfDay(),
+                startDate = slotStart,
+                repeating = false,
+                endDate = slotEnd,
+                scheduledFieldId = normalizedFieldIds.first(),
+                scheduledFieldIds = normalizedFieldIds,
+                price = null,
+            ),
+        )
+    }
+
     private fun syncLeagueSlotDefaultStartDates(previousEvent: Event, updatedEvent: Event) {
         if (previousEvent.start == updatedEvent.start) {
             return
@@ -1738,6 +1815,28 @@ class DefaultCreateEventComponent(
         _leagueSlots.value = _leagueSlots.value.map { slot ->
             if (slot.repeating && slot.startDate == previousEvent.start) {
                 slot.copy(startDate = updatedEvent.start)
+            } else {
+                slot
+            }
+        }
+    }
+
+    private fun syncLeagueSlotDefaultEndDates(
+        previousEvent: Event,
+        updatedEvent: Event,
+    ) {
+        val previousDefaultEnd = previousEvent.defaultLeagueSlotEndDate()
+        val updatedDefaultEnd = updatedEvent.defaultLeagueSlotEndDate()
+        val forceRepeatingEndReset = previousEvent.eventType != updatedEvent.eventType &&
+            updatedEvent.eventType != EventType.EVENT
+        if (!forceRepeatingEndReset && previousDefaultEnd == updatedDefaultEnd) {
+            return
+        }
+        _leagueSlots.value = _leagueSlots.value.map { slot ->
+            if (!slot.repeating) {
+                slot
+            } else if (forceRepeatingEndReset || slot.endDate == previousDefaultEnd) {
+                slot.copy(endDate = updatedDefaultEnd)
             } else {
                 slot
             }

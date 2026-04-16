@@ -96,6 +96,7 @@ fun CreateEventScreen(
     val organizationTemplatesError by component.organizationTemplatesError.collectAsState()
     val localFields by component.localFields.collectAsState()
     val leagueSlots by component.leagueSlots.collectAsState()
+    val useManualTimeSlots by component.useManualTimeSlots.collectAsState()
     val leagueScoringConfig by component.leagueScoringConfig.collectAsState()
     val suggestedUsers by component.suggestedUsers.collectAsState()
     val pendingStaffInvites by component.pendingStaffInvites.collectAsState()
@@ -113,7 +114,7 @@ fun CreateEventScreen(
 
     PreparePaymentProcessor(component)
 
-    if (termsConsentLoading || !termsConsentState.accepted) {
+    if (!termsConsentLoading && !termsConsentState.accepted) {
         TermsConsentDialog(
             state = termsConsentState,
             loading = termsConsentLoading,
@@ -433,11 +434,18 @@ fun CreateEventScreen(
                             onEditTournament = onEditTournament,
                             onEventTypeSelected = onEventTypeSelected,
                             onSportSelected = { sportId ->
-                                onEditEvent { copy(sportId = sportId.takeIf(String::isNotBlank)) }
+                                onEditEvent {
+                                    copy(
+                                        sportId = sportId.takeIf(String::isNotBlank),
+                                        matchRulesOverride = null,
+                                    )
+                                }
                             },
                             onSelectFieldCount = component::selectFieldCount,
                             onUpdateLocalFieldName = component::updateLocalFieldName,
                             onUpdateLocalFieldDivisions = component::updateLocalFieldDivisions,
+                            useManualTimeSlots = useManualTimeSlots,
+                            onUseManualTimeSlotsChange = component::setUseManualTimeSlots,
                             onAddLeagueTimeSlot = component::addLeagueTimeSlot,
                             onUpdateLeagueTimeSlot = { index, updated ->
                                 component.updateLeagueTimeSlot(index) { updated }

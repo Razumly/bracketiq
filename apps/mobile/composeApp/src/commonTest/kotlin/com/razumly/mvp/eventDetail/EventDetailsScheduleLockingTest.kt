@@ -133,6 +133,18 @@ class EventDetailsScheduleLockingTest {
     }
 
     @Test
+    fun schedule_input_validation_is_skipped_when_slot_editor_is_hidden() {
+        val shouldValidate = requiresScheduleInputValidation(
+            eventType = EventType.LEAGUE,
+            isNewEvent = true,
+            scheduleTimeLocked = false,
+            slotEditorEnabled = false,
+        )
+
+        assertFalse(shouldValidate)
+    }
+
+    @Test
     fun field_count_validation_is_skipped_when_schedule_is_locked() {
         val shouldValidate = requiresFieldCountValidation(
             eventType = EventType.LEAGUE,

@@ -6,6 +6,7 @@ import kotlinx.serialization.Serializable
 data class Sport(
     val id: String,
     val name: String,
+    val matchRulesTemplate: MatchRulesConfigMVP? = null,
     val usePointsForWin: Boolean,
     val usePointsForDraw: Boolean,
     val usePointsForLoss: Boolean,
@@ -55,6 +56,7 @@ data class Sport(
 @Serializable
 data class SportDTO(
     val name: String,
+    val matchRulesTemplate: MatchRulesConfigMVP? = null,
     val usePointsForWin: Boolean = false,
     val usePointsForDraw: Boolean = false,
     val usePointsForLoss: Boolean = false,
@@ -104,6 +106,7 @@ data class SportDTO(
         Sport(
             id = id,
             name = name,
+            matchRulesTemplate = matchRulesTemplate,
             usePointsForWin = usePointsForWin,
             usePointsForDraw = usePointsForDraw,
             usePointsForLoss = usePointsForLoss,

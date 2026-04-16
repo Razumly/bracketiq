@@ -94,6 +94,20 @@ data class MatchMVP (
 }
 
 @Serializable
+data class MatchRulesConfigMVP(
+    val scoringModel: String? = null,
+    val segmentCount: Int? = null,
+    val segmentLabel: String? = null,
+    val supportsDraw: Boolean? = null,
+    val supportsOvertime: Boolean? = null,
+    val supportsShootout: Boolean? = null,
+    val officialRoles: List<String>? = null,
+    val supportedIncidentTypes: List<String>? = null,
+    val autoCreatePointIncidentType: String? = null,
+    val pointIncidentRequiresParticipant: Boolean? = null,
+)
+
+@Serializable
 data class ResolvedMatchRulesMVP(
     val scoringModel: String = "POINTS_ONLY",
     val segmentCount: Int = 1,

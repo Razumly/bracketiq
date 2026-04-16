@@ -2671,7 +2671,10 @@ fun EventDetailScreen(
                             onEventTypeSelected = component::onTypeSelected,
                             onSportSelected = { sportId ->
                                 component.editEventField {
-                                    copy(sportId = sportId.takeIf(String::isNotBlank))
+                                    copy(
+                                        sportId = sportId.takeIf(String::isNotBlank),
+                                        matchRulesOverride = null,
+                                    )
                                 }
                             },
                             sports = sports,

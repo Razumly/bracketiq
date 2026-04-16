@@ -199,7 +199,9 @@ suspend fun reconcileEventStaffInvites(
     val deletedInviteIds = scopedExistingInvites
         .filter { invite ->
             val inviteUserId = invite.userId?.trim()
-            !inviteUserId.isNullOrBlank() && inviteUserId !in activeUserIds
+            !inviteUserId.isNullOrBlank() &&
+                inviteUserId in normalizedPreviouslyAssignedUserIds &&
+                inviteUserId !in activeUserIds
         }
         .map { invite -> invite.id }
         .filter(String::isNotBlank)
@@ -273,4 +275,3 @@ suspend fun reconcileEventStaffInvites(
         ),
     )
 }
-

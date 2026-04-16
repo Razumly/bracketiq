@@ -21,8 +21,10 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -44,21 +46,23 @@ import androidx.compose.ui.unit.sp
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
+import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
+import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
+import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.activePlayerRegistrations
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.util.CircularRevealUnderlay
 import com.razumly.mvp.core.presentation.util.getScreenWidth
+import com.razumly.mvp.eventDetail.composables.DropdownField
 import com.razumly.mvp.eventMap.EventMap
 import com.razumly.mvp.eventMap.MapComponent
 import com.razumly.mvp.icons.MVPIcons
 import com.razumly.mvp.icons.Remove24Px
 import dev.icerock.moko.geo.LatLng
 import mvp.composeapp.generated.resources.Res
-import mvp.composeapp.generated.resources.confirm_set_result_message
-import mvp.composeapp.generated.resources.confirm_set_result_title
 import mvp.composeapp.generated.resources.not_official_check_in_message
 import mvp.composeapp.generated.resources.official_check_in_title
 import mvp.composeapp.generated.resources.official_checkin_message
-import mvp.composeapp.generated.resources.set_number
 import org.jetbrains.compose.resources.stringResource
 import kotlin.math.PI
 import kotlin.math.atan2
@@ -90,6 +94,13 @@ private data class MatchLocationTarget(
     val warningDistanceMiles: Double?,
 )
 
+private data class MatchParticipantOption(
+    val selectionId: String,
+    val label: String,
+    val eventRegistrationId: String?,
+    val participantUserId: String,
+)
+
 @Composable
 fun MatchDetailScreen(
     component: MatchContentComponent,
@@ -97,6 +108,7 @@ fun MatchDetailScreen(
 ) {
     val match by component.matchWithTeams.collectAsState()
     val event by component.event.collectAsState()
+    val rules by component.matchRules.collectAsState()
     val isOfficial by component.isOfficial.collectAsState()
     val officialCheckedIn by component.officialCheckedIn.collectAsState()
     val showOfficialCheckInDialog by component.showOfficialCheckInDialog.collectAsState()
@@ -111,9 +123,23 @@ fun MatchDetailScreen(
     val navBottomPadding = LocalNavBarPadding.current.calculateBottomPadding()
     val team1 = match.team1
     val team2 = match.team2
+    val participantOptionsByTeam = remember(team1, team2, match.match.team1Id, match.match.team2Id) {
+        buildMap {
+            match.match.team1Id?.takeIf(String::isNotBlank)?.let { teamId ->
+                put(teamId, buildParticipantOptions(team1, teamId))
+            }
+            match.match.team2Id?.takeIf(String::isNotBlank)?.let { teamId ->
+                put(teamId, buildParticipantOptions(team2, teamId))
+            }
+        }
+    }
 
     var mapRevealCenter by remember { mutableStateOf(Offset.Zero) }
     var showMatchDetails by remember { mutableStateOf(false) }
+    var pendingPointEventTeamId by remember(match.match.id) { mutableStateOf<String?>(null) }
+    var pointIncidentParticipantId by remember(match.match.id) { mutableStateOf<String?>(null) }
+    var pointIncidentMinute by remember(match.match.id) { mutableStateOf("") }
+    var pointIncidentNote by remember(match.match.id) { mutableStateOf("") }
     val locationTarget = remember(match.field, match.match.id, event, currentLocation) {
         resolveLocationTarget(
             field = match.field,
@@ -128,22 +154,62 @@ fun MatchDetailScreen(
         mapComponent.setPlaces(locationTarget.place?.let(::listOf) ?: emptyList())
     }
 
-    val canIncrement = showOfficialScoreControls && !matchFinished && officialCheckedIn
-    val isTimedMatch = event?.usesSets == false
+    val activeParticipantOptions = remember(participantOptionsByTeam, pendingPointEventTeamId) {
+        pendingPointEventTeamId?.let { teamId -> participantOptionsByTeam[teamId] }.orEmpty()
+    }
+    val selectedParticipant = remember(activeParticipantOptions, pointIncidentParticipantId) {
+        activeParticipantOptions.firstOrNull { option -> option.selectionId == pointIncidentParticipantId }
+    }
+    LaunchedEffect(pendingPointEventTeamId, activeParticipantOptions) {
+        if (pendingPointEventTeamId == null) {
+            pointIncidentParticipantId = null
+            return@LaunchedEffect
+        }
+        if (activeParticipantOptions.isEmpty()) {
+            pointIncidentParticipantId = null
+            return@LaunchedEffect
+        }
+        if (pointIncidentParticipantId == null || activeParticipantOptions.none { option -> option.selectionId == pointIncidentParticipantId }) {
+            pointIncidentParticipantId = activeParticipantOptions.first().selectionId
+        }
+    }
     val orderedSegments = remember(match.match.segments) {
         match.match.segments.sortedBy { segment -> segment.sequence }
     }
     val activeSegment = orderedSegments.getOrNull(currentSet)
+    val canIncrement = showOfficialScoreControls &&
+        !matchFinished &&
+        officialCheckedIn &&
+        activeSegment?.status != "COMPLETE"
+    val isTimedMatch = rules.scoringModel == "POINTS_ONLY"
     val team1Score = activeSegment?.scores?.get(match.match.team1Id)
         ?: match.match.team1Points.getOrElse(currentSet) { 0 }
     val team2Score = activeSegment?.scores?.get(match.match.team2Id)
         ?: match.match.team2Points.getOrElse(currentSet) { 0 }
-    val rules = match.match.matchRulesSnapshot ?: match.match.resolvedMatchRules
-    val segmentBaseLabel = rules?.segmentLabel ?: if (event?.usesSets == true) "Set" else "Total"
-    val activeSegmentLabel = if (rules?.scoringModel == "POINTS_ONLY") {
+    val segmentBaseLabel = rules.segmentLabel.ifBlank {
+        if (event?.usesSets == true) "Set" else "Total"
+    }
+    val activeSegmentLabel = if (rules.scoringModel == "POINTS_ONLY") {
         segmentBaseLabel
     } else {
         "$segmentBaseLabel ${currentSet + 1}"
+    }
+    val canConfirmResult = showOfficialScoreControls &&
+        officialCheckedIn &&
+        !matchFinished &&
+        activeSegment?.status != "COMPLETE"
+    val confirmResultEnabled = canConfirmResult && when (rules.scoringModel) {
+        "SETS" -> team1Score != team2Score
+        "POINTS_ONLY" -> rules.supportsDraw || team1Score != team2Score
+        else -> true
+    }
+
+    fun openPointIncidentDialog(teamId: String?) {
+        val resolvedTeamId = teamId?.takeIf(String::isNotBlank) ?: return
+        pendingPointEventTeamId = resolvedTeamId
+        pointIncidentMinute = ""
+        pointIncidentNote = ""
+        pointIncidentParticipantId = participantOptionsByTeam[resolvedTeamId]?.firstOrNull()?.selectionId
     }
 
     val team1Text = remember(team1) {
@@ -196,10 +262,20 @@ fun MatchDetailScreen(
     }
 
     if (showScoreControls && showSetConfirmDialog) {
+        val confirmationTitle = if (rules.scoringModel == "POINTS_ONLY") {
+            "Confirm match result"
+        } else {
+            "Confirm $activeSegmentLabel"
+        }
+        val confirmationMessage = if (rules.scoringModel == "POINTS_ONLY") {
+            "Save the current match result?"
+        } else {
+            "Confirm the result for $activeSegmentLabel?"
+        }
         AlertDialog(
             onDismissRequest = { },
-            title = { Text(stringResource(Res.string.confirm_set_result_title)) },
-            text = { Text(stringResource(Res.string.confirm_set_result_message, currentSet + 1)) },
+            title = { Text(confirmationTitle) },
+            text = { Text(confirmationMessage) },
             confirmButton = {
                 Button(onClick = { component.confirmSet() }) {
                     Text("Confirm")
@@ -210,6 +286,95 @@ fun MatchDetailScreen(
                     Text("Cancel")
                 }
             }
+        )
+    }
+
+    if (pendingPointEventTeamId != null) {
+        val participantLabel = selectedParticipant?.label
+            ?: if (activeParticipantOptions.isEmpty()) "No roster available" else ""
+        AlertDialog(
+            onDismissRequest = {
+                pendingPointEventTeamId = null
+                pointIncidentParticipantId = null
+                pointIncidentMinute = ""
+                pointIncidentNote = ""
+            },
+            title = { Text("Record scoring details") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    DropdownField(
+                        modifier = Modifier.fillMaxWidth(),
+                        value = participantLabel,
+                        label = if (rules.pointIncidentRequiresParticipant) "Player" else "Player (optional)",
+                    ) { onDismiss ->
+                        if (!rules.pointIncidentRequiresParticipant) {
+                            DropdownMenuItem(
+                                text = { Text("No player selected") },
+                                onClick = {
+                                    pointIncidentParticipantId = null
+                                    onDismiss()
+                                },
+                            )
+                        }
+                        activeParticipantOptions.forEach { option ->
+                            DropdownMenuItem(
+                                text = { Text(option.label) },
+                                onClick = {
+                                    pointIncidentParticipantId = option.selectionId
+                                    onDismiss()
+                                },
+                            )
+                        }
+                    }
+                    OutlinedTextField(
+                        value = pointIncidentMinute,
+                        onValueChange = { value -> pointIncidentMinute = value.filter(Char::isDigit) },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Minute") },
+                        singleLine = true,
+                    )
+                    OutlinedTextField(
+                        value = pointIncidentNote,
+                        onValueChange = { value -> pointIncidentNote = value },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Details") },
+                        minLines = 2,
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val isTeam1Point = pendingPointEventTeamId == match.match.team1Id
+                        component.recordPointIncident(
+                            isTeam1 = isTeam1Point,
+                            eventRegistrationId = selectedParticipant?.eventRegistrationId,
+                            participantUserId = selectedParticipant?.participantUserId,
+                            minute = pointIncidentMinute.toIntOrNull(),
+                            note = pointIncidentNote.takeIf(String::isNotBlank),
+                        )
+                        pendingPointEventTeamId = null
+                        pointIncidentParticipantId = null
+                        pointIncidentMinute = ""
+                        pointIncidentNote = ""
+                    },
+                    enabled = !rules.pointIncidentRequiresParticipant || selectedParticipant != null,
+                ) {
+                    Text("Save Point")
+                }
+            },
+            dismissButton = {
+                Button(
+                    onClick = {
+                        pendingPointEventTeamId = null
+                        pointIncidentParticipantId = null
+                        pointIncidentMinute = ""
+                        pointIncidentNote = ""
+                    }
+                ) {
+                    Text("Cancel")
+                }
+            },
         )
     }
 
@@ -256,7 +421,11 @@ fun MatchDetailScreen(
                 title = team1Text,
                 score = team1Score.toString(),
                 increase = {
-                    component.updateScore(isTeam1 = true, increment = true)
+                    if (event?.autoCreatePointMatchIncidents == true) {
+                        openPointIncidentDialog(match.match.team1Id)
+                    } else {
+                        component.updateScore(isTeam1 = true, increment = true)
+                    }
                 },
                 decrease = {
                     component.updateScore(isTeam1 = true, increment = false)
@@ -291,12 +460,18 @@ fun MatchDetailScreen(
                 )
             }
 
-            if (isTimedMatch && showOfficialScoreControls) {
+            if (showOfficialScoreControls) {
                 Button(
                     onClick = { component.requestSetConfirmation() },
-                    enabled = canIncrement && team1Score != team2Score,
+                    enabled = confirmResultEnabled,
                 ) {
-                    Text("Save Match")
+                    Text(
+                        if (rules.scoringModel == "POINTS_ONLY") {
+                            "Save Match"
+                        } else {
+                            "Confirm $activeSegmentLabel"
+                        }
+                    )
                 }
             }
 
@@ -306,7 +481,11 @@ fun MatchDetailScreen(
                 modifier = Modifier
                     .weight(1f),
                 increase = {
-                    component.updateScore(isTeam1 = false, increment = true)
+                    if (event?.autoCreatePointMatchIncidents == true) {
+                        openPointIncidentDialog(match.match.team2Id)
+                    } else {
+                        component.updateScore(isTeam1 = false, increment = true)
+                    }
                 },
                 decrease = {
                     component.updateScore(isTeam1 = false, increment = false)
@@ -378,7 +557,7 @@ fun MatchDetailScreen(
                             style = MaterialTheme.typography.bodyMedium,
                         )
                         Text(
-                            text = "Rules: ${rules?.scoringModel ?: if (event?.usesSets == true) "SETS" else "POINTS_ONLY"}",
+                            text = "Rules: ${rules.scoringModel}",
                             style = MaterialTheme.typography.bodyMedium,
                         )
                         Row(
@@ -392,7 +571,7 @@ fun MatchDetailScreen(
                                     enabled = index != currentSet,
                                 ) {
                                     Text(
-                                        if (rules?.scoringModel == "POINTS_ONLY") {
+                                        if (rules.scoringModel == "POINTS_ONLY") {
                                             segmentBaseLabel
                                         } else {
                                             "$segmentBaseLabel ${segment.sequence}"
@@ -405,7 +584,7 @@ fun MatchDetailScreen(
                             val team1SegmentScore = match.match.team1Id?.let { teamId -> segment.scores[teamId] } ?: 0
                             val team2SegmentScore = match.match.team2Id?.let { teamId -> segment.scores[teamId] } ?: 0
                             Text(
-                                text = "${if (rules?.scoringModel == "POINTS_ONLY") segmentBaseLabel else "$segmentBaseLabel ${segment.sequence}"}: $team1SegmentScore - $team2SegmentScore (${segment.status})",
+                                text = "${if (rules.scoringModel == "POINTS_ONLY") segmentBaseLabel else "$segmentBaseLabel ${segment.sequence}"}: $team1SegmentScore - $team2SegmentScore (${segment.status})",
                                 style = MaterialTheme.typography.bodySmall,
                             )
                         }
@@ -432,7 +611,11 @@ fun MatchDetailScreen(
                         } else {
                             match.match.incidents.sortedBy { incident -> incident.sequence }.forEach { incident ->
                                 Text(
-                                    text = "${matchLogTypeLabel(incident.incidentType)}: ${incident.note ?: incident.linkedPointDelta?.let { "point change ${if (it > 0) "+" else ""}$it" } ?: "Match note"}",
+                                    text = buildIncidentSummary(
+                                        incident = incident,
+                                        team1 = team1,
+                                        team2 = team2,
+                                    ),
                                     style = MaterialTheme.typography.bodySmall,
                                 )
                             }
@@ -674,3 +857,90 @@ private fun roundMiles(distanceMiles: Double): Double {
     return (distanceMiles * 10.0).roundToInt() / 10.0
 }
 
+private fun buildParticipantOptions(
+    team: TeamWithRelations?,
+    eventTeamId: String,
+): List<MatchParticipantOption> {
+    val playersById = team?.players.orEmpty().associateBy(UserData::id)
+    val registrations = team?.team?.activePlayerRegistrations().orEmpty()
+    if (registrations.isNotEmpty()) {
+        return registrations.map { registration ->
+            MatchParticipantOption(
+                selectionId = registration.id,
+                label = participantOptionLabel(playersById[registration.userId], registration),
+                eventRegistrationId = registration.id,
+                participantUserId = registration.userId,
+            )
+        }
+    }
+
+    return team?.players.orEmpty().map { player ->
+        MatchParticipantOption(
+            selectionId = player.id,
+            label = participantOptionLabel(player, null),
+            eventRegistrationId = null,
+            participantUserId = player.id,
+        )
+    }.takeIf { it.isNotEmpty() }.orEmpty()
+}
+
+private fun participantOptionLabel(
+    player: UserData?,
+    registration: TeamPlayerRegistration?,
+): String {
+    val name = player?.fullName
+        ?.takeIf(String::isNotBlank)
+        ?: registration?.userId
+        ?.takeIf(String::isNotBlank)
+        ?: "Participant"
+    val details = buildList {
+        registration?.jerseyNumber?.takeIf(String::isNotBlank)?.let { jersey -> add("#$jersey") }
+        registration?.position?.takeIf(String::isNotBlank)?.let(::add)
+    }.joinToString(" ")
+    return if (details.isBlank()) name else "$name ($details)"
+}
+
+private fun resolveIncidentParticipantLabel(
+    participantUserId: String?,
+    eventRegistrationId: String?,
+    team: TeamWithRelations?,
+): String? {
+    val playersById = team?.players.orEmpty().associateBy(UserData::id)
+    val registrationsById = team?.team?.activePlayerRegistrations().orEmpty().associateBy(TeamPlayerRegistration::id)
+    val registration = eventRegistrationId?.let { registrationId -> registrationsById[registrationId] }
+    val player = registration?.userId?.let { userId -> playersById[userId] }
+        ?: participantUserId?.let { userId -> playersById[userId] }
+    return if (player == null && registration == null) {
+        null
+    } else {
+        participantOptionLabel(player, registration)
+    }
+}
+
+private fun buildIncidentSummary(
+    incident: com.razumly.mvp.core.data.dataTypes.MatchIncidentMVP,
+    team1: TeamWithRelations?,
+    team2: TeamWithRelations?,
+): String {
+    val teamLabel = when (incident.eventTeamId) {
+        team1?.team?.id -> team1?.team?.name
+        team2?.team?.id -> team2?.team?.name
+        else -> null
+    }
+    val participantLabel = when (incident.eventTeamId) {
+        team1?.team?.id -> resolveIncidentParticipantLabel(incident.participantUserId, incident.eventRegistrationId, team1)
+        team2?.team?.id -> resolveIncidentParticipantLabel(incident.participantUserId, incident.eventRegistrationId, team2)
+        else -> null
+    }
+    val minuteLabel = incident.minute?.let { minute -> "$minute'" }
+    val note = incident.note?.takeIf(String::isNotBlank)
+    val pointDelta = incident.linkedPointDelta?.let { delta ->
+        "point change ${if (delta > 0) "+" else ""}$delta"
+    }
+    val extras = listOfNotNull(teamLabel, participantLabel, minuteLabel, pointDelta, note)
+    return if (extras.isEmpty()) {
+        matchLogTypeLabel(incident.incidentType)
+    } else {
+        "${matchLogTypeLabel(incident.incidentType)}: ${extras.joinToString(" | ")}"
+    }
+}

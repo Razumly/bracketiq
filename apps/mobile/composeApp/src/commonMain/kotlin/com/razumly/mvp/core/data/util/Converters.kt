@@ -6,6 +6,7 @@ import com.razumly.mvp.core.data.dataTypes.EventOfficial
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.MatchIncidentMVP
 import com.razumly.mvp.core.data.dataTypes.MatchOfficialAssignment
+import com.razumly.mvp.core.data.dataTypes.MatchRulesConfigMVP
 import com.razumly.mvp.core.data.dataTypes.MatchSegmentMVP
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
 import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
@@ -143,6 +144,16 @@ class Converters {
     fun toResolvedMatchRules(value: String?): ResolvedMatchRulesMVP? =
         value?.takeIf { it.isNotBlank() }?.let {
             runCatching { Json.decodeFromString<ResolvedMatchRulesMVP>(it) }.getOrNull()
+        }
+
+    @TypeConverter
+    fun fromMatchRulesConfig(value: MatchRulesConfigMVP?): String? =
+        value?.let { Json.encodeToString(it) }
+
+    @TypeConverter
+    fun toMatchRulesConfig(value: String?): MatchRulesConfigMVP? =
+        value?.takeIf { it.isNotBlank() }?.let {
+            runCatching { Json.decodeFromString<MatchRulesConfigMVP>(it) }.getOrNull()
         }
 
     @TypeConverter

@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -61,6 +62,7 @@ import kotlin.time.Instant
 
 private const val MAX_VISIBLE_FIELD_ROWS = 5
 private const val MAX_VISIBLE_SLOT_ROWS = 2
+private const val MAX_PICKER_MINUTES = 23 * 60 + 59
 private val fieldListItemSpacing = 4.dp
 private val slotListItemSpacing = 8.dp
 private val fieldRowMinHeight = 84.dp
@@ -76,6 +78,22 @@ private val dayOptions = listOf(
     DropdownOption("6", "Sunday"),
 )
 
+internal data class PickerTimeValue(
+    val hour: Int,
+    val minute: Int,
+)
+
+internal fun minutesToPickerTime(minutes: Int?): PickerTimeValue {
+    if (minutes == null) {
+        return PickerTimeValue(hour = 12, minute = 0)
+    }
+    val normalizedMinutes = minutes.coerceIn(0, MAX_PICKER_MINUTES)
+    return PickerTimeValue(
+        hour = normalizedMinutes / 60,
+        minute = normalizedMinutes % 60,
+    )
+}
+
 @Composable
 fun LeagueScheduleFields(
     fieldCount: Int,
@@ -90,6 +108,9 @@ fun LeagueScheduleFields(
     onRemoveSlot: (Int) -> Unit,
     slotErrors: Map<Int, String>,
     showSlotEditor: Boolean,
+    showUseManualTimeSlotsToggle: Boolean = false,
+    useManualTimeSlots: Boolean = true,
+    onUseManualTimeSlotsChange: (Boolean) -> Unit = {},
     slotDivisionOptions: List<DropdownOption> = emptyList(),
     lockSlotDivisions: Boolean = false,
     lockedDivisionIds: List<String> = emptyList(),
@@ -184,7 +205,7 @@ fun LeagueScheduleFields(
         }
     }
 
-    if (!showSlotEditor) {
+    if (!showSlotEditor && !showUseManualTimeSlotsToggle) {
         return
     }
 
@@ -209,20 +230,45 @@ fun LeagueScheduleFields(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text("Timeslots (${slots.size})", style = MaterialTheme.typography.titleMedium)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Button(
-                onClick = onAddSlot,
+        if (showSlotEditor) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Button(
+                    onClick = onAddSlot,
+                    enabled = !readOnly,
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null)
+                    Text("Add", modifier = Modifier.padding(start = 4.dp))
+                }
+                IconButton(onClick = { slotsExpanded = !slotsExpanded }) {
+                    Icon(
+                        imageVector = if (slotsExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = if (slotsExpanded) "Collapse timeslots" else "Expand timeslots",
+                    )
+                }
+            }
+        }
+    }
+    if (showUseManualTimeSlotsToggle) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Checkbox(
+                checked = useManualTimeSlots,
                 enabled = !readOnly,
-            ) {
-                Icon(Icons.Default.Add, contentDescription = null)
-                Text("Add", modifier = Modifier.padding(start = 4.dp))
-            }
-            IconButton(onClick = { slotsExpanded = !slotsExpanded }) {
-                Icon(
-                    imageVector = if (slotsExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    contentDescription = if (slotsExpanded) "Collapse timeslots" else "Expand timeslots",
-                )
-            }
+                onCheckedChange = onUseManualTimeSlotsChange,
+            )
+            Text(
+                text = "Use timeslots",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+        if (!useManualTimeSlots) {
+            Text(
+                text = "A single timeslot will use the event start and end date/time.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
     if (readOnly) {
@@ -231,6 +277,10 @@ fun LeagueScheduleFields(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+
+    if (!showSlotEditor) {
+        return
     }
 
     if (slots.isEmpty()) {
@@ -609,16 +659,16 @@ private fun TimeOfDayPickerField(
 ) {
     var showTimePicker by remember { mutableStateOf(false) }
     var showNativeTimePicker by remember { mutableStateOf(false) }
+    val initialPickerTime = minutesToPickerTime(minutes)
     val timeState = rememberTimePickerState(
-        initialHour = minutes?.div(60) ?: 12,
-        initialMinute = minutes?.rem(60) ?: 0,
+        initialHour = initialPickerTime.hour,
+        initialMinute = initialPickerTime.minute,
         is24Hour = false,
     )
     LaunchedEffect(minutes) {
-        minutes?.let {
-            timeState.hour = it / 60
-            timeState.minute = it % 60
-        }
+        val pickerTime = minutesToPickerTime(minutes)
+        timeState.hour = pickerTime.hour
+        timeState.minute = pickerTime.minute
     }
 
     StandardTextField(

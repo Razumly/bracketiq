@@ -6,6 +6,7 @@ import com.razumly.mvp.core.network.userMessage
 import com.arkivanov.decompose.ComponentContext
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import com.razumly.mvp.core.data.dataTypes.MatchSegmentMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
@@ -19,6 +20,7 @@ import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.eventDetail.data.IMatchRepository
+import com.razumly.mvp.core.network.dto.MatchIncidentOperationDto
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -42,6 +44,7 @@ import kotlin.time.ExperimentalTime
 interface MatchContentComponent {
     val matchWithTeams: StateFlow<MatchWithTeams>
     val event: StateFlow<Event?>
+    val matchRules: StateFlow<ResolvedMatchRulesMVP>
     val matchFinished: StateFlow<Boolean>
     val officialCheckedIn: StateFlow<Boolean>
     val currentSet: StateFlow<Int>
@@ -56,6 +59,13 @@ interface MatchContentComponent {
     fun confirmOfficialCheckIn()
     fun selectSegment(index: Int)
     fun updateScore(isTeam1: Boolean, increment: Boolean)
+    fun recordPointIncident(
+        isTeam1: Boolean,
+        eventRegistrationId: String?,
+        participantUserId: String?,
+        minute: Int?,
+        note: String?,
+    )
     fun requestSetConfirmation()
     fun confirmSet()
 }
@@ -140,16 +150,28 @@ class DefaultMatchContentComponent(
                     } ?: flowOf(Result.success(null))
 
                     combine(team1Flow, team2Flow, teamOfficialFlow) { team1Result, team2Result, teamOfficialResult ->
+                        val normalizedMatch = updateMatchStructureForCurrentContext(baseMatch.match)
                         baseMatch.toMatchWithTeams(
                             team1 = team1Result.getOrNull(),
                             team2 = team2Result.getOrNull(),
                             teamOfficial = teamOfficialResult.getOrNull()
-                        )
+                        ).copy(match = normalizedMatch)
                     }
                 }
         }
     }.stateIn(
-        scope, SharingStarted.Eagerly, selectedMatch.toMatchWithTeams(null, null, null)
+        scope,
+        SharingStarted.Eagerly,
+        selectedMatch.toMatchWithTeams(null, null, null)
+            .copy(match = updateMatchStructureForCurrentContext(selectedMatch.match)),
+    )
+
+    override val matchRules = combine(matchWithTeams, event) { currentMatch, currentEvent ->
+        resolveActiveRules(currentMatch.match, currentEvent)
+    }.stateIn(
+        scope,
+        SharingStarted.Eagerly,
+        resolveActiveRules(selectedMatch.match, selectedEvent),
     )
 
     private val pendingUpdates = mutableListOf<MatchMVP>()
@@ -388,32 +410,30 @@ class DefaultMatchContentComponent(
         if (!isOfficial.value || officialCheckedIn.value != true || matchFinished.value) {
             return
         }
+        if (increment && event.value?.autoCreatePointMatchIncidents == true) {
+            _errorState.value = "Scoring details are required for this match."
+            return
+        }
 
         val currentMatch = matchWithTeams.value
         val scoringMatch = updateMatchStructureForCurrentContext(currentMatch.match)
         val setIndex = currentSet.value.coerceIn(0, maxSets - 1)
-
-        if (increment && checkSetCompletion(scoringMatch)) {
+        val activeSegment = scoringMatch.segments.getOrNull(setIndex) ?: return
+        if (activeSegment.status == "COMPLETE") {
+            return
+        }
+        val eventTeamId = if (isTeam1) scoringMatch.team1Id else scoringMatch.team2Id
+        if (eventTeamId.isNullOrBlank()) {
             return
         }
 
-        val currentPoints = if (isTeam1) {
-            scoringMatch.team1Points.toMutableList()
-        } else {
-            scoringMatch.team2Points.toMutableList()
-        }
-
-        if (increment) {
-            currentPoints[setIndex]++
-        } else if (!increment && currentPoints[setIndex] > 0) {
-            currentPoints[setIndex]--
-        }
-
-        val updatedScoringMatch = if (isTeam1) {
-            scoringMatch.copy(team1Points = currentPoints)
-        } else {
-            scoringMatch.copy(team2Points = currentPoints)
-        }.syncSegmentsFromLegacyScores()
+        val delta = if (increment) 1 else -1
+        val updatedScoringMatch = scoringMatch.updateSegmentScore(
+            segmentIndex = setIndex,
+            eventTeamId = eventTeamId,
+            delta = delta,
+            segmentCount = maxSets,
+        )
         val optimisticMatch = currentMatch.copy(match = updatedScoringMatch)
 
         _optimisticMatch.value = optimisticMatch
@@ -425,17 +445,85 @@ class DefaultMatchContentComponent(
         }
     }
 
+    override fun recordPointIncident(
+        isTeam1: Boolean,
+        eventRegistrationId: String?,
+        participantUserId: String?,
+        minute: Int?,
+        note: String?,
+    ) {
+        if (!isOfficial.value || officialCheckedIn.value != true || matchFinished.value) {
+            return
+        }
+
+        val currentMatch = matchWithTeams.value
+        val scoringMatch = updateMatchStructureForCurrentContext(currentMatch.match)
+        val segmentIndex = currentSet.value.coerceIn(0, maxSets - 1)
+        val activeSegment = scoringMatch.segments.getOrNull(segmentIndex) ?: return
+        if (activeSegment.status == "COMPLETE") {
+            return
+        }
+        val eventTeamId = if (isTeam1) scoringMatch.team1Id else scoringMatch.team2Id
+        if (eventTeamId.isNullOrBlank()) {
+            return
+        }
+
+        val updatedScoringMatch = scoringMatch.updateSegmentScore(
+            segmentIndex = segmentIndex,
+            eventTeamId = eventTeamId,
+            delta = 1,
+            segmentCount = maxSets,
+        )
+        _optimisticMatch.value = currentMatch.copy(match = updatedScoringMatch)
+        checkSetCompletion(updatedScoringMatch)
+
+        scope.launch {
+            val incidentType = resolveActiveRules(scoringMatch, event.value).autoCreatePointIncidentType
+                ?.takeIf(String::isNotBlank)
+                ?: "POINT"
+            val updatedSegment = updatedScoringMatch.segments.getOrNull(segmentIndex) ?: activeSegment
+            matchRepository.updateMatchOperations(
+                match = scoringMatch,
+                incidentOperations = listOf(
+                    MatchIncidentOperationDto(
+                        action = "CREATE",
+                        segmentId = updatedSegment.id,
+                        eventTeamId = eventTeamId,
+                        eventRegistrationId = eventRegistrationId?.trim()?.takeIf(String::isNotBlank),
+                        participantUserId = participantUserId?.trim()?.takeIf(String::isNotBlank),
+                        officialUserId = currentUser.id.takeIf(String::isNotBlank),
+                        incidentType = incidentType,
+                        linkedPointDelta = 1,
+                        minute = minute,
+                        note = note?.trim()?.takeIf(String::isNotBlank),
+                    )
+                ),
+            ).onSuccess {
+                _optimisticMatch.value = null
+            }.onFailure { error ->
+                _errorState.value = "Failed to update score: ${error.userMessage()}"
+                _optimisticMatch.value = null
+            }
+        }
+    }
+
 
     override fun requestSetConfirmation() {
         if (matchFinished.value || !isOfficial.value || officialCheckedIn.value != true) return
 
         val scoringMatch = updateMatchStructureForCurrentContext(matchWithTeams.value.match)
+        val rules = resolveActiveRules(scoringMatch, event.value)
         val setIndex = currentSet.value.coerceIn(0, maxSets - 1)
         val team1Score = scoringMatch.team1Points.getOrElse(setIndex) { 0 }
         val team2Score = scoringMatch.team2Points.getOrElse(setIndex) { 0 }
 
-        if (team1Score == team2Score) {
+        if (rules.scoringModel == "SETS" && team1Score == team2Score) {
             _errorState.value = "Set score cannot be tied."
+            return
+        }
+
+        if (rules.scoringModel == "POINTS_ONLY" && !rules.supportsDraw && team1Score == team2Score) {
+            _errorState.value = "Match score cannot be tied."
             return
         }
 
@@ -453,22 +541,30 @@ class DefaultMatchContentComponent(
         scope.launch {
             val currentMatch = matchWithTeams.value
             val scoringMatch = updateMatchStructureForCurrentContext(currentMatch.match)
+            val rules = resolveActiveRules(scoringMatch, event.value)
             val setIndex = currentSet.value.coerceIn(0, maxSets - 1)
             val team1Score = scoringMatch.team1Points.getOrElse(setIndex) { 0 }
             val team2Score = scoringMatch.team2Points.getOrElse(setIndex) { 0 }
 
-            if (team1Score == team2Score) {
+            if (rules.scoringModel == "SETS" && team1Score == team2Score) {
                 _errorState.value = "Set score cannot be tied."
                 return@launch
             }
 
-            val setResults = scoringMatch.setResults.toMutableList()
-            val team1Won = team1Score > team2Score
-
-            setResults[setIndex] = if (team1Won) 1 else 2
-
-            val updatedScoringMatch = scoringMatch.copy(setResults = setResults)
-                .syncSegmentsFromLegacyScores()
+            val currentSegment = scoringMatch.segments.getOrNull(setIndex) ?: return@launch
+            val winnerEventTeamId = when {
+                team1Score > team2Score -> scoringMatch.team1Id
+                team2Score > team1Score -> scoringMatch.team2Id
+                else -> null
+            }
+            val updatedSegments = scoringMatch.segments.toMutableList().apply {
+                this[setIndex] = currentSegment.copy(
+                    status = "COMPLETE",
+                    winnerEventTeamId = winnerEventTeamId,
+                )
+            }
+            val updatedScoringMatch = scoringMatch.copy(segments = updatedSegments)
+                .syncLegacyScoresFromSegments(maxSets)
 
             val updatedMatch = currentMatch.copy(
                 match = updatedScoringMatch
@@ -542,22 +638,37 @@ class DefaultMatchContentComponent(
     }
 
     private fun isMatchOver(match: MatchMVP): Boolean {
+        val rules = resolveActiveRules(match, event.value)
         val segmentWinnerIds = match.segments
             .filter { segment -> segment.status == "COMPLETE" || !segment.winnerEventTeamId.isNullOrBlank() }
             .mapNotNull { segment -> segment.winnerEventTeamId }
-        if (segmentWinnerIds.isNotEmpty()) {
+        if (rules.scoringModel == "SETS" && segmentWinnerIds.isNotEmpty()) {
             val team1Wins = segmentWinnerIds.count { winnerId -> winnerId == match.team1Id }
             val team2Wins = segmentWinnerIds.count { winnerId -> winnerId == match.team2Id }
             return team1Wins >= setsNeeded || team2Wins >= setsNeeded
         }
-        val relevantResults = match.setResults.take(maxSets.coerceAtLeast(1))
-        val team1Wins = relevantResults.count { it == 1 }
-        val team2Wins = relevantResults.count { it == 2 }
-        return team1Wins >= setsNeeded || team2Wins >= setsNeeded
+
+        return when (rules.scoringModel) {
+            "SETS" -> {
+                val relevantResults = match.setResults.take(maxSets.coerceAtLeast(1))
+                val team1Wins = relevantResults.count { it == 1 }
+                val team2Wins = relevantResults.count { it == 2 }
+                team1Wins >= setsNeeded || team2Wins >= setsNeeded
+            }
+
+            "POINTS_ONLY" -> match.segments
+                .firstOrNull()
+                ?.status == "COMPLETE"
+
+            else -> match.segments
+                .take(maxSets.coerceAtLeast(1))
+                .all { segment -> segment.status == "COMPLETE" }
+        }
     }
 
     private fun checkSetCompletion(match: MatchMVP): Boolean {
-        if (event.value?.usesSets == false) return false
+        val rules = resolveActiveRules(match, event.value)
+        if (rules.scoringModel != "SETS") return false
 
         val setIndex = currentSet.value.coerceIn(0, maxSets - 1)
         val team1Score = match.team1Points.getOrElse(setIndex) { 0 }
@@ -583,22 +694,38 @@ class DefaultMatchContentComponent(
 
     private fun updateMatchStructureForCurrentContext(match: MatchMVP): MatchMVP {
         maxSets = resolveExpectedSetCount(match)
-        setsNeeded = ((maxSets + 1) / 2).coerceAtLeast(1)
+        val rules = resolveActiveRules(match, event.value)
+        setsNeeded = if (rules.scoringModel == "SETS") {
+            ((maxSets + 1) / 2).coerceAtLeast(1)
+        } else {
+            1
+        }
         return normalizeMatchForSetCount(match, maxSets).ensureSegments()
     }
 
     private fun resolveExpectedSetCount(match: MatchMVP): Int {
+        val rules = resolveActiveRules(match, event.value)
+        val explicitCount = rules.segmentCount.coerceAtLeast(1)
+        if (match.matchRulesSnapshot != null || match.resolvedMatchRules != null) {
+            return explicitCount
+        }
+
         val fallbackSetCount = listOf(
+            match.segments.size,
             match.setResults.size,
             match.team1Points.size,
             match.team2Points.size,
             1,
         ).maxOrNull() ?: 1
 
-        val currentEvent = event.value ?: return fallbackSetCount
-        if (!currentEvent.usesSets) {
+        if (rules.scoringModel == "POINTS_ONLY") {
             return 1
         }
+        if (rules.scoringModel != "SETS") {
+            return fallbackSetCount
+        }
+
+        val currentEvent = event.value ?: return fallbackSetCount
 
         val isBracketMatch = isBracketMatch(match)
         return when {
@@ -699,6 +826,68 @@ class DefaultMatchContentComponent(
     private fun MatchMVP.syncSegmentsFromLegacyScores(): MatchMVP =
         copy(segments = buildLegacySegments(this, maxSets, team1Points, team2Points, setResults))
 
+    private fun MatchMVP.syncLegacyScoresFromSegments(segmentCount: Int): MatchMVP {
+        val normalizedTeam1 = normalizeScoreList(team1Points, segmentCount)
+        val normalizedTeam2 = normalizeScoreList(team2Points, segmentCount)
+        val normalizedResults = normalizeResultList(setResults, segmentCount)
+        val normalizedSegments = normalizeSegments(
+            match = this,
+            setCount = segmentCount,
+            team1Points = normalizedTeam1,
+            team2Points = normalizedTeam2,
+            setResults = normalizedResults,
+        )
+        val nextTeam1Points = normalizedSegments.map { segment ->
+            team1Id?.let { teamId -> segment.scores[teamId] } ?: 0
+        }
+        val nextTeam2Points = normalizedSegments.map { segment ->
+            team2Id?.let { teamId -> segment.scores[teamId] } ?: 0
+        }
+        val nextResults = normalizedSegments.map { segment ->
+            when (segment.winnerEventTeamId) {
+                team1Id -> 1
+                team2Id -> 2
+                else -> 0
+            }
+        }
+        return copy(
+            team1Points = nextTeam1Points,
+            team2Points = nextTeam2Points,
+            setResults = nextResults,
+            segments = normalizedSegments,
+        )
+    }
+
+    private fun MatchMVP.updateSegmentScore(
+        segmentIndex: Int,
+        eventTeamId: String,
+        delta: Int,
+        segmentCount: Int,
+    ): MatchMVP {
+        val normalizedMatch = syncLegacyScoresFromSegments(segmentCount)
+        val currentSegment = normalizedMatch.segments.getOrNull(segmentIndex) ?: return normalizedMatch
+        if (currentSegment.status == "COMPLETE") {
+            return normalizedMatch
+        }
+        val currentScore = currentSegment.scores[eventTeamId] ?: 0
+        val nextScore = (currentScore + delta).coerceAtLeast(0)
+        val nextScores = currentSegment.scores.toMutableMap().apply {
+            this[eventTeamId] = nextScore
+        }
+        val updatedSegment = currentSegment.copy(
+            status = when {
+                nextScores.values.any { score -> score > 0 } -> "IN_PROGRESS"
+                else -> "NOT_STARTED"
+            },
+            scores = nextScores,
+            winnerEventTeamId = null,
+        )
+        val updatedSegments = normalizedMatch.segments.toMutableList().apply {
+            this[segmentIndex] = updatedSegment
+        }
+        return normalizedMatch.copy(segments = updatedSegments).syncLegacyScoresFromSegments(segmentCount)
+    }
+
     private fun normalizeScoreList(values: List<Int>, setCount: Int): List<Int> {
         val normalized = values.take(setCount).toMutableList()
         while (normalized.size < setCount) {
@@ -738,7 +927,7 @@ class DefaultMatchContentComponent(
 
     private fun resolvePointsToVictory(match: MatchMVP, setIndex: Int): Int? {
         val currentEvent = event.value ?: return null
-        if (!currentEvent.usesSets) return null
+        if (resolveActiveRules(match, currentEvent).scoringModel != "SETS") return null
 
         val points = when {
             currentEvent.eventType == EventType.LEAGUE && !isBracketMatch(match) ->
@@ -749,5 +938,59 @@ class DefaultMatchContentComponent(
                 currentEvent.winnerBracketPointsToVictory.getOrNull(setIndex)
         }
         return points?.takeIf { it > 0 }
+    }
+
+    private fun resolveActiveRules(match: MatchMVP, currentEvent: Event?): ResolvedMatchRulesMVP {
+        val source = match.matchRulesSnapshot ?: match.resolvedMatchRules
+        val fallbackModel = if (currentEvent?.usesSets == true) "SETS" else "POINTS_ONLY"
+        val scoringModel = source?.scoringModel
+            ?.trim()
+            ?.uppercase()
+            ?.takeIf { it in setOf("SETS", "PERIODS", "INNINGS", "POINTS_ONLY") }
+            ?: fallbackModel
+        val explicitSegmentCount = source?.segmentCount?.takeIf { it > 0 }
+        val fallbackSegmentCount = listOf(
+            match.segments.size,
+            match.setResults.size,
+            match.team1Points.size,
+            match.team2Points.size,
+            1,
+        ).maxOrNull() ?: 1
+        val segmentCount = when {
+            explicitSegmentCount != null -> explicitSegmentCount
+            scoringModel == "SETS" -> {
+                val legacyCount = when {
+                    currentEvent == null -> fallbackSegmentCount
+                    match.losersBracket -> currentEvent.loserSetCount.coerceAtLeast(1)
+                    currentEvent.eventType == EventType.LEAGUE && !isBracketMatch(match) ->
+                        (currentEvent.setsPerMatch ?: fallbackSegmentCount).coerceAtLeast(1)
+                    else -> currentEvent.winnerSetCount.coerceAtLeast(1)
+                }
+                legacyCount.coerceAtLeast(1)
+            }
+
+            scoringModel == "POINTS_ONLY" -> 1
+            else -> fallbackSegmentCount.coerceAtLeast(1)
+        }
+
+        return ResolvedMatchRulesMVP(
+            scoringModel = scoringModel,
+            segmentCount = segmentCount,
+            segmentLabel = source?.segmentLabel?.takeIf(String::isNotBlank) ?: when (scoringModel) {
+                "SETS" -> "Set"
+                "INNINGS" -> "Inning"
+                "POINTS_ONLY" -> "Total"
+                else -> "Period"
+            },
+            supportsDraw = source?.supportsDraw ?: false,
+            supportsOvertime = source?.supportsOvertime ?: false,
+            supportsShootout = source?.supportsShootout ?: false,
+            officialRoles = source?.officialRoles ?: emptyList(),
+            supportedIncidentTypes = source?.supportedIncidentTypes
+                ?.takeIf { it.isNotEmpty() }
+                ?: listOf("POINT", "DISCIPLINE", "NOTE", "ADMIN"),
+            autoCreatePointIncidentType = source?.autoCreatePointIncidentType ?: "POINT",
+            pointIncidentRequiresParticipant = source?.pointIncidentRequiresParticipant ?: false,
+        )
     }
 }

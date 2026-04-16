@@ -12,6 +12,8 @@ import com.razumly.mvp.core.network.dto.BulkMatchCreateEntryDto
 import com.razumly.mvp.core.network.dto.BulkMatchUpdateEntryDto
 import com.razumly.mvp.core.network.dto.BulkMatchUpdateRequestDto
 import com.razumly.mvp.core.network.dto.BulkMatchesResponseDto
+import com.razumly.mvp.core.network.dto.MatchIncidentOperationDto
+import com.razumly.mvp.core.network.dto.MatchOfficialCheckInOperationDto
 import com.razumly.mvp.core.network.dto.MatchResponseDto
 import com.razumly.mvp.core.network.dto.MatchSegmentOperationDto
 import com.razumly.mvp.core.network.dto.MatchUpdateDto
@@ -44,6 +46,14 @@ interface IMatchRepository : IMVPRepository {
     suspend fun getMatch(matchId: String): Result<MatchMVP>
     fun getMatchFlow(matchId: String): Flow<Result<MatchWithRelations>>
     suspend fun updateMatch(match: MatchMVP): Result<Unit>
+    suspend fun updateMatchOperations(
+        match: MatchMVP,
+        segmentOperations: List<MatchSegmentOperationDto>? = null,
+        incidentOperations: List<MatchIncidentOperationDto>? = null,
+        officialCheckIn: MatchOfficialCheckInOperationDto? = null,
+        finalize: Boolean = false,
+        time: Instant? = null,
+    ): Result<MatchMVP>
     suspend fun updateMatchesBulk(
         matches: List<MatchMVP>,
         creates: List<StagedMatchCreate> = emptyList(),
@@ -221,6 +231,30 @@ class MatchRepository(
         },
         saveCall = { updatedMatch -> databaseService.getMatchDao.upsertMatch(updatedMatch) },
         onReturn = {},
+    )
+
+    override suspend fun updateMatchOperations(
+        match: MatchMVP,
+        segmentOperations: List<MatchSegmentOperationDto>?,
+        incidentOperations: List<MatchIncidentOperationDto>?,
+        officialCheckIn: MatchOfficialCheckInOperationDto?,
+        finalize: Boolean,
+        time: Instant?,
+    ): Result<MatchMVP> = singleResponse(
+        networkCall = {
+            api.patch<MatchUpdateDto, MatchResponseDto>(
+                path = "api/events/${match.eventId}/matches/${match.id}",
+                body = MatchUpdateDto(
+                    segmentOperations = segmentOperations,
+                    incidentOperations = incidentOperations,
+                    officialCheckIn = officialCheckIn,
+                    finalize = finalize,
+                    time = time?.toString(),
+                ),
+            ).match?.toMatchOrNull() ?: error("Match operations response missing match")
+        },
+        saveCall = { updatedMatch -> databaseService.getMatchDao.upsertMatch(updatedMatch) },
+        onReturn = { it },
     )
 
     override suspend fun updateMatchesBulk(

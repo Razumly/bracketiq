@@ -23,6 +23,7 @@ This work spans `mvp-site`, which is the backend and web source of truth, and `m
 - [x] (2026-04-16 09:05Z) Replaced web score-array modal behavior with match operations behavior and kept schedule/admin edits in `MatchEditModal`.
 - [x] (2026-04-16 09:45Z) Mirrored backend match contracts in mobile DTOs, Room models, repositories, and match detail UI.
 - [x] (2026-04-16 10:25Z) Ran targeted backend and mobile validation and recorded outputs here.
+- [x] (2026-04-16 22:05Z) Added event-level match-rules editors in web `EventForm` and mobile `EventDetails`, plus the missing mobile sport/event DTO fields required to persist `matchRulesTemplate`, `matchRulesOverride`, and `resolvedMatchRules`.
 
 ## Surprises & Discoveries
 
@@ -40,6 +41,9 @@ This work spans `mvp-site`, which is the backend and web source of truth, and `m
 
 - Observation: `npx tsc --noEmit` initially failed on a malformed generated Next validator under `.next/dev/types/validator.ts`.
   Evidence: the file contained a truncated route validation block. Removing the generated cache file and rerunning `npx tsc --noEmit` passed.
+
+- Observation: The app had the match-rules runtime model for matches, but not the event or sport DTO fields needed to edit those rules before a match starts.
+  Evidence: before this change, `SportApiDto` lacked `matchRulesTemplate`, and `EventApiDto` / `EventUpdateDto` lacked `matchRulesOverride` and `resolvedMatchRules`.
 
 ## Decision Log
 
@@ -63,13 +67,17 @@ This work spans `mvp-site`, which is the backend and web source of truth, and `m
   Rationale: The booleans still drive league scoring config visibility, and `side` is bracket-placement metadata used by advancement logic.
   Date/Author: 2026-04-16 / Codex
 
+- Decision: Keep scoring model, segment label, and automatic point-incident type sport-owned in the event editors, and expose only event-safe overrides such as segment count, result options, incident availability, and automatic point-incident capture.
+  Rationale: The user explicitly called out format labels such as set versus period as stable sport defaults. Locking those fields in the event editor avoids cross-sport misconfiguration while still allowing event-level flexibility where hosts actually need it.
+  Date/Author: 2026-04-16 / Codex
+
 ## Outcomes & Retrospective
 
 The cross-stack refactor is implemented in the backend/web project and mirrored in the KMP client. Backend schema and migration SQL add rule config, lifecycle/result fields, `MatchSegments`, and `MatchIncidents`. Match responses now include resolved rules, segments, incidents, lifecycle/result state, and winner projection. The atomic match PATCH route accepts lifecycle, segment, incident, and official check-in operations and freezes `matchRulesSnapshot` on the first operational write.
 
 The web schedule score modal is now the match operations modal with `View Field Location` and `Match Details` side by side, a segment selector, score controls, lifecycle/rules/officials/incidents display, and incident creation. `MatchEditModal` no longer exposes the old score-array editor.
 
-The mobile match detail screen now mirrors the same operational concepts, including the bottom `Match Details` action, segment-based scoring state, lifecycle/rules/officials/incidents display, and Room-compatible segment/incident fields. `MVP_DATABASE_VERSION` was incremented to 12 and the available Room schema copy task completed.
+The mobile match detail screen now mirrors the same operational concepts, including the bottom `Match Details` action, segment-based scoring state, lifecycle/rules/officials/incidents display, and Room-compatible segment/incident fields. Event editors on web and mobile now also expose a dedicated `Match Rules` section so hosts can configure event-level overrides before officials ever open a match. `MVP_DATABASE_VERSION` was incremented to 13 and the available Room schema copy task completed.
 
 ## Context and Orientation
 
@@ -135,6 +143,7 @@ Artifacts will be recorded here as implementation progresses, including the Pris
 - Backend validation: `npx tsc --noEmit` from `C:\Users\samue\Documents\Code\mvp-site` passed after removing the stale generated `.next/dev/types/validator.ts` cache file.
 - Mobile validation: `.\gradlew :composeApp:compileDebugKotlinAndroid --no-daemon` from `C:\Users\samue\StudioProjects\mvp-app` passed.
 - Room schema validation: `.\gradlew :composeApp:roomGenerateSchema --no-daemon` is not available in this repo; `.\gradlew :composeApp:copyRoomSchemas --no-daemon` passed instead.
+- Event editor validation: `pnpm exec tsc --noEmit` from `mvp-site` passed after adding `src/app/events/[id]/schedule/components/MatchRulesSection.tsx`, and `./gradlew :composeApp:compileDebugKotlinAndroid` from `mvp-app` passed after adding the mobile event-editor match-rules section and DTO fields.
 
 ## Interfaces and Dependencies
 
@@ -144,4 +153,4 @@ At completion, `mvp-site/prisma/schema.prisma` must expose JSON rule fields on `
 
 At completion, `mvp-app` must have serializable Kotlin equivalents for the same match fields, segments, incidents, and operation payloads. The mobile DTOs must mirror backend names.
 
-Revision note (2026-04-16 / Codex): Replaced the earlier compatibility-first plan with the approved coordinated removal of legacy score arrays, removed `segmentType` from `MatchSegment`, and added explicit web/mobile operations-panel requirements.
+Revision note (2026-04-16 / Codex): Replaced the earlier compatibility-first plan with the approved coordinated removal of legacy score arrays, removed `segmentType` from `MatchSegment`, added explicit web/mobile operations-panel requirements, and then extended the plan with the event-editor match-rules configuration work once the backend rule contract was in place.

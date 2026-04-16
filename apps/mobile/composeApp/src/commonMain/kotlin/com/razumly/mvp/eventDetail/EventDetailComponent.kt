@@ -751,24 +751,54 @@ class DefaultEventDetailComponent(
     override val isHost = selectedEvent.map { it.hostId == currentUser.value.id }
         .stateIn(scope, SharingStarted.Eagerly, false)
 
-    private val eventTimeSlots: StateFlow<List<TimeSlot>> = selectedEvent.flatMapLatest { selected ->
-        val slotIds = selected.timeSlotIds
-            .map { slotId -> slotId.trim() }
-            .filter(String::isNotBlank)
-            .distinct()
-        if (slotIds.isEmpty()) {
-            flowOf(emptyList())
-        } else {
-            flow {
-                val slots = fieldRepository.getTimeSlots(slotIds)
-                    .onFailure { error ->
-                        Napier.w("Failed to refresh time slots for event ${selected.id}: ${error.message}")
-                    }
-                    .getOrElse { emptyList() }
-                emit(slots)
+    private val selectedEventId: StateFlow<String> = selectedEvent
+        .map { selected -> selected.id.trim() }
+        .distinctUntilChanged()
+        .stateIn(scope, SharingStarted.Eagerly, event.id.trim())
+
+    private val eventRelationPlayers: StateFlow<List<UserData>> = eventRelations
+        .map { relations -> relations.players }
+        .distinctUntilChanged()
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    private val eventRelationHost: StateFlow<UserData?> = eventRelations
+        .map { relations -> relations.host }
+        .distinctUntilChanged()
+        .stateIn(scope, SharingStarted.Eagerly, eventRelations.value.host)
+
+    private val eventRelationTeamIds: StateFlow<List<String>> = eventRelations
+        .map { relations ->
+            relations.teams
+                .map { team -> team.id.trim() }
+                .filter(String::isNotBlank)
+                .distinct()
+        }
+        .distinctUntilChanged()
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    private val eventTimeSlots: StateFlow<List<TimeSlot>> = selectedEvent
+        .map { selected ->
+            selected.id to selected.timeSlotIds
+                .map { slotId -> slotId.trim() }
+                .filter(String::isNotBlank)
+                .distinct()
+        }
+        .distinctUntilChanged()
+        .flatMapLatest { (eventId, slotIds) ->
+            if (slotIds.isEmpty()) {
+                flowOf(emptyList())
+            } else {
+                flow {
+                    val slots = fieldRepository.getTimeSlots(slotIds)
+                        .onFailure { error ->
+                            Napier.w("Failed to refresh time slots for event $eventId: ${error.message}")
+                        }
+                        .getOrElse { emptyList() }
+                    emit(slots)
+                }
             }
         }
-    }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     private val eventLeagueScoringConfig: StateFlow<LeagueScoringConfig?> = eventRelations
         .map { relations ->
@@ -794,59 +824,85 @@ class DefaultEventDetailComponent(
         }
         .stateIn(scope, SharingStarted.Eagerly, null)
 
-    override val eventWithRelations = eventRelations.flatMapLatest { relations ->
-        val hostFallbackFlow = if (relations.host != null || relations.event.hostId.isBlank()) {
-            flowOf(relations.host)
-        } else {
-            userRepository.getUsersFlow(
-                userIds = listOf(relations.event.hostId),
-                visibilityContext = UserVisibilityContext(eventId = relations.event.id),
-            ).map { result ->
-                result.getOrElse { emptyList() }.firstOrNull()
+    private val eventMatches: StateFlow<List<MatchWithRelations>> = selectedEventId
+        .flatMapLatest { eventId ->
+            if (eventId.isBlank()) {
+                flowOf(emptyList())
+            } else {
+                matchRepository.getMatchesOfTournamentFlow(eventId).map { result ->
+                    result.getOrElse {
+                        _errorState.value = ErrorMessage("Error loading matches: ${it.userMessage()}")
+                        emptyList()
+                    }
+                }
             }
         }
-        val relationTeamIds = relations.teams
-            .map { team -> team.id.trim() }
-            .filter(String::isNotBlank)
-            .distinct()
-        combine(
-            matchRepository.getMatchesOfTournamentFlow(relations.event.id).map { result ->
-                result.getOrElse {
-                    _errorState.value =
-                        ErrorMessage("Error loading matches: ${it.userMessage()}"); emptyList()
-                }
-            },
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    private val eventTeams: StateFlow<List<TeamWithPlayers>> = eventRelationTeamIds
+        .flatMapLatest { relationTeamIds ->
             if (relationTeamIds.isEmpty()) {
                 flowOf(emptyList())
             } else {
                 teamRepository.getTeamsFlow(relationTeamIds).map { result ->
                     result.getOrElse {
-                        _errorState.value =
-                            ErrorMessage("Failed to load teams: ${it.userMessage()}"); emptyList()
+                        _errorState.value = ErrorMessage("Failed to load teams: ${it.userMessage()}")
+                        emptyList()
                     }
                 }
-            },
-            _sports,
-            hostFallbackFlow,
-            eventTimeSlots,
-        ) { matches, teams, sports, hostFallback, timeSlots ->
-            val sport = relations.event.sportId
-                ?.takeIf(String::isNotBlank)
-                ?.let { sportId -> sports.firstOrNull { it.id == sportId } }
-            relations.toEventWithFullRelations(matches, teams).copy(
-                timeSlots = timeSlots,
-                sport = sport,
-                host = relations.host ?: hostFallback,
-            )
-        }.combine(eventLeagueScoringConfig) { combinedRelations, leagueScoringConfig ->
-            combinedRelations.copy(leagueScoringConfig = leagueScoringConfig)
-        }.combine(_eventStaffInvites) { combinedRelations, staffInvites ->
-            combinedRelations.copy(staffInvites = staffInvites)
+            }
         }
-    }.stateIn(
-        scope, SharingStarted.Eagerly, EventWithFullRelations(
-            event, emptyList(), emptyList(), emptyList()
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    private val eventHost: StateFlow<UserData?> = combine(
+        selectedEvent
+            .map { selected -> selected.id to selected.hostId.trim() }
+            .distinctUntilChanged(),
+        eventRelationHost,
+    ) { (eventId, hostId), host ->
+        Triple(eventId, hostId, host)
+    }.flatMapLatest { (eventId, hostId, host) ->
+        if (host != null || hostId.isBlank()) {
+            flowOf(host)
+        } else {
+            userRepository.getUsersFlow(
+                userIds = listOf(hostId),
+                visibilityContext = UserVisibilityContext(eventId = eventId),
+            ).map { result ->
+                result.getOrElse { emptyList() }.firstOrNull()
+            }
+        }
+    }.stateIn(scope, SharingStarted.Eagerly, eventRelations.value.host)
+
+    override val eventWithRelations = combine(
+        selectedEvent,
+        eventRelationPlayers,
+        eventMatches,
+        eventTeams,
+        _sports,
+    ) { selected, players, matches, teams, sports ->
+        val sport = selected.sportId
+            ?.takeIf(String::isNotBlank)
+            ?.let { sportId -> sports.firstOrNull { it.id == sportId } }
+        EventWithFullRelations(
+            event = selected,
+            players = players,
+            matches = matches,
+            teams = teams,
+            sport = sport,
         )
+    }.combine(eventHost) { relations, host ->
+        relations.copy(host = host)
+    }.combine(eventTimeSlots) { relations, timeSlots ->
+        relations.copy(timeSlots = timeSlots)
+    }.combine(eventLeagueScoringConfig) { relations, leagueScoringConfig ->
+        relations.copy(leagueScoringConfig = leagueScoringConfig)
+    }.combine(_eventStaffInvites) { relations, staffInvites ->
+        relations.copy(staffInvites = staffInvites)
+    }.stateIn(
+        scope,
+        SharingStarted.Eagerly,
+        EventWithFullRelations(event, emptyList(), emptyList(), emptyList()),
     )
 
     private val _divisionMatches = MutableStateFlow<Map<String, MatchWithRelations>>(emptyMap())
@@ -1207,37 +1263,26 @@ class DefaultEventDetailComponent(
         scope.launch {
             matchRepository.setIgnoreMatch(null)
             matchRepository.subscribeToMatches()
-            eventWithRelations.distinctUntilChanged { old, new -> old == new }.filterNotNull()
-                .collect { event ->
-                    if (!canEditEventDetails(event.event) && _isEditing.value) {
-                        _isEditing.value = false
-                        _editedEvent.value = event.event
-                        _editableLeagueTimeSlots.value = event.timeSlots.sortedBy { slot ->
-                            slot.startTimeMinutes ?: Int.MAX_VALUE
-                        }
-                        val refreshedFields = buildEditableFieldDrafts(
-                            event = event.event,
-                            sourceFields = eventFields.value.map { relation -> relation.field },
-                        )
-                        _editableFields.value = refreshedFields
-                        _fieldCount.value = refreshedFields.size
-                    } else if (!_isEditing.value) {
-                        _editableLeagueTimeSlots.value = event.timeSlots.sortedBy { slot ->
-                            slot.startTimeMinutes ?: Int.MAX_VALUE
-                        }
-                        val refreshedFields = buildEditableFieldDrafts(
-                            event = event.event,
-                            sourceFields = eventFields.value.map { relation -> relation.field },
-                        )
-                        _editableFields.value = refreshedFields
-                        _fieldCount.value = refreshedFields.size
-                    }
-                    refreshCurrentUserMembershipState(event.event)
-                    refreshWithdrawTargets(event.event)
-                    event.event.resolveDefaultSelectedDivisionId()?.let { divisionId ->
-                        selectDivision(divisionId)
+            eventWithRelations.collect { relations ->
+                if (!canEditEventDetails(relations.event) && _isEditing.value) {
+                    _isEditing.value = false
+                    _editedEvent.value = relations.event
+                }
+                if (!_isEditing.value) {
+                    _editableLeagueTimeSlots.value = relations.timeSlots.sortedBy { slot ->
+                        slot.startTimeMinutes ?: Int.MAX_VALUE
                     }
                 }
+            }
+        }
+        scope.launch {
+            selectedEvent.collect { selected ->
+                refreshCurrentUserMembershipState(selected)
+                refreshWithdrawTargets(selected)
+                selected.resolveDefaultSelectedDivisionId()?.let { divisionId ->
+                    selectDivision(divisionId)
+                }
+            }
         }
         scope.launch {
             combine(eventWithRelations, eventFields, _isEditing) { relations, fieldsWithMatches, editing ->

@@ -10,7 +10,9 @@ import com.razumly.mvp.core.data.dataTypes.Invite
 import com.razumly.mvp.core.data.dataTypes.LeagueScoringConfigDTO
 import com.razumly.mvp.core.data.dataTypes.EventOfficial
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
+import com.razumly.mvp.core.data.dataTypes.MatchRulesConfigMVP
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
+import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.util.mergeDivisionDetailsForDivisions
@@ -94,7 +96,9 @@ data class EventApiDto(
     val setsPerMatch: Int? = null,
     val doTeamsOfficiate: Boolean? = null,
     val teamOfficialsMaySwap: Boolean? = null,
+    val matchRulesOverride: MatchRulesConfigMVP? = null,
     val autoCreatePointMatchIncidents: Boolean? = null,
+    val resolvedMatchRules: ResolvedMatchRulesMVP? = null,
     val restTimeMinutes: Int? = null,
 
     val state: String? = null,
@@ -276,7 +280,9 @@ data class EventApiDto(
             setsPerMatch = setsPerMatch,
             doTeamsOfficiate = doTeamsOfficiate,
             teamOfficialsMaySwap = if (doTeamsOfficiate == true) teamOfficialsMaySwap else false,
+            matchRulesOverride = matchRulesOverride,
             autoCreatePointMatchIncidents = autoCreatePointMatchIncidents ?: false,
+            resolvedMatchRules = resolvedMatchRules,
             restTimeMinutes = restTimeMinutes,
             state = state ?: "UNPUBLISHED",
             pointsToVictory = pointsToVictory ?: emptyList(),
@@ -562,6 +568,7 @@ data class EventUpdateDto(
     val eventType: String? = null,
     val doTeamsOfficiate: Boolean? = null,
     val teamOfficialsMaySwap: Boolean? = null,
+    val matchRulesOverride: MatchRulesConfigMVP? = null,
     val autoCreatePointMatchIncidents: Boolean? = null,
     val officialIds: List<String>? = null,
     val allowPaymentPlans: Boolean? = null,
@@ -740,6 +747,7 @@ fun Event.toUpdateDto(
         eventType = eventType.name,
         doTeamsOfficiate = doTeamsOfficiate,
         teamOfficialsMaySwap = if (doTeamsOfficiate == true) teamOfficialsMaySwap else false,
+        matchRulesOverride = matchRulesOverride,
         autoCreatePointMatchIncidents = autoCreatePointMatchIncidents,
         officialIds = officialIds,
         allowPaymentPlans = allowPaymentPlans,
