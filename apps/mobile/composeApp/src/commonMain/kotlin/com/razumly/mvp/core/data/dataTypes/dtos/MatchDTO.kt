@@ -3,7 +3,10 @@
 package com.razumly.mvp.core.data.dataTypes.dtos
 
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.dataTypes.MatchIncidentMVP
 import com.razumly.mvp.core.data.dataTypes.MatchOfficialAssignment
+import com.razumly.mvp.core.data.dataTypes.MatchSegmentMVP
+import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import com.razumly.mvp.core.data.util.normalizeDivisionLabel
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
@@ -22,6 +25,17 @@ data class MatchDTO(
     val eventId: String,
     val officialId: String?,
     val fieldId: String?,
+    val status: String? = null,
+    val resultStatus: String? = null,
+    val resultType: String? = null,
+    val actualStart: String? = null,
+    val actualEnd: String? = null,
+    val statusReason: String? = null,
+    val winnerEventTeamId: String? = null,
+    val matchRulesSnapshot: ResolvedMatchRulesMVP? = null,
+    val resolvedMatchRules: ResolvedMatchRulesMVP? = null,
+    val segments: List<MatchSegmentMVP> = emptyList(),
+    val incidents: List<MatchIncidentMVP> = emptyList(),
     val start: String?,
     val end: String?,
     val division: String?,
@@ -51,6 +65,17 @@ fun MatchDTO.toMatch(id: String): MatchMVP {
         matchId = matchId,
         officialId = officialId,
         fieldId = fieldId,
+        status = status,
+        resultStatus = resultStatus,
+        resultType = resultType,
+        actualStart = actualStart,
+        actualEnd = actualEnd,
+        statusReason = statusReason,
+        winnerEventTeamId = winnerEventTeamId,
+        matchRulesSnapshot = matchRulesSnapshot,
+        resolvedMatchRules = resolvedMatchRules,
+        segments = segments,
+        incidents = incidents,
         start = start?.let { Instant.parse(it) },
         end = end?.let { Instant.parse(it) },
         division = division?.normalizeDivisionLabel(),

@@ -1,4 +1,4 @@
-# Cross-Stack Match Rules, Incidents, and Match Operations Refactor
+# Cross-Stack Match Rules, Segments, Incidents, and Match Operations Refactor
 
 This ExecPlan is a living document. The sections `Progress`, `Surprises & Discoveries`, `Decision Log`, and `Outcomes & Retrospective` must be kept up to date as work proceeds.
 
@@ -6,378 +6,142 @@ This document must be maintained in accordance with `PLANS.md` at the repository
 
 ## Purpose / Big Picture
 
-After this change, matches in both `mvp-site` and `mvp-app` will support richer sport-aware match operations instead of only basic score arrays and official check-in. Hosts will be able to configure match rules per sport and override them per event, officials will be able to record structured match incidents such as goals while updating scores, and readonly match views will show clearer match state, segment-by-segment scoring, official crew context, and incident history.
+After this change, officials and hosts can run a match from one operational view instead of editing raw score arrays. Scores are represented as match segments, match history is represented as incidents, and the UI shows the full operational state of the match: lifecycle, rules, segment scores, officials, check-ins, field location, and incident timeline. A user can verify the feature by opening a match on web or mobile, toggling `Match Details` next to `View Field Location`, switching segments, checking in as an assigned official, updating score, and adding an incident.
 
-This plan intentionally covers only the match, sport, and event refactor needed to unlock those features. The planned redesign of teams, team registrations, player jersey numbers, and roster membership is a separate follow-up plan and must not be mixed into this implementation beyond the minimum compatibility needed to keep current match editing working.
+This work spans `mvp-site`, which is the backend and web source of truth, and `mvp-app`, which is the Kotlin Multiplatform client. The backend contract must be implemented first, then mirrored in the mobile DTOs and Room cache.
 
 ## Progress
 
-- [x] (2026-04-15 14:05Z) Audited current Prisma models for `Sports`, `Events`, `Matches`, `Teams`, `UserData`, and `EventOfficials` in `mvp-site`.
-- [x] (2026-04-15 14:05Z) Audited current web/mobile match editing and score update surfaces in `mvp-site` and `mvp-app`.
-- [x] (2026-04-15 14:05Z) Confirmed that `Sports.usePointsFor*` flags are still required for league scoring configuration filtering and current set-based heuristics.
-- [x] (2026-04-15 14:05Z) Confirmed that `Matches.side` is an active bracket-placement concept and already feeds scheduler advancement logic.
-- [x] (2026-04-15 14:25Z) Saved this cross-stack ExecPlan for match rules, incidents, and match operations.
-- [ ] Define the new persisted rule models and compatibility fields in `mvp-site` Prisma schema and shared TypeScript types.
-- [ ] Add backend persistence, API contract, and rules-resolution logic for sport defaults, event overrides, and per-match snapshots.
-- [ ] Add incident capture and score-to-incident automation on web and mobile match update flows.
-- [ ] Upgrade readonly and edit match UIs on web and mobile to surface lifecycle state, resolved rules, segments, officials, and incidents.
-- [ ] Run targeted backend, web, and mobile validation suites and update this plan with final outcomes.
+- [x] (2026-04-16 00:35Z) Re-read `PLANS.md` and confirmed this complex cross-stack refactor must use a living ExecPlan.
+- [x] (2026-04-16 00:40Z) Audited current backend schema and found `Matches.team1Points`, `Matches.team2Points`, and `Matches.setResults` are still persisted directly on `Matches`.
+- [x] (2026-04-16 00:45Z) Audited web score surfaces and found `ScoreUpdateModal` already has the `View Field Location` row where the new `Match Details` toggle belongs.
+- [x] (2026-04-16 00:50Z) Audited mobile match detail and found its bottom action bar has `View Field Location`, while scoring state is still driven by `currentSet`, `team1Points`, `team2Points`, and `setResults`.
+- [x] (2026-04-16 00:55Z) Revised this ExecPlan from the earlier compatibility design to the approved coordinated-removal design.
+- [x] (2026-04-16 07:20Z) Added backend Prisma fields, models, and migration SQL for rules, lifecycle, segments, and incidents.
+- [x] (2026-04-16 07:45Z) Added backend TypeScript contracts and rules-resolution helpers.
+- [x] (2026-04-16 08:20Z) Updated backend event/match repositories and match routes to load and write segments/incidents while keeping compatibility projections where existing flows still need them.
+- [x] (2026-04-16 09:05Z) Replaced web score-array modal behavior with match operations behavior and kept schedule/admin edits in `MatchEditModal`.
+- [x] (2026-04-16 09:45Z) Mirrored backend match contracts in mobile DTOs, Room models, repositories, and match detail UI.
+- [x] (2026-04-16 10:25Z) Ran targeted backend and mobile validation and recorded outputs here.
 
 ## Surprises & Discoveries
 
-- Observation: the `Sports.usePointsFor*` and related booleans are not dead schema; they are actively used to decide which league scoring fields appear in the web form.
-  Evidence: `src/app/discover/components/LeagueScoringConfigPanel.tsx` uses `FLAG_MAP` and `shouldShowField()` to gate the numeric scoring inputs.
+- Observation: Web already has the field-location expansion in `ScoreUpdateModal`.
+  Evidence: `mvp-site/src/app/events/[id]/schedule/components/ScoreUpdateModal.tsx` renders `View Field Location`, `Open in Maps`, and an iframe map preview.
 
-- Observation: `usePointsPerSetWin` is also being used as a proxy for "this sport uses sets" in current web event and tournament editors.
-  Evidence: `src/app/discover/components/LeagueFields.tsx`, `src/app/discover/components/TournamentFields.tsx`, and `src/app/events/[id]/schedule/components/EventForm.tsx` all derive `requiresSets` from `sport?.usePointsPerSetWin`.
+- Observation: Web has two separate match surfaces that should not be merged. `ScoreUpdateModal` is the live operations surface, while `MatchEditModal` is the schedule/admin setup surface.
+  Evidence: `ScoreUpdateModal.tsx` owns score entry and field location. `MatchEditModal.tsx` owns teams, field, start/end, bracket links, and official assignments.
 
-- Observation: `Matches.side` is not merely a rendering hint; it is part of bracket advancement semantics and is already normalized to `LEFT`/`RIGHT` in scheduler code.
-  Evidence: `src/server/scheduler/types.ts` defines `sideFrom()` and `Match.advanceTeams()` places advancing teams based on `this.side`.
+- Observation: Mobile already has a bottom action surface that can hold both `View Field Location` and `Match Details`.
+  Evidence: `mvp-app/composeApp/src/commonMain/kotlin/com/razumly/mvp/matchDetail/MatchDetailScreen.kt` renders a bottom `Surface` containing the field-location button.
 
-- Observation: official assignment is already in a half-migrated state. Event staff is normalized in `EventOfficials`, while per-match crew is still stored as JSON on `Matches.officialIds`.
-  Evidence: `prisma/schema.prisma` stores `EventOfficials` as rows but keeps `Matches.officialIds` as `Json?`.
+- Observation: Mobile Room cache currently serializes score arrays directly on `MatchMVP`.
+  Evidence: `mvp-app/composeApp/src/commonMain/kotlin/com/razumly/mvp/core/data/dataTypes/MatchMVP.kt` has `team1Points`, `team2Points`, and `setResults`.
 
-- Observation: the current mobile and web match score surfaces assume score changes can be applied immediately without collecting extra context first.
-  Evidence: `composeApp/src/commonMain/kotlin/com/razumly/mvp/matchDetail/MatchContentComponent.kt` updates scores directly, and `src/app/events/[id]/schedule/components/ScoreUpdateModal.tsx` edits points without an incident capture step.
+- Observation: `npx tsc --noEmit` initially failed on a malformed generated Next validator under `.next/dev/types/validator.ts`.
+  Evidence: the file contained a truncated route validation block. Removing the generated cache file and rerunning `npx tsc --noEmit` passed.
 
 ## Decision Log
 
-- Decision: keep the existing `Sports.usePointsFor*`, tiebreak, and overtime-related booleans in this implementation.
-  Rationale: they are still the source of truth for league scoring configuration visibility and some existing event form heuristics; removing them would expand the migration surface unnecessarily.
-  Date/Author: 2026-04-15 / Codex
+- Decision: Remove `team1Points`, `team2Points`, and `setResults` from runtime contracts in this coordinated release.
+  Rationale: The user chose a coordinated backend/web/mobile release and wants `MatchSegments` plus optional `MatchIncidents` to replace score arrays rather than preserving them as the runtime API.
+  Date/Author: 2026-04-16 / Codex
 
-- Decision: stop treating the `usePointsFor*` booleans as the primary source of truth for match operations.
-  Rationale: standings configuration and match operations are related but separate concerns. A sport can be set-based for match play without that being encoded only through standings flags.
-  Date/Author: 2026-04-15 / Codex
+- Decision: Do not store `segmentType` on `MatchSegment`.
+  Rationale: All segments in a match derive their meaning from the resolved rules. A row only needs `sequence`; UI labels such as "Set 1" or "Period 1" are derived from rules.
+  Date/Author: 2026-04-16 / Codex
 
-- Decision: keep `Matches.side`, but constrain it more tightly and preserve its bracket-only meaning.
-  Rationale: scheduler and bracket code already rely on `LEFT`/`RIGHT` placement. Future concepts such as `home/away` or `top/bottom` must use different fields rather than overloading `side`.
-  Date/Author: 2026-04-15 / Codex
+- Decision: Treat `MatchSegments` as the authoritative scoreboard/result projection and `MatchIncidents` as the operational log.
+  Rationale: Brackets, standings, and UI need fast current state, while incidents explain how that state changed when incident capture is enabled.
+  Date/Author: 2026-04-16 / Codex
 
-- Decision: implement rules as a three-level model: sport template, event override, and per-match snapshot.
-  Rationale: sports provide defaults, events need local overrides, and completed matches must preserve the exact rules that were in force when they were played.
-  Date/Author: 2026-04-15 / Codex
+- Decision: Use hybrid scoring history based on `Events.autoCreatePointMatchIncidents`.
+  Rationale: The user chose hybrid behavior. When the toggle is on, point deltas create incidents; when off, segment scores can update directly.
+  Date/Author: 2026-04-16 / Codex
 
-- Decision: implement incidents as first-class persisted records instead of trying to encode them inside points arrays or free-text notes.
-  Rationale: readonly match views, official reporting, and later analytics all need structured incident data tied to teams, players, officials, and match time.
-  Date/Author: 2026-04-15 / Codex
-
-- Decision: keep current score arrays as compatibility fields during the first implementation, while introducing richer match segment and incident models alongside them.
-  Rationale: bracket logic, existing DTOs, and mobile/web screens already expect `team1Points`, `team2Points`, and `setResults`. Replacing them immediately would make the migration riskier than necessary.
-  Date/Author: 2026-04-15 / Codex
-
-- Decision: treat the team membership and registration redesign as explicitly out of scope for this plan.
-  Rationale: the user requested that the current match plan be saved first, and the team redesign will require its own schema, UI, and migration work.
-  Date/Author: 2026-04-15 / Codex
+- Decision: Keep `Sports.usePointsFor*` booleans and `Matches.side`.
+  Rationale: The booleans still drive league scoring config visibility, and `side` is bracket-placement metadata used by advancement logic.
+  Date/Author: 2026-04-16 / Codex
 
 ## Outcomes & Retrospective
 
-Initial planning only.
+The cross-stack refactor is implemented in the backend/web project and mirrored in the KMP client. Backend schema and migration SQL add rule config, lifecycle/result fields, `MatchSegments`, and `MatchIncidents`. Match responses now include resolved rules, segments, incidents, lifecycle/result state, and winner projection. The atomic match PATCH route accepts lifecycle, segment, incident, and official check-in operations and freezes `matchRulesSnapshot` on the first operational write.
 
-This plan now captures the intended match refactor scope, the current constraints discovered in code, and the implementation sequence required to keep the work incremental and cross-stack safe. No code changes have been made yet from this plan. The next major outcome to record here will be after the backend model and API foundation has been implemented.
+The web schedule score modal is now the match operations modal with `View Field Location` and `Match Details` side by side, a segment selector, score controls, lifecycle/rules/officials/incidents display, and incident creation. `MatchEditModal` no longer exposes the old score-array editor.
+
+The mobile match detail screen now mirrors the same operational concepts, including the bottom `Match Details` action, segment-based scoring state, lifecycle/rules/officials/incidents display, and Room-compatible segment/incident fields. `MVP_DATABASE_VERSION` was incremented to 12 and the available Room schema copy task completed.
 
 ## Context and Orientation
 
-This work spans two repositories in the same product:
+`mvp-site` lives at `C:\Users\samue\Documents\Code\mvp-site` on this Windows machine. It contains the Prisma schema in `prisma/schema.prisma`, TypeScript public contracts in `src/types/index.ts`, backend event/match repository mapping in `src/server/repositories/events.ts`, atomic match routes under `src/app/api/events/[eventId]/matches`, web schedule UI under `src/app/events/[id]/schedule`, and client service calls in `src/lib/tournamentService.ts`.
 
-- `mvp-site` is the backend and web source of truth for event, sport, team, and match persistence.
-- `mvp-app` is the Kotlin Multiplatform mobile client that consumes those contracts and exposes mobile match detail and match editing surfaces.
+`mvp-app` lives at `C:\Users\samue\StudioProjects\mvp-app`. It contains shared Kotlin models in `composeApp/src/commonMain/kotlin/com/razumly/mvp/core/data/dataTypes`, backend DTOs in `composeApp/src/commonMain/kotlin/com/razumly/mvp/core/network/dto`, Room setup in `composeApp/src/commonMain/kotlin/com/razumly/mvp/core/db/MVPDatabaseService.kt`, match repository calls in `composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/data/MatchRepository.kt`, and the match detail UI in `composeApp/src/commonMain/kotlin/com/razumly/mvp/matchDetail`.
 
-In the current backend schema, `Matches` in `mvp-site/prisma/schema.prisma` stores match scheduling, bracket links, seeds, a simple official model, and score arrays. `Sports` stores many booleans that describe which league scoring settings matter. `Events` stores sport-level and event-level scheduling and officiating settings. `EventOfficials` is already a normalized event staffing table, but `Matches.officialIds` is still stored as JSON.
+In this plan, a "segment" is one scoring unit in a match. For volleyball it is a set; for soccer it may be a period or half; for baseball it may be an inning; for a simple points-only match it is a single total segment. A segment row stores sequence and scores, not its type. The resolved rules define what the sequence means.
 
-In the current web application, the primary match edit and score update surfaces live in:
-
-- `mvp-site/src/app/events/[id]/schedule/components/MatchEditModal.tsx`
-- `mvp-site/src/app/events/[id]/schedule/components/ScoreUpdateModal.tsx`
-- `mvp-site/src/app/events/[id]/schedule/components/MatchCard.tsx`
-- `mvp-site/src/app/events/[id]/schedule/page.tsx`
-
-In the current mobile application, the primary match edit and score update surfaces live in:
-
-- `mvp-app/composeApp/src/commonMain/kotlin/com/razumly/mvp/matchDetail/MatchContentComponent.kt`
-- `mvp-app/composeApp/src/commonMain/kotlin/com/razumly/mvp/matchDetail/MatchDetailScreen.kt`
-- `mvp-app/composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/composables/MatchEditDialog.kt`
-- `mvp-app/composeApp/src/commonMain/kotlin/com/razumly/mvp/core/network/dto/MatchDtos.kt`
-
-The term "match rules" in this plan means the persisted description of how a match should be operated. That includes the scoring model (for example sets, periods, or innings), whether a draw is allowed, how overtime or shootout phases work, what official roles are expected, whether incidents should be recorded automatically when points are added, and which incident types are supported. Match rules are not the same thing as league standings configuration.
-
-The term "rules snapshot" means a copy of the fully resolved rules for a single match. A snapshot is stored on the match so that later event or sport edits do not silently reinterpret the historical record for matches that were already played or partially played.
-
-The term "incident" means a structured match event such as a goal, card, substitution, injury, penalty, timeout, or delay. An incident belongs to a match and can optionally point at a segment, team, player, official, and note text.
+In this plan, an "incident" is a structured match event such as a scoring action, card, penalty, or administrative note. Incidents can optionally point at the segment, event team, event registration, participant user, and official user involved.
 
 ## Plan of Work
 
-The implementation will proceed in five milestones. Each milestone is independently verifiable and leaves the system in a working state.
+Start in `mvp-site`. Add JSON-backed rule fields to `Sports` and `Events`, lifecycle/result fields to `Matches`, and new `MatchSegments` and `MatchIncidents` models. Add a Prisma migration that backfills existing score arrays into segment rows before dropping or no longer selecting the old runtime fields. The migration must map `setResults[i] === 1` to `team1Id` and `setResults[i] === 2` to `team2Id` as the segment `winnerEventTeamId`.
 
-### Milestone 1: Persist sport rules, event overrides, and match snapshots
+Add TypeScript types for `ResolvedMatchRules`, `MatchSegment`, `MatchIncident`, lifecycle values, segment operations, incident operations, and official check-in operations in `src/types/index.ts`. Add a rules helper that resolves `sport.matchRulesTemplate` and `event.matchRulesOverride`, applies defaults, and freezes a match snapshot on the first segment or incident write.
 
-At the end of this milestone, sports and events will be able to express match-operation rules without overloading the standings flags, and matches will store a resolved snapshot of those rules. Existing screens will still work because legacy score arrays and current official assignment shapes will remain in place during the migration.
+Update `src/server/repositories/events.ts` and the match API routes so match responses include lifecycle fields, `winnerEventTeamId`, resolved rules, `segments`, and `incidents`. Match update requests must accept `lifecycle`, `segmentOperations`, `incidentOperations`, and `officialCheckIn`. Score changes must update `MatchSegments`; if `Events.autoCreatePointMatchIncidents` is true, the same transaction must also create a scoring incident.
 
-In `mvp-site/prisma/schema.prisma`, add new JSON-backed fields that are small enough to evolve without forcing a large relational explosion in the first pass:
+Update web `ScoreUpdateModal` into the match operations modal. Keep the field-location row and add a `Match Details` button next to `View Field Location`. The expanded panel must show lifecycle, rules, teams, field/time, bracket links, segment score table, officials/check-in state, and incidents. Segment switching must use labels derived from rules. Move old score-array editing out of `MatchEditModal` so that modal stays focused on teams, field, time, bracket links, and official assignments.
 
-- `Sports.matchRulesTemplate Json?`
-- `Events.matchRulesOverride Json?`
-- `Events.autoCreatePointMatchIncidents Boolean? @default(false)`
-- `Matches.matchRulesSnapshot Json?`
-- `Matches.status String?`
-- `Matches.resultStatus String?`
-- `Matches.resultType String?`
-- `Matches.actualStart DateTime?`
-- `Matches.actualEnd DateTime?`
-- `Matches.statusReason String?`
-
-Keep `Sports.usePointsFor*`, `Events.officialPositions`, `Matches.side`, `Matches.team1Points`, `Matches.team2Points`, and `Matches.setResults` intact in this milestone.
-
-In `mvp-site/src/types/index.ts`, define explicit interfaces for:
-
-- `SportMatchRulesTemplate`
-- `EventMatchRulesOverride`
-- `ResolvedMatchRules`
-- `MatchLifecycleStatus`
-- `MatchResultStatus`
-- `MatchResultType`
-
-These types must define, at minimum:
-
-- `scoringModel`: one of `SETS`, `PERIODS`, `INNINGS`, `POINTS_ONLY`
-- `segmentType`: one of `SET`, `HALF`, `QUARTER`, `PERIOD`, `INNING`, `OVERTIME`, `SHOOTOUT`
-- `segmentCount`
-- `supportsDraw`
-- `supportsOvertime`
-- `supportsShootout`
-- `officialRoles`
-- `supportedIncidentTypes`
-- `autoCreatePointIncidentType`
-- `pointIncidentRequiresParticipant`
-
-Add rules-resolution helpers in `mvp-site/src/lib` or `mvp-site/src/server/repositories` that resolve sport template + event override into a final `ResolvedMatchRules`, then stamp that snapshot on each match when matches are created or updated through the event match routes.
-
-Validation for this milestone is complete when web and mobile can still load existing events and matches, and newly created or updated matches return a populated `matchRulesSnapshot` without breaking existing score-entry behavior.
-
-### Milestone 2: Persist match segments and incidents alongside legacy score arrays
-
-At the end of this milestone, the system will be able to persist richer score progression and incident history without yet requiring every screen to render the full new model.
-
-Add new Prisma models in `mvp-site/prisma/schema.prisma`:
-
-- `MatchSegments`
-- `MatchIncidents`
-
-`MatchSegments` must contain:
-
-- `id`
-- `matchId`
-- `order`
-- `segmentType`
-- `label`
-- `team1Score`
-- `team2Score`
-- `winner`
-- `startedAt`
-- `endedAt`
-- `isComplete`
-
-`MatchIncidents` must contain:
-
-- `id`
-- `matchId`
-- `segmentId`
-- `incidentType`
-- `teamId`
-- `participantUserId`
-- `officialUserId`
-- `linkedPointDelta Int?`
-- `minute Int?`
-- `sequence Int`
-- `note String?`
-- `createdAt`
-- `updatedAt`
-
-Keep the existing score arrays on `Matches` as compatibility fields. The backend must write both:
-
-- segments and incidents as the richer source of truth for new screens
-- arrays and set results as compatibility outputs for existing scheduler and bracket code
-
-In `mvp-site/src/app/api/events/[eventId]/matches/route.ts` and `.../[matchId]/route.ts`, extend the match update payload so callers can send:
-
-- segment updates
-- incident creates, edits, and deletes
-- lifecycle status changes
-
-In `mvp-site/src/server/repositories/events.ts`, load segments and incidents when hydrating matches for event detail and schedule pages.
-
-Validation for this milestone is complete when a match can be updated through the route layer with segment and incident data, the new rows persist, and the legacy arrays still reflect the same score state.
-
-### Milestone 3: Web match-edit and readonly upgrade
-
-At the end of this milestone, web hosts and officials will see resolved match rules, lifecycle state, segment scoring, official context, and incident history in the schedule and match edit surfaces.
-
-Update these files in `mvp-site`:
-
-- `src/app/events/[id]/schedule/components/MatchEditModal.tsx`
-- `src/app/events/[id]/schedule/components/ScoreUpdateModal.tsx`
-- `src/app/events/[id]/schedule/components/MatchCard.tsx`
-- `src/app/events/[id]/schedule/page.tsx`
-- any event settings panels that currently derive set mode only from `sport.usePointsPerSetWin`
-
-The event settings flow must expose:
-
-- event-level rules override editor
-- event-level toggle for `autoCreatePointMatchIncidents`
-
-The match edit flow must expose:
-
-- lifecycle status and reason
-- actual start and actual end
-- resolved rule summary
-- segment editor
-- incident timeline
-
-The score update modal must change behavior when `autoCreatePointMatchIncidents` is enabled and the resolved rules declare a point incident type. When an official increments score in that mode, the UI must open a compact incident capture prompt before finalizing the change. That prompt must let the official select the incident inputs required by the rules, such as team, scorer, assisting player if later supported, or note text. If the rules say participant selection is not required, the prompt can prefill or skip that field.
-
-The current flow must remain fast when the toggle is disabled. In that case, score increments continue to behave as they do today.
-
-Validation for this milestone is complete when a host can enable the toggle for an event, an official can increment score and capture a goal incident in the web UI, and the readonly match card or detail surface shows the incident history.
-
-### Milestone 4: Mobile match-detail and match-edit upgrade
-
-At the end of this milestone, the Kotlin Multiplatform mobile app will expose the same rules-aware match operations on mobile.
-
-Update these files in `mvp-app`:
-
-- `composeApp/src/commonMain/kotlin/com/razumly/mvp/core/data/dataTypes/MatchMVP.kt`
-- `composeApp/src/commonMain/kotlin/com/razumly/mvp/core/network/dto/MatchDtos.kt`
-- `composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/data/MatchRepository.kt`
-- `composeApp/src/commonMain/kotlin/com/razumly/mvp/matchDetail/MatchContentComponent.kt`
-- `composeApp/src/commonMain/kotlin/com/razumly/mvp/matchDetail/MatchDetailScreen.kt`
-- `composeApp/src/commonMain/kotlin/com/razumly/mvp/eventDetail/composables/MatchEditDialog.kt`
-
-The shared models must gain the same new match-rule, lifecycle, segment, and incident types introduced on the backend. Room schema and migrations must be updated if new persisted local fields are cached.
-
-The mobile score flow must mirror web behavior:
-
-- if event point-incident automation is off, score entry stays direct
-- if it is on, score increment opens a compact incident capture step before the point is committed
-
-Readonly mobile match detail must show:
-
-- match lifecycle status
-- resolved rules summary
-- segment-by-segment score
-- official crew summary
-- incident timeline
-
-Validation for this milestone is complete when mobile can sync the new fields, officials can create point-linked incidents during scoring, and readonly mobile match detail renders the incident list for the same match data returned by the backend.
-
-### Milestone 5: Compatibility cleanup and migration hardening
-
-At the end of this milestone, the new rules and incidents system is the preferred path, while legacy fields remain only as compatibility layers where still needed.
-
-Add explicit migration and fallback rules in both repositories so that:
-
-- old sports without `matchRulesTemplate` get inferred defaults from current flags
-- old events without `matchRulesOverride` continue using sport defaults
-- old matches without a snapshot receive a resolved snapshot on first save
-- old matches without segment rows can still render from arrays until touched
-
-Do not remove `Sports.usePointsFor*` or `Matches.side` in this milestone. Do not remove legacy score arrays until the team and roster redesign is complete and the new match flow has been proven stable across both stacks.
-
-Validation for this milestone is complete when existing production-like seeded data can be loaded and edited without manual repairs, and new matches use the richer model end to end.
+Mirror the same contract in `mvp-app`. Replace `MatchMVP` score arrays with segment and incident collections plus lifecycle/result fields. Increment `MVP_DATABASE_VERSION`, update converters if needed, regenerate the Room schema, and update repository payloads. Replace `currentSet` and array-based scoring in `MatchContentComponent` with selected segment state and operation calls. Add a `Match Details` button beside `View Field Location` in `MatchDetailScreen`.
 
 ## Concrete Steps
 
-Run these commands from the named working directories as the work proceeds.
+Run commands from `C:\Users\samue\Documents\Code\mvp-site` for backend and web work:
 
-From `/Users/elesesy/StudioProjects/mvp-site`:
-
-1. Edit `prisma/schema.prisma` and create a Prisma migration for the new match rules, lifecycle, segments, and incidents fields.
-2. Update `src/types/index.ts`, repository mappers, and event match API routes.
-3. Add targeted Jest coverage for repository mapping, API route validation, and score-to-incident automation.
-
-Expected commands:
-
-    npx prisma migrate dev --name match_rules_and_incidents
-    npm test -- --runTestsByPath "src/app/api/events/[eventId]/matches/[matchId]/route.test.ts"
-    npm test -- --runTestsByPath "src/server/repositories/__tests__/events.upsert.test.ts"
     npm test -- --runTestsByPath "src/app/events/[id]/schedule/components/__tests__/ScoreUpdateModal.test.tsx"
+    npm test -- --runTestsByPath "src/lib/__tests__/tournamentService.test.ts"
+    npm test -- --runTestsByPath "src/app/api/events/[eventId]/matches/[matchId]/route.test.ts"
 
-From `/Users/elesesy/StudioProjects/mvp-app`:
+Run commands from `C:\Users\samue\StudioProjects\mvp-app` for mobile work:
 
-1. Update shared Kotlin models, DTOs, repositories, and match detail/edit surfaces.
-2. Add or update unit tests for DTO mapping and match scoring component behavior.
+    .\gradlew :composeApp:testDebugUnitTest
+    .\gradlew :composeApp:roomGenerateSchema
+    .\gradlew :composeApp:compileDebugKotlinAndroid
 
-Expected commands:
+When Prisma migration generation is available, run from `mvp-site`:
 
-    ./gradlew :composeApp:testDebugUnitTest --tests "com.razumly.mvp.matchDetail.MatchContentComponentTest"
-    ./gradlew :composeApp:testDebugUnitTest --tests "com.razumly.mvp.core.network.dto.MatchDtosTest"
-    ./gradlew :composeApp:compileDebugKotlinAndroid
+    npx prisma migrate dev --name match_segments_incidents_operations
+
+If the local database is not available, create the migration SQL manually under `mvp-site/prisma/migrations/<timestamp>_match_segments_incidents_operations/migration.sql` and validate it through tests that mock Prisma.
 
 ## Validation and Acceptance
 
-Acceptance is met when all of the following behaviors are demonstrably working:
+Acceptance is met when opening a match on web shows `View Field Location` and `Match Details` side by side, expanding `Match Details` shows lifecycle, rules, segments, officials, and incidents, and changing score updates a segment. With `autoCreatePointMatchIncidents` on, the score action creates an incident before committing the point. With the toggle off, the score action updates only the segment.
 
-1. A sport can define a structured match rules template without losing the existing league scoring configuration gating driven by `usePointsFor*`.
-2. An event can override those rules and toggle automatic point-to-incident creation.
-3. A match created or updated through the backend returns a `matchRulesSnapshot`, lifecycle status, segments, and incidents.
-4. The web match score flow prompts for incident details when the event toggle is on and directly updates score when it is off.
-5. The mobile match score flow behaves the same way.
-6. Readonly match views on both platforms show lifecycle status, resolved rule summary, segment scores, official context, and incident timeline.
-7. Existing bracket placement still works because `side` remains `LEFT` or `RIGHT` and continues to drive advancement.
-8. Existing league scoring configuration UI still filters fields based on the current `Sports.usePointsFor*` flags.
+Acceptance is met on mobile when opening the match detail screen shows the same two bottom actions, the details panel renders segment scores and incidents, segment switching changes the active scoring segment, and official check-in updates the correct assignment slot.
+
+Backend acceptance is met when a match response no longer needs score arrays and instead returns lifecycle fields, `winnerEventTeamId`, resolved rules, `segments`, and `incidents`; bracket advancement uses `winnerEventTeamId`; and existing schedule/bracket loads work when segments and incidents are empty.
 
 ## Idempotence and Recovery
 
-All schema changes in this plan must be additive first. Do not remove legacy fields during the first migration wave. Re-running the Prisma migration command is safe only when the migration name has not already been used locally; otherwise create a new migration name and keep the SQL additive.
+Schema migration must be safe to run once on a database that has legacy match arrays. Backfill should create segment rows only when they do not already exist for a match/sequence. If a migration fails before dropping old columns, it can be rerun after deleting partial segment rows for the affected migration. If a code step breaks either stack, keep the new additive models and repair mappers before removing any compatibility parsing.
 
-If the new rules or segment loading breaks older events, disable the new UI surfaces behind "has data / has rules" guards while preserving the backend schema changes, then fix the mapper logic before re-enabling the surfaces. If mobile Room migrations fail, keep the schema bump and repair the migration SQL rather than rolling back the version number.
+Room schema changes in `mvp-app` require incrementing `MVP_DATABASE_VERSION` exactly once for this refactor and regenerating schema JSON. If generation fails, do not lower the version; fix the entity/converter mismatch and regenerate.
 
 ## Artifacts and Notes
 
-This section must be updated during implementation with concise proof snippets such as:
+Artifacts will be recorded here as implementation progresses, including the Prisma migration path, focused Jest output, Gradle output, and any short request/response examples that prove segments and incidents round-trip.
 
-- Prisma migration output that shows the new columns and tables were applied.
-- Jest output for API route and schedule component tests.
-- Gradle output for the targeted mobile tests.
-- Short request/response examples showing `matchRulesSnapshot`, segment rows, and incidents in the returned payload.
+- Prisma migration: `C:\Users\samue\Documents\Code\mvp-site\prisma\migrations\20260416003000_match_segments_incidents_operations\migration.sql`
+- Backend validation: `npx tsc --noEmit` from `C:\Users\samue\Documents\Code\mvp-site` passed after removing the stale generated `.next/dev/types/validator.ts` cache file.
+- Mobile validation: `.\gradlew :composeApp:compileDebugKotlinAndroid --no-daemon` from `C:\Users\samue\StudioProjects\mvp-app` passed.
+- Room schema validation: `.\gradlew :composeApp:roomGenerateSchema --no-daemon` is not available in this repo; `.\gradlew :composeApp:copyRoomSchemas --no-daemon` passed instead.
 
 ## Interfaces and Dependencies
 
-At the end of this plan, the following interfaces and persisted shapes must exist.
+At completion, `mvp-site/src/types/index.ts` must define `ResolvedMatchRules`, `MatchSegment`, `MatchIncident`, lifecycle/result string unions, and operation payload types for lifecycle, segment, incident, and official check-in changes.
 
-In `mvp-site/src/types/index.ts`, define:
+At completion, `mvp-site/prisma/schema.prisma` must expose JSON rule fields on `Sports` and `Events`, lifecycle/result fields on `Matches`, and relational `MatchSegments` and `MatchIncidents` models. `MatchSegments` must not include `segmentType`.
 
-    export interface ResolvedMatchRules { ... }
-    export interface MatchSegment { ... }
-    export interface MatchIncident { ... }
+At completion, `mvp-app` must have serializable Kotlin equivalents for the same match fields, segments, incidents, and operation payloads. The mobile DTOs must mirror backend names.
 
-In `mvp-site/prisma/schema.prisma`, add fields for:
-
-    Sports.matchRulesTemplate
-    Events.matchRulesOverride
-    Events.autoCreatePointMatchIncidents
-    Matches.matchRulesSnapshot
-    Matches.status
-    Matches.resultStatus
-    Matches.resultType
-    Matches.actualStart
-    Matches.actualEnd
-    Matches.statusReason
-
-and add models:
-
-    MatchSegments
-    MatchIncidents
-
-In `mvp-app`, the shared match DTO and domain model layer must round-trip the same new fields and collections.
-
-This plan depends on existing code in:
-
-- `mvp-site/src/server/repositories/events.ts`
-- `mvp-site/src/app/api/events/[eventId]/matches/route.ts`
-- `mvp-site/src/app/api/events/[eventId]/matches/[matchId]/route.ts`
-- `mvp-site/src/server/scheduler/types.ts`
-- `mvp-app/composeApp/src/commonMain/kotlin/com/razumly/mvp/matchDetail/MatchContentComponent.kt`
-
-The team redesign that removes `playerIds`, `captainId`, `managerId`, `headCoachId`, and `coachIds` from `Teams` is a separate dependency plan and must be completed before any later phase that wants player-backed roster incidents or roster-driven lineup validation. For this match plan, all player selection flows must continue to work against the current team/player relationship until that follow-up lands.
-
-Revision note (2026-04-15 / Codex): Initial plan created to capture the cross-stack match rules, lifecycle, and incident refactor while preserving current standings flags and bracket side semantics.
+Revision note (2026-04-16 / Codex): Replaced the earlier compatibility-first plan with the approved coordinated removal of legacy score arrays, removed `segmentType` from `MatchSegment`, and added explicit web/mobile operations-panel requirements.

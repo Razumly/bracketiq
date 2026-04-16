@@ -51,6 +51,8 @@ resolve_backend_dir() {
   fi
   candidates+=(
     "$REPO_ROOT/../mvp-site"
+    "$HOME/Documents/Code/mvp-site"
+    "/mnt/c/Users/samue/Documents/Code/mvp-site"
     "$HOME/Projects/MVP/mvp-site"
     "$HOME/StudioProjects/mvp-site"
   )
@@ -247,7 +249,7 @@ main() {
   configure_node_path
 
   local backend_dir
-  backend_dir="$(resolve_backend_dir)" || fail "Could not find mvp-site. Set MVP_SITE_DIR or clone it to ../mvp-site."
+  backend_dir="$(resolve_backend_dir)" || fail "Could not find mvp-site. Set MVP_SITE_DIR, clone it to ~/Documents/Code/mvp-site, or clone it to ../mvp-site."
 
   local port
   port="$(resolve_backend_port)"

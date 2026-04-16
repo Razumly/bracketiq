@@ -13,6 +13,7 @@ import com.razumly.mvp.core.network.dto.BulkMatchUpdateEntryDto
 import com.razumly.mvp.core.network.dto.BulkMatchUpdateRequestDto
 import com.razumly.mvp.core.network.dto.BulkMatchesResponseDto
 import com.razumly.mvp.core.network.dto.MatchResponseDto
+import com.razumly.mvp.core.network.dto.MatchSegmentOperationDto
 import com.razumly.mvp.core.network.dto.MatchUpdateDto
 import com.razumly.mvp.core.network.dto.MatchesResponseDto
 import com.razumly.mvp.core.network.dto.toBulkMatchCreateEntryDto
@@ -120,6 +121,23 @@ class MatchRepository(
         )
     }
 
+    private fun MatchMVP.toSegmentOperations(): List<MatchSegmentOperationDto>? =
+        segments
+            .takeIf { it.isNotEmpty() }
+            ?.map { segment ->
+                MatchSegmentOperationDto(
+                    id = segment.id,
+                    sequence = segment.sequence,
+                    status = segment.status,
+                    scores = segment.scores,
+                    winnerEventTeamId = segment.winnerEventTeamId,
+                    startedAt = segment.startedAt,
+                    endedAt = segment.endedAt,
+                    resultType = segment.resultType,
+                    statusReason = segment.statusReason,
+                )
+            }
+
     private suspend fun fetchRemoteMatches(tournamentId: String): List<MatchMVP> {
         return api.get<MatchesResponseDto>("api/events/$tournamentId/matches")
             .matches
@@ -177,6 +195,7 @@ class MatchRepository(
                     team1Points = sanitizedMatch.team1Points,
                     team2Points = sanitizedMatch.team2Points,
                     setResults = sanitizedMatch.setResults,
+                    segmentOperations = sanitizedMatch.toSegmentOperations(),
                     team1Id = sanitizedMatch.team1Id,
                     team2Id = sanitizedMatch.team2Id,
                     team1Seed = sanitizedMatch.team1Seed,
@@ -319,6 +338,7 @@ class MatchRepository(
                         team1Points = sanitizedMatch.team1Points,
                         team2Points = sanitizedMatch.team2Points,
                         setResults = sanitizedMatch.setResults,
+                        segmentOperations = sanitizedMatch.toSegmentOperations(),
                         team1Id = sanitizedMatch.team1Id,
                         team2Id = sanitizedMatch.team2Id,
                         team1Seed = sanitizedMatch.team1Seed,

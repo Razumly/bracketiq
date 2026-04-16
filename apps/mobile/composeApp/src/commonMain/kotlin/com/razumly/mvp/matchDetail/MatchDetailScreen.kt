@@ -71,6 +71,19 @@ private const val WEB_LAYOUT_BREAKPOINT_DP = 600
 private const val FIELD_DISTANCE_WARNING_THRESHOLD_MILES = 0.01
 private const val EARTH_RADIUS_MILES = 3958.8
 
+private fun matchLogTypeLabel(type: String): String = when (type.trim().uppercase()) {
+    "POINT" -> "Scoring detail"
+    "DISCIPLINE" -> "Penalty or card"
+    "NOTE" -> "Match note"
+    "ADMIN" -> "Admin note"
+    else -> type
+        .lowercase()
+        .split("_", "-", " ")
+        .filter { it.isNotBlank() }
+        .joinToString(" ") { part -> part.replaceFirstChar { char -> char.titlecase() } }
+        .ifBlank { "Match note" }
+}
+
 private data class MatchLocationTarget(
     val focusedLocation: LatLng,
     val place: MVPPlace?,
@@ -100,6 +113,7 @@ fun MatchDetailScreen(
     val team2 = match.team2
 
     var mapRevealCenter by remember { mutableStateOf(Offset.Zero) }
+    var showMatchDetails by remember { mutableStateOf(false) }
     val locationTarget = remember(match.field, match.match.id, event, currentLocation) {
         resolveLocationTarget(
             field = match.field,
@@ -116,8 +130,21 @@ fun MatchDetailScreen(
 
     val canIncrement = showOfficialScoreControls && !matchFinished && officialCheckedIn
     val isTimedMatch = event?.usesSets == false
-    val team1Score = match.match.team1Points.getOrElse(currentSet) { 0 }
-    val team2Score = match.match.team2Points.getOrElse(currentSet) { 0 }
+    val orderedSegments = remember(match.match.segments) {
+        match.match.segments.sortedBy { segment -> segment.sequence }
+    }
+    val activeSegment = orderedSegments.getOrNull(currentSet)
+    val team1Score = activeSegment?.scores?.get(match.match.team1Id)
+        ?: match.match.team1Points.getOrElse(currentSet) { 0 }
+    val team2Score = activeSegment?.scores?.get(match.match.team2Id)
+        ?: match.match.team2Points.getOrElse(currentSet) { 0 }
+    val rules = match.match.matchRulesSnapshot ?: match.match.resolvedMatchRules
+    val segmentBaseLabel = rules?.segmentLabel ?: if (event?.usesSets == true) "Set" else "Total"
+    val activeSegmentLabel = if (rules?.scoringModel == "POINTS_ONLY") {
+        segmentBaseLabel
+    } else {
+        "$segmentBaseLabel ${currentSet + 1}"
+    }
 
     val team1Text = remember(team1) {
         derivedStateOf {
@@ -258,7 +285,7 @@ fun MatchDetailScreen(
                     style = MaterialTheme.typography.titleLarge
                 )
                 Text(
-                    text = stringResource(Res.string.set_number, currentSet + 1),
+                    text = activeSegmentLabel,
                     color = MaterialTheme.colorScheme.onSurface,
                     style = MaterialTheme.typography.titleLarge
                 )
@@ -323,6 +350,97 @@ fun MatchDetailScreen(
                 }
             }
 
+            AnimatedVisibility(
+                visible = showMatchDetails,
+                enter = expandVertically(),
+                exit = shrinkVertically(),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    tonalElevation = 3.dp,
+                    shadowElevation = 6.dp,
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            text = "Match Details",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            text = "Status: ${match.match.status ?: "SCHEDULED"}${match.match.statusReason?.let { " - $it" } ?: ""}",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            text = "Rules: ${rules?.scoringModel ?: if (event?.usesSets == true) "SETS" else "POINTS_ONLY"}",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            orderedSegments.forEachIndexed { index, segment ->
+                                Button(
+                                    onClick = { component.selectSegment(index) },
+                                    enabled = index != currentSet,
+                                ) {
+                                    Text(
+                                        if (rules?.scoringModel == "POINTS_ONLY") {
+                                            segmentBaseLabel
+                                        } else {
+                                            "$segmentBaseLabel ${segment.sequence}"
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                        orderedSegments.forEach { segment ->
+                            val team1SegmentScore = match.match.team1Id?.let { teamId -> segment.scores[teamId] } ?: 0
+                            val team2SegmentScore = match.match.team2Id?.let { teamId -> segment.scores[teamId] } ?: 0
+                            Text(
+                                text = "${if (rules?.scoringModel == "POINTS_ONLY") segmentBaseLabel else "$segmentBaseLabel ${segment.sequence}"}: $team1SegmentScore - $team2SegmentScore (${segment.status})",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                        Text(
+                            text = "Officials",
+                            style = MaterialTheme.typography.titleSmall,
+                        )
+                        if (match.match.officialIds.isEmpty()) {
+                            Text("No official slots assigned.", style = MaterialTheme.typography.bodySmall)
+                        } else {
+                            match.match.officialIds.forEach { assignment ->
+                                Text(
+                                    text = "${assignment.positionId} #${assignment.slotIndex + 1}: ${assignment.userId} ${if (assignment.checkedIn == true) "(checked in)" else "(not checked in)"}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                        }
+                        Text(
+                            text = "Match Log",
+                            style = MaterialTheme.typography.titleSmall,
+                        )
+                        if (match.match.incidents.isEmpty()) {
+                            Text("No match details recorded.", style = MaterialTheme.typography.bodySmall)
+                        } else {
+                            match.match.incidents.sortedBy { incident -> incident.sequence }.forEach { incident ->
+                                Text(
+                                    text = "${matchLogTypeLabel(incident.incidentType)}: ${incident.note ?: incident.linkedPointDelta?.let { "point change ${if (it > 0) "+" else ""}$it" } ?: "Match note"}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
@@ -349,6 +467,12 @@ fun MatchDetailScreen(
                                 "View Field Location"
                             }
                         )
+                    }
+                    Button(
+                        onClick = { showMatchDetails = !showMatchDetails },
+                        modifier = Modifier.padding(start = 8.dp),
+                    ) {
+                        Text(if (showMatchDetails) "Hide Match Details" else "Match Details")
                     }
                     locationTarget.warningDistanceMiles?.let { distance ->
                         Row(

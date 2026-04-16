@@ -1,7 +1,10 @@
 package com.razumly.mvp.core.network.dto
 
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.dataTypes.MatchIncidentMVP
 import com.razumly.mvp.core.data.dataTypes.MatchOfficialAssignment
+import com.razumly.mvp.core.data.dataTypes.MatchSegmentMVP
+import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import com.razumly.mvp.core.data.util.normalizeDivisionLabel
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -21,6 +24,17 @@ data class MatchApiDto(
     val eventId: String? = null,
     val officialId: String? = null,
     val fieldId: String? = null,
+    val status: String? = null,
+    val resultStatus: String? = null,
+    val resultType: String? = null,
+    val actualStart: String? = null,
+    val actualEnd: String? = null,
+    val statusReason: String? = null,
+    val winnerEventTeamId: String? = null,
+    val matchRulesSnapshot: ResolvedMatchRulesMVP? = null,
+    val resolvedMatchRules: ResolvedMatchRulesMVP? = null,
+    val segments: List<MatchSegmentMVP>? = null,
+    val incidents: List<MatchIncidentMVP>? = null,
     val start: String? = null,
     val end: String? = null,
     val division: String? = null,
@@ -56,6 +70,17 @@ data class MatchApiDto(
             eventId = resolvedEventId,
             officialId = officialId,
             fieldId = fieldId,
+            status = status,
+            resultStatus = resultStatus,
+            resultType = resultType,
+            actualStart = actualStart,
+            actualEnd = actualEnd,
+            statusReason = statusReason,
+            winnerEventTeamId = winnerEventTeamId,
+            matchRulesSnapshot = matchRulesSnapshot,
+            resolvedMatchRules = resolvedMatchRules,
+            segments = segments ?: emptyList(),
+            incidents = incidents ?: emptyList(),
             start = start?.let { Instant.parse(it) },
             end = end?.let { Instant.parse(it) },
             division = division?.normalizeDivisionLabel(),
@@ -87,7 +112,61 @@ data class MatchResponseDto(
 )
 
 @Serializable
+data class MatchLifecycleOperationDto(
+    val status: String? = null,
+    val resultStatus: String? = null,
+    val resultType: String? = null,
+    val actualStart: String? = null,
+    val actualEnd: String? = null,
+    val statusReason: String? = null,
+    val winnerEventTeamId: String? = null,
+)
+
+@Serializable
+data class MatchSegmentOperationDto(
+    val id: String? = null,
+    val sequence: Int,
+    val status: String? = null,
+    val scores: Map<String, Int>? = null,
+    val winnerEventTeamId: String? = null,
+    val startedAt: String? = null,
+    val endedAt: String? = null,
+    val resultType: String? = null,
+    val statusReason: String? = null,
+)
+
+@Serializable
+data class MatchIncidentOperationDto(
+    val action: String,
+    val id: String? = null,
+    val segmentId: String? = null,
+    val eventTeamId: String? = null,
+    val eventRegistrationId: String? = null,
+    val participantUserId: String? = null,
+    val officialUserId: String? = null,
+    val incidentType: String? = null,
+    val sequence: Int? = null,
+    val minute: Int? = null,
+    val clock: String? = null,
+    val clockSeconds: Int? = null,
+    val linkedPointDelta: Int? = null,
+    val note: String? = null,
+)
+
+@Serializable
+data class MatchOfficialCheckInOperationDto(
+    val positionId: String? = null,
+    val slotIndex: Int? = null,
+    val userId: String? = null,
+    val checkedIn: Boolean,
+)
+
+@Serializable
 data class MatchUpdateDto(
+    val lifecycle: MatchLifecycleOperationDto? = null,
+    val segmentOperations: List<MatchSegmentOperationDto>? = null,
+    val incidentOperations: List<MatchIncidentOperationDto>? = null,
+    val officialCheckIn: MatchOfficialCheckInOperationDto? = null,
     val team1Points: List<Int>? = null,
     val team2Points: List<Int>? = null,
     val setResults: List<Int>? = null,

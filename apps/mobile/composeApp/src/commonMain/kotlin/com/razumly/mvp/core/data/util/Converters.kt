@@ -4,8 +4,11 @@ import androidx.room.TypeConverter
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.EventOfficial
 import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
+import com.razumly.mvp.core.data.dataTypes.MatchIncidentMVP
 import com.razumly.mvp.core.data.dataTypes.MatchOfficialAssignment
+import com.razumly.mvp.core.data.dataTypes.MatchSegmentMVP
 import com.razumly.mvp.core.data.dataTypes.OfficialSchedulingMode
+import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
 import com.razumly.mvp.core.data.dataTypes.TeamStaffAssignment
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
@@ -113,6 +116,34 @@ class Converters {
     fun toMatchOfficialAssignments(value: String): List<MatchOfficialAssignment> =
         runCatching { Json.decodeFromString<List<MatchOfficialAssignment>>(value) }
             .getOrDefault(emptyList())
+
+    @TypeConverter
+    fun fromMatchSegments(value: List<MatchSegmentMVP>): String =
+        Json.encodeToString(value)
+
+    @TypeConverter
+    fun toMatchSegments(value: String): List<MatchSegmentMVP> =
+        runCatching { Json.decodeFromString<List<MatchSegmentMVP>>(value) }
+            .getOrDefault(emptyList())
+
+    @TypeConverter
+    fun fromMatchIncidents(value: List<MatchIncidentMVP>): String =
+        Json.encodeToString(value)
+
+    @TypeConverter
+    fun toMatchIncidents(value: String): List<MatchIncidentMVP> =
+        runCatching { Json.decodeFromString<List<MatchIncidentMVP>>(value) }
+            .getOrDefault(emptyList())
+
+    @TypeConverter
+    fun fromResolvedMatchRules(value: ResolvedMatchRulesMVP?): String? =
+        value?.let { Json.encodeToString(it) }
+
+    @TypeConverter
+    fun toResolvedMatchRules(value: String?): ResolvedMatchRulesMVP? =
+        value?.takeIf { it.isNotBlank() }?.let {
+            runCatching { Json.decodeFromString<ResolvedMatchRulesMVP>(it) }.getOrNull()
+        }
 
     @TypeConverter
     fun fromTeamPlayerRegistrations(value: List<TeamPlayerRegistration>): String =

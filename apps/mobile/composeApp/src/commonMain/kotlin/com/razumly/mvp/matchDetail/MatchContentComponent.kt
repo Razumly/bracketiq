@@ -6,6 +6,7 @@ import com.razumly.mvp.core.network.userMessage
 import com.arkivanov.decompose.ComponentContext
 import com.razumly.mvp.core.data.dataTypes.Field
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.dataTypes.MatchSegmentMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
 import com.razumly.mvp.core.data.dataTypes.Event
@@ -53,6 +54,7 @@ interface MatchContentComponent {
     fun dismissOfficialDialog()
     fun checkOfficialStatus()
     fun confirmOfficialCheckIn()
+    fun selectSegment(index: Int)
     fun updateScore(isTeam1: Boolean, increment: Boolean)
     fun requestSetConfirmation()
     fun confirmSet()
@@ -203,7 +205,7 @@ class DefaultMatchContentComponent(
                 val normalizedMatch = updateMatchStructureForCurrentContext(matchWithTeams.value.match)
                 _matchFinished.value = isMatchOver(normalizedMatch)
                 if (!_matchFinished.value) {
-                    _currentSet.value = resolveCurrentSetIndex(normalizedMatch.setResults)
+                    _currentSet.value = resolveCurrentSegmentIndex(normalizedMatch)
                 }
                 checkOfficialStatus()
             }
@@ -214,7 +216,7 @@ class DefaultMatchContentComponent(
                 val normalizedMatch = updateMatchStructureForCurrentContext(it.match)
                 _matchFinished.value = isMatchOver(normalizedMatch)
                 if (!_matchFinished.value) {
-                    _currentSet.value = resolveCurrentSetIndex(normalizedMatch.setResults)
+                    _currentSet.value = resolveCurrentSegmentIndex(normalizedMatch)
                 }
                 checkOfficialStatus()
             }
@@ -320,6 +322,12 @@ class DefaultMatchContentComponent(
         }
     }
 
+    override fun selectSegment(index: Int) {
+        val normalizedMatch = updateMatchStructureForCurrentContext(matchWithTeams.value.match)
+        val maxIndex = (normalizedMatch.segments.size - 1).coerceAtLeast(0)
+        _currentSet.value = index.coerceIn(0, maxIndex)
+    }
+
     private fun currentUserTeamIds(): List<String> {
         val repositoryTeamIds = _currentUserTeams.value
             .map { team -> team.team.id.trim() }
@@ -405,7 +413,7 @@ class DefaultMatchContentComponent(
             scoringMatch.copy(team1Points = currentPoints)
         } else {
             scoringMatch.copy(team2Points = currentPoints)
-        }
+        }.syncSegmentsFromLegacyScores()
         val optimisticMatch = currentMatch.copy(match = updatedScoringMatch)
 
         _optimisticMatch.value = optimisticMatch
@@ -460,6 +468,7 @@ class DefaultMatchContentComponent(
             setResults[setIndex] = if (team1Won) 1 else 2
 
             val updatedScoringMatch = scoringMatch.copy(setResults = setResults)
+                .syncSegmentsFromLegacyScores()
 
             val updatedMatch = currentMatch.copy(
                 match = updatedScoringMatch
@@ -533,6 +542,14 @@ class DefaultMatchContentComponent(
     }
 
     private fun isMatchOver(match: MatchMVP): Boolean {
+        val segmentWinnerIds = match.segments
+            .filter { segment -> segment.status == "COMPLETE" || !segment.winnerEventTeamId.isNullOrBlank() }
+            .mapNotNull { segment -> segment.winnerEventTeamId }
+        if (segmentWinnerIds.isNotEmpty()) {
+            val team1Wins = segmentWinnerIds.count { winnerId -> winnerId == match.team1Id }
+            val team2Wins = segmentWinnerIds.count { winnerId -> winnerId == match.team2Id }
+            return team1Wins >= setsNeeded || team2Wins >= setsNeeded
+        }
         val relevantResults = match.setResults.take(maxSets.coerceAtLeast(1))
         val team1Wins = relevantResults.count { it == 1 }
         val team2Wins = relevantResults.count { it == 2 }
@@ -567,7 +584,7 @@ class DefaultMatchContentComponent(
     private fun updateMatchStructureForCurrentContext(match: MatchMVP): MatchMVP {
         maxSets = resolveExpectedSetCount(match)
         setsNeeded = ((maxSets + 1) / 2).coerceAtLeast(1)
-        return normalizeMatchForSetCount(match, maxSets)
+        return normalizeMatchForSetCount(match, maxSets).ensureSegments()
     }
 
     private fun resolveExpectedSetCount(match: MatchMVP): Int {
@@ -606,10 +623,13 @@ class DefaultMatchContentComponent(
         val normalizedTeam2 = normalizeScoreList(match.team2Points, setCount)
         val normalizedResults = normalizeResultList(match.setResults, setCount)
 
+        val normalizedSegments = normalizeSegments(match, setCount, normalizedTeam1, normalizedTeam2, normalizedResults)
+
         if (
             normalizedTeam1 == match.team1Points &&
             normalizedTeam2 == match.team2Points &&
-            normalizedResults == match.setResults
+            normalizedResults == match.setResults &&
+            normalizedSegments == match.segments
         ) {
             return match
         }
@@ -618,8 +638,66 @@ class DefaultMatchContentComponent(
             team1Points = normalizedTeam1,
             team2Points = normalizedTeam2,
             setResults = normalizedResults,
+            segments = normalizedSegments,
         )
     }
+
+    private fun normalizeSegments(
+        match: MatchMVP,
+        setCount: Int,
+        team1Points: List<Int>,
+        team2Points: List<Int>,
+        setResults: List<Int>,
+    ): List<MatchSegmentMVP> {
+        if (match.segments.isNotEmpty()) {
+            return match.segments
+                .sortedBy { segment -> segment.sequence }
+                .take(setCount)
+                .let { existing ->
+                    if (existing.size >= setCount) {
+                        existing
+                    } else {
+                        existing + buildLegacySegments(match, setCount, team1Points, team2Points, setResults)
+                            .drop(existing.size)
+                    }
+                }
+        }
+        return buildLegacySegments(match, setCount, team1Points, team2Points, setResults)
+    }
+
+    private fun buildLegacySegments(
+        match: MatchMVP,
+        setCount: Int,
+        team1Points: List<Int>,
+        team2Points: List<Int>,
+        setResults: List<Int>,
+    ): List<MatchSegmentMVP> = List(setCount) { index ->
+        val sequence = index + 1
+        val scores = buildMap {
+            match.team1Id?.takeIf { it.isNotBlank() }?.let { teamId -> put(teamId, team1Points.getOrElse(index) { 0 }) }
+            match.team2Id?.takeIf { it.isNotBlank() }?.let { teamId -> put(teamId, team2Points.getOrElse(index) { 0 }) }
+        }
+        val winner = when (setResults.getOrElse(index) { 0 }) {
+            1 -> match.team1Id
+            2 -> match.team2Id
+            else -> null
+        }
+        MatchSegmentMVP(
+            id = "${match.id}_segment_$sequence",
+            eventId = match.eventId,
+            matchId = match.id,
+            sequence = sequence,
+            status = if (!winner.isNullOrBlank()) "COMPLETE" else if (scores.values.any { it > 0 }) "IN_PROGRESS" else "NOT_STARTED",
+            scores = scores,
+            winnerEventTeamId = winner,
+        )
+    }
+
+    private fun MatchMVP.ensureSegments(): MatchMVP =
+        if (segments.isNotEmpty()) this else syncSegmentsFromLegacyScores()
+
+    private fun MatchMVP.syncSegmentsFromLegacyScores(): MatchMVP =
+        copy(segments = buildLegacySegments(this, maxSets, team1Points, team2Points, setResults))
 
     private fun normalizeScoreList(values: List<Int>, setCount: Int): List<Int> {
         val normalized = values.take(setCount).toMutableList()
@@ -646,6 +724,15 @@ class DefaultMatchContentComponent(
             firstIncomplete >= 0 -> firstIncomplete
             setResults.isEmpty() -> 0
             else -> setResults.lastIndex.coerceAtLeast(0)
+        }
+    }
+
+    private fun resolveCurrentSegmentIndex(match: MatchMVP): Int {
+        val firstIncomplete = match.segments.indexOfFirst { segment -> segment.status != "COMPLETE" }
+        return when {
+            firstIncomplete >= 0 -> firstIncomplete
+            match.segments.isNotEmpty() -> match.segments.lastIndex
+            else -> resolveCurrentSetIndex(match.setResults)
         }
     }
 
