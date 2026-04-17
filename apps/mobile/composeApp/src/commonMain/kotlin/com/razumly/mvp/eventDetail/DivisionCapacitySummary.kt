@@ -3,7 +3,6 @@ package com.razumly.mvp.eventDetail
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
-import com.razumly.mvp.core.data.util.isPlaceholderSlot
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 
@@ -45,7 +44,6 @@ internal fun buildDivisionCapacitySummaries(
 
     val registeredTeamIdSet = teams
         .map { teamWithPlayers -> teamWithPlayers.team }
-        .filter { team -> !team.isPlaceholderSlot(event.eventType) }
         .map { team -> team.id.trim() }
         .filter(String::isNotBlank)
         .toSet()

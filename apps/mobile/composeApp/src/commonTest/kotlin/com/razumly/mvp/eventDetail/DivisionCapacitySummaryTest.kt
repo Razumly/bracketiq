@@ -100,6 +100,40 @@ class DivisionCapacitySummaryTest {
         assertEquals(1, filledByDivision["unassigned"])
     }
 
+    @Test
+    fun buildDivisionCapacitySummaries_usesDisplayedTeamsEvenWhenTheyLookLikePlaceholders() {
+        val eventId = "event-3"
+        val divisionId = buildEventDivisionId(eventId, "c_skill_open_age_u17")
+        val divisionDetails = listOf(
+            buildDivisionDetail(
+                id = divisionId,
+                token = "c_skill_open_age_u17",
+                ageDivisionTypeId = "u17",
+                teamIds = listOf("team-1", "team-2"),
+            ),
+        )
+        val event = Event(
+            id = eventId,
+            teamSignup = true,
+            singleDivision = false,
+            teamIds = listOf("team-1", "team-2"),
+            divisions = listOf(divisionId),
+            divisionDetails = divisionDetails,
+        )
+        val teams = listOf(
+            buildTeamWithPlayers(teamId = "team-1"),
+            buildTeamWithPlayers(teamId = "team-2", kind = "PLACEHOLDER", parentTeamId = null),
+        )
+
+        val summaries = buildDivisionCapacitySummaries(
+            event = event,
+            divisionDetails = divisionDetails,
+            teams = teams,
+        )
+
+        assertEquals(2, summaries.single().filled)
+    }
+
     private fun buildDivisionDetail(
         id: String,
         token: String,
@@ -119,11 +153,17 @@ class DivisionCapacitySummaryTest {
         teamIds = teamIds,
     )
 
-    private fun buildTeamWithPlayers(teamId: String): TeamWithPlayers = TeamWithPlayers(
+    private fun buildTeamWithPlayers(
+        teamId: String,
+        kind: String? = null,
+        parentTeamId: String? = "parent-$teamId",
+    ): TeamWithPlayers = TeamWithPlayers(
         team = Team(
             division = "open",
             name = teamId,
+            kind = kind,
             captainId = "captain-$teamId",
+            parentTeamId = parentTeamId,
             teamSize = 2,
             id = teamId,
         ),

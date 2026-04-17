@@ -1,4 +1,4 @@
-@file:OptIn(kotlin.time.ExperimentalTime::class)
+@file:OptIn(kotlin.time.ExperimentalTime::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 
 package com.razumly.mvp.matchDetail
 
@@ -7,9 +7,13 @@ import com.arkivanov.essenty.backhandler.BackDispatcher
 import com.arkivanov.essenty.lifecycle.LifecycleRegistry
 import com.razumly.mvp.core.data.dataTypes.AuthAccount
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.EventWithRelations
 import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.dataTypes.MatchOfficialAssignment
+import com.razumly.mvp.core.data.dataTypes.MatchSegmentMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
+import com.razumly.mvp.core.data.dataTypes.OfficialAssignmentHolderType
 import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
@@ -27,6 +31,7 @@ import com.razumly.mvp.eventCreate.CreateEvent_FakeUserRepository
 import com.razumly.mvp.eventCreate.MainDispatcherTest
 import com.razumly.mvp.eventDetail.data.IMatchRepository
 import com.razumly.mvp.eventDetail.data.StagedMatchCreate
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
@@ -38,6 +43,131 @@ import kotlin.test.assertTrue
 import kotlin.time.Instant
 
 class MatchContentComponentTest : MainDispatcherTest() {
+    @Test
+    fun given_set_scoring_when_displaying_main_score_then_current_segment_score_is_returned() {
+        val segments = listOf(
+            createSegment(sequence = 1, team1Score = 21, team2Score = 18),
+            createSegment(sequence = 2, team1Score = 7, team2Score = 11),
+        )
+
+        val team1Score = matchDisplayScore(
+            scoringModel = "SETS",
+            segments = segments,
+            teamId = "team-a",
+            legacyScores = listOf(21, 7),
+            currentSegmentIndex = 1,
+        )
+
+        assertEquals(7, team1Score)
+    }
+
+    @Test
+    fun given_period_scoring_when_displaying_main_score_then_full_match_score_is_returned() {
+        val segments = listOf(
+            createSegment(sequence = 1, team1Score = 14, team2Score = 10),
+            createSegment(sequence = 2, team1Score = 7, team2Score = 3),
+        )
+
+        val team1Score = matchDisplayScore(
+            scoringModel = "PERIODS",
+            segments = segments,
+            teamId = "team-a",
+            legacyScores = listOf(14, 7),
+            currentSegmentIndex = 1,
+        )
+        val team2Score = matchDisplayScore(
+            scoringModel = "PERIODS",
+            segments = segments,
+            teamId = "team-b",
+            legacyScores = listOf(10, 3),
+            currentSegmentIndex = 1,
+        )
+
+        assertEquals(21, team1Score)
+        assertEquals(13, team2Score)
+    }
+
+    @Test
+    fun given_raw_status_value_when_formatting_match_details_then_title_case_is_returned() {
+        assertEquals("Scheduled", titleCaseMatchValue("SCHEDULED"))
+        assertEquals("In Progress", titleCaseMatchValue("IN_PROGRESS"))
+        assertEquals("Not Started", titleCaseMatchValue("not-started"))
+    }
+
+    @Test
+    fun given_official_assignment_when_building_detail_rows_then_name_and_position_are_used() {
+        val match = createMatch(
+            eventId = "event-1",
+            team1Id = "team-a",
+            team2Id = "team-b",
+            teamOfficialId = "team-c",
+            officialCheckedIn = false,
+        ).copy(
+            officialIds = listOf(
+                MatchOfficialAssignment(
+                    positionId = "position-referee",
+                    slotIndex = 0,
+                    holderType = OfficialAssignmentHolderType.OFFICIAL,
+                    userId = "official-123",
+                    eventOfficialId = "event-official-123",
+                    checkedIn = true,
+                )
+            )
+        )
+
+        val rows = buildMatchOfficialDetailRows(
+            match = match,
+            positions = listOf(EventOfficialPosition(id = "position-referee", name = "Referee")),
+            usersById = mapOf(
+                "official-123" to createUser(
+                    id = "official-123",
+                    firstName = "Jamie",
+                    lastName = "Rivera",
+                    userName = "jamie",
+                )
+            ),
+        )
+
+        val row = rows.single()
+        assertEquals("Referee", row.positionLabel)
+        assertEquals("Jamie Rivera", row.officialName)
+        assertTrue(row.checkedIn)
+    }
+
+    @Test
+    fun given_missing_official_user_when_building_detail_rows_then_raw_id_is_not_displayed() {
+        val match = createMatch(
+            eventId = "event-1",
+            team1Id = "team-a",
+            team2Id = "team-b",
+            teamOfficialId = "team-c",
+            officialCheckedIn = false,
+        ).copy(
+            officialIds = listOf(
+                MatchOfficialAssignment(
+                    positionId = "position-referee",
+                    slotIndex = 1,
+                    holderType = OfficialAssignmentHolderType.OFFICIAL,
+                    userId = "official-123",
+                    eventOfficialId = "event-official-123",
+                    checkedIn = false,
+                )
+            )
+        )
+
+        val rows = buildMatchOfficialDetailRows(
+            match = match,
+            positions = listOf(EventOfficialPosition(id = "position-referee", name = "Referee", count = 2)),
+            usersById = emptyMap(),
+        )
+
+        val row = rows.single()
+        assertEquals("Referee 2", row.positionLabel)
+        assertEquals("Unknown official", row.officialName)
+        assertFalse(row.officialName.contains("official-123"))
+        assertFalse(row.checkedIn)
+    }
+
     @Test
     fun given_assigned_official_team_when_match_not_checked_in_then_check_in_prompt_is_shown() = runTest(testDispatcher) {
         val user = createUser(id = "user-1", teamIds = listOf("team-c"))
@@ -65,6 +195,45 @@ class MatchContentComponentTest : MainDispatcherTest() {
         assertTrue(harness.component.isOfficial.value)
         assertFalse(harness.component.officialCheckedIn.value)
         assertTrue(harness.component.showOfficialCheckInDialog.value)
+    }
+
+    @Test
+    fun given_slow_official_check_in_when_confirming_then_saving_state_is_exposed() = runTest(testDispatcher) {
+        val user = createUser(id = "user-1", teamIds = listOf("team-c"))
+        val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c"))
+        val match = createMatch(
+            eventId = event.id,
+            team1Id = "team-a",
+            team2Id = "team-b",
+            teamOfficialId = "team-c",
+            officialCheckedIn = false,
+        )
+        val harness = MatchDetailHarness(
+            event = event,
+            initialMatch = match,
+            currentUser = user,
+            teams = listOf(
+                createTeam(id = "team-a", captainId = "captain-a"),
+                createTeam(id = "team-b", captainId = "captain-b"),
+                createTeam(id = "team-c", captainId = user.id, playerIds = listOf(user.id)),
+            ),
+            updateDelayMillis = 1_000,
+        )
+
+        advance()
+
+        harness.component.confirmOfficialCheckIn()
+        testDispatcher.scheduler.runCurrent()
+
+        assertTrue(harness.component.officialCheckInSaving.value)
+        assertTrue(harness.component.showOfficialCheckInDialog.value)
+
+        testDispatcher.scheduler.advanceTimeBy(1_000)
+        advance()
+
+        assertFalse(harness.component.officialCheckInSaving.value)
+        assertTrue(harness.component.officialCheckedIn.value)
+        assertFalse(harness.component.showOfficialCheckInDialog.value)
     }
 
     @Test
@@ -286,8 +455,9 @@ private class MatchDetailHarness(
     currentUser: UserData,
     teams: List<Team>,
     currentUserTeamIdsInRepository: List<String>? = null,
+    updateDelayMillis: Long = 0,
 ) {
-    val matchRepository = MatchDetailFakeMatchRepository(initialMatch)
+    val matchRepository = MatchDetailFakeMatchRepository(initialMatch, updateDelayMillis)
 
     val component = DefaultMatchContentComponent(
         componentContext = createTestComponentContext(),
@@ -317,6 +487,7 @@ private class MatchDetailFakeEventRepository(
 
 private class MatchDetailFakeMatchRepository(
     initialMatch: MatchMVP,
+    private val updateDelayMillis: Long = 0,
 ) : IMatchRepository by CreateEvent_FakeMatchRepository() {
     private val matchFlow = MutableStateFlow(Result.success(initialMatch.toMatchWithRelations()))
     val updatedMatches = mutableListOf<MatchMVP>()
@@ -328,6 +499,9 @@ private class MatchDetailFakeMatchRepository(
     override fun getMatchFlow(matchId: String): Flow<Result<MatchWithRelations>> = matchFlow
 
     override suspend fun updateMatch(match: MatchMVP): Result<Unit> {
+        if (updateDelayMillis > 0) {
+            delay(updateDelayMillis)
+        }
         updatedMatches += match
         matchFlow.value = Result.success(match.toMatchWithRelations())
         return Result.success(Unit)
@@ -486,6 +660,22 @@ private fun createMatch(
     start = Instant.fromEpochMilliseconds(1_700_000_000_000),
 )
 
+private fun createSegment(
+    sequence: Int,
+    team1Score: Int,
+    team2Score: Int,
+): MatchSegmentMVP = MatchSegmentMVP(
+    id = "segment-$sequence",
+    eventId = "event-1",
+    matchId = "match-1",
+    sequence = sequence,
+    status = if (team1Score > 0 || team2Score > 0) "IN_PROGRESS" else "NOT_STARTED",
+    scores = mapOf(
+        "team-a" to team1Score,
+        "team-b" to team2Score,
+    ),
+)
+
 private fun createTeam(
     id: String,
     captainId: String,
@@ -502,15 +692,18 @@ private fun createTeam(
 private fun createUser(
     id: String,
     teamIds: List<String> = emptyList(),
+    firstName: String = "Test",
+    lastName: String = "User",
+    userName: String = id,
 ): UserData = UserData(
-    firstName = "Test",
-    lastName = "User",
+    firstName = firstName,
+    lastName = lastName,
     teamIds = teamIds,
     friendIds = emptyList(),
     friendRequestIds = emptyList(),
     friendRequestSentIds = emptyList(),
     followingIds = emptyList(),
-    userName = id,
+    userName = userName,
     hasStripeAccount = false,
     uploadedImages = emptyList(),
     profileImageId = null,
@@ -557,4 +750,3 @@ private fun Team.toTeamWithRelations(usersById: Map<String, UserData>): TeamWith
         matchAsTeam2 = emptyList(),
     )
 }
-

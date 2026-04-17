@@ -5,28 +5,36 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -41,15 +49,22 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.razumly.mvp.core.data.dataTypes.Event
+import com.razumly.mvp.core.data.dataTypes.EventOfficialPosition
 import com.razumly.mvp.core.data.dataTypes.Field
+import com.razumly.mvp.core.data.dataTypes.MatchMVP
+import com.razumly.mvp.core.data.dataTypes.MatchSegmentMVP
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
+import com.razumly.mvp.core.data.dataTypes.OfficialAssignmentHolderType
 import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.activePlayerRegistrations
+import com.razumly.mvp.core.data.dataTypes.normalizedOfficialAssignments
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.util.CircularRevealUnderlay
 import com.razumly.mvp.core.presentation.util.getScreenWidth
@@ -101,6 +116,103 @@ private data class MatchParticipantOption(
     val participantUserId: String,
 )
 
+internal data class MatchOfficialDetailRow(
+    val positionLabel: String,
+    val officialName: String,
+    val checkedIn: Boolean,
+)
+
+internal fun titleCaseMatchValue(value: String?): String {
+    val normalized = value?.trim().orEmpty()
+    if (normalized.isBlank()) return ""
+    return normalized
+        .lowercase()
+        .split("_", "-", " ")
+        .filter(String::isNotBlank)
+        .joinToString(" ") { part -> part.replaceFirstChar { char -> char.titlecase() } }
+}
+
+internal fun buildMatchOfficialDetailRows(
+    match: MatchMVP,
+    positions: List<EventOfficialPosition>,
+    usersById: Map<String, UserData>,
+): List<MatchOfficialDetailRow> {
+    val positionsById = positions.associateBy(EventOfficialPosition::id)
+    val assignments = match.normalizedOfficialAssignments()
+    if (assignments.isNotEmpty()) {
+        return assignments.map { assignment ->
+            val position = positionsById[assignment.positionId]
+            MatchOfficialDetailRow(
+                positionLabel = officialPositionLabel(
+                    position = position,
+                    slotIndex = assignment.slotIndex,
+                    holderType = assignment.holderType,
+                ),
+                officialName = officialDisplayName(usersById[assignment.userId]),
+                checkedIn = assignment.checkedIn,
+            )
+        }
+    }
+
+    val legacyOfficialId = match.officialId?.trim()?.takeIf(String::isNotBlank) ?: return emptyList()
+    return listOf(
+        MatchOfficialDetailRow(
+            positionLabel = "Official",
+            officialName = officialDisplayName(usersById[legacyOfficialId]),
+            checkedIn = match.officialCheckedIn == true,
+        )
+    )
+}
+
+private fun officialPositionLabel(
+    position: EventOfficialPosition?,
+    slotIndex: Int,
+    holderType: OfficialAssignmentHolderType,
+): String {
+    val baseLabel = position?.name?.trim()?.takeIf(String::isNotBlank) ?: "Official"
+    val slotLabel = if ((position?.count ?: 1) > 1) {
+        "$baseLabel ${slotIndex + 1}"
+    } else {
+        baseLabel
+    }
+    return if (holderType == OfficialAssignmentHolderType.PLAYER) {
+        "$slotLabel (Player)"
+    } else {
+        slotLabel
+    }
+}
+
+private fun officialDisplayName(user: UserData?): String =
+    user?.fullName?.trim()?.takeIf(String::isNotBlank) ?: "Unknown official"
+
+internal fun matchDisplayScore(
+    scoringModel: String,
+    segments: List<MatchSegmentMVP>,
+    teamId: String?,
+    legacyScores: List<Int>,
+    currentSegmentIndex: Int,
+): Int {
+    val orderedSegments = segments.sortedBy { segment -> segment.sequence }
+    if (scoringModel.trim().uppercase() == "SETS") {
+        return segmentScore(
+            segment = orderedSegments.getOrNull(currentSegmentIndex),
+            teamId = teamId,
+            fallbackScores = legacyScores,
+            index = currentSegmentIndex,
+        )
+    }
+
+    val normalizedTeamId = teamId?.trim()?.takeIf(String::isNotBlank) ?: return legacyScores.sum()
+    val hasSegmentScores = orderedSegments.any { segment ->
+        segment.scores.containsKey(normalizedTeamId)
+    }
+    return if (hasSegmentScores) {
+        orderedSegments.sumOf { segment -> segment.scores[normalizedTeamId] ?: 0 }
+    } else {
+        legacyScores.sum()
+    }
+}
+
 @Composable
 fun MatchDetailScreen(
     component: MatchContentComponent,
@@ -109,8 +221,10 @@ fun MatchDetailScreen(
     val match by component.matchWithTeams.collectAsState()
     val event by component.event.collectAsState()
     val rules by component.matchRules.collectAsState()
+    val officialUsers by component.officialUsers.collectAsState()
     val isOfficial by component.isOfficial.collectAsState()
     val officialCheckedIn by component.officialCheckedIn.collectAsState()
+    val officialCheckInSaving by component.officialCheckInSaving.collectAsState()
     val showOfficialCheckInDialog by component.showOfficialCheckInDialog.collectAsState()
     val showSetConfirmDialog by component.showSetConfirmDialog.collectAsState()
     val currentSet by component.currentSet.collectAsState()
@@ -176,16 +290,33 @@ fun MatchDetailScreen(
     val orderedSegments = remember(match.match.segments) {
         match.match.segments.sortedBy { segment -> segment.sequence }
     }
+    val officialRows = remember(match.match, event?.officialPositions, officialUsers) {
+        buildMatchOfficialDetailRows(
+            match = match.match,
+            positions = event?.officialPositions.orEmpty(),
+            usersById = officialUsers,
+        )
+    }
     val activeSegment = orderedSegments.getOrNull(currentSet)
     val canIncrement = showOfficialScoreControls &&
         !matchFinished &&
         officialCheckedIn &&
         activeSegment?.status != "COMPLETE"
     val isTimedMatch = rules.scoringModel == "POINTS_ONLY"
-    val team1Score = activeSegment?.scores?.get(match.match.team1Id)
-        ?: match.match.team1Points.getOrElse(currentSet) { 0 }
-    val team2Score = activeSegment?.scores?.get(match.match.team2Id)
-        ?: match.match.team2Points.getOrElse(currentSet) { 0 }
+    val team1Score = matchDisplayScore(
+        scoringModel = rules.scoringModel,
+        segments = orderedSegments,
+        teamId = match.match.team1Id,
+        legacyScores = match.match.team1Points,
+        currentSegmentIndex = currentSet,
+    )
+    val team2Score = matchDisplayScore(
+        scoringModel = rules.scoringModel,
+        segments = orderedSegments,
+        teamId = match.match.team2Id,
+        legacyScores = match.match.team2Points,
+        currentSegmentIndex = currentSet,
+    )
     val segmentBaseLabel = rules.segmentLabel.ifBlank {
         if (event?.usesSets == true) "Set" else "Total"
     }
@@ -249,12 +380,36 @@ fun MatchDetailScreen(
             title = { Text(stringResource(Res.string.official_check_in_title)) },
             text = { Text(message) },
             confirmButton = {
-                Button(onClick = { component.confirmOfficialCheckIn() }) {
-                    Text("Yes")
+                Button(
+                    onClick = { component.confirmOfficialCheckIn() },
+                    enabled = !officialCheckInSaving,
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (officialCheckInSaving) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.onPrimary,
+                            )
+                        }
+                        Text(
+                            when {
+                                officialCheckInSaving -> "Saving..."
+                                isOfficial -> "Check in"
+                                else -> "Officiate"
+                            }
+                        )
+                    }
                 }
             },
             dismissButton = {
-                Button(onClick = { component.dismissOfficialDialog() }) {
+                Button(
+                    onClick = { component.dismissOfficialDialog() },
+                    enabled = !officialCheckInSaving,
+                ) {
                     Text("No")
                 }
             }
@@ -553,51 +708,35 @@ fun MatchDetailScreen(
                             color = MaterialTheme.colorScheme.onSurface,
                         )
                         Text(
-                            text = "Status: ${match.match.status ?: "SCHEDULED"}${match.match.statusReason?.let { " - $it" } ?: ""}",
+                            text = buildString {
+                                append("Status: ")
+                                append(titleCaseMatchValue(match.match.status).ifBlank { "Scheduled" })
+                                match.match.statusReason
+                                    ?.let(::titleCaseMatchValue)
+                                    ?.takeIf(String::isNotBlank)
+                                    ?.let { reason -> append(" - $reason") }
+                            },
                             style = MaterialTheme.typography.bodyMedium,
                         )
-                        Text(
-                            text = "Rules: ${rules.scoringModel}",
-                            style = MaterialTheme.typography.bodyMedium,
+                        MatchSegmentTable(
+                            segments = orderedSegments,
+                            segmentLabel = segmentBaseLabel,
+                            team1Id = match.match.team1Id,
+                            team2Id = match.match.team2Id,
+                            team1Scores = match.match.team1Points,
+                            team2Scores = match.match.team2Points,
+                            onSegmentSelected = component::selectSegment,
                         )
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            orderedSegments.forEachIndexed { index, segment ->
-                                Button(
-                                    onClick = { component.selectSegment(index) },
-                                    enabled = index != currentSet,
-                                ) {
-                                    Text(
-                                        if (rules.scoringModel == "POINTS_ONLY") {
-                                            segmentBaseLabel
-                                        } else {
-                                            "$segmentBaseLabel ${segment.sequence}"
-                                        }
-                                    )
-                                }
-                            }
-                        }
-                        orderedSegments.forEach { segment ->
-                            val team1SegmentScore = match.match.team1Id?.let { teamId -> segment.scores[teamId] } ?: 0
-                            val team2SegmentScore = match.match.team2Id?.let { teamId -> segment.scores[teamId] } ?: 0
-                            Text(
-                                text = "${if (rules.scoringModel == "POINTS_ONLY") segmentBaseLabel else "$segmentBaseLabel ${segment.sequence}"}: $team1SegmentScore - $team2SegmentScore (${segment.status})",
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
                         Text(
                             text = "Officials",
                             style = MaterialTheme.typography.titleSmall,
                         )
-                        if (match.match.officialIds.isEmpty()) {
+                        if (officialRows.isEmpty()) {
                             Text("No official slots assigned.", style = MaterialTheme.typography.bodySmall)
                         } else {
-                            match.match.officialIds.forEach { assignment ->
+                            officialRows.forEach { official ->
                                 Text(
-                                    text = "${assignment.positionId} #${assignment.slotIndex + 1}: ${assignment.userId} ${if (assignment.checkedIn == true) "(checked in)" else "(not checked in)"}",
+                                    text = "${official.positionLabel}: ${official.officialName} (${if (official.checkedIn) "checked in" else "not checked in"})",
                                     style = MaterialTheme.typography.bodySmall,
                                 )
                             }
@@ -683,6 +822,151 @@ fun MatchDetailScreen(
         )
     }
 }
+
+@Composable
+private fun MatchSegmentTable(
+    segments: List<MatchSegmentMVP>,
+    segmentLabel: String,
+    team1Id: String?,
+    team2Id: String?,
+    team1Scores: List<Int>,
+    team2Scores: List<Int>,
+    onSegmentSelected: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (segments.isEmpty()) return
+
+    val scrollState = rememberScrollState()
+    val dividerColor = MaterialTheme.colorScheme.outlineVariant
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .horizontalScroll(scrollState),
+    ) {
+        MatchSegmentTableRow(
+            label = segmentLabel,
+            values = segments.map { segment -> segment.sequence.toString() },
+            highlightedColumns = segments.map { segment -> segment.isStarted },
+            dividerColor = dividerColor,
+            valueFontWeight = FontWeight.SemiBold,
+            onSegmentSelected = onSegmentSelected,
+        )
+        HorizontalDivider(color = dividerColor)
+        MatchSegmentTableRow(
+            label = "Home",
+            values = segments.mapIndexed { index, segment ->
+                segmentScore(
+                    segment = segment,
+                    teamId = team1Id,
+                    fallbackScores = team1Scores,
+                    index = index,
+                ).toString()
+            },
+            highlightedColumns = segments.map { segment -> segment.isStarted },
+            dividerColor = dividerColor,
+            onSegmentSelected = onSegmentSelected,
+        )
+        HorizontalDivider(color = dividerColor)
+        MatchSegmentTableRow(
+            label = "Away",
+            values = segments.mapIndexed { index, segment ->
+                segmentScore(
+                    segment = segment,
+                    teamId = team2Id,
+                    fallbackScores = team2Scores,
+                    index = index,
+                ).toString()
+            },
+            highlightedColumns = segments.map { segment -> segment.isStarted },
+            dividerColor = dividerColor,
+            onSegmentSelected = onSegmentSelected,
+        )
+    }
+}
+
+@Composable
+private fun MatchSegmentTableRow(
+    label: String,
+    values: List<String>,
+    highlightedColumns: List<Boolean>,
+    dividerColor: androidx.compose.ui.graphics.Color,
+    valueFontWeight: FontWeight = FontWeight.Normal,
+    onSegmentSelected: (Int) -> Unit,
+) {
+    Row(modifier = Modifier.height(IntrinsicSize.Min)) {
+        MatchSegmentCell(
+            text = label,
+            modifier = Modifier.width(88.dp),
+            textAlign = TextAlign.Start,
+            fontWeight = FontWeight.SemiBold,
+        )
+        values.forEachIndexed { index, value ->
+            VerticalDivider(
+                modifier = Modifier.fillMaxHeight(),
+                color = dividerColor,
+            )
+            MatchSegmentCell(
+                text = value,
+                modifier = Modifier
+                    .width(72.dp)
+                    .clickable { onSegmentSelected(index) },
+                highlighted = highlightedColumns.getOrElse(index) { false },
+                textAlign = TextAlign.Center,
+                fontWeight = valueFontWeight,
+            )
+        }
+    }
+}
+
+@Composable
+private fun MatchSegmentCell(
+    text: String,
+    modifier: Modifier,
+    highlighted: Boolean = false,
+    textAlign: TextAlign = TextAlign.Start,
+    fontWeight: FontWeight = FontWeight.Normal,
+) {
+    val backgroundColor = if (highlighted) {
+        MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+    } else {
+        androidx.compose.ui.graphics.Color.Transparent
+    }
+    val textColor = if (highlighted) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
+
+    Box(
+        modifier = modifier
+            .background(backgroundColor)
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        contentAlignment = if (textAlign == TextAlign.Start) Alignment.CenterStart else Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodySmall,
+            color = textColor,
+            fontWeight = fontWeight,
+            textAlign = textAlign,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+private val MatchSegmentMVP.isStarted: Boolean
+    get() = status.equals("IN_PROGRESS", ignoreCase = true) ||
+        status.equals("STARTED", ignoreCase = true)
+
+private fun segmentScore(
+    segment: MatchSegmentMVP?,
+    teamId: String?,
+    fallbackScores: List<Int>,
+    index: Int,
+): Int = teamId
+    ?.let { resolvedTeamId -> segment?.scores?.get(resolvedTeamId) }
+    ?: fallbackScores.getOrElse(index) { 0 }
 
 @Composable
 fun ScoreCard(

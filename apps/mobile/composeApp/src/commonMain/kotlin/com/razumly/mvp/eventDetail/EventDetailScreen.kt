@@ -718,11 +718,7 @@ private fun EventOverviewSections(
     val event = eventWithRelations.event
     val showRosterSections = shouldShowOverviewRosterSections(event)
     val capacity = selectedWeeklyOccurrenceSummary?.participantCapacity ?: event.resolveParticipantCapacity()
-    val filled = selectedWeeklyOccurrenceSummary?.participantCount ?: if (event.teamSignup) {
-        eventWithRelations.teams.count { teamWithPlayers -> !teamWithPlayers.team.isPlaceholderSlot(event.eventType) }
-    } else {
-        event.playerIds.size
-    }
+    val filled = eventWithRelations.resolveOverviewFilledParticipantCount(selectedWeeklyOccurrenceSummary)
     val spotsLeft = if (capacity > 0) (capacity - filled).coerceAtLeast(0) else 0
     val progress = if (capacity > 0) (filled.toFloat() / capacity.toFloat()).coerceIn(0f, 1f) else 0f
     val freeAgentIds = remember(event.freeAgentIds) { event.freeAgentIds.distinct() }
@@ -2674,6 +2670,7 @@ fun EventDetailScreen(
                                     copy(
                                         sportId = sportId.takeIf(String::isNotBlank),
                                         matchRulesOverride = null,
+                                        resolvedMatchRules = null,
                                     )
                                 }
                             },

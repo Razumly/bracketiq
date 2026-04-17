@@ -11,6 +11,7 @@ import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Instant
@@ -35,7 +36,7 @@ class EventDtosTest {
 
         assertEquals(listOf("template-a", "template-b"), dto.requiredTemplateIds)
         assertEquals(true, dto.noFixedEndDateTime)
-        assertNull(dto.end)
+        assertEquals("2023-11-14T23:13:20Z", dto.end)
         assertEquals(true, dto.teamOfficialsMaySwap)
     }
 
@@ -585,5 +586,21 @@ class EventDtosTest {
 
         assertEquals(10, event?.playoffTeamCount)
         assertEquals(null, event?.divisionDetails?.firstOrNull()?.playoffTeamCount)
+    }
+
+    @Test
+    fun event_api_dto_does_not_infer_no_fixed_end_datetime_from_matching_start_and_end() {
+        val dto = EventApiDto(
+            id = "event-24",
+            name = "Legacy-looking League",
+            hostId = "host-24",
+            eventType = EventType.LEAGUE.name,
+            start = "2026-02-10T00:00:00Z",
+            end = "2026-02-10T00:00:00Z",
+        )
+
+        val event = dto.toEventOrNull()
+
+        assertFalse(event?.noFixedEndDateTime ?: true)
     }
 }

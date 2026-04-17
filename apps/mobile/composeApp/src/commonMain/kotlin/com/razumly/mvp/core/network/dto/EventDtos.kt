@@ -132,14 +132,7 @@ data class EventApiDto(
         val normalizedEventType = eventType?.trim()?.uppercase()
         val resolvedEventType = runCatching { EventType.valueOf(normalizedEventType ?: EventType.EVENT.name) }
             .getOrDefault(EventType.EVENT)
-        val resolvedNoFixedEndDateTime = when {
-            noFixedEndDateTime != null -> noFixedEndDateTime
-            resolvedEventType == EventType.LEAGUE || resolvedEventType == EventType.TOURNAMENT ->
-                resolvedEnd.isNullOrBlank() || resolvedStart == resolvedEnd
-            resolvedEventType == EventType.WEEKLY_EVENT ->
-                resolvedEnd.isNullOrBlank()
-            else -> false
-        }
+        val resolvedNoFixedEndDateTime = noFixedEndDateTime ?: false
         val parsedEnd = when {
             !resolvedEnd.isNullOrBlank() -> runCatching { Instant.parse(resolvedEnd) }.getOrNull()
             resolvedNoFixedEndDateTime -> parsedStart
@@ -688,7 +681,7 @@ fun Event.toUpdateDto(
     return EventUpdateDto(
         name = name,
         start = start.toString(),
-        end = if (noFixedEndDateTime) null else end.toString(),
+        end = end.toString(),
         description = description,
         divisions = normalizedDivisions,
         divisionDetails = normalizedDivisionDetailsForPayload,

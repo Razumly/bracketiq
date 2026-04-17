@@ -438,6 +438,7 @@ fun CreateEventScreen(
                                     copy(
                                         sportId = sportId.takeIf(String::isNotBlank),
                                         matchRulesOverride = null,
+                                        resolvedMatchRules = null,
                                     )
                                 }
                             },

@@ -1971,16 +1971,14 @@ fun EventDetails(
                                     },
                                 )
                                 StandardTextField(
-                                    value = if (supportsNoFixedEndDateTime && editEvent.noFixedEndDateTime) {
-                                        ""
-                                    } else {
-                                        editEvent.end.toLocalDateTime(
-                                            TimeZone.currentSystemDefault()
-                                        ).format(dateTimeFormat)
-                                    },
+                                    value = editEvent.end.toLocalDateTime(
+                                        TimeZone.currentSystemDefault()
+                                    ).format(dateTimeFormat),
                                     onValueChange = {},
                                     modifier = Modifier.weight(1f),
                                     label = "End Date & Time",
+                                    enabled = !scheduleTimeLocked &&
+                                        !(supportsNoFixedEndDateTime && editEvent.noFixedEndDateTime),
                                     readOnly = true,
                                     onTap = {
                                         if (!scheduleTimeLocked && !(supportsNoFixedEndDateTime && editEvent.noFixedEndDateTime)) {
@@ -2023,7 +2021,6 @@ fun EventDetails(
                                             copy(
                                                 noFixedEndDateTime = checked,
                                                 end = when {
-                                                    checked -> start
                                                     end <= start -> minimumFixedEnd
                                                     else -> end
                                                 },
@@ -2032,14 +2029,14 @@ fun EventDetails(
                                     },
                                 )
                                 Text(
-                                    text = "No fixed end date/time",
+                                    text = "No fixed end datetime scheduling",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = Color(localImageScheme.current.onSurface),
                                 )
                             }
                             if (editEvent.noFixedEndDateTime) {
                                 Text(
-                                    text = "Open-ended scheduling is enabled. Turn this off to enforce a fixed end date/time.",
+                                    text = "Scheduling can extend past the displayed end date/time. Turn this off to enforce the end date/time.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = Color(localImageScheme.current.onSurface),
                                 )
@@ -2510,24 +2507,22 @@ fun EventDetails(
                                         matchIncidentTypeLabel(autoPointIncidentType),
                                     ),
                                 )
-                                add(
-                                    DetailRowSpec(
-                                        "Allow draws",
-                                        if (resolvedMatchRules.supportsDraw) "Yes" else "No",
-                                    ),
-                                )
-                                add(
-                                    DetailRowSpec(
-                                        "Allow overtime",
-                                        if (resolvedMatchRules.supportsOvertime) "Yes" else "No",
-                                    ),
-                                )
-                                add(
-                                    DetailRowSpec(
-                                        "Allow shootout / tiebreak",
-                                        if (resolvedMatchRules.supportsShootout) "Yes" else "No",
-                                    ),
-                                )
+                                if (resolvedMatchRules.canUseOvertime) {
+                                    add(
+                                        DetailRowSpec(
+                                            "Allow overtime",
+                                            if (resolvedMatchRules.supportsOvertime) "Yes" else "No",
+                                        ),
+                                    )
+                                }
+                                if (resolvedMatchRules.canUseShootout) {
+                                    add(
+                                        DetailRowSpec(
+                                            "Allow shootout / tiebreak",
+                                            if (resolvedMatchRules.supportsShootout) "Yes" else "No",
+                                        ),
+                                    )
+                                }
                                 add(
                                     DetailRowSpec(
                                         "Automatic point incidents",
@@ -2563,7 +2558,7 @@ fun EventDetails(
                     },
                     editContent = {
                         Text(
-                            text = "The sport defines the match format. This event can adjust segment count, result options, and incident capture without changing the sport default.",
+                            text = "The sport defines the match format. This event can adjust segment count, supported result paths, and incident capture without changing the sport default.",
                             style = MaterialTheme.typography.bodySmall,
                             color = Color(localImageScheme.current.onSurfaceVariant),
                         )
@@ -2609,48 +2604,38 @@ fun EventDetails(
                             modifier = Modifier.fillMaxWidth(),
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            LabeledCheckboxRow(
-                                checked = resolvedMatchRules.supportsDraw,
-                                label = "Allow draws",
-                                onCheckedChange = { checked ->
-                                    onEditEvent {
-                                        copy(
-                                            matchRulesOverride = copyMatchRulesOverride(
-                                                current = matchRulesOverride,
-                                                supportsDraw = checked.takeUnless { it == baseMatchRules.supportsDraw },
-                                            ),
-                                        )
-                                    }
-                                },
-                            )
-                            LabeledCheckboxRow(
-                                checked = resolvedMatchRules.supportsOvertime,
-                                label = "Allow overtime",
-                                onCheckedChange = { checked ->
-                                    onEditEvent {
-                                        copy(
-                                            matchRulesOverride = copyMatchRulesOverride(
-                                                current = matchRulesOverride,
-                                                supportsOvertime = checked.takeUnless { it == baseMatchRules.supportsOvertime },
-                                            ),
-                                        )
-                                    }
-                                },
-                            )
-                            LabeledCheckboxRow(
-                                checked = resolvedMatchRules.supportsShootout,
-                                label = "Allow shootout / tiebreak",
-                                onCheckedChange = { checked ->
-                                    onEditEvent {
-                                        copy(
-                                            matchRulesOverride = copyMatchRulesOverride(
-                                                current = matchRulesOverride,
-                                                supportsShootout = checked.takeUnless { it == baseMatchRules.supportsShootout },
-                                            ),
-                                        )
-                                    }
-                                },
-                            )
+                            if (baseMatchRules.canUseOvertime) {
+                                LabeledCheckboxRow(
+                                    checked = resolvedMatchRules.supportsOvertime,
+                                    label = "Allow overtime",
+                                    onCheckedChange = { checked ->
+                                        onEditEvent {
+                                            copy(
+                                                matchRulesOverride = copyMatchRulesOverride(
+                                                    current = matchRulesOverride,
+                                                    supportsOvertime = checked.takeUnless { it == baseMatchRules.supportsOvertime },
+                                                ),
+                                            )
+                                        }
+                                    },
+                                )
+                            }
+                            if (baseMatchRules.canUseShootout) {
+                                LabeledCheckboxRow(
+                                    checked = resolvedMatchRules.supportsShootout,
+                                    label = "Allow shootout / tiebreak",
+                                    onCheckedChange = { checked ->
+                                        onEditEvent {
+                                            copy(
+                                                matchRulesOverride = copyMatchRulesOverride(
+                                                    current = matchRulesOverride,
+                                                    supportsShootout = checked.takeUnless { it == baseMatchRules.supportsShootout },
+                                                ),
+                                            )
+                                        }
+                                    },
+                                )
+                            }
                             LabeledCheckboxRow(
                                 checked = editEvent.autoCreatePointMatchIncidents,
                                 label = "Create a scoring incident for each point / goal",
@@ -4407,7 +4392,7 @@ fun EventDetails(
             showEndPicker = false
         },
         onDismissRequest = { showEndPicker = false },
-        showPicker = showEndPicker && !scheduleTimeLocked,
+        showPicker = showEndPicker && !scheduleTimeLocked && !editEvent.noFixedEndDateTime,
         getTime = true,
         canSelectPast = false,
         initialDate = editEvent.end,
@@ -6667,7 +6652,7 @@ private fun computeEventValidationResult(
             add("Select a sport to continue.")
         }
         if (!scheduleTimeLocked && !isFixedEndDateRangeValid) {
-            add("End date/time must be after start date/time when no fixed end date/time is disabled.")
+            add("End date/time must be after start date/time when no fixed end datetime scheduling is disabled.")
         }
         if (!isPriceValid) {
             add("Price must be 0 or higher.")
@@ -6864,6 +6849,167 @@ private fun matchSegmentLabelForModel(value: String): String {
     }
 }
 
+private fun defaultPointIncidentTypes(): List<String> = listOf("POINT", "DISCIPLINE", "NOTE", "ADMIN")
+
+private fun defaultGoalIncidentTypes(): List<String> = listOf("GOAL", "DISCIPLINE", "NOTE", "ADMIN")
+
+private fun defaultRunIncidentTypes(): List<String> = listOf("RUN", "DISCIPLINE", "NOTE", "ADMIN")
+
+private fun setBasedMatchRulesTemplate(segmentLabel: String = "Set"): MatchRulesConfigMVP =
+    MatchRulesConfigMVP(
+        scoringModel = "SETS",
+        segmentLabel = segmentLabel,
+        supportsDraw = false,
+        supportsOvertime = false,
+        supportsShootout = false,
+        canUseOvertime = false,
+        canUseShootout = false,
+        officialRoles = emptyList(),
+        supportedIncidentTypes = defaultPointIncidentTypes(),
+        autoCreatePointIncidentType = "POINT",
+        pointIncidentRequiresParticipant = false,
+    )
+
+private fun periodMatchRulesTemplate(
+    segmentCount: Int,
+    segmentLabel: String,
+    supportedIncidentTypes: List<String> = defaultPointIncidentTypes(),
+    autoCreatePointIncidentType: String = "POINT",
+    supportsDraw: Boolean = false,
+    supportsOvertime: Boolean = false,
+    supportsShootout: Boolean = false,
+    canUseOvertime: Boolean = false,
+    canUseShootout: Boolean = false,
+    pointIncidentRequiresParticipant: Boolean = false,
+): MatchRulesConfigMVP =
+    MatchRulesConfigMVP(
+        scoringModel = "PERIODS",
+        segmentCount = segmentCount,
+        segmentLabel = segmentLabel,
+        supportsDraw = supportsDraw,
+        supportsOvertime = supportsOvertime,
+        supportsShootout = supportsShootout,
+        canUseOvertime = canUseOvertime,
+        canUseShootout = canUseShootout,
+        officialRoles = emptyList(),
+        supportedIncidentTypes = supportedIncidentTypes,
+        autoCreatePointIncidentType = autoCreatePointIncidentType,
+        pointIncidentRequiresParticipant = pointIncidentRequiresParticipant,
+    )
+
+private fun defaultSportMatchRulesTemplate(sport: Sport): MatchRulesConfigMVP? {
+    val key = "${sport.id} ${sport.name}".trim().lowercase()
+    return when {
+        "volleyball" in key -> setBasedMatchRulesTemplate()
+        "basketball" in key -> periodMatchRulesTemplate(
+            segmentCount = 4,
+            segmentLabel = "Quarter",
+            supportsOvertime = true,
+            canUseOvertime = true,
+        )
+        "soccer" in key -> periodMatchRulesTemplate(
+            segmentCount = 2,
+            segmentLabel = "Half",
+            supportedIncidentTypes = defaultGoalIncidentTypes(),
+            autoCreatePointIncidentType = "GOAL",
+            supportsDraw = true,
+            canUseOvertime = true,
+            canUseShootout = true,
+            pointIncidentRequiresParticipant = true,
+        )
+        "tennis" in key -> setBasedMatchRulesTemplate()
+        "pickleball" in key -> setBasedMatchRulesTemplate(segmentLabel = "Game")
+        "football" in key -> periodMatchRulesTemplate(
+            segmentCount = 4,
+            segmentLabel = "Quarter",
+            supportsDraw = true,
+            supportsOvertime = true,
+            canUseOvertime = true,
+        )
+        "hockey" in key -> periodMatchRulesTemplate(
+            segmentCount = 3,
+            segmentLabel = "Period",
+            supportedIncidentTypes = defaultGoalIncidentTypes(),
+            autoCreatePointIncidentType = "GOAL",
+            supportsDraw = true,
+            supportsOvertime = true,
+            supportsShootout = true,
+            canUseOvertime = true,
+            canUseShootout = true,
+            pointIncidentRequiresParticipant = true,
+        )
+        "baseball" in key -> MatchRulesConfigMVP(
+            scoringModel = "INNINGS",
+            segmentCount = 9,
+            segmentLabel = "Inning",
+            supportsDraw = false,
+            supportsOvertime = false,
+            supportsShootout = false,
+            canUseOvertime = false,
+            canUseShootout = false,
+            officialRoles = emptyList(),
+            supportedIncidentTypes = defaultRunIncidentTypes(),
+            autoCreatePointIncidentType = "RUN",
+            pointIncidentRequiresParticipant = false,
+        )
+        "other" in key -> MatchRulesConfigMVP(
+            scoringModel = "POINTS_ONLY",
+            segmentCount = 1,
+            segmentLabel = "Total",
+            supportsDraw = true,
+            supportsOvertime = false,
+            supportsShootout = false,
+            canUseOvertime = true,
+            canUseShootout = true,
+            officialRoles = emptyList(),
+            supportedIncidentTypes = defaultPointIncidentTypes(),
+            autoCreatePointIncidentType = "POINT",
+            pointIncidentRequiresParticipant = false,
+        )
+        else -> null
+    }
+}
+
+private fun mergeMatchRulesTemplate(
+    defaults: MatchRulesConfigMVP?,
+    override: MatchRulesConfigMVP?,
+): MatchRulesConfigMVP? {
+    if (defaults == null) {
+        return override
+    }
+    if (override == null) {
+        return defaults
+    }
+    return MatchRulesConfigMVP(
+        scoringModel = override.scoringModel ?: defaults.scoringModel,
+        segmentCount = override.segmentCount ?: defaults.segmentCount,
+        segmentLabel = override.segmentLabel ?: defaults.segmentLabel,
+        supportsDraw = override.supportsDraw ?: defaults.supportsDraw,
+        supportsOvertime = override.supportsOvertime ?: defaults.supportsOvertime,
+        supportsShootout = override.supportsShootout ?: defaults.supportsShootout,
+        canUseOvertime = override.canUseOvertime ?: defaults.canUseOvertime,
+        canUseShootout = override.canUseShootout ?: defaults.canUseShootout,
+        officialRoles = override.officialRoles ?: defaults.officialRoles,
+        supportedIncidentTypes = override.supportedIncidentTypes ?: defaults.supportedIncidentTypes,
+        autoCreatePointIncidentType = override.autoCreatePointIncidentType ?: defaults.autoCreatePointIncidentType,
+        pointIncidentRequiresParticipant = override.pointIncidentRequiresParticipant
+            ?: defaults.pointIncidentRequiresParticipant,
+    )
+}
+
+private fun segmentCountFallbackForModel(scoringModel: String, event: Event): Int {
+    return when (scoringModel) {
+        "SETS" -> when (event.eventType) {
+            EventType.LEAGUE -> (event.setsPerMatch ?: event.winnerSetCount).coerceAtLeast(1)
+            EventType.TOURNAMENT -> event.winnerSetCount.coerceAtLeast(1)
+            EventType.EVENT, EventType.WEEKLY_EVENT -> 1
+        }
+        "INNINGS" -> 9
+        "PERIODS" -> 4
+        else -> 1
+    }
+}
+
 private fun matchIncidentTypeLabel(value: String): String {
     return when (value.trim().uppercase()) {
         "POINT" -> "Point / Goal"
@@ -6909,6 +7055,8 @@ private fun normalizeMatchRulesOverride(value: MatchRulesConfigMVP?): MatchRules
         supportsDraw = value.supportsDraw,
         supportsOvertime = value.supportsOvertime,
         supportsShootout = value.supportsShootout,
+        canUseOvertime = value.canUseOvertime,
+        canUseShootout = value.canUseShootout,
         supportedIncidentTypes = supportedIncidentTypes,
         pointIncidentRequiresParticipant = value.pointIncidentRequiresParticipant,
     )
@@ -6918,6 +7066,8 @@ private fun normalizeMatchRulesOverride(value: MatchRulesConfigMVP?): MatchRules
         normalized.supportsDraw == null &&
         normalized.supportsOvertime == null &&
         normalized.supportsShootout == null &&
+        normalized.canUseOvertime == null &&
+        normalized.canUseShootout == null &&
         normalized.supportedIncidentTypes == null &&
         normalized.pointIncidentRequiresParticipant == null
     ) {
@@ -6933,6 +7083,8 @@ private fun copyMatchRulesOverride(
     supportsDraw: Boolean? = current?.supportsDraw,
     supportsOvertime: Boolean? = current?.supportsOvertime,
     supportsShootout: Boolean? = current?.supportsShootout,
+    canUseOvertime: Boolean? = current?.canUseOvertime,
+    canUseShootout: Boolean? = current?.canUseShootout,
     supportedIncidentTypes: List<String>? = current?.supportedIncidentTypes,
     pointIncidentRequiresParticipant: Boolean? = current?.pointIncidentRequiresParticipant,
 ): MatchRulesConfigMVP? {
@@ -6942,6 +7094,8 @@ private fun copyMatchRulesOverride(
             supportsDraw = supportsDraw,
             supportsOvertime = supportsOvertime,
             supportsShootout = supportsShootout,
+            canUseOvertime = canUseOvertime,
+            canUseShootout = canUseShootout,
             supportedIncidentTypes = supportedIncidentTypes,
             pointIncidentRequiresParticipant = pointIncidentRequiresParticipant,
         ),
@@ -6972,7 +7126,7 @@ private fun supportedIncidentTypesOverrideOrNull(
     return normalizedSelected
 }
 
-private fun resolveEventMatchRules(
+internal fun resolveEventMatchRules(
     event: Event,
     sport: Sport?,
 ): ResolvedMatchRulesMVP {
@@ -6980,10 +7134,16 @@ private fun resolveEventMatchRules(
         return event.resolvedMatchRules
     }
 
-    val sportTemplate = sport?.matchRulesTemplate
+    val sportTemplate = sport?.let { selectedSport ->
+        mergeMatchRulesTemplate(
+            defaults = defaultSportMatchRulesTemplate(selectedSport),
+            override = selectedSport.matchRulesTemplate,
+        )
+    }
     val eventOverride = event.matchRulesOverride
+    val resolvedRulesFallback = event.resolvedMatchRules.takeIf { sportTemplate == null }
     val fallbackModel = when {
-        event.resolvedMatchRules?.scoringModel?.isNotBlank() == true -> event.resolvedMatchRules.scoringModel
+        resolvedRulesFallback?.scoringModel?.isNotBlank() == true -> resolvedRulesFallback.scoringModel
         event.usesSets -> "SETS"
         else -> "POINTS_ONLY"
     }
@@ -6997,27 +7157,54 @@ private fun resolveEventMatchRules(
         .takeIf { it in setOf("SETS", "PERIODS", "INNINGS", "POINTS_ONLY") }
         ?: "POINTS_ONLY"
 
-    val fallbackSegmentCount = when (scoringModel) {
-        "SETS" -> when (event.eventType) {
-            EventType.LEAGUE -> (event.setsPerMatch ?: event.winnerSetCount).coerceAtLeast(1)
-            EventType.TOURNAMENT -> event.winnerSetCount.coerceAtLeast(1)
-            EventType.EVENT, EventType.WEEKLY_EVENT -> 1
-        }
-
-        else -> event.resolvedMatchRules?.segmentCount?.takeIf { it > 0 } ?: 1
-    }
+    val fallbackSegmentCount = resolvedRulesFallback?.segmentCount?.takeIf { it > 0 }
+        ?: segmentCountFallbackForModel(scoringModel, event)
     val segmentCount = eventOverride?.segmentCount
         ?.takeIf { it > 0 }
         ?: sportTemplate?.segmentCount?.takeIf { it > 0 }
         ?: fallbackSegmentCount
-    val defaultIncidentTypes = event.resolvedMatchRules?.supportedIncidentTypes
+    val defaultIncidentTypes = resolvedRulesFallback?.supportedIncidentTypes
         ?.takeIf { it.isNotEmpty() }
-        ?: listOf("POINT", "DISCIPLINE", "NOTE", "ADMIN")
+        ?: defaultPointIncidentTypes()
     val officialRolesFromEvent = event.officialPositions
         .map(EventOfficialPosition::name)
         .map(String::trim)
         .filter(String::isNotBlank)
         .distinct()
+    val canUseOvertime = if (sportTemplate != null) {
+        sportTemplate.canUseOvertime == true || sportTemplate.supportsOvertime == true
+    } else {
+        eventOverride?.canUseOvertime == true ||
+            eventOverride?.supportsOvertime == true ||
+            resolvedRulesFallback?.canUseOvertime == true ||
+            resolvedRulesFallback?.supportsOvertime == true
+    }
+    val canUseShootout = if (sportTemplate != null) {
+        sportTemplate.canUseShootout == true || sportTemplate.supportsShootout == true
+    } else {
+        eventOverride?.canUseShootout == true ||
+            eventOverride?.supportsShootout == true ||
+            resolvedRulesFallback?.canUseShootout == true ||
+            resolvedRulesFallback?.supportsShootout == true
+    }
+    val supportsOvertime = canUseOvertime && (
+        eventOverride?.supportsOvertime
+            ?: sportTemplate?.supportsOvertime
+            ?: resolvedRulesFallback?.supportsOvertime
+            ?: false
+        )
+    val supportsShootout = canUseShootout && (
+        eventOverride?.supportsShootout
+            ?: sportTemplate?.supportsShootout
+            ?: resolvedRulesFallback?.supportsShootout
+            ?: false
+        )
+    val supportsDraw = (
+        eventOverride?.supportsDraw
+            ?: sportTemplate?.supportsDraw
+            ?: resolvedRulesFallback?.supportsDraw
+            ?: false
+        ) && !supportsShootout
 
     return ResolvedMatchRulesMVP(
         scoringModel = scoringModel,
@@ -7026,25 +7213,18 @@ private fun resolveEventMatchRules(
             ?.takeIf(String::isNotBlank)
             ?: sportTemplate?.segmentLabel
                 ?.takeIf(String::isNotBlank)
-            ?: event.resolvedMatchRules?.segmentLabel
+            ?: resolvedRulesFallback?.segmentLabel
             ?: matchSegmentLabelForModel(scoringModel),
-        supportsDraw = eventOverride?.supportsDraw
-            ?: sportTemplate?.supportsDraw
-            ?: event.resolvedMatchRules?.supportsDraw
-            ?: false,
-        supportsOvertime = eventOverride?.supportsOvertime
-            ?: sportTemplate?.supportsOvertime
-            ?: event.resolvedMatchRules?.supportsOvertime
-            ?: false,
-        supportsShootout = eventOverride?.supportsShootout
-            ?: sportTemplate?.supportsShootout
-            ?: event.resolvedMatchRules?.supportsShootout
-            ?: false,
+        supportsDraw = supportsDraw,
+        supportsOvertime = supportsOvertime,
+        supportsShootout = supportsShootout,
+        canUseOvertime = canUseOvertime,
+        canUseShootout = canUseShootout,
         officialRoles = normalizedMatchRuleStringList(eventOverride?.officialRoles)
             .ifEmpty {
                 normalizedMatchRuleStringList(sportTemplate?.officialRoles)
                     .ifEmpty {
-                        event.resolvedMatchRules?.officialRoles
+                        resolvedRulesFallback?.officialRoles
                             ?.takeIf { it.isNotEmpty() }
                             ?: officialRolesFromEvent
                     }
@@ -7058,11 +7238,11 @@ private fun resolveEventMatchRules(
             ?.takeIf(String::isNotBlank)
             ?: sportTemplate?.autoCreatePointIncidentType
                 ?.takeIf(String::isNotBlank)
-            ?: event.resolvedMatchRules?.autoCreatePointIncidentType
+            ?: resolvedRulesFallback?.autoCreatePointIncidentType
             ?: "POINT",
         pointIncidentRequiresParticipant = eventOverride?.pointIncidentRequiresParticipant
             ?: sportTemplate?.pointIncidentRequiresParticipant
-            ?: event.resolvedMatchRules?.pointIncidentRequiresParticipant
+            ?: resolvedRulesFallback?.pointIncidentRequiresParticipant
             ?: false,
     )
 }

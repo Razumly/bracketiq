@@ -14,11 +14,13 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.isUserAssignedToOfficialSlot
 import com.razumly.mvp.core.data.dataTypes.isUserCheckedInForOfficialSlot
+import com.razumly.mvp.core.data.dataTypes.normalizedOfficialAssignments
 import com.razumly.mvp.core.data.dataTypes.updateOfficialAssignmentCheckIn
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
+import com.razumly.mvp.core.data.repositories.UserVisibilityContext
 import com.razumly.mvp.eventDetail.data.IMatchRepository
 import com.razumly.mvp.core.network.dto.MatchIncidentOperationDto
 import kotlinx.coroutines.CoroutineScope
@@ -45,8 +47,10 @@ interface MatchContentComponent {
     val matchWithTeams: StateFlow<MatchWithTeams>
     val event: StateFlow<Event?>
     val matchRules: StateFlow<ResolvedMatchRulesMVP>
+    val officialUsers: StateFlow<Map<String, UserData>>
     val matchFinished: StateFlow<Boolean>
     val officialCheckedIn: StateFlow<Boolean>
+    val officialCheckInSaving: StateFlow<Boolean>
     val currentSet: StateFlow<Int>
     val isOfficial: StateFlow<Boolean>
     val showOfficialCheckInDialog: StateFlow<Boolean>
@@ -183,6 +187,9 @@ class DefaultMatchContentComponent(
     private val _officialCheckedIn = MutableStateFlow(selectedMatch.match.officialCheckedIn ?: false)
     override val officialCheckedIn: StateFlow<Boolean> = _officialCheckedIn.asStateFlow()
 
+    private val _officialCheckInSaving = MutableStateFlow(false)
+    override val officialCheckInSaving: StateFlow<Boolean> = _officialCheckInSaving.asStateFlow()
+
     private val _currentSet = MutableStateFlow(0)
     override val currentSet = _currentSet.asStateFlow()
 
@@ -200,6 +207,37 @@ class DefaultMatchContentComponent(
         .stateIn(scope, SharingStarted.Eagerly, UserData())
     private val currentUser: UserData
         get() = currentUserState.value
+
+    override val officialUsers = combine(matchWithTeams, event, currentUserState) { currentMatch, currentEvent, currentUser ->
+        OfficialUserLookup(
+            userIds = officialUserIdsForMatch(currentMatch.match),
+            eventId = currentEvent?.id ?: currentMatch.match.eventId,
+            currentUser = currentUser,
+        )
+    }
+        .distinctUntilChanged()
+        .flatMapLatest { lookup ->
+            if (lookup.userIds.isEmpty()) {
+                flowOf(emptyMap())
+            } else {
+                userRepository.getUsersFlow(
+                    userIds = lookup.userIds,
+                    visibilityContext = UserVisibilityContext(eventId = lookup.eventId),
+                ).map { result ->
+                    val resolvedUsers = result.getOrElse {
+                        _errorState.value = it.userMessage()
+                        emptyList()
+                    }.associateBy(UserData::id)
+                    val currentUserId = lookup.currentUser.id.trim()
+                    if (currentUserId.isNotBlank() && currentUserId in lookup.userIds && currentUserId !in resolvedUsers) {
+                        resolvedUsers + (currentUserId to lookup.currentUser)
+                    } else {
+                        resolvedUsers
+                    }
+                }
+            }
+        }
+        .stateIn(scope, SharingStarted.Eagerly, emptyMap())
 
     private val _currentUserTeams = currentUserState
         .map { user -> user.id.trim() }
@@ -276,70 +314,76 @@ class DefaultMatchContentComponent(
     }
 
     override fun confirmOfficialCheckIn() {
+        if (_officialCheckInSaving.value) return
+        _officialCheckInSaving.value = true
         scope.launch {
-            val currentMatch = matchWithTeams.value.match
-            val teamIds = currentUserTeamIds().toSet()
-            val currentTeamOfficialId = normalizeOptionalId(currentMatch.teamOfficialId)
-            val isAssignedTeamOfficial =
-                currentTeamOfficialId != null && teamIds.contains(currentTeamOfficialId)
-            val isAssignedUserOfficial = currentMatch.isUserAssignedToOfficialSlot(currentUser.id)
-            val canSwap = canCurrentUserSwapIntoOfficial(currentMatch)
-            val checkedIn = when {
-                isAssignedUserOfficial -> currentMatch.isUserCheckedInForOfficialSlot(currentUser.id)
-                else -> currentMatch.officialCheckedIn == true
-            }
+            try {
+                val currentMatch = matchWithTeams.value.match
+                val teamIds = currentUserTeamIds().toSet()
+                val currentTeamOfficialId = normalizeOptionalId(currentMatch.teamOfficialId)
+                val isAssignedTeamOfficial =
+                    currentTeamOfficialId != null && teamIds.contains(currentTeamOfficialId)
+                val isAssignedUserOfficial = currentMatch.isUserAssignedToOfficialSlot(currentUser.id)
+                val canSwap = canCurrentUserSwapIntoOfficial(currentMatch)
+                val checkedIn = when {
+                    isAssignedUserOfficial -> currentMatch.isUserCheckedInForOfficialSlot(currentUser.id)
+                    else -> currentMatch.officialCheckedIn == true
+                }
 
-            if (checkedIn) {
-                dismissOfficialDialog()
-                _officialCheckedIn.value = true
-                return@launch
-            }
-
-            if (!isAssignedTeamOfficial && !isAssignedUserOfficial && !canSwap) {
-                dismissOfficialDialog()
-                _errorState.value = "Only teams in this event can officiate this match."
-                return@launch
-            }
-
-            if (isAssignedTeamOfficial || isAssignedUserOfficial) {
-                val updatedMatch = matchWithTeams.value.copy(
-                    match = if (isAssignedUserOfficial) {
-                        currentMatch.updateOfficialAssignmentCheckIn(
-                            userId = currentUser.id,
-                            checkedIn = true,
-                        )
-                    } else {
-                        currentMatch.copy(officialCheckedIn = true)
-                    },
-                )
-                matchRepository.updateMatch(updatedMatch.match).onSuccess {
+                if (checkedIn) {
                     dismissOfficialDialog()
                     _officialCheckedIn.value = true
+                    return@launch
+                }
+
+                if (!isAssignedTeamOfficial && !isAssignedUserOfficial && !canSwap) {
+                    dismissOfficialDialog()
+                    _errorState.value = "Only teams in this event can officiate this match."
+                    return@launch
+                }
+
+                if (isAssignedTeamOfficial || isAssignedUserOfficial) {
+                    val updatedMatch = matchWithTeams.value.copy(
+                        match = if (isAssignedUserOfficial) {
+                            currentMatch.updateOfficialAssignmentCheckIn(
+                                userId = currentUser.id,
+                                checkedIn = true,
+                            )
+                        } else {
+                            currentMatch.copy(officialCheckedIn = true)
+                        },
+                    )
+                    matchRepository.updateMatch(updatedMatch.match).onSuccess {
+                        dismissOfficialDialog()
+                        _officialCheckedIn.value = true
+                        _isOfficial.value = true
+                    }.onFailure {
+                        _errorState.value = it.userMessage()
+                    }
+                    return@launch
+                }
+
+                val currentUserEventTeamId = resolveCurrentUserEventTeamId(currentMatch)
+                if (currentUserEventTeamId == null) {
+                    _errorState.value = "Only teams in this event can officiate this match."
+                    return@launch
+                }
+
+                val updatedMatch = matchWithTeams.value.copy(
+                    match = currentMatch.copy(
+                        teamOfficialId = currentUserEventTeamId,
+                        officialCheckedIn = false,
+                    ),
+                )
+                matchRepository.updateMatch(updatedMatch.match).onSuccess {
                     _isOfficial.value = true
+                    _officialCheckedIn.value = false
+                    _showOfficialCheckInDialog.value = true
                 }.onFailure {
                     _errorState.value = it.userMessage()
                 }
-                return@launch
-            }
-
-            val currentUserEventTeamId = resolveCurrentUserEventTeamId(currentMatch)
-            if (currentUserEventTeamId == null) {
-                _errorState.value = "Only teams in this event can officiate this match."
-                return@launch
-            }
-
-            val updatedMatch = matchWithTeams.value.copy(
-                match = currentMatch.copy(
-                    teamOfficialId = currentUserEventTeamId,
-                    officialCheckedIn = false,
-                ),
-            )
-            matchRepository.updateMatch(updatedMatch.match).onSuccess {
-                _isOfficial.value = true
-                _officialCheckedIn.value = false
-                _showOfficialCheckInDialog.value = true
-            }.onFailure {
-                _errorState.value = it.userMessage()
+            } finally {
+                _officialCheckInSaving.value = false
             }
         }
     }
@@ -973,6 +1017,8 @@ class DefaultMatchContentComponent(
             else -> fallbackSegmentCount.coerceAtLeast(1)
         }
 
+        val supportsShootout = source?.supportsShootout ?: false
+
         return ResolvedMatchRulesMVP(
             scoringModel = scoringModel,
             segmentCount = segmentCount,
@@ -982,9 +1028,11 @@ class DefaultMatchContentComponent(
                 "POINTS_ONLY" -> "Total"
                 else -> "Period"
             },
-            supportsDraw = source?.supportsDraw ?: false,
+            supportsDraw = source?.supportsDraw == true && !supportsShootout,
             supportsOvertime = source?.supportsOvertime ?: false,
-            supportsShootout = source?.supportsShootout ?: false,
+            supportsShootout = supportsShootout,
+            canUseOvertime = source?.canUseOvertime ?: source?.supportsOvertime ?: false,
+            canUseShootout = source?.canUseShootout ?: source?.supportsShootout ?: false,
             officialRoles = source?.officialRoles ?: emptyList(),
             supportedIncidentTypes = source?.supportedIncidentTypes
                 ?.takeIf { it.isNotEmpty() }
@@ -994,3 +1042,18 @@ class DefaultMatchContentComponent(
         )
     }
 }
+
+private data class OfficialUserLookup(
+    val userIds: List<String>,
+    val eventId: String,
+    val currentUser: UserData,
+)
+
+private fun officialUserIdsForMatch(match: MatchMVP): List<String> =
+    (
+        match.normalizedOfficialAssignments().map { assignment -> assignment.userId } +
+            listOfNotNull(match.officialId)
+        )
+        .map(String::trim)
+        .filter(String::isNotBlank)
+        .distinct()
