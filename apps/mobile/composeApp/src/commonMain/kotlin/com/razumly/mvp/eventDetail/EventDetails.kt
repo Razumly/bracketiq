@@ -162,6 +162,32 @@ import com.razumly.mvp.eventDetail.composables.PointsTextField
 import com.razumly.mvp.eventDetail.composables.RegistrationOptions
 import com.razumly.mvp.eventDetail.composables.SelectEventImage
 import com.razumly.mvp.eventDetail.composables.TextInputField
+import com.razumly.mvp.eventDetail.division.DivisionDetailEditList
+import com.razumly.mvp.eventDetail.edit.RequiredDocumentsSection
+import com.razumly.mvp.eventDetail.readonly.HostedByReadOnlyRow
+import com.razumly.mvp.eventDetail.readonly.ReadOnlyDivisionsList
+import com.razumly.mvp.eventDetail.readonly.ReadOnlyNameList
+import com.razumly.mvp.eventDetail.readonly.ScheduleTimeslotsReadOnlyList
+import com.razumly.mvp.eventDetail.readonly.buildEventDetailsRows
+import com.razumly.mvp.eventDetail.readonly.buildScheduleDetailsRows
+import com.razumly.mvp.eventDetail.readonly.resolveReadOnlyFieldCount
+import com.razumly.mvp.eventDetail.shared.BackgroundImage
+import com.razumly.mvp.eventDetail.shared.CollapsibleEditorSubsectionHeader
+import com.razumly.mvp.eventDetail.shared.DetailGridItem
+import com.razumly.mvp.eventDetail.shared.DetailKeyValueList
+import com.razumly.mvp.eventDetail.shared.DetailRowSpec
+import com.razumly.mvp.eventDetail.shared.DetailStatsGrid
+import com.razumly.mvp.eventDetail.shared.FormSectionDivider
+import com.razumly.mvp.eventDetail.shared.LabeledCheckboxRow
+import com.razumly.mvp.eventDetail.shared.SummaryTagChip
+import com.razumly.mvp.eventDetail.shared.animatedCardSection
+import com.razumly.mvp.eventDetail.shared.localImageScheme
+import com.razumly.mvp.eventDetail.staff.EditableStaffCardList
+import com.razumly.mvp.eventDetail.staff.StaffAssignmentCard
+import com.razumly.mvp.eventDetail.staff.StaffAssignmentCardModel
+import com.razumly.mvp.eventDetail.staff.buildAssignedStaffCards
+import com.razumly.mvp.eventDetail.staff.buildDraftStaffCards
+import com.razumly.mvp.eventDetail.staff.userDisplayName
 import com.razumly.mvp.eventMap.MapComponent
 import dev.chrisbanes.haze.ExperimentalHazeApi
 import io.github.aakira.napier.Napier
@@ -188,8 +214,6 @@ import mvp.composeapp.generated.resources.value_too_low
 import org.jetbrains.compose.resources.stringResource
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
-
-val localImageScheme = compositionLocalOf<DynamicScheme> { error("No color scheme provided") }
 
 private val SectionExpansionStatesSaver = mapSaver(
     save = { stateMap: SnapshotStateMap<String, Boolean> ->
@@ -1657,6 +1681,157 @@ fun EventDetails(
     } else {
         0
     }
+    val eventDetailsMode = remember(editView) {
+        if (editView) EventDetailsMode.EDIT else EventDetailsMode.READ_ONLY
+    }
+    val readOnlyActions = remember(
+        onOpenLocationMap,
+        onHostMessageUser,
+        onHostSendFriendRequest,
+        onHostFollowUser,
+        onHostUnfollowUser,
+        onHostBlockUser,
+        onHostUnblockUser,
+        onHostFollowOrganization,
+    ) {
+        EventDetailsReadOnlyActions(
+            onOpenLocationMap = onOpenLocationMap,
+            onMessageUser = onHostMessageUser,
+            onSendFriendRequest = onHostSendFriendRequest,
+            onFollowUser = onHostFollowUser,
+            onUnfollowUser = onHostUnfollowUser,
+            onBlockUser = onHostBlockUser,
+            onUnblockUser = onHostUnblockUser,
+            onFollowOrganization = onHostFollowOrganization,
+        )
+    }
+    val editActions = remember(
+        onPlaceSelected,
+        onEditEvent,
+        onEditTournament,
+        onAddCurrentUser,
+        onEventTypeSelected,
+        onSportSelected,
+    ) {
+        EventDetailsEditActions(
+            onPlaceSelected = onPlaceSelected,
+            onEditEvent = onEditEvent,
+            onEditTournament = onEditTournament,
+            onAddCurrentUser = onAddCurrentUser,
+            onEventTypeSelected = onEventTypeSelected,
+            onSportSelected = onSportSelected,
+        )
+    }
+    val readOnlyUiModel = remember(
+        event.id,
+        basicsSummaryLine,
+        pricingSummaryLine,
+        matchRulesSummary,
+        assistantHostIds.size,
+        event.officialIds.size,
+        competitionSummaryLine,
+        facilitiesSummaryLine,
+        editView,
+    ) {
+        EventDetailsReadOnlyUiModel(
+            eventId = event.id,
+            basics = ReadOnlySectionModel(
+                sectionId = "event_basics",
+                title = "Basic Information",
+                summary = basicsSummaryLine,
+            ),
+            registration = ReadOnlySectionModel(
+                sectionId = "event_details",
+                title = "Event Details",
+                summary = pricingSummaryLine,
+            ),
+            matchRules = ReadOnlySectionModel(
+                sectionId = "match_rules",
+                title = "Match Rules",
+                summary = matchRulesSummary,
+            ),
+            staff = ReadOnlySectionModel(
+                sectionId = "officials",
+                title = "Staff",
+                summary = "${assistantHostIds.size + event.officialIds.size} assigned",
+            ),
+            divisions = ReadOnlySectionModel(
+                sectionId = "specifics",
+                title = "Division Settings",
+                summary = competitionSummaryLine,
+            ),
+            leagueScoring = ReadOnlySectionModel(
+                sectionId = "league_scoring",
+                title = if (editView) "League Scoring Config" else "League Scoring Rules",
+                summary = "Scoring rules",
+            ),
+            schedule = ReadOnlySectionModel(
+                sectionId = "facility_schedule",
+                title = if (editView) "Schedule Config" else "Schedule",
+                summary = facilitiesSummaryLine,
+            ),
+        )
+    }
+    val editUiModel = remember(
+        editEvent.id,
+        isNewEvent,
+        basicsSummaryLine,
+        pricingSummaryLine,
+        matchRulesSummary,
+        assistantHostIds.size,
+        event.officialIds.size,
+        competitionSummaryLine,
+        facilitiesSummaryLine,
+        basicsMissingRequiredCount,
+        eventDetailsMissingRequiredCount,
+        divisionSettingsMissingRequiredCount,
+        scheduleMissingRequiredCount,
+        editView,
+    ) {
+        EventDetailsEditUiModel(
+            eventId = editEvent.id,
+            isNewEvent = isNewEvent,
+            basics = EditSectionModel(
+                sectionId = "event_basics",
+                title = "Basic Information",
+                summary = basicsSummaryLine,
+                requiredMissingCount = basicsMissingRequiredCount,
+            ),
+            registration = EditSectionModel(
+                sectionId = "event_details",
+                title = "Event Details",
+                summary = pricingSummaryLine,
+                requiredMissingCount = eventDetailsMissingRequiredCount,
+            ),
+            matchRules = EditSectionModel(
+                sectionId = "match_rules",
+                title = "Match Rules",
+                summary = matchRulesSummary,
+            ),
+            staff = EditSectionModel(
+                sectionId = "officials",
+                title = "Staff",
+                summary = "${assistantHostIds.size + event.officialIds.size} assigned",
+            ),
+            divisions = EditSectionModel(
+                sectionId = "specifics",
+                title = "Division Settings",
+                summary = competitionSummaryLine,
+                requiredMissingCount = divisionSettingsMissingRequiredCount,
+            ),
+            leagueScoring = EditSectionModel(
+                sectionId = "league_scoring",
+                title = if (editView) "League Scoring Config" else "League Scoring Rules",
+                summary = "Scoring rules",
+            ),
+            schedule = EditSectionModel(
+                sectionId = "facility_schedule",
+                title = if (editView) "Schedule Config" else "Schedule",
+                summary = facilitiesSummaryLine,
+                requiredMissingCount = scheduleMissingRequiredCount,
+            ),
+        )
+    }
     val normalizedEventDivisions = remember(event.divisions) {
         event.divisions.normalizeDivisionIdentifiers()
     }
@@ -1869,14 +2044,14 @@ fun EventDetails(
                 }
 
                 animatedCardSection(
-                    sectionId = "event_basics",
+                    sectionId = readOnlyUiModel.basics.sectionId,
                     sectionExpansionStates = sectionExpansionStates,
-                    sectionTitle = "Basic Information",
+                    sectionTitle = readOnlyUiModel.basics.title,
                     collapsibleInEditMode = true,
                     collapsibleInViewMode = true,
-                    viewSummary = basicsSummaryLine,
-                    requiredMissingCount = basicsMissingRequiredCount,
-                    isEditMode = editView,
+                    viewSummary = readOnlyUiModel.basics.summary,
+                    requiredMissingCount = editUiModel.basics.requiredMissingCount,
+                    isEditMode = eventDetailsMode == EventDetailsMode.EDIT,
                     lazyListState = lazyListState,
                     stickyHeaderTopInset = stickyHeaderTopInset,
                     animationDelay = 100,
@@ -1887,13 +2062,13 @@ fun EventDetails(
                             isOrganizationEvent = isOrganizationEvent,
                             fallbackHostDisplayName = hostDisplayName,
                             currentUser = currentUserForHostActions,
-                            onMessageUser = onHostMessageUser,
-                            onSendFriendRequest = onHostSendFriendRequest,
-                            onFollowUser = onHostFollowUser,
-                            onUnfollowUser = onHostUnfollowUser,
-                            onBlockUser = onHostBlockUser,
-                            onUnblockUser = onHostUnblockUser,
-                            onFollowOrganization = onHostFollowOrganization,
+                            onMessageUser = readOnlyActions.onMessageUser,
+                            onSendFriendRequest = readOnlyActions.onSendFriendRequest,
+                            onFollowUser = readOnlyActions.onFollowUser,
+                            onUnfollowUser = readOnlyActions.onUnfollowUser,
+                            onBlockUser = readOnlyActions.onBlockUser,
+                            onUnblockUser = readOnlyActions.onUnblockUser,
+                            onFollowOrganization = readOnlyActions.onFollowOrganization,
                         )
                         HorizontalDivider(
                             color = MaterialTheme.colorScheme.outlineVariant,
@@ -2060,14 +2235,14 @@ fun EventDetails(
                 )
 
                 animatedCardSection(
-                    sectionId = "event_details",
+                    sectionId = readOnlyUiModel.registration.sectionId,
                     sectionExpansionStates = sectionExpansionStates,
-                    sectionTitle = "Event Details",
+                    sectionTitle = readOnlyUiModel.registration.title,
                     collapsibleInEditMode = true,
                     collapsibleInViewMode = true,
-                    viewSummary = pricingSummaryLine,
-                    requiredMissingCount = eventDetailsMissingRequiredCount,
-                    isEditMode = editView,
+                    viewSummary = readOnlyUiModel.registration.summary,
+                    requiredMissingCount = editUiModel.registration.requiredMissingCount,
+                    isEditMode = eventDetailsMode == EventDetailsMode.EDIT,
                     lazyListState = lazyListState,
                     stickyHeaderTopInset = stickyHeaderTopInset,
                     animationDelay = 200,
@@ -2478,13 +2653,13 @@ fun EventDetails(
                 )
 
                 animatedCardSection(
-                    sectionId = "match_rules",
+                    sectionId = readOnlyUiModel.matchRules.sectionId,
                     sectionExpansionStates = sectionExpansionStates,
-                    sectionTitle = "Match Rules",
+                    sectionTitle = readOnlyUiModel.matchRules.title,
                     collapsibleInEditMode = true,
                     collapsibleInViewMode = true,
-                    viewSummary = matchRulesSummary,
-                    isEditMode = editView,
+                    viewSummary = readOnlyUiModel.matchRules.summary,
+                    isEditMode = eventDetailsMode == EventDetailsMode.EDIT,
                     lazyListState = lazyListState,
                     stickyHeaderTopInset = stickyHeaderTopInset,
                     animationDelay = 250,
@@ -2743,13 +2918,13 @@ fun EventDetails(
 
                 if (showOfficialsPanel) {
                     animatedCardSection(
-                        sectionId = "officials",
+                        sectionId = readOnlyUiModel.staff.sectionId,
                         sectionExpansionStates = sectionExpansionStates,
-                        sectionTitle = "Staff",
+                        sectionTitle = readOnlyUiModel.staff.title,
                         collapsibleInEditMode = true,
                         collapsibleInViewMode = true,
-                        viewSummary = "${assistantHostIds.size + event.officialIds.size} assigned",
-                        isEditMode = editView,
+                        viewSummary = readOnlyUiModel.staff.summary,
+                        isEditMode = eventDetailsMode == EventDetailsMode.EDIT,
                         lazyListState = lazyListState,
                         stickyHeaderTopInset = stickyHeaderTopInset,
                         animationDelay = 300,
@@ -3095,7 +3270,6 @@ fun EventDetails(
                                                 .orEmpty()
                                             StaffAssignmentCard(
                                                 card = card,
-                                                editView = true,
                                                 onRemoveAssigned = { userId, role ->
                                                     if (role == EventStaffRole.OFFICIAL) {
                                                         onRemoveOfficialId(userId)
@@ -3142,7 +3316,6 @@ fun EventDetails(
                                         ) { card ->
                                             StaffAssignmentCard(
                                                 card = card,
-                                                editView = true,
                                                 onRemoveAssigned = { userId, role ->
                                                     if (role == EventStaffRole.ASSISTANT_HOST) {
                                                         onUpdateAssistantHostIds(
@@ -3165,17 +3338,17 @@ fun EventDetails(
                 if (editView) {
                     // Specifics Card
                     animatedCardSection(
-                        sectionId = "specifics",
+                        sectionId = readOnlyUiModel.divisions.sectionId,
                         sectionExpansionStates = sectionExpansionStates,
-                        sectionTitle = "Division Settings",
+                        sectionTitle = readOnlyUiModel.divisions.title,
                         collapsibleInEditMode = true,
                         collapsibleInViewMode = true,
-                        viewSummary = competitionSummaryLine,
-                        isEditMode = editView,
+                        viewSummary = readOnlyUiModel.divisions.summary,
+                        isEditMode = eventDetailsMode == EventDetailsMode.EDIT,
                         lazyListState = lazyListState,
                         stickyHeaderTopInset = stickyHeaderTopInset,
                         animationDelay = 400,
-                        requiredMissingCount = divisionSettingsMissingRequiredCount,
+                        requiredMissingCount = editUiModel.divisions.requiredMissingCount,
                         viewContent = {
                         val maxParticipantsLabel =
                             if (event.teamSignup) "Max teams" else "Max players"
@@ -3779,116 +3952,12 @@ fun EventDetails(
                         )
                     }
 
-                    if (divisionDetailsForSettings.isNotEmpty()) {
-                        Column(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            divisionDetailsForSettings.forEach { detail ->
-                                val priceCents = if (editEvent.singleDivision) {
-                                    editEvent.priceCents.coerceAtLeast(0)
-                                } else {
-                                    (detail.price ?: editEvent.priceCents).coerceAtLeast(0)
-                                }
-                                val maxParticipants = if (editEvent.singleDivision) {
-                                    editEvent.maxParticipants.coerceAtLeast(2)
-                                } else {
-                                    (detail.maxParticipants ?: editEvent.maxParticipants).coerceAtLeast(2)
-                                }
-                                val playoffTeams = if (
-                                    editEvent.eventType == EventType.LEAGUE &&
-                                    editEvent.includePlayoffs
-                                ) {
-                                    if (editEvent.singleDivision) {
-                                        editEvent.playoffTeamCount ?: detail.playoffTeamCount
-                                    } else {
-                                        detail.playoffTeamCount
-                                    }
-                                } else {
-                                    null
-                                }
-                                val normalizedDetail = detail.normalizeDivisionDetail(editEvent.id)
-                                val detailMeta = listOf(
-                                    normalizedDetail.gender.ifBlank { "C" },
-                                    normalizedDetail.skillDivisionTypeName.ifBlank {
-                                        normalizedDetail.skillDivisionTypeId.toDivisionDisplayLabel()
-                                    },
-                                    normalizedDetail.ageDivisionTypeName.ifBlank {
-                                        normalizedDetail.ageDivisionTypeId.toDivisionDisplayLabel()
-                                    },
-                                ).joinToString(" - ")
-
-                                Card(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    shape = RoundedCornerShape(10.dp),
-                                    colors = CardDefaults.cardColors(
-                                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                                    ),
-                                    border = BorderStroke(
-                                        1.dp,
-                                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                                    ),
-                                ) {
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                                    ) {
-                                        Text(
-                                            text = detail.name,
-                                            style = MaterialTheme.typography.titleSmall,
-                                            color = MaterialTheme.colorScheme.onSurface,
-                                        )
-                                        Text(
-                                            text = detailMeta,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                        Text(
-                                            text = "Price: ${priceCents.toDouble().div(100.0).moneyFormat()} - ${if (editEvent.teamSignup) "Max teams" else "Max participants"}: $maxParticipants",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                        val paymentPlanInstallmentCount = maxOf(
-                                            detail.installmentCount ?: 0,
-                                            detail.installmentAmounts.size,
-                                            detail.installmentDueDates.size,
-                                        )
-                                        if (detail.allowPaymentPlans == true && paymentPlanInstallmentCount > 0) {
-                                            Text(
-                                                text = "Payment plan: $paymentPlanInstallmentCount installments",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            )
-                                        }
-                                        if (playoffTeams != null) {
-                                            Text(
-                                                text = "Playoff teams: $playoffTeams",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            )
-                                        }
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.End,
-                                            verticalAlignment = Alignment.CenterVertically,
-                                        ) {
-                                            TextButton(onClick = { handleEditDivisionDetail(detail.id) }) {
-                                                Text("Edit")
-                                            }
-                                            TextButton(onClick = { handleRemoveDivisionDetail(detail.id) }) {
-                                                Text(
-                                                    text = "Remove",
-                                                    color = MaterialTheme.colorScheme.error,
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    DivisionDetailEditList(
+                        event = editEvent,
+                        divisionDetails = divisionDetailsForSettings,
+                        onEditDivision = ::handleEditDivisionDetail,
+                        onRemoveDivision = ::handleRemoveDivisionDetail,
+                    )
                     }
 
                     )
@@ -3896,13 +3965,17 @@ fun EventDetails(
 
                 if (editEvent.eventType == EventType.LEAGUE) {
                     animatedCardSection(
-                        sectionId = "league_scoring",
+                        sectionId = readOnlyUiModel.leagueScoring.sectionId,
                         sectionExpansionStates = sectionExpansionStates,
-                        sectionTitle = if (editView) "League Scoring Config" else "League Scoring Rules",
+                        sectionTitle = if (eventDetailsMode == EventDetailsMode.EDIT) {
+                            editUiModel.leagueScoring.title
+                        } else {
+                            readOnlyUiModel.leagueScoring.title
+                        },
                         collapsibleInEditMode = true,
                         collapsibleInViewMode = true,
-                        viewSummary = "Scoring rules",
-                        isEditMode = editView,
+                        viewSummary = readOnlyUiModel.leagueScoring.summary,
+                        isEditMode = eventDetailsMode == EventDetailsMode.EDIT,
                         lazyListState = lazyListState,
                         stickyHeaderTopInset = stickyHeaderTopInset,
                         animationDelay = 440,
@@ -3929,14 +4002,18 @@ fun EventDetails(
 
                 if (supportsScheduleConfig) {
                     animatedCardSection(
-                        sectionId = "facility_schedule",
+                        sectionId = readOnlyUiModel.schedule.sectionId,
                         sectionExpansionStates = sectionExpansionStates,
-                        sectionTitle = if (editView) "Schedule Config" else "Schedule",
+                        sectionTitle = if (eventDetailsMode == EventDetailsMode.EDIT) {
+                            editUiModel.schedule.title
+                        } else {
+                            readOnlyUiModel.schedule.title
+                        },
                         collapsibleInEditMode = true,
                         collapsibleInViewMode = true,
-                        viewSummary = facilitiesSummaryLine,
-                        requiredMissingCount = scheduleMissingRequiredCount,
-                        isEditMode = editView,
+                        viewSummary = readOnlyUiModel.schedule.summary,
+                        requiredMissingCount = editUiModel.schedule.requiredMissingCount,
+                        isEditMode = eventDetailsMode == EventDetailsMode.EDIT,
                         lazyListState = lazyListState,
                         stickyHeaderTopInset = stickyHeaderTopInset,
                         animationDelay = 450,
@@ -4552,2816 +4629,6 @@ fun EventDetails(
                         }
                     })
             }
-        }
-    }
-}
-
-@Composable
-private fun SummaryTagChip(label: String) {
-    Box(
-        modifier = Modifier
-            .background(
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                shape = RoundedCornerShape(12.dp)
-            )
-            .padding(horizontal = 10.dp, vertical = 6.dp)
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-fun LazyListScope.animatedCardSection(
-    sectionId: String,
-    sectionExpansionStates: SnapshotStateMap<String, Boolean>,
-    sectionTitle: String? = null,
-    collapsibleInEditMode: Boolean = false,
-    collapsibleInViewMode: Boolean = false,
-    requiredMissingCount: Int = 0,
-    viewSummary: String? = null,
-    editSummary: String? = null,
-    isEditMode: Boolean,
-    lazyListState: LazyListState? = null,
-    stickyHeaderTopInset: Dp = 0.dp,
-    animationDelay: Int = 0,
-    viewContent: @Composable() (ColumnScope.() -> Unit),
-    editContent: @Composable() (ColumnScope.() -> Unit)
-) {
-    val isCollapsible = if (isEditMode) collapsibleInEditMode else collapsibleInViewMode
-    val shouldUseStickyHeader = isCollapsible && sectionTitle != null
-    val horizontalCardPadding = if (shouldUseStickyHeader) 0.dp else 16.dp
-    val sectionStateKey = "$sectionId:${if (isEditMode) "edit" else "view"}"
-    val headerKey = "${sectionStateKey}_header"
-    val expanded = sectionExpansionStates[sectionStateKey] ?: false
-    val summaryText = if (isEditMode) editSummary else viewSummary
-
-    if (shouldUseStickyHeader) {
-        stickyHeader(key = headerKey) {
-            val isPinned by remember(lazyListState, headerKey) {
-                derivedStateOf {
-                    lazyListState?.layoutInfo?.visibleItemsInfo?.any { itemInfo ->
-                        itemInfo.key == headerKey && itemInfo.offset <= 0
-                    } == true
-                }
-            }
-            CollapsibleSectionHeaderCard(
-                title = sectionTitle,
-                expanded = expanded,
-                summaryText = summaryText,
-                requiredMissingCount = requiredMissingCount,
-                horizontalCardPadding = horizontalCardPadding,
-                topInset = stickyHeaderTopInset,
-                isPinned = isPinned,
-                onToggleExpanded = {
-                    sectionExpansionStates[sectionStateKey] = !expanded
-                },
-            )
-        }
-
-        item(key = "${sectionStateKey}_body") {
-            CollapsibleSectionBodyCard(
-                expanded = expanded,
-                isEditMode = isEditMode,
-                animationDelay = animationDelay,
-                horizontalCardPadding = horizontalCardPadding,
-                viewContent = viewContent,
-                editContent = editContent,
-            )
-        }
-
-        return
-    }
-
-    item(key = sectionId) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surface),
-        ) {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 6.dp, horizontal = horizontalCardPadding),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    if (sectionTitle != null) {
-                        Text(
-                            text = sectionTitle,
-                            style = MaterialTheme.typography.titleMedium,
-                            color = Color(localImageScheme.current.onSurface),
-                        )
-                    }
-
-                    SectionCardAnimatedContent(
-                        isEditMode = isEditMode,
-                        animationDelay = animationDelay,
-                        viewContent = viewContent,
-                        editContent = editContent,
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CollapsibleSectionHeaderCard(
-    title: String,
-    expanded: Boolean,
-    summaryText: String?,
-    requiredMissingCount: Int,
-    horizontalCardPadding: Dp,
-    topInset: Dp,
-    isPinned: Boolean,
-    onToggleExpanded: () -> Unit,
-) {
-    val bottomCornerSize = if (expanded) 0.dp else 16.dp
-    val stickyHeaderTopSpacing = 6.dp
-    val pinnedTopInset by animateDpAsState(
-        targetValue = if (isPinned) topInset else 0.dp,
-        label = "pinnedHeaderTopInset",
-    )
-    val pinnedHeaderOffset = (pinnedTopInset - stickyHeaderTopSpacing).coerceAtLeast(0.dp)
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .zIndex(1f)
-            .background(MaterialTheme.colorScheme.surface),
-    ) {
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .offset(y = pinnedHeaderOffset)
-                .padding(
-                    start = horizontalCardPadding,
-                    end = horizontalCardPadding,
-                    top = stickyHeaderTopSpacing,
-                    bottom = if (expanded) 0.dp else 6.dp,
-                ),
-            shape = RoundedCornerShape(
-                topStart = 16.dp,
-                topEnd = 16.dp,
-                bottomStart = bottomCornerSize,
-                bottomEnd = bottomCornerSize,
-            ),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
-            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(onClick = onToggleExpanded)
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = Color(localImageScheme.current.onSurface),
-                        modifier = Modifier.weight(1f),
-                    )
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        if (requiredMissingCount > 0) {
-                            Box(
-                                modifier = Modifier
-                                    .padding(end = 6.dp)
-                                    .size(20.dp)
-                                    .background(
-                                        color = MaterialTheme.colorScheme.error,
-                                        shape = RoundedCornerShape(999.dp),
-                                    ),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text(
-                                    text = if (requiredMissingCount > 99) "99+" else requiredMissingCount.toString(),
-                                    color = Color.White,
-                                    style = MaterialTheme.typography.labelSmall,
-                                )
-                            }
-                        }
-                        Icon(
-                            imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                            contentDescription = if (expanded) "Collapse section" else "Expand section",
-                        )
-                    }
-                }
-
-                if (!expanded && !summaryText.isNullOrBlank()) {
-                    Text(
-                        text = summaryText,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CollapsibleSectionBodyCard(
-    expanded: Boolean,
-    isEditMode: Boolean,
-    animationDelay: Int,
-    horizontalCardPadding: Dp,
-    viewContent: @Composable() (ColumnScope.() -> Unit),
-    editContent: @Composable() (ColumnScope.() -> Unit),
-) {
-    AnimatedVisibility(visible = expanded) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surface),
-        ) {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = horizontalCardPadding, end = horizontalCardPadding, bottom = 6.dp)
-                    .offset(y = (-1).dp),
-                shape = RoundedCornerShape(
-                    topStart = 0.dp,
-                    topEnd = 0.dp,
-                    bottomStart = 16.dp,
-                    bottomEnd = 16.dp,
-                ),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                ) {
-                    SectionCardAnimatedContent(
-                        isEditMode = isEditMode,
-                        animationDelay = animationDelay,
-                        viewContent = viewContent,
-                        editContent = editContent,
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SectionCardAnimatedContent(
-    isEditMode: Boolean,
-    animationDelay: Int,
-    viewContent: @Composable() (ColumnScope.() -> Unit),
-    editContent: @Composable() (ColumnScope.() -> Unit),
-) {
-    AnimatedContent(
-        targetState = isEditMode,
-        transitionSpec = { transitionSpec(animationDelay) },
-        label = "cardTransition",
-    ) { editMode ->
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalAlignment = Alignment.Start,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if (editMode) {
-                editContent()
-            } else {
-                viewContent()
-            }
-        }
-    }
-}
-
-private fun buildEventDetailsRows(
-    event: Event,
-    priceSummary: String,
-    registrationSummary: String,
-    refundSummary: String,
-): List<DetailRowSpec> {
-    return buildList {
-        add(DetailRowSpec("Entry fee", priceSummary))
-        add(
-            DetailRowSpec(
-                if (event.teamSignup) "Max teams" else "Max players",
-                event.maxParticipants.toString(),
-            ),
-        )
-        add(DetailRowSpec("Team size", event.teamSizeLimit.toString()))
-        add(DetailRowSpec("Registration closes", "$registrationSummary \u203A"))
-        add(DetailRowSpec("Refunds", "$refundSummary \u203A"))
-        add(DetailRowSpec("Waitlist", "${event.waitListIds.size}"))
-    }
-}
-
-private fun buildScheduleDetailsRows(
-    event: Event,
-    fieldCount: Int,
-    slotCount: Int,
-): List<DetailRowSpec> {
-    return buildList {
-        add(DetailRowSpec("Field count", fieldCount.coerceAtLeast(0).toString()))
-        add(DetailRowSpec("Weekly timeslots", slotCount.toString()))
-
-        when (event.eventType) {
-            EventType.LEAGUE -> {
-                add(DetailRowSpec("Games per opponent", "${event.gamesPerOpponent ?: 1}"))
-                if (event.usesSets) {
-                    add(DetailRowSpec("Sets per match", "${event.setsPerMatch ?: 1}"))
-                    add(DetailRowSpec("Set duration", "${event.setDurationMinutes ?: 20} minutes"))
-                    if (event.pointsToVictory.isNotEmpty()) {
-                        add(DetailRowSpec("Points to victory", event.pointsToVictory.joinToString()))
-                    }
-                } else {
-                    add(DetailRowSpec("Match duration", "${event.matchDurationMinutes ?: 60} minutes"))
-                }
-                add(DetailRowSpec("Rest time", "${event.restTimeMinutes ?: 0} minutes"))
-                if (event.includePlayoffs) {
-                    add(
-                        DetailRowSpec(
-                            "Playoffs",
-                            if (event.singleDivision) {
-                                event.playoffTeamCount?.let { "$it teams" } ?: "Not set"
-                            } else {
-                                "Configured per division"
-                            },
-                        ),
-                    )
-                }
-            }
-
-            EventType.TOURNAMENT -> {
-                if (event.usesSets) {
-                    add(DetailRowSpec("Set duration", "${event.setDurationMinutes ?: 20} minutes"))
-                } else {
-                    add(DetailRowSpec("Match duration", "${event.matchDurationMinutes ?: 60} minutes"))
-                }
-                add(
-                    DetailRowSpec(
-                        "Bracket",
-                        if (event.doubleElimination) "Double elimination" else "Single elimination",
-                    ),
-                )
-                if (event.doubleElimination) {
-                    add(DetailRowSpec("Winner set count", event.winnerSetCount.toString()))
-                    if (event.winnerBracketPointsToVictory.isNotEmpty()) {
-                        add(
-                            DetailRowSpec(
-                                "Winner set points",
-                                event.winnerBracketPointsToVictory.joinToString(),
-                            ),
-                        )
-                    }
-                    add(DetailRowSpec("Loser set count", event.loserSetCount.toString()))
-                    if (event.loserBracketPointsToVictory.isNotEmpty()) {
-                        add(
-                            DetailRowSpec(
-                                "Loser set points",
-                                event.loserBracketPointsToVictory.joinToString(),
-                            ),
-                        )
-                    }
-                } else {
-                    add(DetailRowSpec("Bracket set count", event.winnerSetCount.toString()))
-                    if (event.winnerBracketPointsToVictory.isNotEmpty()) {
-                        add(
-                            DetailRowSpec(
-                                "Bracket set points",
-                                event.winnerBracketPointsToVictory.joinToString(),
-                            ),
-                        )
-                    }
-                }
-            }
-
-            EventType.EVENT, EventType.WEEKLY_EVENT -> Unit
-        }
-    }
-}
-
-private fun resolveReadOnlyFieldCount(
-    event: Event,
-    editableFields: List<Field>,
-): Int {
-    val linkedFieldCount = event.fieldIds.count { fieldId -> fieldId.isNotBlank() }
-    return when {
-        linkedFieldCount > 0 -> linkedFieldCount
-        editableFields.isNotEmpty() -> editableFields.size
-        else -> 0
-    }
-}
-
-private data class DetailRowSpec(
-    val label: String,
-    val value: String?,
-)
-
-@Composable
-private fun HostedByReadOnlyRow(
-    host: UserData?,
-    organization: Organization?,
-    isOrganizationEvent: Boolean,
-    fallbackHostDisplayName: String,
-    currentUser: UserData?,
-    onMessageUser: (UserData) -> Unit,
-    onSendFriendRequest: (UserData) -> Unit,
-    onFollowUser: (UserData) -> Unit,
-    onUnfollowUser: (UserData) -> Unit,
-    onBlockUser: (UserData, Boolean) -> Unit,
-    onUnblockUser: (UserData) -> Unit,
-    onFollowOrganization: (Organization) -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = 56.dp)
-            .padding(vertical = 10.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = "Hosted by",
-            modifier = Modifier.widthIn(min = 84.dp, max = 108.dp),
-            style = MaterialTheme.typography.labelSmall.copy(
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            ),
-        )
-
-        Box(
-            modifier = Modifier.weight(1f),
-            contentAlignment = Alignment.CenterEnd,
-        ) {
-            when {
-                isOrganizationEvent && organization != null -> {
-                    OrganizationHostCardWithMenu(
-                        organization = organization,
-                        onFollowOrganization = onFollowOrganization,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-
-                host != null && currentUser != null && currentUser.id.isNotBlank() -> {
-                    PlayerCardWithActions(
-                        player = host,
-                        currentUser = currentUser,
-                        modifier = Modifier.fillMaxWidth(),
-                        onMessage = onMessageUser,
-                        onSendFriendRequest = onSendFriendRequest,
-                        onFollow = onFollowUser,
-                        onUnfollow = onUnfollowUser,
-                        onBlock = { user, leaveSharedChats ->
-                            onBlockUser(user, leaveSharedChats)
-                        },
-                        onUnblock = onUnblockUser,
-                    )
-                }
-
-                else -> {
-                    Text(
-                        text = fallbackHostDisplayName,
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold,
-                        ),
-                        color = MaterialTheme.colorScheme.onSurface,
-                        textAlign = TextAlign.End,
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun OrganizationHostCardWithMenu(
-    organization: Organization,
-    onFollowOrganization: (Organization) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    var showMenu by remember(organization.id) { mutableStateOf(false) }
-    val organizationName = organization.name.ifBlank { "Organization" }
-
-    Box(
-        modifier = modifier,
-        contentAlignment = Alignment.TopEnd,
-    ) {
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { showMenu = true },
-            shape = RoundedCornerShape(10.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            ),
-            border = BorderStroke(
-                1.dp,
-                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-            ),
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 10.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                NetworkAvatar(
-                    displayName = organizationName,
-                    imageRef = organization.logoId,
-                    size = 32.dp,
-                    contentDescription = "$organizationName logo",
-                )
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            modifier = Modifier.weight(1f),
-                            text = organizationName,
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                fontWeight = FontWeight.SemiBold,
-                            ),
-                            maxLines = 1,
-                        )
-                        OrganizationVerificationBadge(organization = organization)
-                    }
-                    organization.location
-                        ?.takeIf(String::isNotBlank)
-                        ?.let { location ->
-                            Text(
-                                text = location,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                            )
-                        }
-                }
-            }
-        }
-
-        DropdownMenu(
-            expanded = showMenu,
-            onDismissRequest = { showMenu = false },
-        ) {
-            DropdownMenuItem(
-                text = { Text("Follow") },
-                onClick = {
-                    onFollowOrganization(organization)
-                    showMenu = false
-                },
-            )
-        }
-    }
-}
-
-@Composable
-private fun FormSectionDivider(
-    modifier: Modifier = Modifier,
-) {
-    HorizontalDivider(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f),
-        thickness = 1.dp,
-    )
-}
-
-@Composable
-private fun CollapsibleEditorSubsectionHeader(
-    title: String,
-    expanded: Boolean,
-    onToggle: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onToggle),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = if (expanded) "Hide" else "Show",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Icon(
-                imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                contentDescription = if (expanded) "Collapse $title" else "Expand $title",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-@Composable
-private fun EditableStaffCardList(
-    cards: List<StaffAssignmentCardModel>,
-    emptyText: String,
-    lazyListHeight: androidx.compose.ui.unit.Dp,
-    cardContent: @Composable (StaffAssignmentCardModel) -> Unit,
-) {
-    if (cards.isEmpty()) {
-        Text(
-            text = emptyText,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        return
-    }
-
-    if (cards.size >= STAFF_LAZY_LIST_THRESHOLD) {
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(lazyListHeight),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            items(cards) { card ->
-                cardContent(card)
-            }
-        }
-        return
-    }
-
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        cards.forEach { card ->
-            cardContent(card)
-        }
-    }
-}
-
-private data class DetailGridItem(
-    val label: String,
-    val value: String?,
-)
-
-@Composable
-private fun DetailKeyValueList(
-    rows: List<DetailRowSpec>,
-    modifier: Modifier = Modifier,
-) {
-    val normalizedRows = rows
-        .map { row -> row.copy(value = row.value?.trim()) }
-        .filter { !it.value.isNullOrBlank() }
-    if (normalizedRows.isEmpty()) return
-
-    Column(
-        modifier = modifier.fillMaxWidth(),
-    ) {
-        normalizedRows.forEachIndexed { index, row ->
-            DetailKeyValueRow(
-                label = row.label,
-                value = row.value.orEmpty(),
-            )
-            if (index < normalizedRows.lastIndex) {
-                HorizontalDivider(
-                    color = MaterialTheme.colorScheme.outlineVariant,
-                    thickness = 1.dp,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun DetailKeyValueRow(
-    label: String,
-    value: String,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = 44.dp)
-            .padding(vertical = 10.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = label,
-            modifier = Modifier.weight(0.44f),
-            style = MaterialTheme.typography.labelSmall.copy(
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            ),
-        )
-        Text(
-            text = value,
-            modifier = Modifier.weight(0.56f),
-            style = MaterialTheme.typography.bodyMedium.copy(
-                fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold,
-            ),
-            color = MaterialTheme.colorScheme.onSurface,
-            textAlign = TextAlign.End,
-        )
-    }
-}
-
-@Composable
-private fun DetailStatsGrid(
-    items: List<DetailGridItem>,
-    modifier: Modifier = Modifier,
-) {
-    val normalizedItems = items
-        .map { item -> item.copy(value = item.value?.trim()) }
-        .filter { !it.value.isNullOrBlank() }
-    if (normalizedItems.isEmpty()) return
-
-    Column(
-        modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        normalizedItems.chunked(2).forEach { row ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                row.forEach { item ->
-                    Card(
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(10.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                        ),
-                        border = BorderStroke(
-                            1.dp,
-                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                        ),
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 10.dp, vertical = 9.dp),
-                            verticalArrangement = Arrangement.spacedBy(2.dp),
-                        ) {
-                            Text(
-                                text = item.label,
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                ),
-                            )
-                            Text(
-                                text = item.value.orEmpty(),
-                                style = MaterialTheme.typography.bodyMedium.copy(
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                ),
-                                color = MaterialTheme.colorScheme.onSurface,
-                            )
-                        }
-                    }
-                }
-                if (row.size == 1) {
-                    Spacer(modifier = Modifier.weight(1f))
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ReadOnlyDivisionsList(
-    event: Event,
-    divisionDetails: List<DivisionDetail>,
-) {
-    Spacer(modifier = Modifier.height(8.dp))
-    var expanded by rememberSaveable(event.id) { mutableStateOf(false) }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { expanded = !expanded },
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Text(
-            text = "Divisions (${divisionDetails.size})",
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(if (expanded) "Hide" else "Show")
-            Spacer(modifier = Modifier.size(4.dp))
-            Icon(
-                imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                contentDescription = if (expanded) "Collapse divisions" else "Expand divisions",
-            )
-        }
-    }
-
-    if (event.singleDivision) {
-        Text(
-            text = "Single-division events mirror event-level capacity and pricing settings.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-
-    AnimatedVisibility(visible = expanded) {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if (divisionDetails.isEmpty()) {
-                Text(
-                    text = "No divisions configured.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
-                divisionDetails.forEach { detail ->
-                    ReadOnlyDivisionCard(
-                        event = event,
-                        detail = detail,
-                        allDivisionDetails = divisionDetails,
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ReadOnlyDivisionCard(
-    event: Event,
-    detail: DivisionDetail,
-    allDivisionDetails: List<DivisionDetail>,
-) {
-    val normalizedDetail = detail.normalizeDivisionDetail(event.id)
-    val detailMeta = listOf(
-        normalizedDetail.gender.ifBlank { "C" },
-        normalizedDetail.skillDivisionTypeName.ifBlank {
-            normalizedDetail.skillDivisionTypeId.toDivisionDisplayLabel()
-        },
-        normalizedDetail.ageDivisionTypeName.ifBlank {
-            normalizedDetail.ageDivisionTypeId.toDivisionDisplayLabel()
-        },
-    ).joinToString(" - ")
-    val priceCents = (detail.price ?: event.priceCents).coerceAtLeast(0)
-    val maxParticipants = (detail.maxParticipants ?: event.maxParticipants).coerceAtLeast(2)
-    val paymentPlanInstallmentCount = maxOf(
-        detail.installmentCount ?: 0,
-        detail.installmentAmounts.size,
-        detail.installmentDueDates.size,
-    )
-    val playoffTeams = if (
-        event.eventType == EventType.LEAGUE &&
-        event.includePlayoffs &&
-        !event.singleDivision
-    ) {
-        detail.playoffTeamCount
-    } else {
-        null
-    }
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(10.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        ),
-        border = BorderStroke(
-            1.dp,
-            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-        ),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Text(
-                text = detail.name.ifBlank { detail.id.toDivisionDisplayLabel(allDivisionDetails) },
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Text(
-                text = detailMeta,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                text = "Price: ${priceCents.toDouble().div(100.0).moneyFormat()} - " +
-                    "${if (event.teamSignup) "Max teams" else "Max participants"}: $maxParticipants",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            if (paymentPlanInstallmentCount > 0 && detail.allowPaymentPlans == true) {
-                Text(
-                    text = "Payment plan: $paymentPlanInstallmentCount installments",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            if (playoffTeams != null) {
-                Text(
-                    text = "Playoff teams: $playoffTeams",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun ScheduleTimeslotsReadOnlyList(
-    slots: List<TimeSlot>,
-    fieldsById: Map<String, Field>,
-    divisionDetails: List<DivisionDetail>,
-    fallbackDivisionIds: List<String>,
-) {
-    Spacer(modifier = Modifier.height(8.dp))
-    Text(
-        text = "Weekly timeslots",
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.onSurface,
-    )
-    if (slots.isEmpty()) {
-        Text(
-            text = "No weekly timeslots configured.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        return
-    }
-
-    val groupedSlots = remember(slots) { buildScheduleTimeslotGroups(slots) }
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        groupedSlots.forEach { (dayOfWeek, daySlots) ->
-            Text(
-                text = "${dayOfWeekLabel(dayOfWeek)} (${daySlots.size})",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                daySlots.forEach { slot ->
-                    val fieldNames = resolveSlotFieldNames(slot, fieldsById)
-                    val divisionNames = resolveSlotDivisionNames(
-                        slot = slot,
-                        divisionDetails = divisionDetails,
-                        fallbackDivisionIds = fallbackDivisionIds,
-                    )
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                        ),
-                        border = BorderStroke(
-                            1.dp,
-                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                        ),
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 10.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            Text(
-                                text = formatSlotTimeRange(slot.startTimeMinutes, slot.endTimeMinutes),
-                                style = MaterialTheme.typography.titleSmall,
-                                color = MaterialTheme.colorScheme.onSurface,
-                            )
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                verticalAlignment = Alignment.Top,
-                            ) {
-                                TimeslotReadOnlyNameColumn(
-                                    title = "Fields",
-                                    values = fieldNames,
-                                    emptyText = "Fields: Not assigned",
-                                    modifier = Modifier.weight(1f),
-                                )
-                                TimeslotReadOnlyNameColumn(
-                                    title = "Divisions",
-                                    values = divisionNames,
-                                    emptyText = "Divisions: Not assigned",
-                                    modifier = Modifier.weight(1f),
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun TimeslotReadOnlyNameColumn(
-    title: String,
-    values: List<String>,
-    emptyText: String,
-    modifier: Modifier = Modifier,
-) {
-    val maxHeight = (readOnlyNameListItemHeight * MAX_READ_ONLY_NAME_LIST_ITEMS) +
-        (readOnlyNameListSpacing * (MAX_READ_ONLY_NAME_LIST_ITEMS - 1).coerceAtLeast(0))
-    Column(
-        modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(readOnlyNameListSpacing),
-    ) {
-        if (values.isEmpty()) {
-            Text(
-                text = emptyText,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            return@Column
-        }
-
-        Text(
-            text = "$title (${values.size})",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-
-        if (values.size > MAX_READ_ONLY_NAME_LIST_ITEMS) {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = maxHeight),
-                verticalArrangement = Arrangement.spacedBy(readOnlyNameListSpacing),
-            ) {
-                items(values) { value ->
-                    Text(
-                        text = value,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = readOnlyNameListItemHeight),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        } else {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(readOnlyNameListSpacing),
-            ) {
-                values.forEach { value ->
-                    Text(
-                        text = value,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = readOnlyNameListItemHeight),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ReadOnlyNameList(
-    title: String,
-    singularTitle: String,
-    values: List<String>,
-    emptyText: String,
-) {
-    when {
-        values.isEmpty() -> {
-            Text(
-                text = emptyText,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-
-        values.size == 1 -> {
-            Text(
-                text = "$singularTitle: ${values.first()}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-
-        else -> {
-            val visibleItems = values.size.coerceAtMost(MAX_READ_ONLY_NAME_LIST_ITEMS)
-            val maxHeight = (readOnlyNameListItemHeight * visibleItems) +
-                (readOnlyNameListSpacing * (visibleItems - 1).coerceAtLeast(0))
-            Text(
-                text = "$title (${values.size})",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = maxHeight),
-                verticalArrangement = Arrangement.spacedBy(readOnlyNameListSpacing),
-            ) {
-                items(values) { value ->
-                    Text(
-                        text = value,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = readOnlyNameListItemHeight),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun RequiredDocumentsSection(
-    isOrganizationEvent: Boolean,
-    rentalTimeLocked: Boolean,
-    organizationTemplatesLoading: Boolean,
-    organizationTemplatesError: String?,
-    requiredTemplateOptions: List<DropdownOption>,
-    selectedRequiredTemplateIds: List<String>,
-    selectedRequiredTemplateLabels: List<String>,
-    onRequiredTemplateIdsChange: (List<String>) -> Unit,
-) {
-    if (!isOrganizationEvent) {
-        return
-    }
-
-    if (rentalTimeLocked) {
-        Text(
-            text = "Required Documents",
-            style = MaterialTheme.typography.titleSmall,
-            color = Color(localImageScheme.current.onSurface),
-            modifier = Modifier.padding(top = 8.dp),
-        )
-        ReadOnlyNameList(
-            title = "Required Documents",
-            singularTitle = "Required Document",
-            values = selectedRequiredTemplateLabels,
-            emptyText = "Required Documents: None",
-        )
-        Text(
-            text = "Set by the rental field and cannot be changed here.",
-            style = MaterialTheme.typography.bodySmall,
-            color = Color(localImageScheme.current.onSurfaceVariant),
-        )
-        return
-    }
-
-    PlatformDropdown(
-        selectedValue = "",
-        onSelectionChange = {},
-        options = requiredTemplateOptions,
-        label = "Required Documents",
-        placeholder = if (organizationTemplatesLoading) {
-            "Loading templates..."
-        } else {
-            "Select templates"
-        },
-        enabled = !organizationTemplatesLoading,
-        multiSelect = true,
-        selectedValues = selectedRequiredTemplateIds,
-        onMultiSelectionChange = { values ->
-            onRequiredTemplateIdsChange(values.normalizeTemplateIds())
-        },
-        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-    )
-    if (!organizationTemplatesError.isNullOrBlank()) {
-        Text(
-            text = organizationTemplatesError,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.error,
-        )
-    } else if (
-        !organizationTemplatesLoading &&
-        requiredTemplateOptions.isEmpty()
-    ) {
-        Text(
-            text = "No templates yet. Create one in your organization Document Templates tab.",
-            style = MaterialTheme.typography.bodySmall,
-            color = Color(localImageScheme.current.onSurfaceVariant),
-        )
-    }
-}
-
-internal fun isScheduleEditingLocked(
-    event: Event,
-    timeSlots: List<TimeSlot>,
-    fields: List<Field>,
-    rentalTimeLocked: Boolean,
-): Boolean {
-    if (rentalTimeLocked) {
-        return true
-    }
-    if (timeSlots.isEmpty()) {
-        return false
-    }
-    val eventOrganizationId = event.organizationId?.trim().orEmpty()
-    val fieldOrganizationById = fields
-        .asSequence()
-        .mapNotNull { field ->
-            val fieldId = field.id.trim().takeIf(String::isNotEmpty) ?: return@mapNotNull null
-            fieldId to field.organizationId?.trim().orEmpty()
-        }
-        .toMap()
-    val slotFieldIds = timeSlots
-        .asSequence()
-        .flatMap { slot -> slot.normalizedScheduledFieldIds().asSequence() }
-        .distinct()
-        .toList()
-    if (eventOrganizationId.isNotEmpty()) {
-        val hasUnknownFieldOwnership = slotFieldIds.any { fieldId ->
-            fieldOrganizationById[fieldId].isNullOrBlank()
-        }
-        if (hasUnknownFieldOwnership) {
-            return true
-        }
-    }
-    return slotFieldIds
-        .asSequence()
-        .any { fieldId ->
-            val fieldOrganizationId = fieldOrganizationById[fieldId].orEmpty()
-            fieldOrganizationId.isNotEmpty() && fieldOrganizationId != eventOrganizationId
-        }
-}
-
-private fun buildScheduleTimeslotGroups(slots: List<TimeSlot>): List<Pair<Int, List<TimeSlot>>> {
-    if (slots.isEmpty()) return emptyList()
-
-    val grouped = mutableMapOf<Int, MutableList<TimeSlot>>()
-    slots.forEach { slot ->
-        val normalizedDays = slot.normalizedDaysOfWeek()
-        if (normalizedDays.isEmpty()) {
-            grouped.getOrPut(-1) { mutableListOf() } += slot
-        } else {
-            normalizedDays.forEach { day ->
-                grouped.getOrPut(day) { mutableListOf() } += slot
-            }
-        }
-    }
-
-    val dayOrder = listOf(0, 1, 2, 3, 4, 5, 6, -1)
-    return grouped.entries
-        .sortedBy { entry ->
-            dayOrder.indexOf(entry.key).let { index ->
-                if (index >= 0) index else Int.MAX_VALUE
-            }
-        }
-        .map { entry ->
-            entry.key to entry.value.sortedWith(
-                compareBy<TimeSlot>(
-                    { it.startTimeMinutes ?: Int.MAX_VALUE },
-                    { it.endTimeMinutes ?: Int.MAX_VALUE },
-                    { it.id },
-                ),
-            )
-        }
-}
-
-private fun resolveSlotFieldNames(
-    slot: TimeSlot,
-    fieldsById: Map<String, Field>,
-): List<String> {
-    return slot.normalizedScheduledFieldIds()
-        .map { fieldId ->
-            val field = fieldsById[fieldId]
-            field?.name?.takeIf(String::isNotBlank)
-                ?: field?.let { resolved -> "Field ${resolved.fieldNumber}" }
-                ?: fieldId
-        }
-        .distinct()
-}
-
-private fun resolveSlotDivisionNames(
-    slot: TimeSlot,
-    divisionDetails: List<DivisionDetail>,
-    fallbackDivisionIds: List<String>,
-): List<String> {
-    val slotDivisionIds = slot.normalizedDivisionIds().normalizeDivisionIdentifiers()
-    val effectiveDivisionIds = if (slotDivisionIds.isNotEmpty()) {
-        slotDivisionIds
-    } else {
-        fallbackDivisionIds
-    }
-    return effectiveDivisionIds
-        .map { divisionId -> divisionId.toDivisionDisplayLabel(divisionDetails) }
-        .distinct()
-}
-
-private fun dayOfWeekLabel(dayOfWeek: Int): String {
-    return when (dayOfWeek) {
-        0 -> "Monday"
-        1 -> "Tuesday"
-        2 -> "Wednesday"
-        3 -> "Thursday"
-        4 -> "Friday"
-        5 -> "Saturday"
-        6 -> "Sunday"
-        else -> "Unassigned day"
-    }
-}
-
-private fun formatSlotTimeRange(startMinutes: Int?, endMinutes: Int?): String {
-    val startLabel = startMinutes?.let(::formatMinutesTo12Hour) ?: "Start not set"
-    val endLabel = endMinutes?.let(::formatMinutesTo12Hour) ?: "End not set"
-    return "$startLabel - $endLabel"
-}
-
-private fun formatMinutesTo12Hour(totalMinutes: Int): String {
-    val normalizedMinutes = ((totalMinutes % 1440) + 1440) % 1440
-    val hour24 = normalizedMinutes / 60
-    val minute = normalizedMinutes % 60
-    val meridiem = if (hour24 >= 12) "PM" else "AM"
-    val hour12 = when (val value = hour24 % 12) {
-        0 -> 12
-        else -> value
-    }
-    return "$hour12:${minute.toString().padStart(2, '0')} $meridiem"
-}
-
-internal data class DivisionEditorState(
-    val editingId: String? = null,
-    val gender: String = "",
-    val skillDivisionTypeId: String = "",
-    val skillDivisionTypeName: String = "",
-    val ageDivisionTypeId: String = "",
-    val ageDivisionTypeName: String = "",
-    val name: String = "",
-    val priceCents: Int = 0,
-    val maxParticipants: Int = 2,
-    val playoffTeamCount: Int? = null,
-    val allowPaymentPlans: Boolean = false,
-    val installmentCount: Int = 0,
-    val installmentDueDates: List<String> = emptyList(),
-    val installmentAmounts: List<Int> = emptyList(),
-    val nameTouched: Boolean = false,
-    val error: String? = null,
-)
-
-internal data class ParsedDivisionToken(
-    val gender: String,
-    val skillDivisionTypeId: String,
-    val ageDivisionTypeId: String,
-)
-
-internal val DIVISION_TOKEN_PATTERN = Regex("^([mfc])_(age|skill)_(.+)$")
-internal val COMBINED_DIVISION_TOKEN_PATTERN = Regex("^([mfc])_skill_(.+)_age_(.+)$")
-internal val DIVISION_NAME_WHITESPACE_PATTERN = Regex("\\s+")
-
-internal val DIVISION_GENDER_OPTIONS = listOf(
-    DropdownOption(value = "M", label = "Men"),
-    DropdownOption(value = "F", label = "Women"),
-    DropdownOption(value = "C", label = "Coed"),
-)
-
-internal fun defaultDivisionEditorState(
-    defaultPriceCents: Int,
-    defaultMaxParticipants: Int,
-    defaultPlayoffTeamCount: Int?,
-    defaultAllowPaymentPlans: Boolean,
-    defaultInstallmentCount: Int?,
-    defaultInstallmentDueDates: List<String>,
-    defaultInstallmentAmounts: List<Int>,
-): DivisionEditorState {
-    val fallbackMax = defaultMaxParticipants.coerceAtLeast(2)
-    val fallbackPlayoff = defaultPlayoffTeamCount?.coerceAtLeast(2)
-    val normalizedInstallmentAmounts = defaultInstallmentAmounts.map { amount ->
-        amount.coerceAtLeast(0)
-    }
-    val normalizedInstallmentDueDates = defaultInstallmentDueDates
-        .map { dueDate -> dueDate.trim() }
-        .filter(String::isNotBlank)
-    val normalizedInstallmentCount = maxOf(
-        defaultInstallmentCount ?: 0,
-        normalizedInstallmentAmounts.size,
-        normalizedInstallmentDueDates.size,
-    ).takeIf { count -> count > 0 } ?: 0
-    val normalizedAllowPaymentPlans = defaultAllowPaymentPlans &&
-        normalizedInstallmentCount > 0 &&
-        defaultPriceCents.coerceAtLeast(0) > 0
-    return DivisionEditorState(
-        editingId = null,
-        gender = "",
-        skillDivisionTypeId = "",
-        skillDivisionTypeName = "",
-        ageDivisionTypeId = "",
-        ageDivisionTypeName = "",
-        name = "",
-        priceCents = defaultPriceCents.coerceAtLeast(0),
-        maxParticipants = fallbackMax,
-        playoffTeamCount = fallbackPlayoff,
-        allowPaymentPlans = normalizedAllowPaymentPlans,
-        installmentCount = if (normalizedAllowPaymentPlans) normalizedInstallmentCount else 0,
-        installmentDueDates = if (normalizedAllowPaymentPlans) normalizedInstallmentDueDates else emptyList(),
-        installmentAmounts = if (normalizedAllowPaymentPlans) normalizedInstallmentAmounts else emptyList(),
-        nameTouched = false,
-        error = null,
-    )
-}
-
-internal fun buildSkillDivisionTypeOptions(
-    existingDetails: List<DivisionDetail>,
-): List<DropdownOption> {
-    val options = linkedMapOf<String, String>()
-    fun addOption(divisionTypeId: String, label: String? = null) {
-        val normalizedId = divisionTypeId.normalizeDivisionIdentifier()
-        if (normalizedId.isBlank()) return
-        options[normalizedId] = label?.trim().takeIf { !it.isNullOrBlank() }
-            ?: normalizedId.toDivisionDisplayLabel()
-    }
-
-    DEFAULT_DIVISION_OPTIONS.forEach { divisionTypeId ->
-        addOption(divisionTypeId)
-    }
-    existingDetails.forEach { detail ->
-        val normalizedDetail = detail.normalizeDivisionDetail()
-        addOption(
-            divisionTypeId = normalizedDetail.skillDivisionTypeId,
-            label = normalizedDetail.skillDivisionTypeName,
-        )
-    }
-    return options.map { (value, label) ->
-        DropdownOption(value = value, label = label)
-    }
-}
-
-internal fun buildAgeDivisionTypeOptions(
-    existingDetails: List<DivisionDetail>,
-): List<DropdownOption> {
-    val options = linkedMapOf<String, String>()
-    fun addOption(divisionTypeId: String, label: String? = null) {
-        val normalizedId = divisionTypeId.normalizeDivisionIdentifier()
-        if (normalizedId.isBlank()) return
-        options[normalizedId] = label?.trim().takeIf { !it.isNullOrBlank() }
-            ?: normalizedId.toDivisionDisplayLabel()
-    }
-
-    DEFAULT_AGE_DIVISION_OPTIONS.forEach { divisionTypeId ->
-        addOption(divisionTypeId)
-    }
-    existingDetails.forEach { detail ->
-        val normalizedDetail = detail.normalizeDivisionDetail()
-        addOption(
-            divisionTypeId = normalizedDetail.ageDivisionTypeId,
-            label = normalizedDetail.ageDivisionTypeName,
-        )
-    }
-    return options.map { (value, label) ->
-        DropdownOption(value = value, label = label)
-    }
-}
-
-internal fun resolveDivisionTypeName(
-    divisionTypeId: String,
-    existingDetails: List<DivisionDetail>,
-    fallbackOptions: List<DropdownOption>,
-): String {
-    val normalizedDivisionTypeId = divisionTypeId.normalizeDivisionIdentifier()
-    if (normalizedDivisionTypeId.isBlank()) return ""
-    existingDetails.firstOrNull { detail ->
-        val normalizedDetail = detail.normalizeDivisionDetail()
-        normalizedDetail.skillDivisionTypeId.normalizeDivisionIdentifier() == normalizedDivisionTypeId ||
-            normalizedDetail.ageDivisionTypeId.normalizeDivisionIdentifier() == normalizedDivisionTypeId ||
-            normalizedDetail.divisionTypeId.normalizeDivisionIdentifier() == normalizedDivisionTypeId
-    }?.let { matchedDetail ->
-        val normalizedDetail = matchedDetail.normalizeDivisionDetail()
-        val resolvedName = when {
-            normalizedDetail.skillDivisionTypeId.normalizeDivisionIdentifier() == normalizedDivisionTypeId -> {
-                normalizedDetail.skillDivisionTypeName
-            }
-            normalizedDetail.ageDivisionTypeId.normalizeDivisionIdentifier() == normalizedDivisionTypeId -> {
-                normalizedDetail.ageDivisionTypeName
-            }
-            else -> normalizedDetail.divisionTypeName
-        }.trim()
-        if (resolvedName.isNotBlank()) {
-            return resolvedName
-        }
-    }
-
-    fallbackOptions.firstOrNull { option ->
-        option.value.normalizeDivisionIdentifier() == normalizedDivisionTypeId
-    }?.label?.takeIf { it.isNotBlank() }?.let { return it }
-
-    return normalizedDivisionTypeId.toDivisionDisplayLabel(existingDetails)
-}
-
-internal fun parseDivisionToken(detail: DivisionDetail): ParsedDivisionToken {
-    val tokenFromDetail = detail.key.normalizeDivisionIdentifier().ifBlank {
-        detail.id.extractDivisionTokenFromId().orEmpty()
-    }
-    val combinedMatch = COMBINED_DIVISION_TOKEN_PATTERN.matchEntire(tokenFromDetail)
-    if (combinedMatch != null) {
-        return ParsedDivisionToken(
-            gender = combinedMatch.groupValues[1].uppercase(),
-            skillDivisionTypeId = combinedMatch.groupValues[2].normalizeDivisionIdentifier()
-                .ifBlank { DEFAULT_DIVISION },
-            ageDivisionTypeId = combinedMatch.groupValues[3].normalizeDivisionIdentifier()
-                .ifBlank { DEFAULT_AGE_DIVISION },
-        )
-    }
-    val legacyMatch = DIVISION_TOKEN_PATTERN.matchEntire(tokenFromDetail)
-    if (legacyMatch != null) {
-        val normalizedLegacyDivisionTypeId = legacyMatch.groupValues[3]
-            .normalizeDivisionIdentifier()
-            .ifBlank { DEFAULT_DIVISION }
-        val legacyRatingType = legacyMatch.groupValues[2].uppercase()
-        return ParsedDivisionToken(
-            gender = legacyMatch.groupValues[1].uppercase(),
-            skillDivisionTypeId = if (legacyRatingType == "SKILL") {
-                normalizedLegacyDivisionTypeId
-            } else {
-                DEFAULT_DIVISION
-            },
-            ageDivisionTypeId = if (legacyRatingType == "AGE") {
-                normalizedLegacyDivisionTypeId
-            } else {
-                DEFAULT_AGE_DIVISION
-            },
-        )
-    }
-    val normalizedDetail = detail.normalizeDivisionDetail()
-    val fallbackGender = normalizedDetail.gender.trim().uppercase().ifBlank { "C" }
-    return ParsedDivisionToken(
-        gender = fallbackGender,
-        skillDivisionTypeId = normalizedDetail.skillDivisionTypeId.normalizeDivisionIdentifier()
-            .ifBlank { DEFAULT_DIVISION },
-        ageDivisionTypeId = normalizedDetail.ageDivisionTypeId.normalizeDivisionIdentifier()
-            .ifBlank { DEFAULT_AGE_DIVISION },
-    )
-}
-
-internal fun buildUniqueDivisionIdForToken(
-    eventId: String,
-    divisionToken: String,
-    existingDivisionIds: List<String>,
-): String {
-    val usedDivisionIds = existingDivisionIds
-        .map { divisionId -> divisionId.normalizeDivisionIdentifier() }
-        .filter(String::isNotBlank)
-        .toSet()
-
-    var suffix = 1
-    while (true) {
-        val scopedEventId = if (suffix == 1) eventId else "${eventId}_$suffix"
-        val candidate = buildEventDivisionId(scopedEventId, divisionToken)
-            .normalizeDivisionIdentifier()
-        if (!usedDivisionIds.contains(candidate)) {
-            return candidate
-        }
-        suffix += 1
-    }
-}
-
-internal fun String.normalizeDivisionNameKey(): String {
-    return trim()
-        .lowercase()
-        .replace(DIVISION_NAME_WHITESPACE_PATTERN, " ")
-}
-
-internal fun buildDivisionToken(
-    gender: String,
-    skillDivisionTypeId: String,
-    ageDivisionTypeId: String,
-): String {
-    return buildGenderSkillAgeDivisionToken(
-        gender = gender,
-        skillDivisionTypeId = skillDivisionTypeId,
-        ageDivisionTypeId = ageDivisionTypeId,
-    )
-}
-
-internal fun buildDivisionName(
-    gender: String,
-    skillDivisionTypeName: String,
-    ageDivisionTypeName: String,
-): String {
-    val normalizedSkillDivisionTypeName = skillDivisionTypeName.trim().ifBlank {
-        DEFAULT_DIVISION.toDivisionDisplayLabel()
-    }
-    val normalizedAgeDivisionTypeName = ageDivisionTypeName.trim().ifBlank {
-        DEFAULT_AGE_DIVISION.toDivisionDisplayLabel()
-    }
-    return when (gender.trim().uppercase()) {
-        "M" -> "Men's $normalizedSkillDivisionTypeName $normalizedAgeDivisionTypeName"
-        "F" -> "Women's $normalizedSkillDivisionTypeName $normalizedAgeDivisionTypeName"
-        else -> "Coed $normalizedSkillDivisionTypeName $normalizedAgeDivisionTypeName"
-    }
-}
-
-private fun Int.toRegistrationCutoffSummary(): String {
-    return when (this) {
-        0 -> "No cutoff"
-        1 -> "24h before start"
-        2 -> "48h before start"
-        else -> "No cutoff"
-    }
-}
-
-private fun List<String>.normalizeTemplateIds(): List<String> {
-    return map { templateId -> templateId.trim() }
-        .filter(String::isNotBlank)
-        .distinct()
-}
-
-private fun OrganizationTemplateDocument.toRequiredTemplateLabel(): String {
-    val normalizedTitle = title.trim().ifBlank { "Untitled Template" }
-    val normalizedType = if (type.trim().equals("TEXT", ignoreCase = true)) "TEXT" else "PDF"
-    val signerLabel = templateSignerTypeLabel(requiredSignerType)
-    return "$normalizedTitle ($normalizedType, $signerLabel)"
-}
-
-private fun templateSignerTypeLabel(rawType: String?): String {
-    return when (
-        rawType?.trim()?.uppercase()?.replace('-', '_')?.replace(' ', '_')?.replace('/', '_')
-    ) {
-        "PARENT_GUARDIAN" -> "Parent/Guardian"
-        "CHILD" -> "Child"
-        "PARENT_GUARDIAN_CHILD", "PARENT_GUARDIAN_AND_CHILD" -> "Parent/Guardian + Child"
-        else -> "Participant"
-    }
-}
-
-private fun userDisplayName(user: UserData): String {
-    val fullName = user.fullName.trim()
-    return when {
-        fullName.isNotBlank() -> fullName
-        user.userName.trim().isNotBlank() -> user.userName.trim()
-        else -> user.id
-    }
-}
-
-private data class StaffAssignmentCardModel(
-    val key: String,
-    val title: String,
-    val subtitle: String? = null,
-    val email: String? = null,
-    val statusLabel: String? = null,
-    val role: EventStaffRole,
-    val userId: String? = null,
-    val draftEmail: String? = null,
-    val isDraft: Boolean = false,
-)
-
-private fun eventStaffStatusLabel(status: String?): String? = when (status?.trim()?.uppercase()) {
-    "PENDING" -> "Pending"
-    "DECLINED" -> "Declined"
-    else -> null
-}
-
-private fun buildAssignedStaffCards(
-    role: EventStaffRole,
-    userIds: List<String>,
-    knownUsersById: Map<String, UserData>,
-    staffInvites: List<Invite>,
-): List<StaffAssignmentCardModel> {
-    return userIds
-        .map { userId -> userId.trim() }
-        .filter(String::isNotBlank)
-        .distinct()
-        .map { userId ->
-            val user = knownUsersById[userId]
-            val invite = staffInvites.firstOrNull { candidate ->
-                candidate.userId?.trim() == userId && candidate.includesEventStaffRole(role)
-            }
-            StaffAssignmentCardModel(
-                key = "${role.name}:$userId",
-                title = user?.let(::userDisplayName) ?: userId,
-                email = invite?.email?.trim()?.takeIf(String::isNotBlank),
-                statusLabel = eventStaffStatusLabel(invite?.normalizedStatusOrNull()),
-                role = role,
-                userId = userId,
-            )
-        }
-}
-
-private fun buildDraftStaffCards(
-    role: EventStaffRole,
-    drafts: List<PendingStaffInviteDraft>,
-): List<StaffAssignmentCardModel> {
-    return drafts
-        .map(PendingStaffInviteDraft::normalized)
-        .filter { draft -> draft.hasRole(role) }
-        .map { draft ->
-            StaffAssignmentCardModel(
-                key = "draft:${role.name}:${draft.email}",
-                title = draft.displayName(),
-                subtitle = role.label(),
-                email = draft.email,
-                statusLabel = "Email invite",
-                role = role,
-                draftEmail = draft.email,
-                isDraft = true,
-            )
-        }
-}
-
-@Composable
-@Suppress("SameParameterValue")
-private fun StaffAssignmentCard(
-    card: StaffAssignmentCardModel,
-    editView: Boolean,
-    onRemoveAssigned: (String, EventStaffRole) -> Unit,
-    onRemoveDraft: (String, EventStaffRole) -> Unit,
-    extraContent: (@Composable () -> Unit)? = null,
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-        ),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
-    ) {
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Text(
-                text = card.title,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-            card.subtitle?.takeIf(String::isNotBlank)?.let { subtitle ->
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            card.email?.takeIf(String::isNotBlank)?.let { email ->
-                Text(
-                    text = email,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            card.statusLabel?.takeIf(String::isNotBlank)?.let { statusLabel ->
-                Text(
-                    text = statusLabel,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (statusLabel.equals("Declined", ignoreCase = true)) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.primary
-                    },
-                )
-            }
-            extraContent?.invoke()
-            if (editView) {
-                val removeAction: (() -> Unit)? = when {
-                    card.isDraft && !card.draftEmail.isNullOrBlank() -> {
-                        { onRemoveDraft(card.draftEmail, card.role) }
-                    }
-
-                    !card.userId.isNullOrBlank() -> {
-                        { onRemoveAssigned(card.userId, card.role) }
-                    }
-
-                    else -> null
-                }
-                removeAction?.let { onRemove ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
-                    ) {
-                        Text(
-                            text = "Remove",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.error,
-                            modifier = Modifier
-                                .clickable(onClick = onRemove)
-                                .padding(horizontal = 6.dp, vertical = 2.dp),
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-private fun validatePaymentPlans(
-    event: Event,
-    divisionDetails: List<DivisionDetail> = emptyList(),
-): List<String> {
-    fun validatePlan(
-        label: String,
-        priceCents: Int,
-        allowPaymentPlans: Boolean,
-        installmentCount: Int?,
-        installmentAmounts: List<Int>,
-        installmentDueDates: List<String>,
-    ): List<String> {
-        if (!allowPaymentPlans) return emptyList()
-
-        val errors = mutableListOf<String>()
-        val normalizedAmounts = installmentAmounts.map { amount -> amount.coerceAtLeast(0) }
-        val normalizedDueDates = installmentDueDates
-            .map { dueDate -> dueDate.trim() }
-            .filter(String::isNotBlank)
-        val normalizedCount = maxOf(
-            installmentCount ?: 0,
-            normalizedAmounts.size,
-            normalizedDueDates.size,
-        )
-
-        if (priceCents <= 0) {
-            errors += "$label: set a price greater than 0 before enabling payment plans."
-        }
-        if (normalizedCount <= 0) {
-            errors += "$label: installment count must be at least 1 when payment plans are enabled."
-        }
-        if (normalizedAmounts.size != normalizedCount) {
-            errors += "$label: installment count must match installment amounts."
-        }
-        if (normalizedDueDates.size != normalizedCount) {
-            errors += "$label: installment count must match installment due dates."
-        }
-
-        val parsedDueDates = normalizedDueDates.mapIndexed { index, dueDate ->
-            runCatching { LocalDate.parse(dueDate) }
-                .getOrElse {
-                    errors += "$label: installment ${index + 1} due date must use YYYY-MM-DD."
-                    null
-                }
-        }
-        if (parsedDueDates.filterNotNull().zipWithNext().any { (previous, next) -> next < previous }) {
-            errors += "$label: installment due dates must be in chronological order."
-        }
-
-        if (normalizedAmounts.sum() != priceCents) {
-            errors += "$label: installment total must equal the configured price."
-        }
-
-        return errors
-    }
-
-    if (event.singleDivision) {
-        return validatePlan(
-            label = "Payment plan",
-            priceCents = event.priceCents.coerceAtLeast(0),
-            allowPaymentPlans = event.allowPaymentPlans == true,
-            installmentCount = event.installmentCount,
-            installmentAmounts = event.installmentAmounts,
-            installmentDueDates = event.installmentDueDates,
-        ).distinct()
-    }
-
-    val errors = mutableListOf<String>()
-    errors += validatePlan(
-        label = "Default payment plan",
-        priceCents = event.priceCents.coerceAtLeast(0),
-        allowPaymentPlans = event.allowPaymentPlans == true,
-        installmentCount = event.installmentCount,
-        installmentAmounts = event.installmentAmounts,
-        installmentDueDates = event.installmentDueDates,
-    )
-
-    divisionDetails.forEach { detail ->
-        val detailName = detail.name.trim().ifBlank { detail.id }
-        errors += validatePlan(
-            label = "Division \"$detailName\" payment plan",
-            priceCents = (detail.price ?: event.priceCents).coerceAtLeast(0),
-            allowPaymentPlans = detail.allowPaymentPlans == true,
-            installmentCount = detail.installmentCount,
-            installmentAmounts = detail.installmentAmounts,
-            installmentDueDates = detail.installmentDueDates,
-        )
-    }
-
-    return errors.distinct()
-}
-
-private data class EventValidationResult(
-    val isNameValid: Boolean,
-    val isPriceValid: Boolean,
-    val isMaxParticipantsValid: Boolean,
-    val isTeamSizeValid: Boolean,
-    val isWinnerSetCountValid: Boolean,
-    val isLoserSetCountValid: Boolean,
-    val isWinnerPointsValid: Boolean,
-    val isLoserPointsValid: Boolean,
-    val isLocationValid: Boolean,
-    val isFieldCountValid: Boolean,
-    val isLeagueGamesValid: Boolean,
-    val isLeagueDurationValid: Boolean,
-    val isLeaguePointsValid: Boolean,
-    val isLeaguePlayoffTeamsValid: Boolean,
-    val isLeagueSlotsValid: Boolean,
-    val isSkillLevelValid: Boolean,
-    val isSportValid: Boolean,
-    val isFixedEndDateRangeValid: Boolean,
-    val isPaymentPlansValid: Boolean,
-    val paymentPlanValidationErrors: List<String>,
-    val validationErrors: List<String>,
-    val isValid: Boolean,
-)
-
-private fun computeEventValidationResult(
-    editEvent: Event,
-    isNewEvent: Boolean,
-    fieldCount: Int,
-    leagueTimeSlots: List<TimeSlot>,
-    leagueSlotErrors: Map<Int, String>,
-    slotEditorEnabled: Boolean,
-    divisionDetailsForSettings: List<DivisionDetail>,
-    isColorLoaded: Boolean,
-    scheduleTimeLocked: Boolean,
-): EventValidationResult {
-    val isNameValid = editEvent.name.isNotBlank()
-    val isPriceValid = editEvent.priceCents >= 0
-    val isMaxParticipantsValid = editEvent.maxParticipants > 1
-    val isTeamSizeValid = editEvent.teamSizeLimit >= 1
-    val isLocationValid = editEvent.location.isNotBlank() && editEvent.lat != 0.0 && editEvent.long != 0.0
-    val isSkillLevelValid = editEvent.eventType == EventType.LEAGUE || editEvent.divisions.isNotEmpty()
-    val isSportValid = !isNewEvent || !editEvent.sportId.isNullOrBlank()
-    val requiresFixedEndValidation = requiresFixedEndRangeValidation(
-        event = editEvent,
-        scheduleTimeLocked = scheduleTimeLocked,
-    )
-    val isFixedEndDateRangeValid = !requiresFixedEndValidation || editEvent.end > editEvent.start
-    val isLeagueSlotsValid = if (
-        requiresScheduleInputValidation(
-            eventType = editEvent.eventType,
-            isNewEvent = isNewEvent,
-            scheduleTimeLocked = scheduleTimeLocked,
-            slotEditorEnabled = slotEditorEnabled,
-        )
-    ) {
-        leagueTimeSlots.isNotEmpty() && leagueSlotErrors.isEmpty()
-    } else {
-        true
-    }
-
-    val isFieldCountValid = if (
-        requiresFieldCountValidation(
-            eventType = editEvent.eventType,
-            scheduleTimeLocked = scheduleTimeLocked,
-        )
-    ) {
-        fieldCount > 0
-    } else {
-        true
-    }
-
-    val isWinnerSetCountValid: Boolean
-    val isLoserSetCountValid: Boolean
-    val isWinnerPointsValid: Boolean
-    val isLoserPointsValid: Boolean
-    if (editEvent.eventType == EventType.TOURNAMENT) {
-        isWinnerSetCountValid = editEvent.winnerSetCount in setOf(1, 3, 5)
-        isWinnerPointsValid = editEvent.winnerBracketPointsToVictory.size >= editEvent.winnerSetCount &&
-            editEvent.winnerBracketPointsToVictory.take(editEvent.winnerSetCount).all { it > 0 }
-        if (editEvent.doubleElimination) {
-            isLoserSetCountValid = editEvent.loserSetCount in setOf(1, 3, 5)
-            isLoserPointsValid = editEvent.loserBracketPointsToVictory.size >= editEvent.loserSetCount &&
-                editEvent.loserBracketPointsToVictory.take(editEvent.loserSetCount).all { it > 0 }
-        } else {
-            isLoserSetCountValid = true
-            isLoserPointsValid = true
-        }
-    } else {
-        isWinnerSetCountValid = true
-        isWinnerPointsValid = true
-        isLoserSetCountValid = true
-        isLoserPointsValid = true
-    }
-
-    val isLeagueGamesValid: Boolean
-    val isLeaguePlayoffTeamsValid: Boolean
-    val isLeaguePointsValid: Boolean
-    val isLeagueDurationValid: Boolean
-    if (editEvent.eventType == EventType.LEAGUE) {
-        val setCount = when (editEvent.setsPerMatch) {
-            1, 3, 5 -> editEvent.setsPerMatch
-            else -> null
-        }
-        isLeagueGamesValid = (editEvent.gamesPerOpponent ?: 1) >= 1
-        isLeaguePlayoffTeamsValid = if (!editEvent.includePlayoffs) {
-            true
-        } else {
-            val hasEventPlayoffCount = (editEvent.playoffTeamCount ?: 0) >= 2
-            val details = mergeDivisionDetailsForDivisions(
-                divisions = editEvent.divisions,
-                existingDetails = editEvent.divisionDetails,
-                eventId = editEvent.id,
-            )
-            hasEventPlayoffCount && (
-                editEvent.singleDivision ||
-                    (details.isNotEmpty() && details.all { detail -> (detail.playoffTeamCount ?: 0) >= 2 })
-                )
-        }
-        if (editEvent.usesSets) {
-            isLeagueDurationValid = setCount != null && (editEvent.setDurationMinutes ?: 0) >= 5
-            isLeaguePointsValid = setCount != null &&
-                editEvent.pointsToVictory.size >= setCount &&
-                editEvent.pointsToVictory.take(setCount).all { it > 0 }
-        } else {
-            isLeagueDurationValid = (editEvent.matchDurationMinutes ?: 0) >= 15
-            isLeaguePointsValid = true
-        }
-    } else if (editEvent.eventType == EventType.TOURNAMENT) {
-        isLeagueGamesValid = true
-        isLeaguePlayoffTeamsValid = true
-        isLeaguePointsValid = true
-        isLeagueDurationValid = if (editEvent.usesSets) {
-            (editEvent.setDurationMinutes ?: 0) >= 5
-        } else {
-            (editEvent.matchDurationMinutes ?: 0) >= 15
-        }
-    } else {
-        isLeagueGamesValid = true
-        isLeagueDurationValid = true
-        isLeaguePointsValid = true
-        isLeaguePlayoffTeamsValid = true
-    }
-
-    val paymentPlanValidationErrors = validatePaymentPlans(
-        event = editEvent,
-        divisionDetails = divisionDetailsForSettings,
-    )
-    val isPaymentPlansValid = paymentPlanValidationErrors.isEmpty()
-
-    val isValid = isPriceValid &&
-        isMaxParticipantsValid &&
-        isTeamSizeValid &&
-        isWinnerSetCountValid &&
-        isWinnerPointsValid &&
-        isLoserSetCountValid &&
-        isLoserPointsValid &&
-        isLocationValid &&
-        isSkillLevelValid &&
-        isFieldCountValid &&
-        isLeagueGamesValid &&
-        isLeagueDurationValid &&
-        isLeaguePointsValid &&
-        isLeaguePlayoffTeamsValid &&
-        isLeagueSlotsValid &&
-        isFixedEndDateRangeValid &&
-        isSportValid &&
-        isPaymentPlansValid &&
-        isColorLoaded
-
-    val validationErrors = buildList {
-        if (!isNameValid) {
-            add("Event name is required.")
-        }
-        if (!isSportValid) {
-            add("Select a sport to continue.")
-        }
-        if (!scheduleTimeLocked && !isFixedEndDateRangeValid) {
-            add("End date/time must be after start date/time when no fixed end datetime scheduling is disabled.")
-        }
-        if (!isPriceValid) {
-            add("Price must be 0 or higher.")
-        }
-        if (!isMaxParticipantsValid) {
-            add(
-                if (editEvent.teamSignup) {
-                    "Max teams must be at least 2."
-                } else {
-                    "Max participants must be at least 2."
-                },
-            )
-        }
-        if (!isTeamSizeValid) {
-            add("Team size must be at least 1.")
-        }
-        if (!isSkillLevelValid) {
-            add("Add at least one division.")
-        }
-        if (!isLocationValid) {
-            add("Select a location.")
-        }
-        if (!scheduleTimeLocked && !isFieldCountValid) {
-            add("Field count must be at least 1.")
-        }
-        if (!isWinnerSetCountValid) {
-            add("Winner set count must be 1, 3, or 5.")
-        }
-        if (!isWinnerPointsValid) {
-            add("Winner points must be greater than 0 for every set.")
-        }
-        if (editEvent.doubleElimination && !isLoserSetCountValid) {
-            add("Loser set count must be 1, 3, or 5.")
-        }
-        if (editEvent.doubleElimination && !isLoserPointsValid) {
-            add("Loser points must be greater than 0 for every set.")
-        }
-        if (!isLeagueGamesValid) {
-            add("Games per opponent must be at least 1.")
-        }
-        if (!isLeagueDurationValid) {
-            add(
-                if (editEvent.usesSets) {
-                    "Set duration must be at least 5 minutes and sets must be Best of 1, 3, or 5."
-                } else {
-                    "Match duration must be at least 15 minutes."
-                },
-            )
-        }
-        if (!isLeaguePointsValid) {
-            add("Points to victory must be greater than 0 for every configured set.")
-        }
-        if (!isLeaguePlayoffTeamsValid) {
-            add(
-                if (editEvent.singleDivision) {
-                    "Playoff team count must be at least 2 when playoffs are enabled."
-                } else {
-                    "Each division must have a playoff team count of at least 2 when playoffs are enabled."
-                },
-            )
-        }
-        if (!scheduleTimeLocked && !isLeagueSlotsValid) {
-            add(
-                if (leagueTimeSlots.isEmpty()) {
-                    "Add at least one timeslot for scheduling."
-                } else {
-                    "Fix timeslot issues before continuing."
-                },
-            )
-        }
-        if (!isPaymentPlansValid) {
-            addAll(paymentPlanValidationErrors)
-        }
-        val imageError = when {
-            editEvent.imageId.isBlank() -> "Select an image for the event."
-            !isColorLoaded -> "Image is still loading."
-            else -> null
-        }
-        if (imageError != null) {
-            add(imageError)
-        }
-    }
-
-    return EventValidationResult(
-        isNameValid = isNameValid,
-        isPriceValid = isPriceValid,
-        isMaxParticipantsValid = isMaxParticipantsValid,
-        isTeamSizeValid = isTeamSizeValid,
-        isWinnerSetCountValid = isWinnerSetCountValid,
-        isLoserSetCountValid = isLoserSetCountValid,
-        isWinnerPointsValid = isWinnerPointsValid,
-        isLoserPointsValid = isLoserPointsValid,
-        isLocationValid = isLocationValid,
-        isFieldCountValid = isFieldCountValid,
-        isLeagueGamesValid = isLeagueGamesValid,
-        isLeagueDurationValid = isLeagueDurationValid,
-        isLeaguePointsValid = isLeaguePointsValid,
-        isLeaguePlayoffTeamsValid = isLeaguePlayoffTeamsValid,
-        isLeagueSlotsValid = isLeagueSlotsValid,
-        isSkillLevelValid = isSkillLevelValid,
-        isSportValid = isSportValid,
-        isFixedEndDateRangeValid = isFixedEndDateRangeValid,
-        isPaymentPlansValid = isPaymentPlansValid,
-        paymentPlanValidationErrors = paymentPlanValidationErrors,
-        validationErrors = validationErrors,
-        isValid = isValid,
-    )
-}
-
-internal fun requiresScheduleInputValidation(
-    eventType: EventType,
-    isNewEvent: Boolean,
-    scheduleTimeLocked: Boolean,
-    slotEditorEnabled: Boolean = true,
-): Boolean {
-    return !scheduleTimeLocked &&
-        isNewEvent &&
-        (
-            eventType == EventType.WEEKLY_EVENT ||
-                (
-                    slotEditorEnabled &&
-                        (
-                            eventType == EventType.LEAGUE ||
-                                eventType == EventType.TOURNAMENT
-                            )
-                    )
-            )
-}
-
-internal fun requiresFieldCountValidation(
-    eventType: EventType,
-    scheduleTimeLocked: Boolean,
-): Boolean {
-    return !scheduleTimeLocked &&
-        (
-            eventType == EventType.LEAGUE ||
-                eventType == EventType.TOURNAMENT ||
-                eventType == EventType.WEEKLY_EVENT
-            )
-}
-
-internal fun requiresFixedEndRangeValidation(
-    event: Event,
-    scheduleTimeLocked: Boolean,
-): Boolean {
-    return !scheduleTimeLocked &&
-        !event.noFixedEndDateTime &&
-        (
-            event.eventType == EventType.LEAGUE ||
-                event.eventType == EventType.TOURNAMENT ||
-                event.eventType == EventType.WEEKLY_EVENT
-            )
-}
-
-@Composable
-private fun LabeledCheckboxRow(
-    checked: Boolean,
-    label: String,
-    enabled: Boolean = true,
-    onCheckedChange: (Boolean) -> Unit,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Checkbox(
-            checked = checked,
-            enabled = enabled,
-            onCheckedChange = onCheckedChange,
-        )
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = Color(localImageScheme.current.onSurface),
-        )
-    }
-}
-
-private fun matchScoringModelLabel(value: String?): String {
-    return when (value?.trim()?.uppercase()) {
-        "SETS" -> "Sets"
-        "INNINGS" -> "Innings"
-        "POINTS_ONLY" -> "Points only"
-        else -> "Periods"
-    }
-}
-
-private fun matchSegmentLabelForModel(value: String): String {
-    return when (value.trim().uppercase()) {
-        "SETS" -> "Set"
-        "INNINGS" -> "Inning"
-        "POINTS_ONLY" -> "Total"
-        else -> "Period"
-    }
-}
-
-private fun defaultPointIncidentTypes(): List<String> = listOf("POINT", "DISCIPLINE", "NOTE", "ADMIN")
-
-private fun defaultGoalIncidentTypes(): List<String> = listOf("GOAL", "DISCIPLINE", "NOTE", "ADMIN")
-
-private fun defaultRunIncidentTypes(): List<String> = listOf("RUN", "DISCIPLINE", "NOTE", "ADMIN")
-
-private fun setBasedMatchRulesTemplate(segmentLabel: String = "Set"): MatchRulesConfigMVP =
-    MatchRulesConfigMVP(
-        scoringModel = "SETS",
-        segmentLabel = segmentLabel,
-        supportsDraw = false,
-        supportsOvertime = false,
-        supportsShootout = false,
-        canUseOvertime = false,
-        canUseShootout = false,
-        officialRoles = emptyList(),
-        supportedIncidentTypes = defaultPointIncidentTypes(),
-        autoCreatePointIncidentType = "POINT",
-        pointIncidentRequiresParticipant = false,
-    )
-
-private fun periodMatchRulesTemplate(
-    segmentCount: Int,
-    segmentLabel: String,
-    supportedIncidentTypes: List<String> = defaultPointIncidentTypes(),
-    autoCreatePointIncidentType: String = "POINT",
-    supportsDraw: Boolean = false,
-    supportsOvertime: Boolean = false,
-    supportsShootout: Boolean = false,
-    canUseOvertime: Boolean = false,
-    canUseShootout: Boolean = false,
-    pointIncidentRequiresParticipant: Boolean = false,
-): MatchRulesConfigMVP =
-    MatchRulesConfigMVP(
-        scoringModel = "PERIODS",
-        segmentCount = segmentCount,
-        segmentLabel = segmentLabel,
-        supportsDraw = supportsDraw,
-        supportsOvertime = supportsOvertime,
-        supportsShootout = supportsShootout,
-        canUseOvertime = canUseOvertime,
-        canUseShootout = canUseShootout,
-        officialRoles = emptyList(),
-        supportedIncidentTypes = supportedIncidentTypes,
-        autoCreatePointIncidentType = autoCreatePointIncidentType,
-        pointIncidentRequiresParticipant = pointIncidentRequiresParticipant,
-    )
-
-private fun defaultSportMatchRulesTemplate(sport: Sport): MatchRulesConfigMVP? {
-    val key = "${sport.id} ${sport.name}".trim().lowercase()
-    return when {
-        "volleyball" in key -> setBasedMatchRulesTemplate()
-        "basketball" in key -> periodMatchRulesTemplate(
-            segmentCount = 4,
-            segmentLabel = "Quarter",
-            supportsOvertime = true,
-            canUseOvertime = true,
-        )
-        "soccer" in key -> periodMatchRulesTemplate(
-            segmentCount = 2,
-            segmentLabel = "Half",
-            supportedIncidentTypes = defaultGoalIncidentTypes(),
-            autoCreatePointIncidentType = "GOAL",
-            supportsDraw = true,
-            canUseOvertime = true,
-            canUseShootout = true,
-            pointIncidentRequiresParticipant = true,
-        )
-        "tennis" in key -> setBasedMatchRulesTemplate()
-        "pickleball" in key -> setBasedMatchRulesTemplate(segmentLabel = "Game")
-        "football" in key -> periodMatchRulesTemplate(
-            segmentCount = 4,
-            segmentLabel = "Quarter",
-            supportsDraw = true,
-            supportsOvertime = true,
-            canUseOvertime = true,
-        )
-        "hockey" in key -> periodMatchRulesTemplate(
-            segmentCount = 3,
-            segmentLabel = "Period",
-            supportedIncidentTypes = defaultGoalIncidentTypes(),
-            autoCreatePointIncidentType = "GOAL",
-            supportsDraw = true,
-            supportsOvertime = true,
-            supportsShootout = true,
-            canUseOvertime = true,
-            canUseShootout = true,
-            pointIncidentRequiresParticipant = true,
-        )
-        "baseball" in key -> MatchRulesConfigMVP(
-            scoringModel = "INNINGS",
-            segmentCount = 9,
-            segmentLabel = "Inning",
-            supportsDraw = false,
-            supportsOvertime = false,
-            supportsShootout = false,
-            canUseOvertime = false,
-            canUseShootout = false,
-            officialRoles = emptyList(),
-            supportedIncidentTypes = defaultRunIncidentTypes(),
-            autoCreatePointIncidentType = "RUN",
-            pointIncidentRequiresParticipant = false,
-        )
-        "other" in key -> MatchRulesConfigMVP(
-            scoringModel = "POINTS_ONLY",
-            segmentCount = 1,
-            segmentLabel = "Total",
-            supportsDraw = true,
-            supportsOvertime = false,
-            supportsShootout = false,
-            canUseOvertime = true,
-            canUseShootout = true,
-            officialRoles = emptyList(),
-            supportedIncidentTypes = defaultPointIncidentTypes(),
-            autoCreatePointIncidentType = "POINT",
-            pointIncidentRequiresParticipant = false,
-        )
-        else -> null
-    }
-}
-
-private fun mergeMatchRulesTemplate(
-    defaults: MatchRulesConfigMVP?,
-    override: MatchRulesConfigMVP?,
-): MatchRulesConfigMVP? {
-    if (defaults == null) {
-        return override
-    }
-    if (override == null) {
-        return defaults
-    }
-    return MatchRulesConfigMVP(
-        scoringModel = override.scoringModel ?: defaults.scoringModel,
-        segmentCount = override.segmentCount ?: defaults.segmentCount,
-        segmentLabel = override.segmentLabel ?: defaults.segmentLabel,
-        supportsDraw = override.supportsDraw ?: defaults.supportsDraw,
-        supportsOvertime = override.supportsOvertime ?: defaults.supportsOvertime,
-        supportsShootout = override.supportsShootout ?: defaults.supportsShootout,
-        canUseOvertime = override.canUseOvertime ?: defaults.canUseOvertime,
-        canUseShootout = override.canUseShootout ?: defaults.canUseShootout,
-        officialRoles = override.officialRoles ?: defaults.officialRoles,
-        supportedIncidentTypes = override.supportedIncidentTypes ?: defaults.supportedIncidentTypes,
-        autoCreatePointIncidentType = override.autoCreatePointIncidentType ?: defaults.autoCreatePointIncidentType,
-        pointIncidentRequiresParticipant = override.pointIncidentRequiresParticipant
-            ?: defaults.pointIncidentRequiresParticipant,
-    )
-}
-
-private fun segmentCountFallbackForModel(scoringModel: String, event: Event): Int {
-    return when (scoringModel) {
-        "SETS" -> when (event.eventType) {
-            EventType.LEAGUE -> (event.setsPerMatch ?: event.winnerSetCount).coerceAtLeast(1)
-            EventType.TOURNAMENT -> event.winnerSetCount.coerceAtLeast(1)
-            EventType.EVENT, EventType.WEEKLY_EVENT -> 1
-        }
-        "INNINGS" -> 9
-        "PERIODS" -> 4
-        else -> 1
-    }
-}
-
-private fun matchIncidentTypeLabel(value: String): String {
-    return when (value.trim().uppercase()) {
-        "POINT" -> "Point / Goal"
-        "DISCIPLINE" -> "Discipline"
-        "NOTE" -> "Note"
-        "ADMIN" -> "Admin"
-        else -> value
-            .trim()
-            .lowercase()
-            .replace("_", " ")
-            .split(" ")
-            .filter(String::isNotBlank)
-            .joinToString(" ") { token -> token.replaceFirstChar { character -> character.titlecase() } }
-    }
-}
-
-private fun normalizedMatchRuleStringList(values: List<String>?): List<String> =
-    values
-        .orEmpty()
-        .map(String::trim)
-        .filter(String::isNotBlank)
-        .distinct()
-
-private fun sameStringSet(left: List<String>, right: List<String>): Boolean {
-    if (left.size != right.size) {
-        return false
-    }
-    val leftSet = left.toSet()
-    return right.all(leftSet::contains)
-}
-
-private fun normalizeMatchRulesOverride(value: MatchRulesConfigMVP?): MatchRulesConfigMVP? {
-    if (value == null) {
-        return null
-    }
-
-    val segmentCount = value.segmentCount?.takeIf { it > 0 }
-    val supportedIncidentTypes = normalizedMatchRuleStringList(value.supportedIncidentTypes)
-        .takeIf { it.isNotEmpty() }
-
-    val normalized = MatchRulesConfigMVP(
-        segmentCount = segmentCount,
-        supportsDraw = value.supportsDraw,
-        supportsOvertime = value.supportsOvertime,
-        supportsShootout = value.supportsShootout,
-        canUseOvertime = value.canUseOvertime,
-        canUseShootout = value.canUseShootout,
-        supportedIncidentTypes = supportedIncidentTypes,
-        pointIncidentRequiresParticipant = value.pointIncidentRequiresParticipant,
-    )
-
-    return if (
-        normalized.segmentCount == null &&
-        normalized.supportsDraw == null &&
-        normalized.supportsOvertime == null &&
-        normalized.supportsShootout == null &&
-        normalized.canUseOvertime == null &&
-        normalized.canUseShootout == null &&
-        normalized.supportedIncidentTypes == null &&
-        normalized.pointIncidentRequiresParticipant == null
-    ) {
-        null
-    } else {
-        normalized
-    }
-}
-
-private fun copyMatchRulesOverride(
-    current: MatchRulesConfigMVP?,
-    segmentCount: Int? = current?.segmentCount,
-    supportsDraw: Boolean? = current?.supportsDraw,
-    supportsOvertime: Boolean? = current?.supportsOvertime,
-    supportsShootout: Boolean? = current?.supportsShootout,
-    canUseOvertime: Boolean? = current?.canUseOvertime,
-    canUseShootout: Boolean? = current?.canUseShootout,
-    supportedIncidentTypes: List<String>? = current?.supportedIncidentTypes,
-    pointIncidentRequiresParticipant: Boolean? = current?.pointIncidentRequiresParticipant,
-): MatchRulesConfigMVP? {
-    return normalizeMatchRulesOverride(
-        MatchRulesConfigMVP(
-            segmentCount = segmentCount,
-            supportsDraw = supportsDraw,
-            supportsOvertime = supportsOvertime,
-            supportsShootout = supportsShootout,
-            canUseOvertime = canUseOvertime,
-            canUseShootout = canUseShootout,
-            supportedIncidentTypes = supportedIncidentTypes,
-            pointIncidentRequiresParticipant = pointIncidentRequiresParticipant,
-        ),
-    )
-}
-
-private fun enforceAutoPointIncidentType(
-    selected: List<String>,
-    autoPointIncidentType: String,
-    enabled: Boolean,
-): List<String> {
-    val normalized = normalizedMatchRuleStringList(selected)
-    if (!enabled) {
-        return normalized
-    }
-    val normalizedAutoType = autoPointIncidentType.trim().ifBlank { "POINT" }
-    return (normalized + normalizedAutoType).distinct()
-}
-
-private fun supportedIncidentTypesOverrideOrNull(
-    selected: List<String>,
-    defaults: List<String>,
-): List<String>? {
-    val normalizedSelected = normalizedMatchRuleStringList(selected)
-    if (normalizedSelected.isEmpty() || sameStringSet(normalizedSelected, normalizedMatchRuleStringList(defaults))) {
-        return null
-    }
-    return normalizedSelected
-}
-
-internal fun resolveEventMatchRules(
-    event: Event,
-    sport: Sport?,
-): ResolvedMatchRulesMVP {
-    if (sport == null && event.matchRulesOverride == null && event.resolvedMatchRules != null) {
-        return event.resolvedMatchRules
-    }
-
-    val sportTemplate = sport?.let { selectedSport ->
-        mergeMatchRulesTemplate(
-            defaults = defaultSportMatchRulesTemplate(selectedSport),
-            override = selectedSport.matchRulesTemplate,
-        )
-    }
-    val eventOverride = event.matchRulesOverride
-    val resolvedRulesFallback = event.resolvedMatchRules.takeIf { sportTemplate == null }
-    val fallbackModel = when {
-        resolvedRulesFallback?.scoringModel?.isNotBlank() == true -> resolvedRulesFallback.scoringModel
-        event.usesSets -> "SETS"
-        else -> "POINTS_ONLY"
-    }
-    val scoringModel = (
-        eventOverride?.scoringModel
-            ?: sportTemplate?.scoringModel
-            ?: fallbackModel
-        )
-        .trim()
-        .uppercase()
-        .takeIf { it in setOf("SETS", "PERIODS", "INNINGS", "POINTS_ONLY") }
-        ?: "POINTS_ONLY"
-
-    val fallbackSegmentCount = resolvedRulesFallback?.segmentCount?.takeIf { it > 0 }
-        ?: segmentCountFallbackForModel(scoringModel, event)
-    val segmentCount = eventOverride?.segmentCount
-        ?.takeIf { it > 0 }
-        ?: sportTemplate?.segmentCount?.takeIf { it > 0 }
-        ?: fallbackSegmentCount
-    val defaultIncidentTypes = resolvedRulesFallback?.supportedIncidentTypes
-        ?.takeIf { it.isNotEmpty() }
-        ?: defaultPointIncidentTypes()
-    val officialRolesFromEvent = event.officialPositions
-        .map(EventOfficialPosition::name)
-        .map(String::trim)
-        .filter(String::isNotBlank)
-        .distinct()
-    val canUseOvertime = if (sportTemplate != null) {
-        sportTemplate.canUseOvertime == true || sportTemplate.supportsOvertime == true
-    } else {
-        eventOverride?.canUseOvertime == true ||
-            eventOverride?.supportsOvertime == true ||
-            resolvedRulesFallback?.canUseOvertime == true ||
-            resolvedRulesFallback?.supportsOvertime == true
-    }
-    val canUseShootout = if (sportTemplate != null) {
-        sportTemplate.canUseShootout == true || sportTemplate.supportsShootout == true
-    } else {
-        eventOverride?.canUseShootout == true ||
-            eventOverride?.supportsShootout == true ||
-            resolvedRulesFallback?.canUseShootout == true ||
-            resolvedRulesFallback?.supportsShootout == true
-    }
-    val supportsOvertime = canUseOvertime && (
-        eventOverride?.supportsOvertime
-            ?: sportTemplate?.supportsOvertime
-            ?: resolvedRulesFallback?.supportsOvertime
-            ?: false
-        )
-    val supportsShootout = canUseShootout && (
-        eventOverride?.supportsShootout
-            ?: sportTemplate?.supportsShootout
-            ?: resolvedRulesFallback?.supportsShootout
-            ?: false
-        )
-    val supportsDraw = (
-        eventOverride?.supportsDraw
-            ?: sportTemplate?.supportsDraw
-            ?: resolvedRulesFallback?.supportsDraw
-            ?: false
-        ) && !supportsShootout
-
-    return ResolvedMatchRulesMVP(
-        scoringModel = scoringModel,
-        segmentCount = segmentCount,
-        segmentLabel = eventOverride?.segmentLabel
-            ?.takeIf(String::isNotBlank)
-            ?: sportTemplate?.segmentLabel
-                ?.takeIf(String::isNotBlank)
-            ?: resolvedRulesFallback?.segmentLabel
-            ?: matchSegmentLabelForModel(scoringModel),
-        supportsDraw = supportsDraw,
-        supportsOvertime = supportsOvertime,
-        supportsShootout = supportsShootout,
-        canUseOvertime = canUseOvertime,
-        canUseShootout = canUseShootout,
-        officialRoles = normalizedMatchRuleStringList(eventOverride?.officialRoles)
-            .ifEmpty {
-                normalizedMatchRuleStringList(sportTemplate?.officialRoles)
-                    .ifEmpty {
-                        resolvedRulesFallback?.officialRoles
-                            ?.takeIf { it.isNotEmpty() }
-                            ?: officialRolesFromEvent
-                    }
-            },
-        supportedIncidentTypes = normalizedMatchRuleStringList(eventOverride?.supportedIncidentTypes)
-            .ifEmpty {
-                normalizedMatchRuleStringList(sportTemplate?.supportedIncidentTypes)
-                    .ifEmpty { defaultIncidentTypes }
-            },
-        autoCreatePointIncidentType = eventOverride?.autoCreatePointIncidentType
-            ?.takeIf(String::isNotBlank)
-            ?: sportTemplate?.autoCreatePointIncidentType
-                ?.takeIf(String::isNotBlank)
-            ?: resolvedRulesFallback?.autoCreatePointIncidentType
-            ?: "POINT",
-        pointIncidentRequiresParticipant = eventOverride?.pointIncidentRequiresParticipant
-            ?: sportTemplate?.pointIncidentRequiresParticipant
-            ?: resolvedRulesFallback?.pointIncidentRequiresParticipant
-            ?: false,
-    )
-}
-
-internal fun computeLeagueSlotErrors(
-    slots: List<TimeSlot>,
-    singleDivision: Boolean,
-    selectedDivisionIds: List<String>,
-): Map<Int, String> {
-    if (slots.isEmpty()) return emptyMap()
-
-    val errors = mutableMapOf<Int, String>()
-    val normalizedSelectedDivisions = selectedDivisionIds.normalizeDivisionIdentifiers()
-    val selectedDivisionSet = normalizedSelectedDivisions.toSet()
-    slots.forEachIndexed { index, slot ->
-        val fieldIds = slot.normalizedScheduledFieldIds()
-        val fieldIdSet = fieldIds.toSet()
-        val days = slot.normalizedDaysOfWeek()
-        val daySet = days.toSet()
-        val slotDivisionIds = slot.normalizedDivisionIds().normalizeDivisionIdentifiers()
-        val slotDivisionSet = slotDivisionIds.toSet()
-        val start = slot.startTimeMinutes
-        val end = slot.endTimeMinutes
-
-        if (!slot.repeating) {
-            val slotStart = slot.startDate
-            val slotEnd = slot.endDate
-            val requiredMissing = when {
-                fieldIds.isEmpty() -> "Select at least one field."
-                slotEnd == null -> "Select start and end date/time."
-                slotEnd <= slotStart -> "Timeslot must end after it starts."
-                else -> null
-            }
-            if (requiredMissing != null) {
-                errors[index] = requiredMissing
-                return@forEachIndexed
-            }
-
-            if (singleDivision && selectedDivisionSet.isNotEmpty() && slotDivisionSet != selectedDivisionSet) {
-                errors[index] = "Single division requires every timeslot to include all selected divisions."
-                return@forEachIndexed
-            }
-            val nonRepeatingEnd = slotEnd ?: return@forEachIndexed
-
-            val hasOverlap = slots.withIndex().any { (otherIndex, other) ->
-                if (otherIndex == index || other.repeating) return@any false
-                val otherFieldSet = other.normalizedScheduledFieldIds().toSet()
-                if (otherFieldSet.isEmpty() || otherFieldSet.intersect(fieldIdSet).isEmpty()) return@any false
-
-                val otherStart = other.startDate
-                val otherEnd = other.endDate ?: return@any false
-                if (otherEnd <= otherStart) return@any false
-                slotStart < otherEnd && otherStart < nonRepeatingEnd
-            }
-
-            if (hasOverlap) {
-                errors[index] = "Overlaps with another timeslot for one or more selected fields."
-            }
-            return@forEachIndexed
-        }
-
-        val requiredMissing = when {
-            fieldIds.isEmpty() -> "Select at least one field."
-            days.isEmpty() -> "Select at least one day."
-            start == null -> "Select a start time."
-            end == null -> "Select an end time."
-            end <= start -> "Timeslot must end after it starts."
-            else -> null
-        }
-        if (requiredMissing != null) {
-            errors[index] = requiredMissing
-            return@forEachIndexed
-        }
-
-        if (singleDivision && selectedDivisionSet.isNotEmpty() && slotDivisionSet != selectedDivisionSet) {
-            errors[index] = "Single division requires every timeslot to include all selected divisions."
-            return@forEachIndexed
-        }
-
-        val hasOverlap = slots.withIndex().any { (otherIndex, other) ->
-            if (otherIndex == index) return@any false
-            if (!other.repeating) return@any false
-            val otherFieldSet = other.normalizedScheduledFieldIds().toSet()
-            if (otherFieldSet.isEmpty() || otherFieldSet.intersect(fieldIdSet).isEmpty()) return@any false
-            val otherDays = other.normalizedDaysOfWeek()
-            if (otherDays.isEmpty() || otherDays.none(daySet::contains)) return@any false
-
-            val otherStart = other.startTimeMinutes
-            val otherEnd = other.endTimeMinutes
-            if (otherStart == null || otherEnd == null || otherEnd <= otherStart) return@any false
-            val currentEnd = end ?: return@any false
-            slotsOverlap(start!!, currentEnd, otherStart, otherEnd)
-        }
-
-        if (hasOverlap) {
-            errors[index] = "Overlaps with another timeslot for one or more selected fields."
-        }
-    }
-    return errors
-}
-
-private fun slotsOverlap(startA: Int, endA: Int, startB: Int, endB: Int): Boolean {
-    return maxOf(startA, startB) < minOf(endA, endB)
-}
-
-@Composable
-fun BackgroundImage(
-    modifier: Modifier, imageUrl: String
-) {
-    Box(modifier) {
-        if (imageUrl.isNotBlank()) {
-            AsyncImage(
-                model = imageUrl,
-                contentDescription = "Event Image",
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
         }
     }
 }
