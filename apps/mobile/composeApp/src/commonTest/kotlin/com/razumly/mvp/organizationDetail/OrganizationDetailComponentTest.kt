@@ -214,6 +214,9 @@ private object NoopMatchRepository : IMatchRepository {
     override fun getMatchFlow(matchId: String): Flow<Result<com.razumly.mvp.core.data.dataTypes.MatchWithRelations>> =
         flowOf(Result.failure(IllegalStateException("unused")))
 
+    override suspend fun saveMatchLocally(match: com.razumly.mvp.core.data.dataTypes.MatchMVP): Result<Unit> =
+        Result.success(Unit)
+
     override suspend fun updateMatch(match: com.razumly.mvp.core.data.dataTypes.MatchMVP): Result<Unit> =
         Result.success(Unit)
 

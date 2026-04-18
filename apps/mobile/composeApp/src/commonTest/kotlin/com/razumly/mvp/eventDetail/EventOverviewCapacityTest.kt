@@ -11,7 +11,7 @@ import kotlin.test.assertEquals
 
 class EventOverviewCapacityTest {
     @Test
-    fun resolveOverviewFilledParticipantCount_teamSignup_usesDisplayedTeamsAsSourceOfTruth() {
+    fun resolveOverviewFilledParticipantCount_teamSignup_excludesPlaceholderTeams() {
         val relations = EventWithFullRelations(
             event = Event(
                 eventType = EventType.LEAGUE,
@@ -29,7 +29,7 @@ class EventOverviewCapacityTest {
             ),
         )
 
-        assertEquals(5, relations.resolveOverviewFilledParticipantCount())
+        assertEquals(3, relations.resolveOverviewFilledParticipantCount())
     }
 
     @Test
@@ -55,7 +55,7 @@ class EventOverviewCapacityTest {
     }
 
     @Test
-    fun countTeamSignupParticipantsForCapacity_singleDivision_usesDisplayedTeamsAsSourceOfTruth() {
+    fun countTeamSignupParticipantsForCapacity_singleDivision_excludesPlaceholderTeams() {
         val event = Event(
             eventType = EventType.LEAGUE,
             teamSignup = true,
@@ -69,12 +69,13 @@ class EventOverviewCapacityTest {
             buildTeamWithPlayers("team-5", parentTeamId = null),
         )
 
-        assertEquals(5, countTeamSignupParticipantsForCapacity(event, teams))
+        assertEquals(3, countTeamSignupParticipantsForCapacity(event, teams))
     }
 
     @Test
-    fun countTeamSignupParticipantsForCapacity_multiDivision_filtersOnlyBySelectedDivision() {
+    fun countTeamSignupParticipantsForCapacity_multiDivision_filtersPlaceholdersBeforeDivisionCount() {
         val event = Event(
+            eventType = EventType.LEAGUE,
             teamSignup = true,
             singleDivision = false,
         )
@@ -89,7 +90,7 @@ class EventOverviewCapacityTest {
             buildTeamWithPlayers("team-3", division = "advanced"),
         )
 
-        assertEquals(2, countTeamSignupParticipantsForCapacity(event, teams, selectedDivision))
+        assertEquals(1, countTeamSignupParticipantsForCapacity(event, teams, selectedDivision))
     }
 
     private fun buildTeamWithPlayers(

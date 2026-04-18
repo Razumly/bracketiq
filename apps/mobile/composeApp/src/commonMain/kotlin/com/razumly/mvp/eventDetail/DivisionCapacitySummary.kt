@@ -42,7 +42,7 @@ internal fun buildDivisionCapacitySummaries(
         return emptyList()
     }
 
-    val registeredTeamIdSet = teams
+    val registeredTeamIdSet = event.visibleTeams(teams)
         .map { teamWithPlayers -> teamWithPlayers.team }
         .map { team -> team.id.trim() }
         .filter(String::isNotBlank)

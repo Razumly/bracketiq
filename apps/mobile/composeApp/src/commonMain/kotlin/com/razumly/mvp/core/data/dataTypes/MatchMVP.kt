@@ -161,4 +161,5 @@ data class MatchIncidentMVP(
     val linkedPointDelta: Int? = null,
     val note: String? = null,
     val metadata: Map<String, String>? = null,
+    val uploadStatus: String? = null,
 )

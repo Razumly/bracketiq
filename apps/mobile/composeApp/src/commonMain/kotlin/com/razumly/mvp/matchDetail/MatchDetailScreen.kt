@@ -3,11 +3,14 @@ package com.razumly.mvp.matchDetail
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
@@ -23,6 +26,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -49,8 +53,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.razumly.mvp.core.data.dataTypes.Event
@@ -60,6 +67,7 @@ import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchSegmentMVP
 import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.OfficialAssignmentHolderType
+import com.razumly.mvp.core.data.dataTypes.ResolvedMatchRulesMVP
 import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
 import com.razumly.mvp.core.data.dataTypes.TeamWithRelations
 import com.razumly.mvp.core.data.dataTypes.UserData
@@ -68,6 +76,7 @@ import com.razumly.mvp.core.data.dataTypes.normalizedOfficialAssignments
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.util.CircularRevealUnderlay
 import com.razumly.mvp.core.presentation.util.getScreenWidth
+import com.razumly.mvp.core.util.Platform
 import com.razumly.mvp.eventDetail.composables.DropdownField
 import com.razumly.mvp.eventMap.EventMap
 import com.razumly.mvp.eventMap.MapComponent
@@ -213,6 +222,41 @@ internal fun matchDisplayScore(
     }
 }
 
+internal fun matchDetailSegmentCount(
+    rules: ResolvedMatchRulesMVP,
+    segments: List<MatchSegmentMVP>,
+    team1Scores: List<Int>,
+    team2Scores: List<Int>,
+): Int = listOf(
+    rules.segmentCount,
+    segments.size,
+    team1Scores.size,
+    team2Scores.size,
+    1,
+).max()
+
+internal fun shouldShowMatchSegmentBreakdown(
+    rules: ResolvedMatchRulesMVP,
+    segments: List<MatchSegmentMVP>,
+    team1Scores: List<Int>,
+    team2Scores: List<Int>,
+): Boolean = matchDetailSegmentCount(
+    rules = rules,
+    segments = segments,
+    team1Scores = team1Scores,
+    team2Scores = team2Scores,
+) > 1
+
+internal fun activeMatchSegmentLabel(
+    segmentBaseLabel: String,
+    currentSegmentIndex: Int,
+    showSegmentBreakdown: Boolean,
+): String? = if (showSegmentBreakdown) {
+    "$segmentBaseLabel ${currentSegmentIndex + 1}"
+} else {
+    null
+}
+
 @Composable
 fun MatchDetailScreen(
     component: MatchContentComponent,
@@ -232,6 +276,7 @@ fun MatchDetailScreen(
     val showMap by mapComponent.showMap.collectAsState()
     val currentLocation by mapComponent.currentLocation.collectAsState()
     val isWebLayout = getScreenWidth() >= WEB_LAYOUT_BREAKPOINT_DP
+    val useNativeMapOverlayTransition = Platform.isIOS && !isWebLayout
     val showScoreControls = !isWebLayout
     val showOfficialScoreControls = showScoreControls && isOfficial
     val navBottomPadding = LocalNavBarPadding.current.calculateBottomPadding()
@@ -274,6 +319,16 @@ fun MatchDetailScreen(
     val selectedParticipant = remember(activeParticipantOptions, pointIncidentParticipantId) {
         activeParticipantOptions.firstOrNull { option -> option.selectionId == pointIncidentParticipantId }
     }
+    val fieldLocationLabel = remember(match.field, locationTarget.place) {
+        match.field?.name?.trim()?.takeIf(String::isNotBlank)
+            ?: locationTarget.place?.name?.trim()?.takeIf(String::isNotBlank)
+            ?: "Field Location"
+    }
+    val nativeMapOverlayProgress by animateFloatAsState(
+        targetValue = if (showMap && useNativeMapOverlayTransition) 1f else 0f,
+        animationSpec = tween(durationMillis = 450),
+        label = "matchDetailNativeMapOverlayProgress",
+    )
     LaunchedEffect(pendingPointEventTeamId, activeParticipantOptions) {
         if (pendingPointEventTeamId == null) {
             pointIncidentParticipantId = null
@@ -320,11 +375,17 @@ fun MatchDetailScreen(
     val segmentBaseLabel = rules.segmentLabel.ifBlank {
         if (event?.usesSets == true) "Set" else "Total"
     }
-    val activeSegmentLabel = if (rules.scoringModel == "POINTS_ONLY") {
-        segmentBaseLabel
-    } else {
-        "$segmentBaseLabel ${currentSet + 1}"
-    }
+    val showSegmentBreakdown = shouldShowMatchSegmentBreakdown(
+        rules = rules,
+        segments = orderedSegments,
+        team1Scores = match.match.team1Points,
+        team2Scores = match.match.team2Points,
+    )
+    val activeSegmentLabel = activeMatchSegmentLabel(
+        segmentBaseLabel = segmentBaseLabel,
+        currentSegmentIndex = currentSet,
+        showSegmentBreakdown = showSegmentBreakdown,
+    )
     val canConfirmResult = showOfficialScoreControls &&
         officialCheckedIn &&
         !matchFinished &&
@@ -545,12 +606,30 @@ fun MatchDetailScreen(
                 )
             ),
     ) {
+        if (useNativeMapOverlayTransition && nativeMapOverlayProgress > 0.001f) {
+            NativeMapRevealOverlay(
+                progress = nativeMapOverlayProgress,
+                revealCenterInWindow = mapRevealCenter,
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                EventMap(
+                    component = mapComponent,
+                    onEventSelected = { },
+                    onPlaceSelected = { },
+                    canClickPOI = false,
+                    focusedLocation = locationTarget.focusedLocation,
+                    focusedEvent = null,
+                    modifier = Modifier.fillMaxSize(),
+                    onBackPressed = mapComponent::toggleMap,
+                )
+            }
+        }
         CircularRevealUnderlay(
-            isRevealed = showMap && !isWebLayout,
+            isRevealed = showMap && !isWebLayout && !useNativeMapOverlayTransition,
             revealCenterInWindow = mapRevealCenter,
             modifier = Modifier.fillMaxSize(),
             backgroundContent = {
-                if (!isWebLayout) {
+                if (!isWebLayout && !useNativeMapOverlayTransition) {
                     EventMap(
                         component = mapComponent,
                         onEventSelected = { },
@@ -576,7 +655,7 @@ fun MatchDetailScreen(
                 title = team1Text,
                 score = team1Score.toString(),
                 increase = {
-                    if (event?.autoCreatePointMatchIncidents == true) {
+                    if (shouldRequireScoringIncident(rules, event)) {
                         openPointIncidentDialog(match.match.team1Id)
                     } else {
                         component.updateScore(isTeam1 = true, increment = true)
@@ -603,16 +682,18 @@ fun MatchDetailScreen(
                     color = MaterialTheme.colorScheme.onSurface,
                     style = MaterialTheme.typography.titleLarge
                 )
-                Text(
-                    text = " | ",
-                    color = MaterialTheme.colorScheme.onSurface,
-                    style = MaterialTheme.typography.titleLarge
-                )
-                Text(
-                    text = activeSegmentLabel,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    style = MaterialTheme.typography.titleLarge
-                )
+                activeSegmentLabel?.let { label ->
+                    Text(
+                        text = " | ",
+                        color = MaterialTheme.colorScheme.onSurface,
+                        style = MaterialTheme.typography.titleLarge
+                    )
+                    Text(
+                        text = label,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        style = MaterialTheme.typography.titleLarge
+                    )
+                }
             }
 
             if (showOfficialScoreControls) {
@@ -624,7 +705,7 @@ fun MatchDetailScreen(
                         if (rules.scoringModel == "POINTS_ONLY") {
                             "Save Match"
                         } else {
-                            "Confirm $activeSegmentLabel"
+                            "Confirm ${activeSegmentLabel ?: segmentBaseLabel}"
                         }
                     )
                 }
@@ -636,7 +717,7 @@ fun MatchDetailScreen(
                 modifier = Modifier
                     .weight(1f),
                 increase = {
-                    if (event?.autoCreatePointMatchIncidents == true) {
+                    if (shouldRequireScoringIncident(rules, event)) {
                         openPointIncidentDialog(match.match.team2Id)
                     } else {
                         component.updateScore(isTeam1 = false, increment = true)
@@ -718,15 +799,17 @@ fun MatchDetailScreen(
                             },
                             style = MaterialTheme.typography.bodyMedium,
                         )
-                        MatchSegmentTable(
-                            segments = orderedSegments,
-                            segmentLabel = segmentBaseLabel,
-                            team1Id = match.match.team1Id,
-                            team2Id = match.match.team2Id,
-                            team1Scores = match.match.team1Points,
-                            team2Scores = match.match.team2Points,
-                            onSegmentSelected = component::selectSegment,
-                        )
+                        if (showSegmentBreakdown) {
+                            MatchSegmentTable(
+                                segments = orderedSegments,
+                                segmentLabel = segmentBaseLabel,
+                                team1Id = match.match.team1Id,
+                                team2Id = match.match.team2Id,
+                                team1Scores = match.match.team1Points,
+                                team2Scores = match.match.team2Points,
+                                onSegmentSelected = component::selectSegment,
+                            )
+                        }
                         Text(
                             text = "Officials",
                             style = MaterialTheme.typography.titleSmall,
@@ -782,13 +865,16 @@ fun MatchDetailScreen(
                             mapRevealCenter = it.boundsInWindow().center
                         }
                     ) {
-                        Text(
-                            if (isWebLayout && showMap) {
-                                "Hide Field Location"
-                            } else {
-                                "View Field Location"
-                            }
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(fieldLocationLabel)
+                            Icon(
+                                imageVector = Icons.Default.Place,
+                                contentDescription = "Show field on map",
+                            )
+                        }
                     }
                     Button(
                         onClick = { showMatchDetails = !showMatchDetails },
@@ -821,6 +907,40 @@ fun MatchDetailScreen(
             },
         )
     }
+}
+
+@Composable
+private fun NativeMapRevealOverlay(
+    progress: Float,
+    revealCenterInWindow: Offset,
+    modifier: Modifier = Modifier,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    var overlayTopLeft by remember { mutableStateOf(Offset.Zero) }
+    var overlaySize by remember { mutableStateOf(Size.Zero) }
+    val transformOrigin = remember(revealCenterInWindow, overlayTopLeft, overlaySize) {
+        resolveTransformOrigin(
+            revealCenterInWindow = revealCenterInWindow,
+            containerTopLeftInWindow = overlayTopLeft,
+            containerSize = overlaySize,
+        )
+    }
+
+    Box(
+        modifier = modifier
+            .onGloballyPositioned { coordinates ->
+                val bounds = coordinates.boundsInWindow()
+                overlayTopLeft = bounds.topLeft
+                overlaySize = bounds.size
+            }
+            .graphicsLayer {
+                alpha = progress
+                scaleX = 0.9f + (0.1f * progress)
+                scaleY = 0.9f + (0.1f * progress)
+                this.transformOrigin = transformOrigin
+            },
+        content = content,
+    )
 }
 
 @Composable
@@ -1100,6 +1220,32 @@ private fun resolveLocationTarget(
         focusedLocation = focusedLocation,
         place = place,
         warningDistanceMiles = warningDistance,
+    )
+}
+
+private fun resolveTransformOrigin(
+    revealCenterInWindow: Offset,
+    containerTopLeftInWindow: Offset,
+    containerSize: Size,
+): TransformOrigin {
+    if (containerSize.width <= 0f || containerSize.height <= 0f) {
+        return TransformOrigin.Center
+    }
+
+    val localCenter = if (revealCenterInWindow == Offset.Zero) {
+        Offset(containerSize.width / 2f, containerSize.height / 2f)
+    } else {
+        Offset(
+            x = (revealCenterInWindow.x - containerTopLeftInWindow.x)
+                .coerceIn(0f, containerSize.width),
+            y = (revealCenterInWindow.y - containerTopLeftInWindow.y)
+                .coerceIn(0f, containerSize.height),
+        )
+    }
+
+    return TransformOrigin(
+        pivotFractionX = if (containerSize.width == 0f) 0.5f else localCenter.x / containerSize.width,
+        pivotFractionY = if (containerSize.height == 0f) 0.5f else localCenter.y / containerSize.height,
     )
 }
 

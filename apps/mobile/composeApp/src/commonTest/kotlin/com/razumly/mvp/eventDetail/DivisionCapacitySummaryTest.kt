@@ -7,6 +7,7 @@ import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.util.buildCombinedDivisionTypeId
 import com.razumly.mvp.core.data.util.buildEventDivisionId
+import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -33,6 +34,7 @@ class DivisionCapacitySummaryTest {
         )
         val event = Event(
             id = eventId,
+            eventType = EventType.LEAGUE,
             teamSignup = true,
             singleDivision = false,
             teamIds = listOf("team-1", "team-2"),
@@ -101,7 +103,7 @@ class DivisionCapacitySummaryTest {
     }
 
     @Test
-    fun buildDivisionCapacitySummaries_usesDisplayedTeamsEvenWhenTheyLookLikePlaceholders() {
+    fun buildDivisionCapacitySummaries_excludesPlaceholderTeams() {
         val eventId = "event-3"
         val divisionId = buildEventDivisionId(eventId, "c_skill_open_age_u17")
         val divisionDetails = listOf(
@@ -114,6 +116,7 @@ class DivisionCapacitySummaryTest {
         )
         val event = Event(
             id = eventId,
+            eventType = EventType.LEAGUE,
             teamSignup = true,
             singleDivision = false,
             teamIds = listOf("team-1", "team-2"),
@@ -131,7 +134,7 @@ class DivisionCapacitySummaryTest {
             teams = teams,
         )
 
-        assertEquals(2, summaries.single().filled)
+        assertEquals(1, summaries.single().filled)
     }
 
     private fun buildDivisionDetail(

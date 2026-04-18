@@ -124,7 +124,6 @@ import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.data.repositories.EventOccurrenceSelection
 import com.razumly.mvp.core.data.repositories.FeeBreakdown
 import com.razumly.mvp.core.data.util.divisionsEquivalent
-import com.razumly.mvp.core.data.util.isPlaceholderSlot
 import com.razumly.mvp.core.data.dataTypes.normalizedDaysOfWeek
 import com.razumly.mvp.core.data.dataTypes.normalizedDivisionIds
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
@@ -723,17 +722,20 @@ private fun EventOverviewSections(
     val progress = if (capacity > 0) (filled.toFloat() / capacity.toFloat()).coerceIn(0f, 1f) else 0f
     val freeAgentIds = remember(event.freeAgentIds) { event.freeAgentIds.distinct() }
     val waitlistIds = remember(event.waitListIds) { event.waitListIds.distinct() }
+    val visibleTeams = remember(event.eventType, event.teamSignup, eventWithRelations.teams) {
+        event.visibleTeams(eventWithRelations.teams)
+    }
     val divisionCapacitySummaries = remember(
         event.id,
         event.teamSignup,
         event.singleDivision,
-        eventWithRelations.teams,
+        visibleTeams,
         event.divisionDetails,
     ) {
         buildDivisionCapacitySummaries(
             event = event,
             divisionDetails = event.divisionDetails,
-            teams = eventWithRelations.teams,
+            teams = visibleTeams,
         )
     }
     var showDivisionCapacities by rememberSaveable(event.id) { mutableStateOf(false) }
@@ -745,14 +747,13 @@ private fun EventOverviewSections(
     }
     val unresolvedFreeAgentCount = (freeAgentIds.size - freeAgentUsers.size).coerceAtLeast(0)
     val openDetailsLoading = teamsAndParticipantsLoading || matchesLoading
-    val teamsNeedingPlayers = remember(eventWithRelations.teams, event.teamSizeLimit) {
-        eventWithRelations.teams
-            .filter { teamWithPlayers -> !teamWithPlayers.team.isPlaceholderSlot(event.eventType) }
+    val teamsNeedingPlayers = remember(visibleTeams, event.teamSizeLimit) {
+        visibleTeams
             .mapNotNull { team ->
                 val missing = (event.teamSizeLimit - team.team.playerIds.size).coerceAtLeast(0)
                 missing.takeIf { it > 0 }
             }
-        }
+    }
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -881,11 +882,11 @@ private fun EventOverviewSections(
                 )
             } else {
                 SectionHeader(
-                    title = "Teams (${eventWithRelations.teams.size})",
+                    title = "Teams (${visibleTeams.size})",
                     action = "See all",
                     onAction = onOpenDetails
                 )
-                if (eventWithRelations.teams.isEmpty()) {
+                if (visibleTeams.isEmpty()) {
                     Text(
                         text = "No teams yet.",
                         style = MaterialTheme.typography.bodySmall,
@@ -896,7 +897,7 @@ private fun EventOverviewSections(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         items(
-                            eventWithRelations.teams.take(4),
+                            visibleTeams.take(4),
                             key = { teamWithPlayers -> teamWithPlayers.team.id }
                         ) { team ->
                             TeamPreviewChip(

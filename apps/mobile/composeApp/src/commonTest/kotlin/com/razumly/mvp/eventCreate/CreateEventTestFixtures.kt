@@ -533,6 +533,7 @@ internal class CreateEvent_FakeMatchRepository : IMatchRepository {
     override suspend fun getMatch(matchId: String): Result<MatchMVP> = Result.failure(IllegalStateException("unused"))
     override fun getMatchFlow(matchId: String): Flow<Result<MatchWithRelations>> =
         flowOf(Result.failure(IllegalStateException("unused")))
+    override suspend fun saveMatchLocally(match: MatchMVP): Result<Unit> = Result.success(Unit)
     override suspend fun updateMatch(match: MatchMVP): Result<Unit> = Result.success(Unit)
     override suspend fun updateMatchOperations(
         match: MatchMVP,

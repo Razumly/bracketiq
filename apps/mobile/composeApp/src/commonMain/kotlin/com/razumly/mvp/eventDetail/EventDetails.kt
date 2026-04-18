@@ -1542,7 +1542,9 @@ fun EventDetails(
         }
     }
     val freeAgentCount = remember(event.freeAgentIds) { event.freeAgentIds.size }
-    val teamsCount = remember(eventWithRelations.teams) { eventWithRelations.teams.size }
+    val teamsCount = remember(event.eventType, event.teamSignup, eventWithRelations.teams) {
+        event.visibleTeams(eventWithRelations.teams).size
+    }
     val registrationSummary = remember(editEvent.registrationCutoffHours) {
         editEvent.registrationCutoffHours.toRegistrationCutoffSummary()
     }
