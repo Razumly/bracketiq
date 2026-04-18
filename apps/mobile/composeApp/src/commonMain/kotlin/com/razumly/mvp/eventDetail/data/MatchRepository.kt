@@ -207,6 +207,25 @@ class MatchRepository(
             .mapNotNull { it.toMatchOrNull() }
     }
 
+    private suspend fun fetchRemoteMatch(eventId: String, matchId: String): MatchMVP {
+        val detailMatch = runCatching {
+            api.get<MatchResponseDto>("api/events/$eventId/matches/$matchId")
+                .match
+                ?.toMatchOrNull()
+        }.onFailure { error ->
+            Napier.w(
+                "Failed to refresh match $matchId from detail endpoint; falling back to event matches: ${error.message}"
+            )
+        }.getOrNull()
+        if (detailMatch != null) {
+            return detailMatch
+        }
+
+        val res = api.get<MatchesResponseDto>("api/events/$eventId/matches")
+        return res.matches.firstOrNull { (it.id ?: it.legacyId) == matchId }?.toMatchOrNull()
+            ?: error("Match $matchId not found")
+    }
+
     private suspend fun refreshMatchesFromRemote(tournamentId: String): List<MatchMVP> {
         val localMatches = databaseService.getMatchDao.getMatchesOfTournament(tournamentId)
         val remoteMatches = mergePendingLocalIncidents(fetchRemoteMatches(tournamentId))
@@ -227,9 +246,7 @@ class MatchRepository(
                 val local = databaseService.getMatchDao.getMatchById(matchId)?.match
                     ?: error("Match $matchId not cached; fetch matches for the event first")
 
-                val res = api.get<MatchesResponseDto>("api/events/${local.eventId}/matches")
-                val remoteMatch = res.matches.firstOrNull { (it.id ?: it.legacyId) == matchId }?.toMatchOrNull()
-                    ?: error("Match $matchId not found")
+                val remoteMatch = fetchRemoteMatch(local.eventId, matchId)
                 mergePendingLocalIncidents(remoteMatch, local)
             },
             saveCall = { match -> databaseService.getMatchDao.upsertMatch(match) },

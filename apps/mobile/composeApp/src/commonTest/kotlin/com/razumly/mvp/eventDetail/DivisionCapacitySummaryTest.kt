@@ -14,7 +14,7 @@ import kotlin.test.assertFalse
 
 class DivisionCapacitySummaryTest {
     @Test
-    fun buildDivisionCapacitySummaries_usesDivisionTeamIds_asSourceOfTruth() {
+    fun buildDivisionCapacitySummaries_usesLoadedTeamDivisions_asSourceOfTruth() {
         val eventId = "event-1"
         val u17DivisionId = buildEventDivisionId(eventId, "c_skill_open_age_u17")
         val u15DivisionId = buildEventDivisionId(eventId, "c_skill_open_age_u15")
@@ -23,13 +23,13 @@ class DivisionCapacitySummaryTest {
                 id = u17DivisionId,
                 token = "c_skill_open_age_u17",
                 ageDivisionTypeId = "u17",
-                teamIds = listOf("team-1"),
+                teamIds = emptyList(),
             ),
             buildDivisionDetail(
                 id = u15DivisionId,
                 token = "c_skill_open_age_u15",
                 ageDivisionTypeId = "u15",
-                teamIds = listOf("team-2"),
+                teamIds = listOf("team-1", "stale-team"),
             ),
         )
         val event = Event(
@@ -42,8 +42,20 @@ class DivisionCapacitySummaryTest {
             divisionDetails = divisionDetails,
         )
         val teams = listOf(
-            buildTeamWithPlayers(teamId = "team-1"),
-            buildTeamWithPlayers(teamId = "team-2"),
+            buildTeamWithPlayers(
+                teamId = "team-1",
+                division = u17DivisionId,
+                ageDivisionTypeId = "u17",
+            ),
+            buildTeamWithPlayers(
+                teamId = "team-2",
+                division = "unused",
+                divisionTypeId = buildCombinedDivisionTypeId(
+                    skillDivisionTypeId = "open",
+                    ageDivisionTypeId = "u15",
+                ),
+                ageDivisionTypeId = "u15",
+            ),
         )
 
         val summaries = buildDivisionCapacitySummaries(
@@ -59,7 +71,7 @@ class DivisionCapacitySummaryTest {
     }
 
     @Test
-    fun buildDivisionCapacitySummaries_addsUnassigned_whenEventTeamsAreMissingFromDivisionTeamIds() {
+    fun buildDivisionCapacitySummaries_addsUnassigned_whenLoadedTeamsDoNotMatchDivisions() {
         val eventId = "event-2"
         val u17DivisionId = buildEventDivisionId(eventId, "c_skill_open_age_u17")
         val u15DivisionId = buildEventDivisionId(eventId, "c_skill_open_age_u15")
@@ -68,17 +80,16 @@ class DivisionCapacitySummaryTest {
                 id = u17DivisionId,
                 token = "c_skill_open_age_u17",
                 ageDivisionTypeId = "u17",
-                teamIds = listOf("team-1", "team-stale"),
             ),
             buildDivisionDetail(
                 id = u15DivisionId,
                 token = "c_skill_open_age_u15",
                 ageDivisionTypeId = "u15",
-                teamIds = emptyList(),
             ),
         )
         val event = Event(
             id = eventId,
+            eventType = EventType.LEAGUE,
             teamSignup = true,
             singleDivision = false,
             teamIds = listOf("team-1", "team-2"),
@@ -86,8 +97,12 @@ class DivisionCapacitySummaryTest {
             divisionDetails = divisionDetails,
         )
         val teams = listOf(
-            buildTeamWithPlayers(teamId = "team-1"),
-            buildTeamWithPlayers(teamId = "team-2"),
+            buildTeamWithPlayers(
+                teamId = "team-1",
+                division = u17DivisionId,
+                ageDivisionTypeId = "u17",
+            ),
+            buildTeamWithPlayers(teamId = "team-2", division = "unknown"),
         )
 
         val summaries = buildDivisionCapacitySummaries(
@@ -111,7 +126,6 @@ class DivisionCapacitySummaryTest {
                 id = divisionId,
                 token = "c_skill_open_age_u17",
                 ageDivisionTypeId = "u17",
-                teamIds = listOf("team-1", "team-2"),
             ),
         )
         val event = Event(
@@ -124,8 +138,18 @@ class DivisionCapacitySummaryTest {
             divisionDetails = divisionDetails,
         )
         val teams = listOf(
-            buildTeamWithPlayers(teamId = "team-1"),
-            buildTeamWithPlayers(teamId = "team-2", kind = "PLACEHOLDER", parentTeamId = null),
+            buildTeamWithPlayers(
+                teamId = "team-1",
+                division = divisionId,
+                ageDivisionTypeId = "u17",
+            ),
+            buildTeamWithPlayers(
+                teamId = "team-2",
+                division = divisionId,
+                ageDivisionTypeId = "u17",
+                kind = "PLACEHOLDER",
+                parentTeamId = null,
+            ),
         )
 
         val summaries = buildDivisionCapacitySummaries(
@@ -141,7 +165,7 @@ class DivisionCapacitySummaryTest {
         id: String,
         token: String,
         ageDivisionTypeId: String,
-        teamIds: List<String>,
+        teamIds: List<String> = emptyList(),
     ): DivisionDetail = DivisionDetail(
         id = id,
         key = token,
@@ -158,16 +182,25 @@ class DivisionCapacitySummaryTest {
 
     private fun buildTeamWithPlayers(
         teamId: String,
+        division: String = "open",
+        divisionTypeId: String? = null,
+        skillDivisionTypeId: String? = "open",
+        ageDivisionTypeId: String? = null,
+        divisionGender: String? = "C",
         kind: String? = null,
         parentTeamId: String? = "parent-$teamId",
     ): TeamWithPlayers = TeamWithPlayers(
         team = Team(
-            division = "open",
+            division = division,
             name = teamId,
             kind = kind,
             captainId = "captain-$teamId",
             parentTeamId = parentTeamId,
             teamSize = 2,
+            divisionTypeId = divisionTypeId,
+            skillDivisionTypeId = skillDivisionTypeId,
+            ageDivisionTypeId = ageDivisionTypeId,
+            divisionGender = divisionGender,
             id = teamId,
         ),
         captain = UserData(),

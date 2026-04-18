@@ -34,6 +34,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -100,7 +101,9 @@ private const val FIELD_DISTANCE_WARNING_THRESHOLD_MILES = 0.01
 private const val EARTH_RADIUS_MILES = 3958.8
 
 private fun matchLogTypeLabel(type: String): String = when (type.trim().uppercase()) {
-    "POINT" -> "Scoring detail"
+    "POINT" -> "Point"
+    "GOAL" -> "Goal"
+    "RUN" -> "Run"
     "DISCIPLINE" -> "Penalty or card"
     "NOTE" -> "Match note"
     "ADMIN" -> "Admin note"
@@ -118,11 +121,15 @@ private data class MatchLocationTarget(
     val warningDistanceMiles: Double?,
 )
 
-private data class MatchParticipantOption(
+internal data class MatchParticipantOption(
     val selectionId: String,
     val label: String,
     val eventRegistrationId: String?,
     val participantUserId: String,
+)
+
+private data class MatchIncidentDialogTarget(
+    val eventTeamId: String?,
 )
 
 internal data class MatchOfficialDetailRow(
@@ -257,6 +264,51 @@ internal fun activeMatchSegmentLabel(
     null
 }
 
+internal fun incidentDialogTypes(
+    rules: ResolvedMatchRulesMVP,
+    teamScoped: Boolean,
+): List<String> {
+    val scoringType = scoringIncidentType(rules)
+    val supportedTypes = rules.supportedIncidentTypes
+        .mapNotNull { type -> type.trim().uppercase().takeIf(String::isNotBlank) }
+        .ifEmpty { listOf("POINT", "DISCIPLINE", "NOTE", "ADMIN") }
+        .distinct()
+    val includeScoring = teamScoped && rules.pointIncidentRequiresParticipant
+    val filteredTypes = supportedTypes.filter { type ->
+        val scoring = isScoringIncidentType(type) || type == scoringType
+        when {
+            scoring -> false
+            teamScoped -> !isTeamAgnosticIncidentType(type)
+            else -> isTeamAgnosticIncidentType(type)
+        }
+    }
+    return if (includeScoring) {
+        listOf(scoringType) + filteredTypes
+    } else {
+        filteredTypes
+    }.distinct()
+}
+
+internal fun defaultIncidentDialogType(
+    rules: ResolvedMatchRulesMVP,
+    options: List<String>,
+): String {
+    val scoringType = scoringIncidentType(rules)
+    return if (rules.pointIncidentRequiresParticipant) {
+        options.firstOrNull { type -> type == scoringType || isScoringIncidentType(type) } ?: options.firstOrNull().orEmpty()
+    } else {
+        options.firstOrNull().orEmpty()
+    }
+}
+
+private fun scoringIncidentType(rules: ResolvedMatchRulesMVP): String =
+    rules.autoCreatePointIncidentType?.trim()?.uppercase()?.takeIf(String::isNotBlank) ?: "POINT"
+
+private fun isTeamAgnosticIncidentType(type: String): Boolean = when (type.trim().uppercase()) {
+    "NOTE", "ADMIN" -> true
+    else -> false
+}
+
 @Composable
 fun MatchDetailScreen(
     component: MatchContentComponent,
@@ -295,10 +347,11 @@ fun MatchDetailScreen(
 
     var mapRevealCenter by remember { mutableStateOf(Offset.Zero) }
     var showMatchDetails by remember { mutableStateOf(false) }
-    var pendingPointEventTeamId by remember(match.match.id) { mutableStateOf<String?>(null) }
-    var pointIncidentParticipantId by remember(match.match.id) { mutableStateOf<String?>(null) }
-    var pointIncidentMinute by remember(match.match.id) { mutableStateOf("") }
-    var pointIncidentNote by remember(match.match.id) { mutableStateOf("") }
+    var pendingIncidentTarget by remember(match.match.id) { mutableStateOf<MatchIncidentDialogTarget?>(null) }
+    var incidentType by remember(match.match.id) { mutableStateOf("") }
+    var incidentParticipantId by remember(match.match.id) { mutableStateOf<String?>(null) }
+    var incidentMinute by remember(match.match.id) { mutableStateOf("") }
+    var incidentNote by remember(match.match.id) { mutableStateOf("") }
     val locationTarget = remember(match.field, match.match.id, event, currentLocation) {
         resolveLocationTarget(
             field = match.field,
@@ -313,11 +366,11 @@ fun MatchDetailScreen(
         mapComponent.setPlaces(locationTarget.place?.let(::listOf) ?: emptyList())
     }
 
-    val activeParticipantOptions = remember(participantOptionsByTeam, pendingPointEventTeamId) {
-        pendingPointEventTeamId?.let { teamId -> participantOptionsByTeam[teamId] }.orEmpty()
+    val activeParticipantOptions = remember(participantOptionsByTeam, pendingIncidentTarget) {
+        pendingIncidentTarget?.eventTeamId?.let { teamId -> participantOptionsByTeam[teamId] }.orEmpty()
     }
-    val selectedParticipant = remember(activeParticipantOptions, pointIncidentParticipantId) {
-        activeParticipantOptions.firstOrNull { option -> option.selectionId == pointIncidentParticipantId }
+    val selectedParticipant = remember(activeParticipantOptions, incidentParticipantId) {
+        activeParticipantOptions.firstOrNull { option -> option.selectionId == incidentParticipantId }
     }
     val fieldLocationLabel = remember(match.field, locationTarget.place) {
         match.field?.name?.trim()?.takeIf(String::isNotBlank)
@@ -329,17 +382,17 @@ fun MatchDetailScreen(
         animationSpec = tween(durationMillis = 450),
         label = "matchDetailNativeMapOverlayProgress",
     )
-    LaunchedEffect(pendingPointEventTeamId, activeParticipantOptions) {
-        if (pendingPointEventTeamId == null) {
-            pointIncidentParticipantId = null
+    LaunchedEffect(pendingIncidentTarget, activeParticipantOptions) {
+        if (pendingIncidentTarget == null || pendingIncidentTarget?.eventTeamId == null) {
+            incidentParticipantId = null
             return@LaunchedEffect
         }
         if (activeParticipantOptions.isEmpty()) {
-            pointIncidentParticipantId = null
+            incidentParticipantId = null
             return@LaunchedEffect
         }
-        if (pointIncidentParticipantId == null || activeParticipantOptions.none { option -> option.selectionId == pointIncidentParticipantId }) {
-            pointIncidentParticipantId = activeParticipantOptions.first().selectionId
+        if (incidentParticipantId == null || activeParticipantOptions.none { option -> option.selectionId == incidentParticipantId }) {
+            incidentParticipantId = activeParticipantOptions.first().selectionId
         }
     }
     val orderedSegments = remember(match.match.segments) {
@@ -395,13 +448,28 @@ fun MatchDetailScreen(
         "POINTS_ONLY" -> rules.supportsDraw || team1Score != team2Score
         else -> true
     }
+    val promptScoringIncident = shouldRequireScoringIncident(rules, event)
+    val showScoreAdjustButtons = !promptScoringIncident
+    val teamIncidentTypes = remember(rules) {
+        incidentDialogTypes(rules = rules, teamScoped = true)
+    }
+    val teamAgnosticIncidentTypes = remember(rules) {
+        incidentDialogTypes(rules = rules, teamScoped = false)
+    }
+    val showTeamIncidentButtons = teamIncidentTypes.isNotEmpty()
+    val showTeamAgnosticIncidentButton = !showTeamIncidentButtons && teamAgnosticIncidentTypes.isNotEmpty()
 
-    fun openPointIncidentDialog(teamId: String?) {
-        val resolvedTeamId = teamId?.takeIf(String::isNotBlank) ?: return
-        pendingPointEventTeamId = resolvedTeamId
-        pointIncidentMinute = ""
-        pointIncidentNote = ""
-        pointIncidentParticipantId = participantOptionsByTeam[resolvedTeamId]?.firstOrNull()?.selectionId
+    fun openIncidentDialog(teamId: String?) {
+        val resolvedTeamId = teamId?.trim()?.takeIf(String::isNotBlank)
+        val options = incidentDialogTypes(rules = rules, teamScoped = resolvedTeamId != null)
+        if (options.isEmpty()) return
+        pendingIncidentTarget = MatchIncidentDialogTarget(eventTeamId = resolvedTeamId)
+        incidentType = defaultIncidentDialogType(rules, options)
+        incidentMinute = ""
+        incidentNote = ""
+        incidentParticipantId = resolvedTeamId?.let { teamKey ->
+            participantOptionsByTeam[teamKey]?.firstOrNull()?.selectionId
+        }
     }
 
     val team1Text = remember(team1) {
@@ -505,92 +573,48 @@ fun MatchDetailScreen(
         )
     }
 
-    if (pendingPointEventTeamId != null) {
-        val participantLabel = selectedParticipant?.label
-            ?: if (activeParticipantOptions.isEmpty()) "No roster available" else ""
-        AlertDialog(
-            onDismissRequest = {
-                pendingPointEventTeamId = null
-                pointIncidentParticipantId = null
-                pointIncidentMinute = ""
-                pointIncidentNote = ""
+    if (pendingIncidentTarget != null) {
+        val incidentOptions = incidentDialogTypes(
+            rules = rules,
+            teamScoped = pendingIncidentTarget?.eventTeamId != null,
+        )
+        val selectedIncidentType = incidentType.takeIf(String::isNotBlank)
+            ?: incidentOptions.firstOrNull()
+            ?: "NOTE"
+        val selectedTypeIsScoring = isScoringIncidentType(selectedIncidentType)
+        val requiresParticipant = selectedTypeIsScoring && rules.pointIncidentRequiresParticipant
+        fun clearIncidentDialog() {
+            pendingIncidentTarget = null
+            incidentType = ""
+            incidentParticipantId = null
+            incidentMinute = ""
+            incidentNote = ""
+        }
+        MatchIncidentEntryDialog(
+            incidentOptions = incidentOptions,
+            selectedIncidentType = selectedIncidentType,
+            onIncidentTypeChange = { type -> incidentType = type },
+            teamScoped = pendingIncidentTarget?.eventTeamId != null,
+            participantOptions = activeParticipantOptions,
+            selectedParticipant = selectedParticipant,
+            onParticipantSelected = { option -> incidentParticipantId = option?.selectionId },
+            requiresParticipant = requiresParticipant,
+            minute = incidentMinute,
+            onMinuteChange = { value -> incidentMinute = value.filter(Char::isDigit) },
+            note = incidentNote,
+            onNoteChange = { value -> incidentNote = value },
+            onSave = {
+                component.recordMatchIncident(
+                    eventTeamId = pendingIncidentTarget?.eventTeamId,
+                    incidentType = selectedIncidentType,
+                    eventRegistrationId = selectedParticipant?.eventRegistrationId,
+                    participantUserId = selectedParticipant?.participantUserId,
+                    minute = incidentMinute.toIntOrNull(),
+                    note = incidentNote.takeIf(String::isNotBlank),
+                )
+                clearIncidentDialog()
             },
-            title = { Text("Record scoring details") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    DropdownField(
-                        modifier = Modifier.fillMaxWidth(),
-                        value = participantLabel,
-                        label = if (rules.pointIncidentRequiresParticipant) "Player" else "Player (optional)",
-                    ) { onDismiss ->
-                        if (!rules.pointIncidentRequiresParticipant) {
-                            DropdownMenuItem(
-                                text = { Text("No player selected") },
-                                onClick = {
-                                    pointIncidentParticipantId = null
-                                    onDismiss()
-                                },
-                            )
-                        }
-                        activeParticipantOptions.forEach { option ->
-                            DropdownMenuItem(
-                                text = { Text(option.label) },
-                                onClick = {
-                                    pointIncidentParticipantId = option.selectionId
-                                    onDismiss()
-                                },
-                            )
-                        }
-                    }
-                    OutlinedTextField(
-                        value = pointIncidentMinute,
-                        onValueChange = { value -> pointIncidentMinute = value.filter(Char::isDigit) },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Minute") },
-                        singleLine = true,
-                    )
-                    OutlinedTextField(
-                        value = pointIncidentNote,
-                        onValueChange = { value -> pointIncidentNote = value },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Details") },
-                        minLines = 2,
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val isTeam1Point = pendingPointEventTeamId == match.match.team1Id
-                        component.recordPointIncident(
-                            isTeam1 = isTeam1Point,
-                            eventRegistrationId = selectedParticipant?.eventRegistrationId,
-                            participantUserId = selectedParticipant?.participantUserId,
-                            minute = pointIncidentMinute.toIntOrNull(),
-                            note = pointIncidentNote.takeIf(String::isNotBlank),
-                        )
-                        pendingPointEventTeamId = null
-                        pointIncidentParticipantId = null
-                        pointIncidentMinute = ""
-                        pointIncidentNote = ""
-                    },
-                    enabled = !rules.pointIncidentRequiresParticipant || selectedParticipant != null,
-                ) {
-                    Text("Save Point")
-                }
-            },
-            dismissButton = {
-                Button(
-                    onClick = {
-                        pendingPointEventTeamId = null
-                        pointIncidentParticipantId = null
-                        pointIncidentMinute = ""
-                        pointIncidentNote = ""
-                    }
-                ) {
-                    Text("Cancel")
-                }
-            },
+            onDismiss = { clearIncidentDialog() },
         )
     }
 
@@ -655,8 +679,8 @@ fun MatchDetailScreen(
                 title = team1Text,
                 score = team1Score.toString(),
                 increase = {
-                    if (shouldRequireScoringIncident(rules, event)) {
-                        openPointIncidentDialog(match.match.team1Id)
+                    if (promptScoringIncident) {
+                        openIncidentDialog(match.match.team1Id)
                     } else {
                         component.updateScore(isTeam1 = true, increment = true)
                     }
@@ -666,6 +690,13 @@ fun MatchDetailScreen(
                 },
                 enabled = canIncrement,
                 showControls = showOfficialScoreControls,
+                showAdjustControls = showScoreAdjustButtons,
+                addIncidentLabel = if (showTeamIncidentButtons) {
+                    if (promptScoringIncident) "Add ${matchLogTypeLabel(defaultIncidentDialogType(rules, teamIncidentTypes))}" else "Add Incident"
+                } else {
+                    null
+                },
+                onAddIncident = { openIncidentDialog(match.match.team1Id) },
                 modifier = Modifier.weight(1f),
             )
 
@@ -709,6 +740,14 @@ fun MatchDetailScreen(
                         }
                     )
                 }
+                if (showTeamAgnosticIncidentButton) {
+                    Button(
+                        onClick = { openIncidentDialog(null) },
+                        enabled = canConfirmResult,
+                    ) {
+                        Text("Add Incident")
+                    }
+                }
             }
 
             ScoreCard(
@@ -717,8 +756,8 @@ fun MatchDetailScreen(
                 modifier = Modifier
                     .weight(1f),
                 increase = {
-                    if (shouldRequireScoringIncident(rules, event)) {
-                        openPointIncidentDialog(match.match.team2Id)
+                    if (promptScoringIncident) {
+                        openIncidentDialog(match.match.team2Id)
                     } else {
                         component.updateScore(isTeam1 = false, increment = true)
                     }
@@ -728,6 +767,13 @@ fun MatchDetailScreen(
                 },
                 enabled = canIncrement,
                 showControls = showOfficialScoreControls,
+                showAdjustControls = showScoreAdjustButtons,
+                addIncidentLabel = if (showTeamIncidentButtons) {
+                    if (promptScoringIncident) "Add ${matchLogTypeLabel(defaultIncidentDialogType(rules, teamIncidentTypes))}" else "Add Incident"
+                } else {
+                    null
+                },
+                onAddIncident = { openIncidentDialog(match.match.team2Id) },
             )
         }
 
@@ -832,13 +878,14 @@ fun MatchDetailScreen(
                             Text("No match details recorded.", style = MaterialTheme.typography.bodySmall)
                         } else {
                             match.match.incidents.sortedBy { incident -> incident.sequence }.forEach { incident ->
-                                Text(
-                                    text = buildIncidentSummary(
+                                MatchIncidentCard(
+                                    summary = buildIncidentSummary(
                                         incident = incident,
                                         team1 = team1,
                                         team2 = team2,
                                     ),
-                                    style = MaterialTheme.typography.bodySmall,
+                                    canRemove = isOfficial && officialCheckedIn,
+                                    onRemove = { component.removeMatchIncident(incident.id) },
                                 )
                             }
                         }
@@ -1096,6 +1143,9 @@ fun ScoreCard(
     increase: () -> Unit,
     enabled: Boolean,
     showControls: Boolean,
+    showAdjustControls: Boolean = true,
+    addIncidentLabel: String? = null,
+    onAddIncident: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     if (!showControls) {
@@ -1129,21 +1179,25 @@ fun ScoreCard(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            modifier = Modifier
-            .wrapContentSize()
-            .clickable(
-                enabled = enabled,
-                onClick = decrease,
-            )
-        ) {
-            Icon(
-                imageVector = MVPIcons.Remove24Px,
-                contentDescription = "Decrease score",
+        if (showAdjustControls) {
+            Box(
                 modifier = Modifier
-                    .size(48.dp),
-                tint = MaterialTheme.colorScheme.onSurface
-            )
+                .wrapContentSize()
+                .clickable(
+                    enabled = enabled,
+                    onClick = decrease,
+                )
+            ) {
+                Icon(
+                    imageVector = MVPIcons.Remove24Px,
+                    contentDescription = "Decrease score",
+                    modifier = Modifier
+                        .size(48.dp),
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
+            }
+        } else {
+            Box(modifier = Modifier.size(48.dp))
         }
 
         Column(
@@ -1162,20 +1216,183 @@ fun ScoreCard(
                 color = MaterialTheme.colorScheme.onSurface,
                 fontSize = 64.sp
             )
+            if (addIncidentLabel != null && onAddIncident != null) {
+                Button(
+                    onClick = onAddIncident,
+                    enabled = enabled,
+                ) {
+                    Text(addIncidentLabel)
+                }
+            }
         }
 
-        Box(
-            modifier = Modifier
-            .wrapContentSize()
-            .clickable(enabled = enabled, onClick = increase)
-        ) {
-            Icon(
-                imageVector = Icons.Default.Add,
-                contentDescription = "Increase score",
+        if (showAdjustControls) {
+            Box(
                 modifier = Modifier
-                    .size(48.dp),
-                tint = MaterialTheme.colorScheme.onSurface
+                .wrapContentSize()
+                .clickable(enabled = enabled, onClick = increase)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = "Increase score",
+                    modifier = Modifier
+                        .size(48.dp),
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
+            }
+        } else {
+            Box(modifier = Modifier.size(48.dp))
+        }
+    }
+}
+
+@Composable
+internal fun MatchIncidentEntryDialog(
+    incidentOptions: List<String>,
+    selectedIncidentType: String,
+    onIncidentTypeChange: (String) -> Unit,
+    teamScoped: Boolean,
+    participantOptions: List<MatchParticipantOption>,
+    selectedParticipant: MatchParticipantOption?,
+    onParticipantSelected: (MatchParticipantOption?) -> Unit,
+    requiresParticipant: Boolean,
+    minute: String,
+    onMinuteChange: (String) -> Unit,
+    note: String,
+    onNoteChange: (String) -> Unit,
+    onSave: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val selectedTypeIsScoring = isScoringIncidentType(selectedIncidentType)
+    val participantLabel = selectedParticipant?.label
+        ?: if (participantOptions.isEmpty()) "No roster available" else ""
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Record incident") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (incidentOptions.size > 1) {
+                    DropdownField(
+                        modifier = Modifier.fillMaxWidth(),
+                        value = matchLogTypeLabel(selectedIncidentType),
+                        label = "Incident type",
+                    ) { closeMenu ->
+                        incidentOptions.forEach { option ->
+                            DropdownMenuItem(
+                                text = { Text(matchLogTypeLabel(option)) },
+                                onClick = {
+                                    onIncidentTypeChange(option)
+                                    closeMenu()
+                                },
+                            )
+                        }
+                    }
+                } else if (incidentOptions.size == 1) {
+                    Text(
+                        text = matchLogTypeLabel(selectedIncidentType),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+                if (teamScoped) {
+                    DropdownField(
+                        modifier = Modifier.fillMaxWidth(),
+                        value = participantLabel,
+                        label = if (requiresParticipant) "Player" else "Player (optional)",
+                    ) { closeMenu ->
+                        if (!requiresParticipant) {
+                            DropdownMenuItem(
+                                text = { Text("No player selected") },
+                                onClick = {
+                                    onParticipantSelected(null)
+                                    closeMenu()
+                                },
+                            )
+                        }
+                        participantOptions.forEach { option ->
+                            DropdownMenuItem(
+                                text = { Text(option.label) },
+                                onClick = {
+                                    onParticipantSelected(option)
+                                    closeMenu()
+                                },
+                            )
+                        }
+                    }
+                }
+                OutlinedTextField(
+                    value = minute,
+                    onValueChange = onMinuteChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Minute") },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = note,
+                    onValueChange = onNoteChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Details") },
+                    minLines = 2,
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onSave,
+                enabled = !requiresParticipant || selectedParticipant != null,
+            ) {
+                Text(if (selectedTypeIsScoring) "Save ${matchLogTypeLabel(selectedIncidentType)}" else "Save Incident")
+            }
+        },
+        dismissButton = {
+            Button(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+    )
+}
+
+@Composable
+internal fun MatchIncidentCard(
+    summary: String,
+    canRemove: Boolean,
+    onRemove: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        tonalElevation = 1.dp,
+        shadowElevation = 1.dp,
+    ) {
+        Box(
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(
+                text = summary,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(
+                    start = 12.dp,
+                    top = 10.dp,
+                    end = if (canRemove) 44.dp else 12.dp,
+                    bottom = 10.dp,
+                ),
             )
+            if (canRemove) {
+                IconButton(
+                    onClick = onRemove,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .size(32.dp),
+                ) {
+                    Icon(
+                        imageVector = MVPIcons.Remove24Px,
+                        contentDescription = "Remove incident",
+                        tint = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
         }
     }
 }
@@ -1347,7 +1564,30 @@ private fun resolveIncidentParticipantLabel(
     }
 }
 
-private fun buildIncidentSummary(
+private fun resolveScoringIncidentParticipantLabel(
+    participantUserId: String?,
+    eventRegistrationId: String?,
+    team: TeamWithRelations?,
+): String? {
+    val playersById = team?.players.orEmpty().associateBy(UserData::id)
+    val registrations = team?.team?.activePlayerRegistrations().orEmpty()
+    val registration = eventRegistrationId?.let { registrationId ->
+        registrations.firstOrNull { row -> row.id == registrationId }
+    } ?: participantUserId?.let { userId ->
+        registrations.firstOrNull { row -> row.userId == userId }
+    }
+    val player = registration?.userId?.let { userId -> playersById[userId] }
+        ?: participantUserId?.let { userId -> playersById[userId] }
+    val name = player?.fullName
+        ?.takeIf(String::isNotBlank)
+        ?: registration?.userId?.takeIf(String::isNotBlank)
+        ?: participantUserId?.takeIf(String::isNotBlank)
+        ?: return null
+    val jersey = registration?.jerseyNumber?.trim()?.takeIf(String::isNotBlank)
+    return if (jersey == null) name else "$name #$jersey"
+}
+
+internal fun buildIncidentSummary(
     incident: com.razumly.mvp.core.data.dataTypes.MatchIncidentMVP,
     team1: TeamWithRelations?,
     team2: TeamWithRelations?,
@@ -1356,6 +1596,17 @@ private fun buildIncidentSummary(
         team1?.team?.id -> team1?.team?.name
         team2?.team?.id -> team2?.team?.name
         else -> null
+    }
+    if (isScoringIncidentType(incident.incidentType) || (incident.linkedPointDelta ?: 0) != 0) {
+        val scoringParticipantLabel = when (incident.eventTeamId) {
+            team1?.team?.id -> resolveScoringIncidentParticipantLabel(incident.participantUserId, incident.eventRegistrationId, team1)
+            team2?.team?.id -> resolveScoringIncidentParticipantLabel(incident.participantUserId, incident.eventRegistrationId, team2)
+            else -> null
+        }
+        val minuteLabel = incident.minute?.let { minute -> "$minute'" }
+        return listOfNotNull(teamLabel, scoringParticipantLabel, minuteLabel)
+            .joinToString(" | ")
+            .ifBlank { matchLogTypeLabel(incident.incidentType) }
     }
     val participantLabel = when (incident.eventTeamId) {
         team1?.team?.id -> resolveIncidentParticipantLabel(incident.participantUserId, incident.eventRegistrationId, team1)

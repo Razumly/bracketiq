@@ -6,6 +6,8 @@ import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
+import com.razumly.mvp.core.data.util.buildCombinedDivisionTypeId
+import com.razumly.mvp.core.data.util.buildEventDivisionId
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -93,9 +95,56 @@ class EventOverviewCapacityTest {
         assertEquals(1, countTeamSignupParticipantsForCapacity(event, teams, selectedDivision))
     }
 
+    @Test
+    fun countTeamSignupParticipantsForCapacity_multiDivision_matchesTeamDivisionTypeMetadata() {
+        val eventId = "event-1"
+        val divisionTypeId = buildCombinedDivisionTypeId(
+            skillDivisionTypeId = "open",
+            ageDivisionTypeId = "u17",
+        )
+        val selectedDivision = DivisionDetail(
+            id = buildEventDivisionId(eventId, "c_skill_open_age_u17"),
+            key = "c_skill_open_age_u17",
+            name = "Coed Open U17",
+            divisionTypeId = divisionTypeId,
+            skillDivisionTypeId = "open",
+            ageDivisionTypeId = "u17",
+            gender = "C",
+        )
+        val event = Event(
+            id = eventId,
+            eventType = EventType.LEAGUE,
+            teamSignup = true,
+            singleDivision = false,
+        )
+        val teams = listOf(
+            buildTeamWithPlayers(
+                teamId = "team-1",
+                division = "unused",
+                divisionTypeId = divisionTypeId,
+                ageDivisionTypeId = "u17",
+            ),
+            buildTeamWithPlayers(
+                teamId = "team-2",
+                division = "unused",
+                divisionTypeId = buildCombinedDivisionTypeId(
+                    skillDivisionTypeId = "open",
+                    ageDivisionTypeId = "u15",
+                ),
+                ageDivisionTypeId = "u15",
+            ),
+        )
+
+        assertEquals(1, countTeamSignupParticipantsForCapacity(event, teams, selectedDivision))
+    }
+
     private fun buildTeamWithPlayers(
         teamId: String,
         division: String = "open",
+        divisionTypeId: String? = null,
+        skillDivisionTypeId: String? = "open",
+        ageDivisionTypeId: String? = null,
+        divisionGender: String? = "C",
         kind: String? = "REGISTERED",
         parentTeamId: String? = "parent-$teamId",
     ): TeamWithPlayers = TeamWithPlayers(
@@ -106,6 +155,10 @@ class EventOverviewCapacityTest {
             captainId = "captain-$teamId",
             parentTeamId = parentTeamId,
             teamSize = 2,
+            divisionTypeId = divisionTypeId,
+            skillDivisionTypeId = skillDivisionTypeId,
+            ageDivisionTypeId = ageDivisionTypeId,
+            divisionGender = divisionGender,
             id = teamId,
         ),
         captain = UserData(),

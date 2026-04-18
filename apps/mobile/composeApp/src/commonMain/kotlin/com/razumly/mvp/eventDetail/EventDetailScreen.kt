@@ -725,6 +725,10 @@ private fun EventOverviewSections(
     val visibleTeams = remember(event.eventType, event.teamSignup, eventWithRelations.teams) {
         event.visibleTeams(eventWithRelations.teams)
     }
+    val teamCapacityLoading = event.teamSignup &&
+        teamsAndParticipantsLoading &&
+        visibleTeams.isEmpty() &&
+        selectedWeeklyOccurrenceSummary == null
     val divisionCapacitySummaries = remember(
         event.id,
         event.teamSignup,
@@ -783,20 +787,38 @@ private fun EventOverviewSections(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    CapacityStat(title = if (event.teamSignup) "Teams" else "Spots", value = "$filled/$capacity")
+                    CapacityStat(
+                        title = if (event.teamSignup) "Teams" else "Spots",
+                        value = if (teamCapacityLoading) {
+                            "Loading"
+                        } else {
+                            "$filled/$capacity"
+                        },
+                    )
                     CapacityStat(
                         title = if (event.teamSignup) "Free Agents" else "Waitlist",
                         value = if (event.teamSignup) freeAgentIds.size.toString() else waitlistIds.size.toString(),
                     )
                     CapacityStat(title = "Left", value = spotsLeft.toString())
                 }
-                LinearProgressIndicator(
-                    progress = { progress },
-                    modifier = Modifier.fillMaxWidth(),
-                    color = MaterialTheme.colorScheme.primary
-                )
+                if (teamCapacityLoading) {
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                } else {
+                    LinearProgressIndicator(
+                        progress = { progress },
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
                 Text(
-                    text = "${(progress * 100).toInt()}% full - $spotsLeft left",
+                    text = if (teamCapacityLoading) {
+                        "Loading teams..."
+                    } else {
+                        "${(progress * 100).toInt()}% full - $spotsLeft left"
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -850,7 +872,10 @@ private fun EventOverviewSections(
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             divisionCapacitySummaries.forEach { summary ->
-                                DivisionCapacityRow(summary)
+                                DivisionCapacityRow(
+                                    summary = summary,
+                                    isLoading = teamCapacityLoading,
+                                )
                             }
                         }
                     }
@@ -987,6 +1012,7 @@ private fun CapacityStat(
 @Composable
 private fun DivisionCapacityRow(
     summary: DivisionCapacitySummary,
+    isLoading: Boolean = false,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -1010,7 +1036,9 @@ private fun DivisionCapacityRow(
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 Text(
-                    text = if (summary.capacity > 0) {
+                    text = if (isLoading) {
+                        "Loading"
+                    } else if (summary.capacity > 0) {
                         "${summary.filled}/${summary.capacity}"
                     } else {
                         summary.filled.toString()
@@ -1020,13 +1048,22 @@ private fun DivisionCapacityRow(
                     color = MaterialTheme.colorScheme.onSurface,
                 )
             }
-            LinearProgressIndicator(
-                progress = { summary.progress },
-                modifier = Modifier.fillMaxWidth(),
-                color = MaterialTheme.colorScheme.primary,
-            )
+            if (isLoading) {
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            } else {
+                LinearProgressIndicator(
+                    progress = { summary.progress },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
             Text(
-                text = if (summary.capacity > 0) {
+                text = if (isLoading) {
+                    "Loading teams..."
+                } else if (summary.capacity > 0) {
                     "${(summary.progress * 100).toInt()}% full - ${summary.left} left"
                 } else {
                     "No capacity configured"

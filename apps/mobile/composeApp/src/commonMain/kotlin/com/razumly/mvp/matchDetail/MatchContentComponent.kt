@@ -42,6 +42,8 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
@@ -78,6 +80,15 @@ interface MatchContentComponent {
         minute: Int?,
         note: String?,
     )
+    fun recordMatchIncident(
+        eventTeamId: String?,
+        incidentType: String,
+        eventRegistrationId: String?,
+        participantUserId: String?,
+        minute: Int?,
+        note: String?,
+    )
+    fun removeMatchIncident(incidentId: String)
     fun requestSetConfirmation()
     fun confirmSet()
 }
@@ -137,6 +148,8 @@ class DefaultMatchContentComponent(
             }.stateIn(scope, SharingStarted.Eagerly, selectedEvent)
 
     private val _optimisticMatch = MutableStateFlow<MatchWithTeams?>(null)
+    private val localMatchSaveMutex = Mutex()
+    private var localMatchSaveVersion = 0L
 
     override val matchWithTeams = _optimisticMatch.flatMapLatest { optimisticMatch ->
         if (optimisticMatch != null) {
@@ -519,6 +532,27 @@ class DefaultMatchContentComponent(
         minute: Int?,
         note: String?,
     ) {
+        val currentMatch = matchWithTeams.value.match
+        val rules = resolveActiveRules(currentMatch, event.value)
+        val eventTeamId = if (isTeam1) currentMatch.team1Id else currentMatch.team2Id
+        recordMatchIncident(
+            eventTeamId = eventTeamId,
+            incidentType = rules.autoCreatePointIncidentType?.takeIf(String::isNotBlank) ?: "POINT",
+            eventRegistrationId = eventRegistrationId,
+            participantUserId = participantUserId,
+            minute = minute,
+            note = note,
+        )
+    }
+
+    override fun recordMatchIncident(
+        eventTeamId: String?,
+        incidentType: String,
+        eventRegistrationId: String?,
+        participantUserId: String?,
+        minute: Int?,
+        note: String?,
+    ) {
         if (!isOfficial.value || officialCheckedIn.value != true || matchFinished.value) {
             return
         }
@@ -530,29 +564,33 @@ class DefaultMatchContentComponent(
         if (activeSegment.status == "COMPLETE") {
             return
         }
-        val eventTeamId = if (isTeam1) scoringMatch.team1Id else scoringMatch.team2Id
-        if (eventTeamId.isNullOrBlank()) {
+        val normalizedIncidentType = incidentType.trim().takeIf(String::isNotBlank) ?: "NOTE"
+        val scoringIncident = isScoringIncidentType(normalizedIncidentType)
+        val normalizedEventTeamId = eventTeamId?.trim()?.takeIf(String::isNotBlank)
+        if (scoringIncident && normalizedEventTeamId == null) {
             return
         }
 
-        val updatedScoringMatch = scoringMatch.updateSegmentScore(
-            segmentIndex = segmentIndex,
-            eventTeamId = eventTeamId,
-            delta = 1,
-            segmentCount = maxSets,
-        )
-        val incidentType = resolveActiveRules(scoringMatch, event.value).autoCreatePointIncidentType
-            ?.takeIf(String::isNotBlank)
-            ?: "POINT"
+        val updatedScoringMatch = if (scoringIncident) {
+            scoringMatch.updateSegmentScore(
+                segmentIndex = segmentIndex,
+                eventTeamId = normalizedEventTeamId!!,
+                delta = 1,
+                segmentCount = maxSets,
+            )
+        } else {
+            scoringMatch
+        }
         val updatedSegment = updatedScoringMatch.segments.getOrNull(segmentIndex) ?: activeSegment
-        val localIncident = buildPendingScoringIncident(
+        val localIncident = buildPendingIncident(
             match = updatedScoringMatch,
             segment = updatedSegment,
-            eventTeamId = eventTeamId,
+            eventTeamId = normalizedEventTeamId,
             eventRegistrationId = eventRegistrationId,
             participantUserId = participantUserId,
             officialUserId = currentUser.id.takeIf(String::isNotBlank),
-            incidentType = incidentType,
+            incidentType = normalizedIncidentType,
+            linkedPointDelta = if (scoringIncident) 1 else null,
             minute = minute,
             note = note,
         )
@@ -578,6 +616,39 @@ class DefaultMatchContentComponent(
                 )
                 matchRepository.saveMatchLocally(failedMatch)
                 _optimisticMatch.value = currentMatch.copy(match = failedMatch)
+            }
+        }
+    }
+
+    override fun removeMatchIncident(incidentId: String) {
+        val normalizedIncidentId = incidentId.trim().takeIf(String::isNotBlank) ?: return
+        if (!isOfficial.value || officialCheckedIn.value != true) {
+            return
+        }
+
+        val currentMatch = matchWithTeams.value
+        val scoringMatch = updateMatchStructureForCurrentContext(currentMatch.match)
+        val incident = scoringMatch.incidents.firstOrNull { row -> row.id == normalizedIncidentId } ?: return
+        val updatedMatch = scoringMatch
+            .removeIncidentScore(incident)
+            .copy(incidents = scoringMatch.incidents.filterNot { row -> row.id == normalizedIncidentId })
+        _optimisticMatch.value = currentMatch.copy(match = updatedMatch)
+
+        scope.launch {
+            matchRepository.saveMatchLocally(updatedMatch)
+            if (incident.isPendingUpload()) {
+                _optimisticMatch.value = null
+                return@launch
+            }
+            matchRepository.updateMatchOperations(
+                match = updatedMatch,
+                incidentOperations = listOf(MatchIncidentOperationDto(action = "DELETE", id = incident.id)),
+            ).onSuccess {
+                _optimisticMatch.value = null
+            }.onFailure { error ->
+                _errorState.value = "Failed to remove incident: ${error.userMessage()}"
+                matchRepository.saveMatchLocally(scoringMatch)
+                _optimisticMatch.value = currentMatch.copy(match = scoringMatch)
             }
         }
     }
@@ -665,6 +736,9 @@ class DefaultMatchContentComponent(
     private fun queueDatabaseUpdate(match: MatchMVP) {
         pendingUpdates.add(match)
         scope.launch {
+            persistMatchLocally(match, clearOptimisticOnSuccess = true)
+        }
+        scope.launch {
             delay(500)
             processPendingUpdates()
         }
@@ -683,8 +757,6 @@ class DefaultMatchContentComponent(
             latestUpdate?.let { match ->
                 matchRepository.updateMatch(match).onFailure { error ->
                     _errorState.value = "Failed to update score: ${error.userMessage()}"
-                    // Revert optimistic update on failure
-                    _optimisticMatch.value = null
                 }
             }
         } finally {
@@ -700,6 +772,9 @@ class DefaultMatchContentComponent(
         scope.launch {
             // Clear any pending updates since we're syncing now
             pendingUpdates.clear()
+            if (!persistMatchLocally(match, clearOptimisticOnSuccess = true)) {
+                return@launch
+            }
 
             val pendingIncidentOperations = pendingIncidentOperationsFor(match)
             if (finalize || pendingIncidentOperations.isNotEmpty()) {
@@ -727,6 +802,27 @@ class DefaultMatchContentComponent(
                     // Keep optimistic state on failure
                 }
             }
+        }
+    }
+
+    private suspend fun persistMatchLocally(
+        match: MatchMVP,
+        clearOptimisticOnSuccess: Boolean,
+    ): Boolean {
+        val saveVersion = ++localMatchSaveVersion
+        return localMatchSaveMutex.withLock {
+            matchRepository.saveMatchLocally(match)
+                .onSuccess {
+                    if (clearOptimisticOnSuccess && saveVersion == localMatchSaveVersion) {
+                        _optimisticMatch.value = null
+                    }
+                }
+                .onFailure { error ->
+                    if (saveVersion == localMatchSaveVersion) {
+                        _errorState.value = "Failed to save match locally: ${error.userMessage()}"
+                    }
+                }
+                .isSuccess
         }
     }
 
@@ -996,14 +1092,15 @@ class DefaultMatchContentComponent(
             )
         }
 
-    private fun buildPendingScoringIncident(
+    private fun buildPendingIncident(
         match: MatchMVP,
         segment: MatchSegmentMVP,
-        eventTeamId: String,
+        eventTeamId: String?,
         eventRegistrationId: String?,
         participantUserId: String?,
         officialUserId: String?,
         incidentType: String,
+        linkedPointDelta: Int?,
         minute: Int?,
         note: String?,
     ): MatchIncidentMVP {
@@ -1021,7 +1118,7 @@ class DefaultMatchContentComponent(
             incidentType = incidentType,
             sequence = nextSequence,
             minute = minute,
-            linkedPointDelta = 1,
+            linkedPointDelta = linkedPointDelta,
             note = note?.trim()?.takeIf(String::isNotBlank),
             uploadStatus = MATCH_INCIDENT_UPLOAD_PENDING,
         )
@@ -1068,6 +1165,26 @@ class DefaultMatchContentComponent(
             }
         },
     )
+
+    private fun MatchMVP.removeIncidentScore(incident: MatchIncidentMVP): MatchMVP {
+        val linkedDelta = incident.linkedPointDelta ?: return this
+        if (linkedDelta == 0) {
+            return this
+        }
+        val eventTeamId = incident.eventTeamId?.trim()?.takeIf(String::isNotBlank) ?: return this
+        val segmentIndex = segments.indexOfFirst { segment ->
+            segment.id == incident.segmentId || segment.legacyId == incident.segmentId
+        }
+        if (segmentIndex < 0) {
+            return this
+        }
+        return updateSegmentScore(
+            segmentIndex = segmentIndex,
+            eventTeamId = eventTeamId,
+            delta = -linkedDelta,
+            segmentCount = maxSets,
+        )
+    }
 
     private fun normalizeScoreList(values: List<Int>, setCount: Int): List<Int> {
         val normalized = values.take(setCount).toMutableList()
@@ -1188,7 +1305,12 @@ internal fun shouldRequireScoringIncident(
     rules: ResolvedMatchRulesMVP,
     event: Event?,
 ): Boolean {
-    return event?.autoCreatePointMatchIncidents == true || rules.pointIncidentRequiresParticipant
+    return rules.pointIncidentRequiresParticipant
+}
+
+internal fun isScoringIncidentType(type: String?): Boolean = when (type?.trim()?.uppercase()) {
+    "POINT", "GOAL", "RUN", "SCORE" -> true
+    else -> false
 }
 
 private data class OfficialUserLookup(

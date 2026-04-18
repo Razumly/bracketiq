@@ -3,9 +3,7 @@ package com.razumly.mvp.eventDetail
 import com.razumly.mvp.core.data.dataTypes.DivisionDetail
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
-import com.razumly.mvp.core.data.util.divisionsEquivalent
 import com.razumly.mvp.core.data.util.isPlaceholderSlot
-import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 
 internal fun Event.visibleTeams(teams: List<TeamWithPlayers>): List<TeamWithPlayers> =
     if (!teamSignup) {
@@ -35,13 +33,9 @@ internal fun countTeamSignupParticipantsForCapacity(
     selectedDivision: DivisionDetail? = null,
 ): Int {
     val visibleTeams = event.visibleTeams(teams)
-    val divisionId = selectedDivision?.id?.normalizeDivisionIdentifier()?.takeIf(String::isNotBlank)
-    val divisionKey = selectedDivision?.key?.normalizeDivisionIdentifier()?.takeIf(String::isNotBlank)
-    val shouldFilterDivision = !event.singleDivision && (divisionId != null || divisionKey != null)
-    return visibleTeams.count { teamWithPlayers ->
-        val team = teamWithPlayers.team
-        !shouldFilterDivision ||
-            (divisionId != null && divisionsEquivalent(team.division, divisionId)) ||
-            (divisionKey != null && divisionsEquivalent(team.division, divisionKey))
+    val targetDivision = selectedDivision
+    if (event.singleDivision || targetDivision == null) {
+        return visibleTeams.size
     }
+    return visibleTeams.count { teamWithPlayers -> teamWithPlayers.team.matchesEventDivision(targetDivision) }
 }
