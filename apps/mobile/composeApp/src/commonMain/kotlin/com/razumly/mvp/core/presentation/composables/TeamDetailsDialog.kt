@@ -22,7 +22,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.razumly.mvp.core.data.dataTypes.TeamStaffAssignment
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
+import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.activePlayerRegistrations
 import com.razumly.mvp.core.data.dataTypes.isActive
 import com.razumly.mvp.core.data.dataTypes.normalizedRole
 import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
@@ -52,6 +54,9 @@ fun TeamDetailsDialog(
                 val syncedTeam = team.team.withSynchronizedMembership()
                 val knownUsersById = (knownUsers + team.players + team.pendingPlayers + listOfNotNull(team.captain, currentUser))
                     .associateBy { it.id }
+                val activePlayerRegistrationsByUserId = syncedTeam
+                    .activePlayerRegistrations()
+                    .associateBy(TeamPlayerRegistration::userId)
                 val activeStaffAssignments = syncedTeam.staffAssignments
                     .filter(TeamStaffAssignment::isActive)
                     .sortedWith(
@@ -131,6 +136,7 @@ fun TeamDetailsDialog(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(team.players) { player ->
+                        val playerRegistration = activePlayerRegistrationsByUserId[player.id]
                         PlayerCardWithActions(
                             player = player,
                             currentUser = currentUser,
@@ -145,6 +151,7 @@ fun TeamDetailsDialog(
                             onUnfollow = { user -> onPlayerAction(user, PlayerAction.UNFOLLOW) },
                             onBlock = onBlockPlayer,
                             onUnblock = onUnblockPlayer,
+                            jerseyNumber = playerRegistration?.jerseyNumber,
                             modifier = Modifier.fillMaxWidth()
                         )
                     }

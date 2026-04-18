@@ -34,6 +34,11 @@ import io.ktor.http.encodeURLQueryComponent
 
 private data class AvatarColorScheme(val background: Color, val text: Color)
 
+internal data class NetworkAvatarResolvedSource(
+    val fallbackName: String,
+    val imageUrl: String?,
+)
+
 private val avatarPalette = listOf(
     AvatarColorScheme(background = Color(0xFFDCEAF7), text = Color(0xFF19497A)),
     AvatarColorScheme(background = Color(0xFFE7EDF3), text = Color(0xFF1E2633)),
@@ -48,13 +53,21 @@ fun NetworkAvatar(
     size: Dp,
     contentDescription: String?,
     modifier: Modifier = Modifier,
+    jerseyNumber: String? = null,
 ) {
-    val safeName = remember(displayName) {
-        displayName.trim().ifBlank { "User" }
-    }
     val sizePx = remember(size) { size.value.toInt().coerceAtLeast(16) }
-    val initialsUrl = remember(safeName, sizePx) { buildInitialsAvatarUrl(safeName, sizePx) }
-    val normalizedImageUrl = remember(imageRef, sizePx) { resolveImageRef(imageRef, sizePx) }
+    val resolvedSource = remember(displayName, imageRef, jerseyNumber, sizePx) {
+        resolveNetworkAvatarSource(
+            displayName = displayName,
+            imageRef = imageRef,
+            jerseyNumber = jerseyNumber,
+            sizePx = sizePx,
+        )
+    }
+    val initialsUrl = remember(resolvedSource.fallbackName, sizePx) {
+        buildInitialsAvatarUrl(resolvedSource.fallbackName, sizePx)
+    }
+    val normalizedImageUrl = resolvedSource.imageUrl
     var imageModel by remember(normalizedImageUrl, initialsUrl) {
         mutableStateOf<String?>(normalizedImageUrl ?: initialsUrl)
     }
@@ -70,7 +83,7 @@ fun NetworkAvatar(
         contentAlignment = Alignment.Center,
     ) {
         LocalInitialsAvatar(
-            displayName = safeName,
+            displayName = resolvedSource.fallbackName,
             size = size,
             modifier = Modifier.fillMaxSize(),
         )
@@ -151,6 +164,21 @@ private fun resolveImageRef(imageRef: String?, sizePx: Int): String? {
         raw.startsWith("/") -> "${apiBaseUrl.trimEnd('/')}$raw"
         else -> getImageUrl(fileId = raw, width = sizePx, height = sizePx)
     }
+}
+
+internal fun resolveNetworkAvatarSource(
+    displayName: String,
+    imageRef: String?,
+    jerseyNumber: String?,
+    sizePx: Int,
+): NetworkAvatarResolvedSource {
+    val safeName = displayName.trim().ifBlank { "User" }
+    val safeJerseyNumber = jerseyNumber?.trim()?.takeIf(String::isNotBlank)
+
+    return NetworkAvatarResolvedSource(
+        fallbackName = safeJerseyNumber ?: safeName,
+        imageUrl = if (safeJerseyNumber != null) null else resolveImageRef(imageRef, sizePx),
+    )
 }
 
 private fun computeInitials(name: String): String {

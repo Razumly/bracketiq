@@ -22,6 +22,7 @@ fun UnifiedCard(
     entity: DisplayableEntity,
     modifier: Modifier = Modifier,
     subtitle: String? = null,
+    avatarJerseyNumber: String? = null,
     leadingContent: @Composable (() -> Unit)? = null,
     trailingContent: @Composable (() -> Unit)? = null,
     isPending: Boolean = false
@@ -45,6 +46,7 @@ fun UnifiedCard(
                     imageRef = entity.imageUrl,
                     size = UIConstants.PROFILE_PICTURE_HEIGHT.dp,
                     contentDescription = "${entity.displayName} Image",
+                    jerseyNumber = avatarJerseyNumber,
                 )
             }
 

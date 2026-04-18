@@ -50,6 +50,7 @@ fun PlayerCardWithActions(
     onBlock: (UserData, Boolean) -> Unit,
     onUnblock: (UserData) -> Unit,
     onInviteToTeam: ((UserData) -> Unit)? = null,
+    jerseyNumber: String? = null,
 ) {
     var showPopup by remember { mutableStateOf(false) }
     var showBlockDialog by remember(player.id) { mutableStateOf(false) }
@@ -64,6 +65,7 @@ fun PlayerCardWithActions(
     Box {
         PlayerCard(
             player = player,
+            jerseyNumber = jerseyNumber,
             modifier = modifier.clickable(enabled = !isCurrentUser) {
                 showPopup = true
             }
