@@ -9,9 +9,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -55,6 +57,7 @@ import com.razumly.mvp.core.data.dataTypes.MatchMVP
 import com.razumly.mvp.core.data.dataTypes.MatchWithRelations
 import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.officialAssignmentLabels
+import com.razumly.mvp.core.presentation.composables.PlatformLoadingIndicator
 import com.razumly.mvp.core.presentation.util.dateFormat
 import com.razumly.mvp.core.presentation.util.timeFormat
 import com.razumly.mvp.eventDetail.composables.ScheduleItem
@@ -133,20 +136,46 @@ fun ProfileMyScheduleScreen(component: ProfileComponent) {
             )
         }
 
-        ScheduleView(
-            items = scheduleItems,
-            fields = scheduleFields,
-            showFab = {},
-            onMatchClick = { match -> component.openScheduleEvent(match.match.eventId) },
-            onEventClick = { event -> component.openScheduleEvent(event.id) },
-            matchCardContent = { match, onClick ->
-                ProfileScheduleMatchCard(
-                    match = match,
-                    event = eventsById[match.match.eventId],
-                    onClick = onClick,
-                )
-            },
-        )
+        if (state.isLoading && scheduleItems.isEmpty()) {
+            MyScheduleLoadingState()
+        } else {
+            ScheduleView(
+                items = scheduleItems,
+                fields = scheduleFields,
+                showFab = {},
+                onMatchClick = { match -> component.openScheduleEvent(match.match.eventId) },
+                onEventClick = { event -> component.openScheduleEvent(event.id) },
+                matchCardContent = { match, onClick ->
+                    ProfileScheduleMatchCard(
+                        match = match,
+                        event = eventsById[match.match.eventId],
+                        onClick = onClick,
+                    )
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun MyScheduleLoadingState() {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            PlatformLoadingIndicator(
+                modifier = Modifier.size(32.dp),
+            )
+            Text(
+                text = "Loading schedule...",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
