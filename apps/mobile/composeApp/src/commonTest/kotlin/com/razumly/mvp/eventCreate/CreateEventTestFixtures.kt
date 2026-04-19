@@ -544,6 +544,19 @@ internal class CreateEvent_FakeMatchRepository : IMatchRepository {
         time: Instant?,
     ): Result<MatchMVP> = Result.success(match)
 
+    override suspend fun setMatchScore(
+        match: MatchMVP,
+        segmentId: String?,
+        sequence: Int,
+        eventTeamId: String,
+        points: Int,
+    ): Result<MatchMVP> = Result.success(match)
+
+    override suspend fun addMatchIncident(
+        match: MatchMVP,
+        operation: MatchIncidentOperationDto,
+    ): Result<MatchMVP> = Result.success(match)
+
     override suspend fun updateMatchesBulk(
         matches: List<MatchMVP>,
         creates: List<StagedMatchCreate>,

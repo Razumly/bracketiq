@@ -678,7 +678,9 @@ class MatchContentComponentTest : MainDispatcherTest() {
         advance()
 
         assertEquals(1, harness.matchRepository.savedMatches.last().team1Points.first())
-        assertEquals(1, harness.matchRepository.updatedMatches.single().team1Points.first())
+        assertEquals(1, harness.matchRepository.scoreSetCalls.single().match.team1Points.first())
+        assertEquals(1, harness.matchRepository.scoreSetCalls.single().points)
+        assertTrue(harness.matchRepository.updatedMatches.isEmpty())
         assertEquals(listOf(1), harness.component.matchWithTeams.value.match.team1Points)
         assertEquals(1, harness.component.matchWithTeams.value.match.segments.first().scores["team-a"])
     }
@@ -723,7 +725,8 @@ class MatchContentComponentTest : MainDispatcherTest() {
         advance()
 
         val confirmationSync = harness.matchRepository.updatedMatches.last()
-        assertEquals(2, harness.matchRepository.updatedMatches.size)
+        assertEquals(1, harness.matchRepository.scoreSetCalls.size)
+        assertEquals(1, harness.matchRepository.updatedMatches.size)
         assertEquals(listOf(1, 0), confirmationSync.team1Points)
         assertEquals("COMPLETE", confirmationSync.segments.first().status)
         assertEquals(1, confirmationSync.segments.first().scores["team-a"])
@@ -836,9 +839,9 @@ class MatchContentComponentTest : MainDispatcherTest() {
         harness.component.confirmSet()
         advance()
 
-        val operationCall = harness.matchRepository.operationCalls.single()
-        assertEquals("COMPLETE", operationCall.segmentOperations.first().status)
-        assertEquals("client:match-incident:match-1:segment-1:1", operationCall.incidentOperations.single().id)
+        val incidentCall = harness.matchRepository.incidentCalls.single()
+        assertEquals("client:match-incident:match-1:segment-1:1", incidentCall.operation.id)
+        assertTrue(harness.matchRepository.operationCalls.isEmpty())
         assertTrue(harness.matchRepository.savedMatches.isEmpty())
         assertEquals("IN_PROGRESS", harness.component.matchWithTeams.value.match.segments.first().status)
         assertEquals(0, harness.component.currentSet.value)
@@ -902,8 +905,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
         )
         advance()
 
-        val operationCall = harness.matchRepository.operationCalls.single()
-        val incident = operationCall.incidentOperations.single()
+        val incident = harness.matchRepository.incidentCalls.single().operation
         assertEquals("CREATE", incident.action)
         assertTrue(incident.id?.startsWith("client:match-incident:") == true)
         assertEquals("team-a", incident.eventTeamId)
@@ -1117,8 +1119,7 @@ class MatchContentComponentTest : MainDispatcherTest() {
         )
         advance()
 
-        val operationCall = harness.matchRepository.operationCalls.single()
-        val incidentOperation = operationCall.incidentOperations.single()
+        val incidentOperation = harness.matchRepository.incidentCalls.single().operation
         assertEquals("CREATE", incidentOperation.action)
         assertEquals("DISCIPLINE", incidentOperation.incidentType)
         assertEquals(null, incidentOperation.linkedPointDelta)
@@ -1182,9 +1183,11 @@ class MatchContentComponentTest : MainDispatcherTest() {
         harness.component.confirmSet()
         advance()
 
+        val incidentCall = harness.matchRepository.incidentCalls.single()
+        assertEquals("client:match-incident:match-1:segment-1:1", incidentCall.operation.id)
         val operationCall = harness.matchRepository.operationCalls.single()
         assertTrue(operationCall.finalize)
-        assertEquals("client:match-incident:match-1:segment-1:1", operationCall.incidentOperations.single().id)
+        assertTrue(operationCall.incidentOperations.isEmpty())
         assertEquals("COMPLETE", operationCall.segmentOperations.single().status)
     }
 }
@@ -1244,6 +1247,8 @@ private class MatchDetailFakeMatchRepository(
     val savedMatches = mutableListOf<MatchMVP>()
     val updatedMatches = mutableListOf<MatchMVP>()
     val operationCalls = mutableListOf<MatchOperationCall>()
+    val scoreSetCalls = mutableListOf<MatchScoreSetCall>()
+    val incidentCalls = mutableListOf<MatchIncidentCall>()
 
     override suspend fun getMatch(matchId: String): Result<MatchMVP> =
         Result.success(matchFlow.value.getOrThrow().match)
@@ -1286,6 +1291,35 @@ private class MatchDetailFakeMatchRepository(
         matchFlow.value = Result.success(match.toMatchWithRelations())
         return Result.success(match)
     }
+
+    override suspend fun setMatchScore(
+        match: MatchMVP,
+        segmentId: String?,
+        sequence: Int,
+        eventTeamId: String,
+        points: Int,
+    ): Result<MatchMVP> {
+        scoreSetCalls += MatchScoreSetCall(
+            match = match,
+            segmentId = segmentId,
+            sequence = sequence,
+            eventTeamId = eventTeamId,
+            points = points,
+        )
+        updateFailure?.let { return Result.failure(it) }
+        matchFlow.value = Result.success(match.toMatchWithRelations())
+        return Result.success(match)
+    }
+
+    override suspend fun addMatchIncident(
+        match: MatchMVP,
+        operation: MatchIncidentOperationDto,
+    ): Result<MatchMVP> {
+        incidentCalls += MatchIncidentCall(match = match, operation = operation)
+        operationFailure?.let { return Result.failure(it) }
+        matchFlow.value = Result.success(match.toMatchWithRelations())
+        return Result.success(match)
+    }
 }
 
 private data class MatchOperationCall(
@@ -1295,6 +1329,19 @@ private data class MatchOperationCall(
     val officialCheckIn: MatchOfficialCheckInOperationDto?,
     val finalize: Boolean,
     val time: Instant?,
+)
+
+private data class MatchScoreSetCall(
+    val match: MatchMVP,
+    val segmentId: String?,
+    val sequence: Int,
+    val eventTeamId: String,
+    val points: Int,
+)
+
+private data class MatchIncidentCall(
+    val match: MatchMVP,
+    val operation: MatchIncidentOperationDto,
 )
 
 private class MatchDetailFakeUserRepository(

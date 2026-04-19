@@ -154,6 +154,14 @@ data class MatchIncidentOperationDto(
 )
 
 @Serializable
+data class MatchScoreSetDto(
+    val segmentId: String? = null,
+    val sequence: Int,
+    val eventTeamId: String,
+    val points: Int,
+)
+
+@Serializable
 data class MatchOfficialCheckInOperationDto(
     val positionId: String? = null,
     val slotIndex: Int? = null,

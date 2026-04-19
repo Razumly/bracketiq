@@ -16,6 +16,7 @@ import com.razumly.mvp.core.network.dto.BulkMatchesResponseDto
 import com.razumly.mvp.core.network.dto.MatchIncidentOperationDto
 import com.razumly.mvp.core.network.dto.MatchOfficialCheckInOperationDto
 import com.razumly.mvp.core.network.dto.MatchResponseDto
+import com.razumly.mvp.core.network.dto.MatchScoreSetDto
 import com.razumly.mvp.core.network.dto.MatchSegmentOperationDto
 import com.razumly.mvp.core.network.dto.MatchUpdateDto
 import com.razumly.mvp.core.network.dto.MatchesResponseDto
@@ -55,6 +56,17 @@ interface IMatchRepository : IMVPRepository {
         officialCheckIn: MatchOfficialCheckInOperationDto? = null,
         finalize: Boolean = false,
         time: Instant? = null,
+    ): Result<MatchMVP>
+    suspend fun setMatchScore(
+        match: MatchMVP,
+        segmentId: String?,
+        sequence: Int,
+        eventTeamId: String,
+        points: Int,
+    ): Result<MatchMVP>
+    suspend fun addMatchIncident(
+        match: MatchMVP,
+        operation: MatchIncidentOperationDto,
     ): Result<MatchMVP>
     suspend fun updateMatchesBulk(
         matches: List<MatchMVP>,
@@ -327,6 +339,42 @@ class MatchRepository(
                     time = time?.toString(),
                 ),
             ).match?.toMatchOrNull() ?: error("Match operations response missing match")
+        },
+        saveCall = { updatedMatch -> upsertRemoteMatchPreservingPendingIncidents(updatedMatch) },
+        onReturn = { it },
+    )
+
+    override suspend fun setMatchScore(
+        match: MatchMVP,
+        segmentId: String?,
+        sequence: Int,
+        eventTeamId: String,
+        points: Int,
+    ): Result<MatchMVP> = singleResponse(
+        networkCall = {
+            api.post<MatchScoreSetDto, MatchResponseDto>(
+                path = "api/events/${match.eventId}/matches/${match.id}/score",
+                body = MatchScoreSetDto(
+                    segmentId = segmentId,
+                    sequence = sequence,
+                    eventTeamId = eventTeamId,
+                    points = points,
+                ),
+            ).match?.toMatchOrNull() ?: error("Score set response missing match")
+        },
+        saveCall = { updatedMatch -> upsertRemoteMatchPreservingPendingIncidents(updatedMatch) },
+        onReturn = { it },
+    )
+
+    override suspend fun addMatchIncident(
+        match: MatchMVP,
+        operation: MatchIncidentOperationDto,
+    ): Result<MatchMVP> = singleResponse(
+        networkCall = {
+            api.post<MatchIncidentOperationDto, MatchResponseDto>(
+                path = "api/events/${match.eventId}/matches/${match.id}/incidents",
+                body = operation.copy(action = "CREATE"),
+            ).match?.toMatchOrNull() ?: error("Add incident response missing match")
         },
         saveCall = { updatedMatch -> upsertRemoteMatchPreservingPendingIncidents(updatedMatch) },
         onReturn = { it },

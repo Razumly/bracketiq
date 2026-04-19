@@ -149,6 +149,7 @@ class DefaultMatchContentComponent(
 
     private val _optimisticMatch = MutableStateFlow<MatchWithTeams?>(null)
     private val localMatchSaveMutex = Mutex()
+    private val scoreSetMutex = Mutex()
     private var localMatchSaveVersion = 0L
 
     override val matchWithTeams = _optimisticMatch.flatMapLatest { optimisticMatch ->
@@ -518,11 +519,14 @@ class DefaultMatchContentComponent(
 
         _optimisticMatch.value = optimisticMatch
 
-        if (checkSetCompletion(updatedScoringMatch)) {
-            syncMatchImmediately(updatedScoringMatch)
-        } else {
-            queueDatabaseUpdate(updatedScoringMatch)
-        }
+        checkSetCompletion(updatedScoringMatch)
+        queueScoreSet(
+            match = updatedScoringMatch,
+            segmentId = activeSegment.id,
+            sequence = activeSegment.sequence,
+            eventTeamId = eventTeamId,
+            points = updatedScoringMatch.segments.getOrNull(setIndex)?.scores?.get(eventTeamId) ?: 0,
+        )
     }
 
     override fun recordPointIncident(
@@ -603,9 +607,9 @@ class DefaultMatchContentComponent(
 
         scope.launch {
             matchRepository.saveMatchLocally(updatedScoringMatchWithIncident)
-            matchRepository.updateMatchOperations(
+            matchRepository.addMatchIncident(
                 match = updatedScoringMatchWithIncident,
-                incidentOperations = listOf(localIncident.toCreateIncidentOperation()),
+                operation = localIncident.toCreateIncidentOperation(),
             ).onSuccess {
                 _optimisticMatch.value = null
             }.onFailure {
@@ -741,6 +745,33 @@ class DefaultMatchContentComponent(
         }
     }
 
+    private fun queueScoreSet(
+        match: MatchMVP,
+        segmentId: String?,
+        sequence: Int,
+        eventTeamId: String,
+        points: Int,
+    ) {
+        scope.launch {
+            if (!persistMatchLocally(match, clearOptimisticOnSuccess = true)) {
+                return@launch
+            }
+            scoreSetMutex.withLock {
+                matchRepository.setMatchScore(
+                    match = match,
+                    segmentId = segmentId,
+                    sequence = sequence,
+                    eventTeamId = eventTeamId,
+                    points = points,
+                ).onSuccess {
+                    _optimisticMatch.value = null
+                }.onFailure { error ->
+                    _errorState.value = "Failed to sync score: ${error.userMessage()}"
+                }
+            }
+        }
+    }
+
     private suspend fun processPendingUpdates() {
         if (isProcessingUpdates || pendingUpdates.isEmpty()) return
 
@@ -777,11 +808,23 @@ class DefaultMatchContentComponent(
             }
 
             val pendingIncidentOperations = pendingIncidentOperationsFor(match)
+            for (operation in pendingIncidentOperations) {
+                val retryResult = matchRepository.addMatchIncident(match = match, operation = operation)
+                if (retryResult.isFailure) {
+                    if (!saveLocallyBeforeRemote) {
+                        _optimisticMatch.value = null
+                    }
+                    _errorState.value = "Failed to sync match: ${
+                        retryResult.exceptionOrNull()?.userMessage() ?: "Unknown error"
+                    }"
+                    return@launch
+                }
+            }
             if (finalize || pendingIncidentOperations.isNotEmpty()) {
                 matchRepository.updateMatchOperations(
                     match = match,
                     segmentOperations = match.toSegmentOperations(),
-                    incidentOperations = pendingIncidentOperations.ifEmpty { null },
+                    incidentOperations = null,
                     finalize = finalize,
                     time = time,
                 ).onSuccess {

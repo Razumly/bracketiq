@@ -229,6 +229,19 @@ private object NoopMatchRepository : IMatchRepository {
         time: kotlin.time.Instant?,
     ): Result<com.razumly.mvp.core.data.dataTypes.MatchMVP> = Result.success(match)
 
+    override suspend fun setMatchScore(
+        match: com.razumly.mvp.core.data.dataTypes.MatchMVP,
+        segmentId: String?,
+        sequence: Int,
+        eventTeamId: String,
+        points: Int,
+    ): Result<com.razumly.mvp.core.data.dataTypes.MatchMVP> = Result.success(match)
+
+    override suspend fun addMatchIncident(
+        match: com.razumly.mvp.core.data.dataTypes.MatchMVP,
+        operation: com.razumly.mvp.core.network.dto.MatchIncidentOperationDto,
+    ): Result<com.razumly.mvp.core.data.dataTypes.MatchMVP> = Result.success(match)
+
     override suspend fun updateMatchesBulk(
         matches: List<com.razumly.mvp.core.data.dataTypes.MatchMVP>,
         creates: List<StagedMatchCreate>,
