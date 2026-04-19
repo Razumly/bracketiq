@@ -222,6 +222,7 @@ private object NoopMatchRepository : IMatchRepository {
 
     override suspend fun updateMatchOperations(
         match: com.razumly.mvp.core.data.dataTypes.MatchMVP,
+        lifecycle: com.razumly.mvp.core.network.dto.MatchLifecycleOperationDto?,
         segmentOperations: List<com.razumly.mvp.core.network.dto.MatchSegmentOperationDto>?,
         incidentOperations: List<com.razumly.mvp.core.network.dto.MatchIncidentOperationDto>?,
         officialCheckIn: com.razumly.mvp.core.network.dto.MatchOfficialCheckInOperationDto?,

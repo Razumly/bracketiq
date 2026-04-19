@@ -24,6 +24,7 @@ import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.network.dto.MatchIncidentOperationDto
+import com.razumly.mvp.core.network.dto.MatchLifecycleOperationDto
 import com.razumly.mvp.core.network.dto.MatchOfficialCheckInOperationDto
 import com.razumly.mvp.core.network.dto.MatchSegmentOperationDto
 import com.razumly.mvp.eventCreate.CreateEvent_FakeEventRepository
@@ -1273,6 +1274,7 @@ private class MatchDetailFakeMatchRepository(
 
     override suspend fun updateMatchOperations(
         match: MatchMVP,
+        lifecycle: MatchLifecycleOperationDto?,
         segmentOperations: List<MatchSegmentOperationDto>?,
         incidentOperations: List<MatchIncidentOperationDto>?,
         officialCheckIn: MatchOfficialCheckInOperationDto?,
@@ -1281,6 +1283,7 @@ private class MatchDetailFakeMatchRepository(
     ): Result<MatchMVP> {
         operationCalls += MatchOperationCall(
             match = match,
+            lifecycle = lifecycle,
             segmentOperations = segmentOperations.orEmpty(),
             incidentOperations = incidentOperations.orEmpty(),
             officialCheckIn = officialCheckIn,
@@ -1324,6 +1327,7 @@ private class MatchDetailFakeMatchRepository(
 
 private data class MatchOperationCall(
     val match: MatchMVP,
+    val lifecycle: MatchLifecycleOperationDto?,
     val segmentOperations: List<MatchSegmentOperationDto>,
     val incidentOperations: List<MatchIncidentOperationDto>,
     val officialCheckIn: MatchOfficialCheckInOperationDto?,

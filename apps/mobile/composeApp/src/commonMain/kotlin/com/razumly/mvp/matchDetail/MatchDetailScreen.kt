@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalTime::class)
+
 package com.razumly.mvp.matchDetail
 
 import androidx.compose.animation.AnimatedVisibility
@@ -39,6 +41,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -75,7 +78,9 @@ import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.activePlayerRegistrations
 import com.razumly.mvp.core.data.dataTypes.normalizedOfficialAssignments
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
+import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
 import com.razumly.mvp.core.presentation.util.CircularRevealUnderlay
+import com.razumly.mvp.core.presentation.util.dateTimeFormat
 import com.razumly.mvp.core.presentation.util.getScreenWidth
 import com.razumly.mvp.core.util.Platform
 import com.razumly.mvp.eventDetail.composables.DropdownField
@@ -89,12 +94,17 @@ import mvp.composeapp.generated.resources.not_official_check_in_message
 import mvp.composeapp.generated.resources.official_check_in_title
 import mvp.composeapp.generated.resources.official_checkin_message
 import org.jetbrains.compose.resources.stringResource
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.format
+import kotlinx.datetime.toLocalDateTime
 import kotlin.math.PI
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
+import kotlin.time.ExperimentalTime
+import kotlin.time.Instant
 
 private const val WEB_LAYOUT_BREAKPOINT_DP = 600
 private const val FIELD_DISTANCE_WARNING_THRESHOLD_MILES = 0.01
@@ -146,6 +156,29 @@ internal fun titleCaseMatchValue(value: String?): String {
         .split("_", "-", " ")
         .filter(String::isNotBlank)
         .joinToString(" ") { part -> part.replaceFirstChar { char -> char.titlecase() } }
+}
+
+private fun parseMatchInstant(value: String?): Instant? {
+    val normalized = value?.trim()?.takeIf(String::isNotBlank) ?: return null
+    return runCatching { Instant.parse(normalized) }.getOrNull()
+}
+
+private fun actualTimeLabel(value: String?): String {
+    return parseMatchInstant(value)
+        ?.toLocalDateTime(TimeZone.currentSystemDefault())
+        ?.format(dateTimeFormat)
+        ?: "Not set"
+}
+
+private fun shouldShowMatchStatusBlock(match: MatchMVP): Boolean {
+    val statusReason = match.statusReason?.trim().orEmpty()
+    val resultStatus = match.resultStatus?.trim()?.uppercase().orEmpty()
+    val resultType = match.resultType?.trim()?.uppercase().orEmpty()
+    val lifecycleStatus = match.status?.trim()?.uppercase().orEmpty()
+    return statusReason.isNotBlank() ||
+        (resultStatus.isNotBlank() && resultStatus !in setOf("PENDING", "OFFICIAL")) ||
+        (resultType.isNotBlank() && resultType != "REGULATION") ||
+        lifecycleStatus in setOf("CANCELLED", "FORFEIT", "SUSPENDED")
 }
 
 internal fun buildMatchOfficialDetailRows(
@@ -321,6 +354,8 @@ fun MatchDetailScreen(
     val isOfficial by component.isOfficial.collectAsState()
     val officialCheckedIn by component.officialCheckedIn.collectAsState()
     val officialCheckInSaving by component.officialCheckInSaving.collectAsState()
+    val matchStartSaving by component.matchStartSaving.collectAsState()
+    val matchTimeSaving by component.matchTimeSaving.collectAsState()
     val showOfficialCheckInDialog by component.showOfficialCheckInDialog.collectAsState()
     val showSetConfirmDialog by component.showSetConfirmDialog.collectAsState()
     val currentSet by component.currentSet.collectAsState()
@@ -352,6 +387,14 @@ fun MatchDetailScreen(
     var incidentParticipantId by remember(match.match.id) { mutableStateOf<String?>(null) }
     var incidentMinute by remember(match.match.id) { mutableStateOf("") }
     var incidentNote by remember(match.match.id) { mutableStateOf("") }
+    var editingActualTimes by remember(match.match.id) { mutableStateOf(false) }
+    var actualStartDraft by remember(match.match.id, match.match.actualStart) {
+        mutableStateOf(parseMatchInstant(match.match.actualStart))
+    }
+    var actualEndDraft by remember(match.match.id, match.match.actualEnd) {
+        mutableStateOf(parseMatchInstant(match.match.actualEnd))
+    }
+    var actualTimeError by remember(match.match.id) { mutableStateOf<String?>(null) }
     val locationTarget = remember(match.field, match.match.id, event, currentLocation) {
         resolveLocationTarget(
             field = match.field,
@@ -448,6 +491,10 @@ fun MatchDetailScreen(
         "POINTS_ONLY" -> rules.supportsDraw || team1Score != team2Score
         else -> true
     }
+    val canStartMatch = showOfficialScoreControls &&
+        officialCheckedIn &&
+        !matchFinished &&
+        match.match.actualStart.isNullOrBlank()
     val promptScoringIncident = shouldRequireScoringIncident(rules, event)
     val showScoreAdjustButtons = !promptScoringIncident
     val teamIncidentTypes = remember(rules) {
@@ -692,7 +739,7 @@ fun MatchDetailScreen(
                 showControls = showOfficialScoreControls,
                 showAdjustControls = showScoreAdjustButtons,
                 addIncidentLabel = if (showTeamIncidentButtons) {
-                    if (promptScoringIncident) "Add ${matchLogTypeLabel(defaultIncidentDialogType(rules, teamIncidentTypes))}" else "Add Incident"
+                    "Add Incident"
                 } else {
                     null
                 },
@@ -728,17 +775,42 @@ fun MatchDetailScreen(
             }
 
             if (showOfficialScoreControls) {
-                Button(
-                    onClick = { component.requestSetConfirmation() },
-                    enabled = confirmResultEnabled,
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        if (rules.scoringModel == "POINTS_ONLY") {
-                            "Save Match"
-                        } else {
-                            "Confirm ${activeSegmentLabel ?: segmentBaseLabel}"
+                    if (canStartMatch) {
+                        Button(
+                            onClick = { component.startMatch() },
+                            enabled = !matchStartSaving,
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                if (matchStartSaving) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.onPrimary,
+                                    )
+                                }
+                                Text("Start Match")
+                            }
                         }
-                    )
+                    }
+                    Button(
+                        onClick = { component.requestSetConfirmation() },
+                        enabled = confirmResultEnabled,
+                    ) {
+                        Text(
+                            if (rules.scoringModel == "POINTS_ONLY") {
+                                "Save Match"
+                            } else {
+                                "Confirm ${activeSegmentLabel ?: segmentBaseLabel}"
+                            }
+                        )
+                    }
                 }
                 if (showTeamAgnosticIncidentButton) {
                     Button(
@@ -769,7 +841,7 @@ fun MatchDetailScreen(
                 showControls = showOfficialScoreControls,
                 showAdjustControls = showScoreAdjustButtons,
                 addIncidentLabel = if (showTeamIncidentButtons) {
-                    if (promptScoringIncident) "Add ${matchLogTypeLabel(defaultIncidentDialogType(rules, teamIncidentTypes))}" else "Add Incident"
+                    "Add Incident"
                 } else {
                     null
                 },
@@ -834,17 +906,133 @@ fun MatchDetailScreen(
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onSurface,
                         )
-                        Text(
-                            text = buildString {
-                                append("Status: ")
-                                append(titleCaseMatchValue(match.match.status).ifBlank { "Scheduled" })
-                                match.match.statusReason
+                        if (shouldShowMatchStatusBlock(match.match)) {
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(
+                                    text = "Status",
+                                    style = MaterialTheme.typography.titleSmall,
+                                )
+                                Text(
+                                    text = titleCaseMatchValue(
+                                        match.match.resultStatus ?: match.match.status ?: "Pending",
+                                    ).ifBlank { "Pending" },
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                                match.match.resultType
                                     ?.let(::titleCaseMatchValue)
                                     ?.takeIf(String::isNotBlank)
-                                    ?.let { reason -> append(" - $reason") }
-                            },
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
+                                    ?.let { result ->
+                                        Text(
+                                            text = "Result: $result",
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                    }
+                                match.match.statusReason
+                                    ?.trim()
+                                    ?.takeIf(String::isNotBlank)
+                                    ?.let { reason ->
+                                        Text(
+                                            text = reason,
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                    }
+                            }
+                        }
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = "Actual Times",
+                                    style = MaterialTheme.typography.titleSmall,
+                                )
+                                if (isOfficial && officialCheckedIn && !editingActualTimes) {
+                                    TextButton(onClick = {
+                                        actualStartDraft = parseMatchInstant(match.match.actualStart)
+                                        actualEndDraft = parseMatchInstant(match.match.actualEnd)
+                                        actualTimeError = null
+                                        editingActualTimes = true
+                                    }) {
+                                        Text("Edit Times")
+                                    }
+                                }
+                            }
+                            if (editingActualTimes) {
+                                actualTimeError?.let { message ->
+                                    Text(
+                                        text = message,
+                                        color = MaterialTheme.colorScheme.error,
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                }
+                                MatchActualTimeField(
+                                    label = "Actual start",
+                                    selectedTime = actualStartDraft,
+                                    onTimeSelected = { actualStartDraft = it },
+                                    onTimeCleared = { actualStartDraft = null },
+                                )
+                                MatchActualTimeField(
+                                    label = "Actual end",
+                                    selectedTime = actualEndDraft,
+                                    onTimeSelected = { actualEndDraft = it },
+                                    onTimeCleared = { actualEndDraft = null },
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.End,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    TextButton(
+                                        onClick = {
+                                            actualStartDraft = parseMatchInstant(match.match.actualStart)
+                                            actualEndDraft = parseMatchInstant(match.match.actualEnd)
+                                            actualTimeError = null
+                                            editingActualTimes = false
+                                        },
+                                        enabled = !matchTimeSaving,
+                                    ) {
+                                        Text("Cancel")
+                                    }
+                                    Button(
+                                        onClick = {
+                                            if (actualStartDraft != null && actualEndDraft != null && actualEndDraft!! <= actualStartDraft!!) {
+                                                actualTimeError = "Actual end time must be after the actual start time."
+                                                return@Button
+                                            }
+                                            actualTimeError = null
+                                            component.updateActualTimes(actualStartDraft, actualEndDraft)
+                                            editingActualTimes = false
+                                        },
+                                        enabled = !matchTimeSaving,
+                                    ) {
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            if (matchTimeSaving) {
+                                                CircularProgressIndicator(
+                                                    modifier = Modifier.size(16.dp),
+                                                    strokeWidth = 2.dp,
+                                                    color = MaterialTheme.colorScheme.onPrimary,
+                                                )
+                                            }
+                                            Text("Save Times")
+                                        }
+                                    }
+                                }
+                            } else {
+                                Text(
+                                    text = "Start: ${actualTimeLabel(match.match.actualStart)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                                Text(
+                                    text = "End: ${actualTimeLabel(match.match.actualEnd)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                        }
                         if (showSegmentBreakdown) {
                             MatchSegmentTable(
                                 segments = orderedSegments,
@@ -988,6 +1176,54 @@ private fun NativeMapRevealOverlay(
             },
         content = content,
     )
+}
+
+@Composable
+private fun MatchActualTimeField(
+    label: String,
+    selectedTime: Instant?,
+    onTimeSelected: (Instant) -> Unit,
+    onTimeCleared: () -> Unit,
+) {
+    var showPicker by remember { mutableStateOf(false) }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Button(
+            onClick = { showPicker = true },
+            modifier = Modifier.weight(1f),
+        ) {
+            Text(
+                text = "$label: ${
+                    selectedTime
+                        ?.toLocalDateTime(TimeZone.currentSystemDefault())
+                        ?.format(dateTimeFormat)
+                        ?: "Not set"
+                }",
+                textAlign = TextAlign.Start,
+            )
+        }
+        TextButton(onClick = onTimeCleared) {
+            Text("Clear")
+        }
+    }
+
+    if (showPicker) {
+        PlatformDateTimePicker(
+            onDateSelected = { instant ->
+                instant?.let(onTimeSelected)
+                showPicker = false
+            },
+            onDismissRequest = { showPicker = false },
+            showPicker = showPicker,
+            getTime = true,
+            canSelectPast = true,
+            initialDate = selectedTime,
+        )
+    }
 }
 
 @Composable

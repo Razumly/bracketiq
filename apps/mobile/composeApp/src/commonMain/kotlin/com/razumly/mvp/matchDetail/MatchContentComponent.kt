@@ -24,6 +24,7 @@ import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.UserVisibilityContext
 import com.razumly.mvp.eventDetail.data.IMatchRepository
 import com.razumly.mvp.core.network.dto.MatchIncidentOperationDto
+import com.razumly.mvp.core.network.dto.MatchLifecycleOperationDto
 import com.razumly.mvp.core.network.dto.MatchSegmentOperationDto
 import com.razumly.mvp.eventDetail.resolveEventMatchRules
 import kotlinx.coroutines.CoroutineScope
@@ -61,6 +62,8 @@ interface MatchContentComponent {
     val matchFinished: StateFlow<Boolean>
     val officialCheckedIn: StateFlow<Boolean>
     val officialCheckInSaving: StateFlow<Boolean>
+    val matchStartSaving: StateFlow<Boolean>
+    val matchTimeSaving: StateFlow<Boolean>
     val currentSet: StateFlow<Int>
     val isOfficial: StateFlow<Boolean>
     val showOfficialCheckInDialog: StateFlow<Boolean>
@@ -71,6 +74,8 @@ interface MatchContentComponent {
     fun dismissOfficialDialog()
     fun checkOfficialStatus()
     fun confirmOfficialCheckIn()
+    fun startMatch()
+    fun updateActualTimes(actualStart: Instant?, actualEnd: Instant?)
     fun selectSegment(index: Int)
     fun updateScore(isTeam1: Boolean, increment: Boolean)
     fun recordPointIncident(
@@ -211,6 +216,12 @@ class DefaultMatchContentComponent(
 
     private val _officialCheckInSaving = MutableStateFlow(false)
     override val officialCheckInSaving: StateFlow<Boolean> = _officialCheckInSaving.asStateFlow()
+
+    private val _matchStartSaving = MutableStateFlow(false)
+    override val matchStartSaving: StateFlow<Boolean> = _matchStartSaving.asStateFlow()
+
+    private val _matchTimeSaving = MutableStateFlow(false)
+    override val matchTimeSaving: StateFlow<Boolean> = _matchTimeSaving.asStateFlow()
 
     private val _currentSet = MutableStateFlow(0)
     override val currentSet = _currentSet.asStateFlow()
@@ -412,6 +423,77 @@ class DefaultMatchContentComponent(
                 }
             } finally {
                 _officialCheckInSaving.value = false
+            }
+        }
+    }
+
+    override fun startMatch() {
+        if (_matchStartSaving.value) return
+        val currentMatch = matchWithTeams.value.match
+        if (!isOfficial.value || officialCheckedIn.value != true || _matchFinished.value) {
+            return
+        }
+        if (!currentMatch.actualStart.isNullOrBlank()) {
+            return
+        }
+
+        _matchStartSaving.value = true
+        scope.launch {
+            try {
+                val startTime = Clock.System.now()
+                val updatedMatch = currentMatch.copy(
+                    status = "IN_PROGRESS",
+                    actualStart = startTime.toString(),
+                )
+                matchRepository.updateMatchOperations(
+                    match = updatedMatch,
+                    lifecycle = MatchLifecycleOperationDto(
+                        status = "IN_PROGRESS",
+                        actualStart = startTime.toString(),
+                        actualEnd = currentMatch.actualEnd,
+                    ),
+                ).onSuccess {
+                    _optimisticMatch.value = null
+                }.onFailure { error ->
+                    _errorState.value = "Failed to start match: ${error.userMessage()}"
+                }
+            } finally {
+                _matchStartSaving.value = false
+            }
+        }
+    }
+
+    override fun updateActualTimes(actualStart: Instant?, actualEnd: Instant?) {
+        if (_matchTimeSaving.value) return
+        if (!isOfficial.value || officialCheckedIn.value != true) {
+            return
+        }
+        if (actualStart != null && actualEnd != null && actualEnd <= actualStart) {
+            _errorState.value = "Actual end time must be after the actual start time."
+            return
+        }
+
+        _matchTimeSaving.value = true
+        scope.launch {
+            try {
+                val currentMatch = matchWithTeams.value.match
+                val updatedMatch = currentMatch.copy(
+                    actualStart = actualStart?.toString(),
+                    actualEnd = actualEnd?.toString(),
+                )
+                matchRepository.updateMatchOperations(
+                    match = updatedMatch,
+                    lifecycle = MatchLifecycleOperationDto(
+                        actualStart = actualStart?.toString(),
+                        actualEnd = actualEnd?.toString(),
+                    ),
+                ).onSuccess {
+                    _optimisticMatch.value = null
+                }.onFailure { error ->
+                    _errorState.value = "Failed to update actual times: ${error.userMessage()}"
+                }
+            } finally {
+                _matchTimeSaving.value = false
             }
         }
     }

@@ -28,7 +28,7 @@ class MatchIncidentUiTest {
     val composeRule = createComposeRule()
 
     @Test
-    fun player_required_scoring_hides_plus_minus_and_shows_goal_button() {
+    fun player_required_scoring_hides_plus_minus_and_shows_incident_button() {
         composeRule.setContent {
             MaterialTheme {
                 ScoreCard(
@@ -39,13 +39,13 @@ class MatchIncidentUiTest {
                     enabled = true,
                     showControls = true,
                     showAdjustControls = false,
-                    addIncidentLabel = "Add Goal",
+                    addIncidentLabel = "Add Incident",
                     onAddIncident = {},
                 )
             }
         }
 
-        composeRule.onNodeWithText("Add Goal").assertIsDisplayed()
+        composeRule.onNodeWithText("Add Incident").assertIsDisplayed()
         composeRule.onAllNodesWithContentDescription("Increase score").assertCountEquals(0)
         composeRule.onAllNodesWithContentDescription("Decrease score").assertCountEquals(0)
     }

@@ -63,6 +63,7 @@ import com.razumly.mvp.core.data.repositories.UserEmailMembershipMatch
 import com.razumly.mvp.core.data.repositories.UserVisibilityContext
 import com.razumly.mvp.core.network.dto.InviteCreateDto
 import com.razumly.mvp.core.network.dto.MatchIncidentOperationDto
+import com.razumly.mvp.core.network.dto.MatchLifecycleOperationDto
 import com.razumly.mvp.core.network.dto.MatchOfficialCheckInOperationDto
 import com.razumly.mvp.core.network.dto.MatchSegmentOperationDto
 import com.razumly.mvp.core.network.MvpUploadFile
@@ -537,6 +538,7 @@ internal class CreateEvent_FakeMatchRepository : IMatchRepository {
     override suspend fun updateMatch(match: MatchMVP): Result<Unit> = Result.success(Unit)
     override suspend fun updateMatchOperations(
         match: MatchMVP,
+        lifecycle: MatchLifecycleOperationDto?,
         segmentOperations: List<MatchSegmentOperationDto>?,
         incidentOperations: List<MatchIncidentOperationDto>?,
         officialCheckIn: MatchOfficialCheckInOperationDto?,

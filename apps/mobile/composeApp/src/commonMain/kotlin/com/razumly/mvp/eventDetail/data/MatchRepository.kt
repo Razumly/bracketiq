@@ -14,6 +14,7 @@ import com.razumly.mvp.core.network.dto.BulkMatchUpdateEntryDto
 import com.razumly.mvp.core.network.dto.BulkMatchUpdateRequestDto
 import com.razumly.mvp.core.network.dto.BulkMatchesResponseDto
 import com.razumly.mvp.core.network.dto.MatchIncidentOperationDto
+import com.razumly.mvp.core.network.dto.MatchLifecycleOperationDto
 import com.razumly.mvp.core.network.dto.MatchOfficialCheckInOperationDto
 import com.razumly.mvp.core.network.dto.MatchResponseDto
 import com.razumly.mvp.core.network.dto.MatchScoreSetDto
@@ -51,6 +52,7 @@ interface IMatchRepository : IMVPRepository {
     suspend fun updateMatch(match: MatchMVP): Result<Unit>
     suspend fun updateMatchOperations(
         match: MatchMVP,
+        lifecycle: MatchLifecycleOperationDto? = null,
         segmentOperations: List<MatchSegmentOperationDto>? = null,
         incidentOperations: List<MatchIncidentOperationDto>? = null,
         officialCheckIn: MatchOfficialCheckInOperationDto? = null,
@@ -322,6 +324,7 @@ class MatchRepository(
 
     override suspend fun updateMatchOperations(
         match: MatchMVP,
+        lifecycle: MatchLifecycleOperationDto?,
         segmentOperations: List<MatchSegmentOperationDto>?,
         incidentOperations: List<MatchIncidentOperationDto>?,
         officialCheckIn: MatchOfficialCheckInOperationDto?,
@@ -332,6 +335,7 @@ class MatchRepository(
             api.patch<MatchUpdateDto, MatchResponseDto>(
                 path = "api/events/${match.eventId}/matches/${match.id}",
                 body = MatchUpdateDto(
+                    lifecycle = lifecycle,
                     segmentOperations = segmentOperations,
                     incidentOperations = incidentOperations,
                     officialCheckIn = officialCheckIn,

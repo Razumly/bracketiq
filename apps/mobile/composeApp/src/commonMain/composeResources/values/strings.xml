@@ -5,7 +5,7 @@
     <string name="navMenuCreate">Create</string>
     <string name="navMenuProfile">Home</string>
     <string name="not_official_check_in_message">You are not the official for this match. Would you like to officiate this match?</string>
-    <string name="official_checkin_message">Would you like to check in and start this match?</string>
+    <string name="official_checkin_message">Would you like to check in as official?</string>
     <string name="official_check_in_title">Official Check-In</string>
     <string name="confirm_set_result_title">Confirm Set Result</string>
     <string name="confirm_set_result_message">Do you want to confirm the results for Set %1$s?</string>
