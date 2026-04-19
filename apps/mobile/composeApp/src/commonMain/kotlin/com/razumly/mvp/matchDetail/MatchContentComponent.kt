@@ -712,22 +712,19 @@ class DefaultMatchContentComponent(
             val updatedScoringMatch = scoringMatch.copy(segments = updatedSegments)
                 .syncLegacyScoresFromSegments(maxSets)
 
-            val updatedMatch = currentMatch.copy(
-                match = updatedScoringMatch
-            )
-
-            _optimisticMatch.value = updatedMatch
-
             if (isMatchOver(updatedScoringMatch)) {
-                _matchFinished.value = true
                 val endTime = updatedScoringMatch.end ?: updatedScoringMatch.start ?: Clock.System.now()
-                syncMatchImmediately(updatedScoringMatch, finalize = true, time = endTime)
+                syncMatchImmediately(
+                    match = updatedScoringMatch,
+                    finalize = true,
+                    time = endTime,
+                    saveLocallyBeforeRemote = false,
+                )
             } else {
-                if (currentSet.value + 1 < maxSets) {
-                    _currentSet.value++
-                }
-
-                syncMatchImmediately(updatedScoringMatch)
+                syncMatchImmediately(
+                    match = updatedScoringMatch,
+                    saveLocallyBeforeRemote = false,
+                )
             }
         }
     }
@@ -768,12 +765,15 @@ class DefaultMatchContentComponent(
         match: MatchMVP,
         finalize: Boolean = false,
         time: Instant? = null,
+        saveLocallyBeforeRemote: Boolean = true,
     ) {
         scope.launch {
             // Clear any pending updates since we're syncing now
             pendingUpdates.clear()
-            if (!persistMatchLocally(match, clearOptimisticOnSuccess = true)) {
-                return@launch
+            if (saveLocallyBeforeRemote) {
+                if (!persistMatchLocally(match, clearOptimisticOnSuccess = true)) {
+                    return@launch
+                }
             }
 
             val pendingIncidentOperations = pendingIncidentOperationsFor(match)
@@ -787,6 +787,9 @@ class DefaultMatchContentComponent(
                 ).onSuccess {
                     _optimisticMatch.value = null
                 }.onFailure { error ->
+                    if (!saveLocallyBeforeRemote) {
+                        _optimisticMatch.value = null
+                    }
                     _errorState.value = if (finalize) {
                         "Failed to finish match: ${error.userMessage()}"
                     } else {
@@ -799,7 +802,9 @@ class DefaultMatchContentComponent(
                     _optimisticMatch.value = null
                 }.onFailure { error ->
                     _errorState.value = "Failed to sync match: ${error.userMessage()}"
-                    // Keep optimistic state on failure
+                    if (!saveLocallyBeforeRemote) {
+                        _optimisticMatch.value = null
+                    }
                 }
             }
         }

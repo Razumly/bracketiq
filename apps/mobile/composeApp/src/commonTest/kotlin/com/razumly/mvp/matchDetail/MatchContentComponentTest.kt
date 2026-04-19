@@ -730,6 +730,122 @@ class MatchContentComponentTest : MainDispatcherTest() {
     }
 
     @Test
+    fun given_segment_confirmation_patch_failure_then_local_segment_status_is_not_completed() = runTest(testDispatcher) {
+        val user = createUser(id = "user-1", teamIds = listOf("team-c"))
+        val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c"))
+        val match = createMatch(
+            eventId = event.id,
+            team1Id = "team-a",
+            team2Id = "team-b",
+            teamOfficialId = "team-c",
+            officialCheckedIn = true,
+        ).copy(
+            resolvedMatchRules = ResolvedMatchRulesMVP(
+                scoringModel = "PERIODS",
+                segmentCount = 2,
+                segmentLabel = "Half",
+            ),
+            team1Points = listOf(2, 0),
+            team2Points = listOf(1, 0),
+            setResults = listOf(0, 0),
+            segments = listOf(
+                createSegment(sequence = 1, team1Score = 2, team2Score = 1),
+                createSegment(sequence = 2, team1Score = 0, team2Score = 0),
+            ),
+        )
+        val harness = MatchDetailHarness(
+            event = event,
+            initialMatch = match,
+            currentUser = user,
+            teams = listOf(
+                createTeam(id = "team-a", captainId = "captain-a"),
+                createTeam(id = "team-b", captainId = "captain-b"),
+                createTeam(id = "team-c", captainId = user.id, playerIds = listOf(user.id)),
+            ),
+            updateFailure = IllegalStateException("offline"),
+        )
+
+        advance()
+
+        harness.component.requestSetConfirmation()
+        harness.component.confirmSet()
+        advance()
+
+        assertEquals("COMPLETE", harness.matchRepository.updatedMatches.single().segments.first().status)
+        assertTrue(harness.matchRepository.savedMatches.isEmpty())
+        assertEquals("IN_PROGRESS", harness.component.matchWithTeams.value.match.segments.first().status)
+        assertEquals(0, harness.component.currentSet.value)
+        assertTrue(harness.component.errorState.value?.startsWith("Failed to sync match:") == true)
+    }
+
+    @Test
+    fun given_segment_confirmation_operation_failure_then_local_segment_status_is_not_completed() = runTest(testDispatcher) {
+        val user = createUser(id = "user-1", teamIds = listOf("team-c"))
+        val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c"))
+        val pendingIncident = MatchIncidentMVP(
+            id = "client:match-incident:match-1:segment-1:1",
+            eventId = event.id,
+            matchId = "match-1",
+            segmentId = "segment-1",
+            eventTeamId = "team-a",
+            participantUserId = "player-a",
+            officialUserId = user.id,
+            incidentType = "GOAL",
+            sequence = 1,
+            linkedPointDelta = 1,
+            minute = 5,
+            uploadStatus = "FAILED",
+        )
+        val match = createMatch(
+            eventId = event.id,
+            team1Id = "team-a",
+            team2Id = "team-b",
+            teamOfficialId = "team-c",
+            officialCheckedIn = true,
+        ).copy(
+            resolvedMatchRules = ResolvedMatchRulesMVP(
+                scoringModel = "PERIODS",
+                segmentCount = 2,
+                segmentLabel = "Half",
+                autoCreatePointIncidentType = "GOAL",
+            ),
+            team1Points = listOf(2, 0),
+            team2Points = listOf(1, 0),
+            setResults = listOf(0, 0),
+            segments = listOf(
+                createSegment(sequence = 1, team1Score = 2, team2Score = 1),
+                createSegment(sequence = 2, team1Score = 0, team2Score = 0),
+            ),
+            incidents = listOf(pendingIncident),
+        )
+        val harness = MatchDetailHarness(
+            event = event,
+            initialMatch = match,
+            currentUser = user,
+            teams = listOf(
+                createTeam(id = "team-a", captainId = "captain-a"),
+                createTeam(id = "team-b", captainId = "captain-b"),
+                createTeam(id = "team-c", captainId = user.id, playerIds = listOf(user.id)),
+            ),
+            operationFailure = IllegalStateException("offline"),
+        )
+
+        advance()
+
+        harness.component.requestSetConfirmation()
+        harness.component.confirmSet()
+        advance()
+
+        val operationCall = harness.matchRepository.operationCalls.single()
+        assertEquals("COMPLETE", operationCall.segmentOperations.first().status)
+        assertEquals("client:match-incident:match-1:segment-1:1", operationCall.incidentOperations.single().id)
+        assertTrue(harness.matchRepository.savedMatches.isEmpty())
+        assertEquals("IN_PROGRESS", harness.component.matchWithTeams.value.match.segments.first().status)
+        assertEquals(0, harness.component.currentSet.value)
+        assertTrue(harness.component.errorState.value?.startsWith("Failed to sync match:") == true)
+    }
+
+    @Test
     fun given_auto_point_incidents_when_recording_score_then_repository_uses_incident_operations() = runTest(testDispatcher) {
         val user = createUser(id = "user-1", teamIds = listOf("team-c"))
         val event = createEvent(teamIds = listOf("team-a", "team-b", "team-c")).copy(
@@ -1167,6 +1283,7 @@ private class MatchDetailFakeMatchRepository(
             time = time,
         )
         operationFailure?.let { return Result.failure(it) }
+        matchFlow.value = Result.success(match.toMatchWithRelations())
         return Result.success(match)
     }
 }

@@ -261,6 +261,7 @@ fun MatchCard(
                             )
                             VerticalDivider(color = localColors.current.onPrimary)
                             TeamsSection(
+                                event = selectedEvent,
                                 team1 = teams[match.match.team1Id],
                                 team2 = teams[match.match.team2Id],
                                 match = match,
@@ -438,6 +439,7 @@ private fun resolveFieldLabel(match: MatchWithRelations, fields: List<FieldWithM
 
 @Composable
 private fun TeamsSection(
+    event: Event,
     team1: TeamWithPlayers?,
     team2: TeamWithPlayers?,
     match: MatchWithRelations,
@@ -475,7 +477,13 @@ private fun TeamsSection(
         )
         TeamRow(
             team = team1,
-            points = match.match.team1Points.take(displaySetCount),
+            points = displayPointsForTeam(
+                event = event,
+                match = match.match,
+                teamId = match.match.team1Id,
+                legacyPoints = match.match.team1Points,
+                displaySetCount = displaySetCount,
+            ),
             previousMatch = leftMatch,
             isLosersBracket = match.match.losersBracket,
             playoffPlaceholder = playoffPlaceholders[BracketSlotKey(match.match.id, BracketTeamSlot.TEAM1)],
@@ -484,7 +492,13 @@ private fun TeamsSection(
         HorizontalDivider(thickness = 1.dp, color = localColors.current.onPrimary)
         TeamRow(
             team = team2,
-            points = match.match.team2Points.take(displaySetCount),
+            points = displayPointsForTeam(
+                event = event,
+                match = match.match,
+                teamId = match.match.team2Id,
+                legacyPoints = match.match.team2Points,
+                displaySetCount = displaySetCount,
+            ),
             previousMatch = rightMatch,
             isLosersBracket = match.match.losersBracket,
             playoffPlaceholder = playoffPlaceholders[BracketSlotKey(match.match.id, BracketTeamSlot.TEAM2)],
@@ -553,6 +567,33 @@ private fun TeamRow(
             )
         }
     }
+}
+
+internal fun displayPointsForTeam(
+    event: Event,
+    match: MatchMVP,
+    teamId: String?,
+    legacyPoints: List<Int>,
+    displaySetCount: Int,
+): List<Int> {
+    val normalizedTeamId = teamId?.trim()?.takeIf(String::isNotBlank)
+    val orderedSegments = match.segments.sortedBy { segment -> segment.sequence }
+    val sourcePoints = normalizedTeamId
+        ?.takeIf { candidateTeamId ->
+            orderedSegments.any { segment -> segment.scores.containsKey(candidateTeamId) }
+        }
+        ?.let { candidateTeamId ->
+            orderedSegments.map { segment -> segment.scores[candidateTeamId] ?: 0 }
+        }
+        ?: legacyPoints
+
+    if (sourcePoints.isEmpty()) {
+        return emptyList()
+    }
+    if (!event.usesSets) {
+        return listOf(sourcePoints.sum())
+    }
+    return sourcePoints.take(displaySetCount.coerceAtLeast(1))
 }
 
 private fun resolveDisplaySetCount(event: Event, match: MatchMVP): Int {
