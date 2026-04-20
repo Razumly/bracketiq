@@ -155,6 +155,7 @@ data class TeamUpdateDto(
     val ageDivisionTypeId: String? = null,
     val ageDivisionTypeName: String? = null,
     val divisionGender: String? = null,
+    val playerRegistrations: List<TeamPlayerRegistrationApiDto>? = null,
 )
 
 @Serializable
@@ -185,5 +186,16 @@ fun Team.toUpdateDto(): TeamUpdateDto {
         ageDivisionTypeId = synced.ageDivisionTypeId,
         ageDivisionTypeName = synced.ageDivisionTypeName,
         divisionGender = synced.divisionGender,
+        playerRegistrations = synced.playerRegistrations.map { registration ->
+            TeamPlayerRegistrationApiDto(
+                id = registration.id,
+                teamId = registration.teamId,
+                userId = registration.userId,
+                status = registration.status,
+                jerseyNumber = registration.jerseyNumber,
+                position = registration.position,
+                isCaptain = registration.isCaptain,
+            )
+        },
     )
 }

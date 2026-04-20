@@ -10,11 +10,13 @@ fun PlayerCard(
     isPending: Boolean = false,
     modifier: Modifier = Modifier,
     jerseyNumber: String? = null,
+    trailingContent: @Composable (() -> Unit)? = null,
 ) {
     UnifiedCard(
         entity = player,
         isPending = isPending,
         modifier = modifier,
         avatarJerseyNumber = jerseyNumber,
+        trailingContent = trailingContent,
     )
 }

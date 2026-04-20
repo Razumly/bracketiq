@@ -36,7 +36,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import com.razumly.mvp.core.data.dataTypes.isCaptainOrManager
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.composables.PlatformBackButton
@@ -70,6 +69,45 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
     val onCreateTeamClick = {
         createTeam = true
         component.selectTeam(null)
+    }
+    val onCloseTeamEditor = {
+        createTeam = false
+        component.deselectTeam()
+    }
+
+    selectedTeam?.let { team ->
+        CreateOrEditTeamScreen(
+            team = team,
+            sports = sports,
+            friends = friends,
+            freeAgents = freeAgents,
+            onSearch = { query -> component.searchPlayers(query) },
+            suggestions = suggestions,
+            onFinish = { newTeam ->
+                if (createTeam) {
+                    component.createTeam(newTeam)
+                } else {
+                    component.updateTeam(newTeam)
+                }
+                createTeam = false
+            },
+            onDismiss = onCloseTeamEditor,
+            onDelete = { teamToDelete ->
+                component.deleteTeam(teamToDelete)
+                onCloseTeamEditor()
+            },
+            deleteEnabled = deleteEnabled,
+            selectedEvent = selectedEvent,
+            isCaptain = isCaptain,
+            currentUser = currentUser,
+            isNewTeam = createTeam,
+            staffUsersById = staffUsersById,
+            onEnsureUserByEmail = { email -> component.ensureUserByEmail(email) },
+            onInviteTeamRole = { teamId, userId, inviteType ->
+                component.inviteUserToRole(teamId, userId, inviteType)
+            },
+        )
+        return
     }
 
     Scaffold(
@@ -153,46 +191,12 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
                 items(currentTeams) { team ->
                     TeamCard(
                         modifier = Modifier.clickable(onClick = {
+                            createTeam = false
                             component.selectTeam(team)
                         }), team = team
                     )
                 }
             }
-        }
-    }
-
-    if (selectedTeam != null) {
-        Dialog(onDismissRequest = { component.deselectTeam() }) {
-            CreateOrEditTeamDialog(
-                team = selectedTeam!!,
-                sports = sports,
-                friends = friends,
-                freeAgents = freeAgents,
-                onSearch = { query -> component.searchPlayers(query) },
-                suggestions = suggestions,
-                onFinish = { newTeam ->
-                    if (createTeam) {
-                        component.createTeam(newTeam)
-                    } else {
-                        component.updateTeam(newTeam)
-                    }
-                    createTeam = false
-                },
-                onDismiss = { component.deselectTeam() },
-                onDelete = { team ->
-                    component.deleteTeam(team)
-                },
-                deleteEnabled = deleteEnabled,
-                selectedEvent = selectedEvent,
-                isCaptain = isCaptain,
-                currentUser = currentUser,
-                isNewTeam = createTeam,
-                staffUsersById = staffUsersById,
-                onEnsureUserByEmail = { email -> component.ensureUserByEmail(email) },
-                onInviteTeamRole = { teamId, userId, inviteType ->
-                    component.inviteUserToRole(teamId, userId, inviteType)
-                },
-            )
         }
     }
 }

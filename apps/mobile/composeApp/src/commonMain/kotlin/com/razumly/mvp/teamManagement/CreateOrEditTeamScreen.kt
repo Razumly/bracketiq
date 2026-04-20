@@ -3,25 +3,28 @@ package com.razumly.mvp.teamManagement
 import com.razumly.mvp.core.network.userMessage
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonColors
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -57,9 +60,11 @@ import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.data.util.parseCombinedDivisionTypeId
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
+import com.razumly.mvp.core.presentation.LocalNavBarPadding
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import com.razumly.mvp.core.presentation.composables.InvitePlayerCard
 import com.razumly.mvp.core.presentation.composables.PlatformDropdown
+import com.razumly.mvp.core.presentation.composables.PlatformBackButton
 import com.razumly.mvp.core.presentation.composables.StandardTextField
 import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.SearchPlayerDialog
@@ -78,8 +83,9 @@ private val TEAM_DIVISION_GENDER_OPTIONS = listOf(
     DropdownOption(value = "C", label = "Coed"),
 )
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CreateOrEditTeamDialog(
+fun CreateOrEditTeamScreen(
     team: TeamWithPlayers,
     sports: List<Sport>,
     friends: List<UserData>,
@@ -104,6 +110,13 @@ fun CreateOrEditTeamDialog(
     var showSearchDialog by remember { mutableStateOf(false) }
     var invitedPlayers by remember { mutableStateOf(team.pendingPlayers) }
     var playersInTeam by remember { mutableStateOf(team.players) }
+    var jerseyNumbersByUserId by remember(team.team.id, syncedTeam.playerRegistrations) {
+        mutableStateOf(
+            syncedTeam.playerRegistrations.associate { registration ->
+                registration.userId to registration.jerseyNumber.orEmpty()
+            }
+        )
+    }
     var showLeaveTeamDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
     var inviteError by remember { mutableStateOf<String?>(null) }
@@ -355,6 +368,11 @@ fun CreateOrEditTeamDialog(
     val existingPlayerRegistrationsByUserId = remember(syncedTeam.playerRegistrations) {
         syncedTeam.playerRegistrations.associateBy(TeamPlayerRegistration::userId)
     }
+    fun jerseyNumberForUser(userId: String): String = jerseyNumbersByUserId[userId].orEmpty()
+
+    fun updateJerseyNumber(userId: String, jerseyNumber: String) {
+        jerseyNumbersByUserId = jerseyNumbersByUserId + (userId to jerseyNumber)
+    }
 
     fun buildUpdatedTeam(
         activePlayers: List<UserData>,
@@ -374,13 +392,18 @@ fun CreateOrEditTeamDialog(
         val updatedPlayerRegistrations = buildList {
             activePlayerIds.forEach { userId ->
                 val existing = existingPlayerRegistrationsByUserId[userId]
+                val jerseyNumberInput = jerseyNumbersByUserId[userId]
                 add(
                     TeamPlayerRegistration(
                         id = existing?.id ?: "${syncedTeam.id}__player__active__${userId}",
                         teamId = syncedTeam.id,
                         userId = userId,
                         status = "ACTIVE",
-                        jerseyNumber = existing?.jerseyNumber,
+                        jerseyNumber = if (jerseyNumberInput != null) {
+                            jerseyNumberInput.trim().takeIf(String::isNotBlank)
+                        } else {
+                            existing?.jerseyNumber
+                        },
                         position = existing?.position,
                         isCaptain = userId == resolvedCaptainId,
                     )
@@ -388,13 +411,18 @@ fun CreateOrEditTeamDialog(
             }
             invitedPlayerIds.forEach { userId ->
                 val existing = existingPlayerRegistrationsByUserId[userId]
+                val jerseyNumberInput = jerseyNumbersByUserId[userId]
                 add(
                     TeamPlayerRegistration(
                         id = existing?.id ?: "${syncedTeam.id}__player__invited__${userId}",
                         teamId = syncedTeam.id,
                         userId = userId,
                         status = "INVITED",
-                        jerseyNumber = existing?.jerseyNumber,
+                        jerseyNumber = if (jerseyNumberInput != null) {
+                            jerseyNumberInput.trim().takeIf(String::isNotBlank)
+                        } else {
+                            existing?.jerseyNumber
+                        },
                         position = existing?.position,
                         isCaptain = false,
                     )
@@ -422,13 +450,24 @@ fun CreateOrEditTeamDialog(
         ).withSynchronizedMembership()
     }
 
-    Card(
-        modifier = Modifier.fillMaxWidth().padding(16.dp),
-        shape = RoundedCornerShape(12.dp),
-        elevation = CardDefaults.cardElevation(12.dp)
-    ) {
+    Scaffold(
+        modifier = Modifier.padding(LocalNavBarPadding.current),
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text(if (isNewTeam) "Create Team" else "Edit Team") },
+                navigationIcon = {
+                    PlatformBackButton(
+                        onBack = onDismiss,
+                        arrow = true,
+                    )
+                },
+            )
+        },
+    ) { paddingValues ->
         Column(
             modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
                 .padding(16.dp)
                 .verticalScroll(rememberScrollState())
         ) {
@@ -543,12 +582,24 @@ fun CreateOrEditTeamDialog(
             Text("Players")
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 playersInTeam.forEach { player ->
+                    val jerseyNumber = jerseyNumberForUser(player.id)
                     Row(
                         Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        PlayerCard(player = player, modifier = Modifier.weight(1f))
+                        PlayerCard(
+                            player = player,
+                            modifier = Modifier.weight(1f),
+                            jerseyNumber = jerseyNumber,
+                            trailingContent = {
+                                JerseyNumberField(
+                                    value = jerseyNumber,
+                                    onValueChange = { updateJerseyNumber(player.id, it) },
+                                    canEdit = showEditDetails,
+                                )
+                            },
+                        )
                         if (showEditDetails) {
                             Button(onClick = {
                                 playersInTeam = playersInTeam - player
@@ -559,12 +610,25 @@ fun CreateOrEditTeamDialog(
                     }
                 }
                 invitedPlayers.forEach { player ->
+                    val jerseyNumber = jerseyNumberForUser(player.id)
                     Row(
                         Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        PlayerCard(player = player, isPending = true, Modifier.weight(1f))
+                        PlayerCard(
+                            player = player,
+                            isPending = true,
+                            modifier = Modifier.weight(1f),
+                            jerseyNumber = jerseyNumber,
+                            trailingContent = {
+                                JerseyNumberField(
+                                    value = jerseyNumber,
+                                    onValueChange = { updateJerseyNumber(player.id, it) },
+                                    canEdit = showEditDetails,
+                                )
+                            },
+                        )
                         if (showEditDetails) {
                             Button(onClick = {
                                 invitedPlayers = invitedPlayers - player
@@ -574,7 +638,7 @@ fun CreateOrEditTeamDialog(
                         }
                     }
                 }
-                if (playersInTeam.size + invitedPlayers.size < resolvedTeamSize || resolvedTeamSize == 7 && showEditDetails) {
+                if (showEditDetails && (playersInTeam.size + invitedPlayers.size < resolvedTeamSize || resolvedTeamSize == 7)) {
                     InvitePlayerCard {
                         inviteTarget = TeamInviteTarget.PLAYER
                         showSearchDialog = true
@@ -738,6 +802,9 @@ fun CreateOrEditTeamDialog(
                     } else {
                         invitedPlayers = invitedPlayers + it
                     }
+                    if (!jerseyNumbersByUserId.containsKey(it.id)) {
+                        updateJerseyNumber(it.id, "")
+                    }
                 } else {
                     val inviteType = inviteTarget.inviteType
                     if (inviteType != null) {
@@ -757,6 +824,9 @@ fun CreateOrEditTeamDialog(
                                         invitedPlayers.any { it.id == user.id }
                                     if (!alreadySelected) {
                                         invitedPlayers = invitedPlayers + user
+                                        if (!jerseyNumbersByUserId.containsKey(user.id)) {
+                                            updateJerseyNumber(user.id, "")
+                                        }
                                     }
                                 } else {
                                     val inviteType = inviteTarget.inviteType
@@ -774,4 +844,23 @@ fun CreateOrEditTeamDialog(
             entryLabel = inviteTarget.label,
         )
     }
+}
+
+@Composable
+private fun JerseyNumberField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    canEdit: Boolean,
+) {
+    StandardTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = Modifier.width(96.dp),
+        label = "Jersey",
+        keyboardType = "number",
+        inputFilter = { input -> input.filter(Char::isDigit).take(3) },
+        readOnly = !canEdit,
+        height = 56.dp,
+        contentPadding = PaddingValues(0.dp),
+    )
 }
