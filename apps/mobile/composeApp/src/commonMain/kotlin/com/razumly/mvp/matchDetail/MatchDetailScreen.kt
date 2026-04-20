@@ -356,6 +356,7 @@ fun MatchDetailScreen(
     val officialCheckInSaving by component.officialCheckInSaving.collectAsState()
     val matchStartSaving by component.matchStartSaving.collectAsState()
     val matchTimeSaving by component.matchTimeSaving.collectAsState()
+    val segmentConfirmSaving by component.segmentConfirmSaving.collectAsState()
     val showOfficialCheckInDialog by component.showOfficialCheckInDialog.collectAsState()
     val showSetConfirmDialog by component.showSetConfirmDialog.collectAsState()
     val currentSet by component.currentSet.collectAsState()
@@ -441,6 +442,9 @@ fun MatchDetailScreen(
     val orderedSegments = remember(match.match.segments) {
         match.match.segments.sortedBy { segment -> segment.sequence }
     }
+    val visibleIncidents = remember(match.match.incidents) {
+        match.match.incidents.filterNot { incident -> incident.isPendingIncidentDelete() }
+    }
     val officialRows = remember(match.match, event?.officialPositions, officialUsers) {
         buildMatchOfficialDetailRows(
             match = match.match,
@@ -486,7 +490,7 @@ fun MatchDetailScreen(
         officialCheckedIn &&
         !matchFinished &&
         activeSegment?.status != "COMPLETE"
-    val confirmResultEnabled = canConfirmResult && when (rules.scoringModel) {
+    val confirmResultEnabled = canConfirmResult && !segmentConfirmSaving && when (rules.scoringModel) {
         "SETS" -> team1Score != team2Score
         "POINTS_ONLY" -> rules.supportsDraw || team1Score != team2Score
         else -> true
@@ -608,12 +612,30 @@ fun MatchDetailScreen(
             title = { Text(confirmationTitle) },
             text = { Text(confirmationMessage) },
             confirmButton = {
-                Button(onClick = { component.confirmSet() }) {
-                    Text("Confirm")
+                Button(
+                    onClick = { component.confirmSet() },
+                    enabled = !segmentConfirmSaving,
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (segmentConfirmSaving) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.onPrimary,
+                            )
+                        }
+                        Text("Confirm")
+                    }
                 }
             },
             dismissButton = {
-                Button(onClick = { component.dismissSetDialog() }) {
+                Button(
+                    onClick = { component.dismissSetDialog() },
+                    enabled = !segmentConfirmSaving,
+                ) {
                     Text("Cancel")
                 }
             }
@@ -803,13 +825,25 @@ fun MatchDetailScreen(
                         onClick = { component.requestSetConfirmation() },
                         enabled = confirmResultEnabled,
                     ) {
-                        Text(
-                            if (rules.scoringModel == "POINTS_ONLY") {
-                                "Save Match"
-                            } else {
-                                "Confirm ${activeSegmentLabel ?: segmentBaseLabel}"
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            if (segmentConfirmSaving) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onPrimary,
+                                )
                             }
-                        )
+                            Text(
+                                if (rules.scoringModel == "POINTS_ONLY") {
+                                    "Save Match"
+                                } else {
+                                    "Confirm ${activeSegmentLabel ?: segmentBaseLabel}"
+                                }
+                            )
+                        }
                     }
                 }
                 if (showTeamAgnosticIncidentButton) {
@@ -1062,10 +1096,10 @@ fun MatchDetailScreen(
                             text = "Match Log",
                             style = MaterialTheme.typography.titleSmall,
                         )
-                        if (match.match.incidents.isEmpty()) {
+                        if (visibleIncidents.isEmpty()) {
                             Text("No match details recorded.", style = MaterialTheme.typography.bodySmall)
                         } else {
-                            match.match.incidents.sortedBy { incident -> incident.sequence }.forEach { incident ->
+                            visibleIncidents.sortedBy { incident -> incident.sequence }.forEach { incident ->
                                 MatchIncidentCard(
                                     summary = buildIncidentSummary(
                                         incident = incident,
@@ -1861,3 +1895,6 @@ internal fun buildIncidentSummary(
         "${matchLogTypeLabel(incident.incidentType)}: ${extras.joinToString(" | ")}"
     }
 }
+
+private fun com.razumly.mvp.core.data.dataTypes.MatchIncidentMVP.isPendingIncidentDelete(): Boolean =
+    uploadStatus == "DELETE_PENDING" || uploadStatus == "DELETE_FAILED"

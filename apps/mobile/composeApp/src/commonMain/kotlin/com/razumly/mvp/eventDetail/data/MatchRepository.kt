@@ -119,8 +119,11 @@ class MatchRepository(
     private fun MatchMVP.normalizedOfficialAssignmentsForSync() =
         officialIds.normalizedMatchOfficialAssignments()
 
-    private fun MatchIncidentMVP.isPendingLocalUpload(): Boolean =
-        uploadStatus == "PENDING" || uploadStatus == "FAILED" || id.startsWith(CLIENT_MATCH_PREFIX)
+    private fun MatchIncidentMVP.isPendingLocalCreate(): Boolean =
+        uploadStatus == "PENDING" || uploadStatus == "FAILED"
+
+    private fun MatchIncidentMVP.isPendingLocalDelete(): Boolean =
+        uploadStatus == "DELETE_PENDING" || uploadStatus == "DELETE_FAILED"
 
     private fun MatchIncidentMVP.matchesIncident(other: MatchIncidentMVP): Boolean {
         if (id.isNotBlank() && id == other.id) return true
@@ -136,17 +139,24 @@ class MatchRepository(
     }
 
     private fun mergePendingLocalIncidents(remoteMatch: MatchMVP, localMatch: MatchMVP?): MatchMVP {
-        val pendingLocalIncidents = localMatch?.incidents
+        val pendingLocalCreates = localMatch?.incidents
             .orEmpty()
-            .filter { incident -> incident.isPendingLocalUpload() }
+            .filter { incident -> incident.isPendingLocalCreate() }
             .filterNot { pending ->
                 remoteMatch.incidents.any { remote -> remote.matchesIncident(pending) }
             }
-        if (pendingLocalIncidents.isEmpty()) {
+        val pendingLocalDeletes = localMatch?.incidents
+            .orEmpty()
+            .filter { incident -> incident.isPendingLocalDelete() }
+        if (pendingLocalCreates.isEmpty() && pendingLocalDeletes.isEmpty()) {
             return remoteMatch
         }
+        val pendingDeleteIds = pendingLocalDeletes.map { incident -> incident.id }.toSet()
+        val remoteIncidents = remoteMatch.incidents.filterNot { remote ->
+            remote.id in pendingDeleteIds || pendingLocalDeletes.any { pending -> remote.matchesIncident(pending) }
+        }
         return remoteMatch.copy(
-            incidents = (remoteMatch.incidents + pendingLocalIncidents)
+            incidents = (remoteIncidents + pendingLocalCreates + pendingLocalDeletes)
                 .sortedWith(compareBy<MatchIncidentMVP> { it.sequence }.thenBy { it.id }),
         )
     }

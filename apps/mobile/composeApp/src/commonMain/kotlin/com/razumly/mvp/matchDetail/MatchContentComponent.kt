@@ -30,6 +30,7 @@ import com.razumly.mvp.eventDetail.resolveEventMatchRules
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -53,6 +54,13 @@ import kotlin.time.Instant
 private const val LOCAL_MATCH_INCIDENT_PREFIX = "client:match-incident:"
 private const val MATCH_INCIDENT_UPLOAD_PENDING = "PENDING"
 private const val MATCH_INCIDENT_UPLOAD_FAILED = "FAILED"
+private const val MATCH_INCIDENT_DELETE_PENDING = "DELETE_PENDING"
+private const val MATCH_INCIDENT_DELETE_FAILED = "DELETE_FAILED"
+private val INCIDENT_RETRY_DELAYS_MS = longArrayOf(3_000L, 15_000L, 30_000L)
+private const val INCIDENT_CONFIRM_NO_PROGRESS_TIMEOUT_MS = 10_000L
+
+private fun incidentRetryDelayMs(attempt: Int): Long =
+    INCIDENT_RETRY_DELAYS_MS[attempt.coerceIn(0, INCIDENT_RETRY_DELAYS_MS.lastIndex)]
 
 interface MatchContentComponent {
     val matchWithTeams: StateFlow<MatchWithTeams>
@@ -64,6 +72,7 @@ interface MatchContentComponent {
     val officialCheckInSaving: StateFlow<Boolean>
     val matchStartSaving: StateFlow<Boolean>
     val matchTimeSaving: StateFlow<Boolean>
+    val segmentConfirmSaving: StateFlow<Boolean>
     val currentSet: StateFlow<Int>
     val isOfficial: StateFlow<Boolean>
     val showOfficialCheckInDialog: StateFlow<Boolean>
@@ -155,7 +164,10 @@ class DefaultMatchContentComponent(
     private val _optimisticMatch = MutableStateFlow<MatchWithTeams?>(null)
     private val localMatchSaveMutex = Mutex()
     private val scoreSetMutex = Mutex()
+    private val incidentQueueMutex = Mutex()
     private var localMatchSaveVersion = 0L
+    private var incidentQueueRetryJob: Job? = null
+    private var incidentRetryAttempt = 0
 
     override val matchWithTeams = _optimisticMatch.flatMapLatest { optimisticMatch ->
         if (optimisticMatch != null) {
@@ -222,6 +234,9 @@ class DefaultMatchContentComponent(
 
     private val _matchTimeSaving = MutableStateFlow(false)
     override val matchTimeSaving: StateFlow<Boolean> = _matchTimeSaving.asStateFlow()
+
+    private val _segmentConfirmSaving = MutableStateFlow(false)
+    override val segmentConfirmSaving: StateFlow<Boolean> = _segmentConfirmSaving.asStateFlow()
 
     private val _currentSet = MutableStateFlow(0)
     override val currentSet = _currentSet.asStateFlow()
@@ -689,20 +704,7 @@ class DefaultMatchContentComponent(
 
         scope.launch {
             matchRepository.saveMatchLocally(updatedScoringMatchWithIncident)
-            matchRepository.addMatchIncident(
-                match = updatedScoringMatchWithIncident,
-                operation = localIncident.toCreateIncidentOperation(),
-            ).onSuccess {
-                _optimisticMatch.value = null
-            }.onFailure {
-                val failedMatch = markLocalIncidentUploadStatus(
-                    match = updatedScoringMatchWithIncident,
-                    incidentId = localIncident.id,
-                    uploadStatus = MATCH_INCIDENT_UPLOAD_FAILED,
-                )
-                matchRepository.saveMatchLocally(failedMatch)
-                _optimisticMatch.value = currentMatch.copy(match = failedMatch)
-            }
+            processIncidentQueueUntilBlocked(updatedScoringMatchWithIncident)
         }
     }
 
@@ -715,26 +717,29 @@ class DefaultMatchContentComponent(
         val currentMatch = matchWithTeams.value
         val scoringMatch = updateMatchStructureForCurrentContext(currentMatch.match)
         val incident = scoringMatch.incidents.firstOrNull { row -> row.id == normalizedIncidentId } ?: return
-        val updatedMatch = scoringMatch
-            .removeIncidentScore(incident)
-            .copy(incidents = scoringMatch.incidents.filterNot { row -> row.id == normalizedIncidentId })
+        val updatedMatch = if (incident.isPendingCreateUpload()) {
+            scoringMatch
+                .removeIncidentScore(incident)
+                .copy(incidents = scoringMatch.incidents.filterNot { row -> row.id == normalizedIncidentId })
+        } else {
+            scoringMatch
+                .removeIncidentScore(incident)
+                .copy(incidents = scoringMatch.incidents.map { row ->
+                    if (row.id == normalizedIncidentId) {
+                        row.copy(uploadStatus = MATCH_INCIDENT_DELETE_PENDING)
+                    } else {
+                        row
+                    }
+                })
+        }
         _optimisticMatch.value = currentMatch.copy(match = updatedMatch)
 
         scope.launch {
             matchRepository.saveMatchLocally(updatedMatch)
-            if (incident.isPendingUpload()) {
+            if (incident.isPendingCreateUpload()) {
                 _optimisticMatch.value = null
-                return@launch
-            }
-            matchRepository.updateMatchOperations(
-                match = updatedMatch,
-                incidentOperations = listOf(MatchIncidentOperationDto(action = "DELETE", id = incident.id)),
-            ).onSuccess {
-                _optimisticMatch.value = null
-            }.onFailure { error ->
-                _errorState.value = "Failed to remove incident: ${error.userMessage()}"
-                matchRepository.saveMatchLocally(scoringMatch)
-                _optimisticMatch.value = currentMatch.copy(match = scoringMatch)
+            } else {
+                processIncidentQueueUntilBlocked(updatedMatch)
             }
         }
     }
@@ -764,53 +769,66 @@ class DefaultMatchContentComponent(
 
 
     override fun confirmSet() {
+        if (_segmentConfirmSaving.value) return
         if (matchFinished.value || !isOfficial.value || officialCheckedIn.value != true) {
             _showSetConfirmDialog.value = false
             return
         }
         _showSetConfirmDialog.value = false
+        _segmentConfirmSaving.value = true
 
         scope.launch {
-            val currentMatch = matchWithTeams.value
-            val scoringMatch = updateMatchStructureForCurrentContext(currentMatch.match)
-            val rules = resolveActiveRules(scoringMatch, event.value)
-            val setIndex = currentSet.value.coerceIn(0, maxSets - 1)
-            val team1Score = scoringMatch.team1Points.getOrElse(setIndex) { 0 }
-            val team2Score = scoringMatch.team2Points.getOrElse(setIndex) { 0 }
+            try {
+                val queueDrained = drainIncidentQueueForConfirmation()
+                if (!queueDrained) {
+                    _errorState.value = "Incident updates are still waiting to sync. Please retry once the queue starts moving."
+                    return@launch
+                }
 
-            if (rules.scoringModel == "SETS" && team1Score == team2Score) {
-                _errorState.value = "Set score cannot be tied."
-                return@launch
-            }
+                val currentMatch = matchWithTeams.value
+                val scoringMatch = updateMatchStructureForCurrentContext(currentMatch.match)
+                val rules = resolveActiveRules(scoringMatch, event.value)
+                val setIndex = currentSet.value.coerceIn(0, maxSets - 1)
+                val team1Score = scoringMatch.team1Points.getOrElse(setIndex) { 0 }
+                val team2Score = scoringMatch.team2Points.getOrElse(setIndex) { 0 }
 
-            val currentSegment = scoringMatch.segments.getOrNull(setIndex) ?: return@launch
-            val winnerEventTeamId = when {
-                team1Score > team2Score -> scoringMatch.team1Id
-                team2Score > team1Score -> scoringMatch.team2Id
-                else -> null
-            }
-            val updatedSegments = scoringMatch.segments.toMutableList().apply {
-                this[setIndex] = currentSegment.copy(
-                    status = "COMPLETE",
-                    winnerEventTeamId = winnerEventTeamId,
-                )
-            }
-            val updatedScoringMatch = scoringMatch.copy(segments = updatedSegments)
-                .syncLegacyScoresFromSegments(maxSets)
+                if (rules.scoringModel == "SETS" && team1Score == team2Score) {
+                    _errorState.value = "Set score cannot be tied."
+                    return@launch
+                }
 
-            if (isMatchOver(updatedScoringMatch)) {
-                val endTime = updatedScoringMatch.end ?: updatedScoringMatch.start ?: Clock.System.now()
-                syncMatchImmediately(
-                    match = updatedScoringMatch,
-                    finalize = true,
-                    time = endTime,
-                    saveLocallyBeforeRemote = false,
-                )
-            } else {
-                syncMatchImmediately(
-                    match = updatedScoringMatch,
-                    saveLocallyBeforeRemote = false,
-                )
+                val currentSegment = scoringMatch.segments.getOrNull(setIndex) ?: return@launch
+                val winnerEventTeamId = when {
+                    team1Score > team2Score -> scoringMatch.team1Id
+                    team2Score > team1Score -> scoringMatch.team2Id
+                    else -> null
+                }
+                val updatedSegments = scoringMatch.segments.toMutableList().apply {
+                    this[setIndex] = currentSegment.copy(
+                        status = "COMPLETE",
+                        winnerEventTeamId = winnerEventTeamId,
+                    )
+                }
+                val updatedScoringMatch = scoringMatch.copy(segments = updatedSegments)
+                    .syncLegacyScoresFromSegments(maxSets)
+
+                val success = if (isMatchOver(updatedScoringMatch)) {
+                    val endTime = updatedScoringMatch.end ?: updatedScoringMatch.start ?: Clock.System.now()
+                    syncMatchImmediatelyBlocking(
+                        match = updatedScoringMatch,
+                        finalize = true,
+                        time = endTime,
+                        saveLocallyBeforeRemote = false,
+                    )
+                } else {
+                    syncMatchImmediatelyBlocking(
+                        match = updatedScoringMatch,
+                        saveLocallyBeforeRemote = false,
+                    )
+                }
+                if (!success) return@launch
+            } finally {
+                _segmentConfirmSaving.value = false
             }
         }
     }
@@ -881,28 +899,30 @@ class DefaultMatchContentComponent(
         saveLocallyBeforeRemote: Boolean = true,
     ) {
         scope.launch {
+            syncMatchImmediatelyBlocking(
+                match = match,
+                finalize = finalize,
+                time = time,
+                saveLocallyBeforeRemote = saveLocallyBeforeRemote,
+            )
+        }
+    }
+
+    private suspend fun syncMatchImmediatelyBlocking(
+        match: MatchMVP,
+        finalize: Boolean = false,
+        time: Instant? = null,
+        saveLocallyBeforeRemote: Boolean = true,
+    ): Boolean {
             // Clear any pending updates since we're syncing now
             pendingUpdates.clear()
             if (saveLocallyBeforeRemote) {
                 if (!persistMatchLocally(match, clearOptimisticOnSuccess = true)) {
-                    return@launch
+                    return false
                 }
             }
 
-            val pendingIncidentOperations = pendingIncidentOperationsFor(match)
-            for (operation in pendingIncidentOperations) {
-                val retryResult = matchRepository.addMatchIncident(match = match, operation = operation)
-                if (retryResult.isFailure) {
-                    if (!saveLocallyBeforeRemote) {
-                        _optimisticMatch.value = null
-                    }
-                    _errorState.value = "Failed to sync match: ${
-                        retryResult.exceptionOrNull()?.userMessage() ?: "Unknown error"
-                    }"
-                    return@launch
-                }
-            }
-            if (finalize || pendingIncidentOperations.isNotEmpty()) {
+            return if (finalize) {
                 matchRepository.updateMatchOperations(
                     match = match,
                     segmentOperations = match.toSegmentOperations(),
@@ -920,7 +940,7 @@ class DefaultMatchContentComponent(
                     } else {
                         "Failed to sync match: ${error.userMessage()}"
                     }
-                }
+                }.isSuccess
             } else {
                 matchRepository.updateMatch(match).onSuccess {
                     // Clear optimistic state since database is now up to date
@@ -930,9 +950,122 @@ class DefaultMatchContentComponent(
                     if (!saveLocallyBeforeRemote) {
                         _optimisticMatch.value = null
                     }
+                }.isSuccess
+            }
+    }
+
+    private suspend fun processIncidentQueueUntilBlocked(initialMatch: MatchMVP? = null) {
+        incidentQueueMutex.withLock {
+            var queuedMatch = initialMatch
+            while (true) {
+                val currentMatch = updateMatchStructureForCurrentContext(queuedMatch ?: matchWithTeams.value.match)
+                val action = pendingIncidentActionsFor(currentMatch).firstOrNull()
+                    ?: run {
+                        incidentRetryAttempt = 0
+                        return@withLock
+                    }
+                val updatedMatch = executeIncidentAction(currentMatch, action)
+                queuedMatch = updatedMatch
+                if (updatedMatch == null) {
+                    scheduleIncidentQueueRetry()
+                    return@withLock
                 }
             }
         }
+    }
+
+    private suspend fun drainIncidentQueueForConfirmation(): Boolean {
+        incidentQueueRetryJob?.cancel()
+        incidentQueueRetryJob = null
+        return incidentQueueMutex.withLock {
+            var elapsedWithoutReduction = 0L
+            var queuedMatch: MatchMVP? = null
+            while (true) {
+                val currentMatch = updateMatchStructureForCurrentContext(queuedMatch ?: matchWithTeams.value.match)
+                val beforeCount = pendingIncidentActionsFor(currentMatch).size
+                if (beforeCount == 0) {
+                    incidentRetryAttempt = 0
+                    return@withLock true
+                }
+
+                val action = pendingIncidentActionsFor(currentMatch).first()
+                val updatedMatch = executeIncidentAction(currentMatch, action)
+                queuedMatch = updatedMatch
+                val afterCount = pendingIncidentActionsFor(
+                    updateMatchStructureForCurrentContext(updatedMatch ?: matchWithTeams.value.match)
+                ).size
+                if (updatedMatch != null || afterCount < beforeCount) {
+                    elapsedWithoutReduction = 0L
+                    continue
+                }
+
+                val waitMillis = minOf(
+                    incidentRetryDelayMs(incidentRetryAttempt),
+                    INCIDENT_CONFIRM_NO_PROGRESS_TIMEOUT_MS - elapsedWithoutReduction,
+                )
+                if (waitMillis <= 0L) {
+                    return@withLock false
+                }
+                incidentRetryAttempt += 1
+                delay(waitMillis)
+                elapsedWithoutReduction += waitMillis
+            }
+            @Suppress("UNREACHABLE_CODE")
+            false
+        }
+    }
+
+    private fun scheduleIncidentQueueRetry() {
+        if (incidentQueueRetryJob?.isActive == true) return
+        val retryDelayMs = incidentRetryDelayMs(incidentRetryAttempt)
+        incidentRetryAttempt += 1
+        incidentQueueRetryJob = scope.launch {
+            delay(retryDelayMs)
+            incidentQueueRetryJob = null
+            processIncidentQueueUntilBlocked()
+        }
+    }
+
+    private suspend fun executeIncidentAction(
+        match: MatchMVP,
+        action: PendingIncidentAction,
+    ): MatchMVP? {
+        val result = when (action.operation.action) {
+            "CREATE" -> matchRepository.addMatchIncident(match = match, operation = action.operation)
+            else -> matchRepository.updateMatchOperations(
+                match = match,
+                incidentOperations = listOf(action.operation),
+            )
+        }
+
+        return result.fold(
+            onSuccess = { remoteMatch ->
+                val updatedMatch = when (action.operation.action) {
+                    "DELETE" -> remoteMatch.copy(
+                        incidents = remoteMatch.incidents.filterNot { incident -> incident.id == action.incident.id },
+                    )
+                    else -> markLocalIncidentUploadStatus(
+                        match = remoteMatch,
+                        incidentId = action.incident.id,
+                        uploadStatus = null,
+                    )
+                }
+                incidentRetryAttempt = 0
+                matchRepository.saveMatchLocally(updatedMatch)
+                _optimisticMatch.value = null
+                updatedMatch
+            },
+            onFailure = {
+                val failedMatch = markLocalIncidentUploadStatus(
+                    match = match,
+                    incidentId = action.incident.id,
+                    uploadStatus = action.failureStatus,
+                )
+                matchRepository.saveMatchLocally(failedMatch)
+                _optimisticMatch.value = matchWithTeams.value.copy(match = failedMatch)
+                null
+            },
+        )
     }
 
     private suspend fun persistMatchLocally(
@@ -1254,10 +1387,13 @@ class DefaultMatchContentComponent(
         )
     }
 
-    private fun MatchIncidentMVP.isPendingUpload(): Boolean =
+    private fun MatchIncidentMVP.isPendingCreateUpload(): Boolean =
         uploadStatus == MATCH_INCIDENT_UPLOAD_PENDING ||
-            uploadStatus == MATCH_INCIDENT_UPLOAD_FAILED ||
-            id.startsWith(LOCAL_MATCH_INCIDENT_PREFIX)
+            uploadStatus == MATCH_INCIDENT_UPLOAD_FAILED
+
+    private fun MatchIncidentMVP.isPendingDeleteUpload(): Boolean =
+        uploadStatus == MATCH_INCIDENT_DELETE_PENDING ||
+            uploadStatus == MATCH_INCIDENT_DELETE_FAILED
 
     private fun MatchIncidentMVP.toCreateIncidentOperation(): MatchIncidentOperationDto =
         MatchIncidentOperationDto(
@@ -1277,15 +1413,39 @@ class DefaultMatchContentComponent(
             note = note,
         )
 
-    private fun pendingIncidentOperationsFor(match: MatchMVP): List<MatchIncidentOperationDto> =
+    private fun MatchIncidentMVP.toDeleteIncidentOperation(): MatchIncidentOperationDto =
+        MatchIncidentOperationDto(
+            action = "DELETE",
+            id = id,
+            segmentId = segmentId,
+            eventTeamId = eventTeamId,
+            incidentType = incidentType,
+            linkedPointDelta = linkedPointDelta,
+        )
+
+    private fun pendingIncidentActionsFor(match: MatchMVP): List<PendingIncidentAction> =
         match.incidents
-            .filter { incident -> incident.isPendingUpload() }
-            .map { incident -> incident.toCreateIncidentOperation() }
+            .filter { incident -> incident.isPendingCreateUpload() || incident.isPendingDeleteUpload() }
+            .mapNotNull { incident ->
+                when {
+                    incident.isPendingCreateUpload() -> PendingIncidentAction(
+                        incident = incident,
+                        operation = incident.toCreateIncidentOperation(),
+                        failureStatus = MATCH_INCIDENT_UPLOAD_FAILED,
+                    )
+                    incident.isPendingDeleteUpload() -> PendingIncidentAction(
+                        incident = incident,
+                        operation = incident.toDeleteIncidentOperation(),
+                        failureStatus = MATCH_INCIDENT_DELETE_FAILED,
+                    )
+                    else -> null
+                }
+            }
 
     private fun markLocalIncidentUploadStatus(
         match: MatchMVP,
         incidentId: String,
-        uploadStatus: String,
+        uploadStatus: String?,
     ): MatchMVP = match.copy(
         incidents = match.incidents.map { incident ->
             if (incident.id == incidentId) {
@@ -1447,6 +1607,12 @@ private data class OfficialUserLookup(
     val userIds: List<String>,
     val eventId: String,
     val currentUser: UserData,
+)
+
+private data class PendingIncidentAction(
+    val incident: MatchIncidentMVP,
+    val operation: MatchIncidentOperationDto,
+    val failureStatus: String,
 )
 
 private fun officialUserIdsForMatch(match: MatchMVP): List<String> =
