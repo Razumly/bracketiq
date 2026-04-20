@@ -64,7 +64,6 @@ import com.razumly.mvp.core.data.util.parseCombinedDivisionTypeId
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 import com.razumly.mvp.core.network.userMessage
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
-import com.razumly.mvp.core.presentation.NoScaffoldContentInsets
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import com.razumly.mvp.core.presentation.composables.InvitePlayerCard
 import com.razumly.mvp.core.presentation.composables.PlatformBackButton
@@ -495,7 +494,6 @@ fun CreateOrEditTeamScreen(
 
     Scaffold(
         modifier = Modifier.padding(LocalNavBarPadding.current),
-        contentWindowInsets = NoScaffoldContentInsets,
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text(if (isNewTeam) "Create Team" else "Edit Team") },

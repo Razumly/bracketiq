@@ -39,7 +39,6 @@ import androidx.compose.ui.unit.sp
 import com.razumly.mvp.core.data.dataTypes.isCaptainOrManager
 import com.razumly.mvp.core.network.userMessage
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
-import com.razumly.mvp.core.presentation.NoScaffoldContentInsets
 import com.razumly.mvp.core.presentation.composables.PlatformBackButton
 import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.TeamCard
@@ -131,7 +130,6 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
 
     Scaffold(
         modifier = Modifier.padding(LocalNavBarPadding.current),
-        contentWindowInsets = NoScaffoldContentInsets,
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text("Team Management") },
