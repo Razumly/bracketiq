@@ -50,7 +50,6 @@ import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.canUsePaidBilling
 import com.razumly.mvp.core.presentation.LockedRentalSelection
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
-import com.razumly.mvp.core.presentation.NoScaffoldContentInsets
 import com.razumly.mvp.core.presentation.OrganizationDetailTab
 import com.razumly.mvp.core.presentation.RentalCreateContext
 import com.razumly.mvp.core.presentation.composables.BillingAddressDialog
@@ -254,7 +253,6 @@ fun OrganizationDetailScreen(component: OrganizationDetailComponent) {
     }
 
     Scaffold(
-        contentWindowInsets = NoScaffoldContentInsets,
         topBar = {
             CenterAlignedTopAppBar(
                 title = {

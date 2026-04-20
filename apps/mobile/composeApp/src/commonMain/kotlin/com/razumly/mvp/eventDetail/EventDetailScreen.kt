@@ -130,7 +130,6 @@ import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.data.util.resolveParticipantCapacity
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
-import com.razumly.mvp.core.presentation.NoScaffoldContentInsets
 import com.razumly.mvp.core.presentation.PlayerInteractionComponent
 import com.razumly.mvp.core.presentation.composables.BillingAddressDialog
 import com.razumly.mvp.core.presentation.composables.EmbeddedWebModal
@@ -2671,10 +2670,7 @@ fun EventDetailScreen(
                 enabled = !showMap,
                 modifier = Modifier.fillMaxSize(),
             ) {
-                Scaffold(
-                    modifier = Modifier.fillMaxSize(),
-                    contentWindowInsets = NoScaffoldContentInsets,
-                ) { innerPadding ->
+                Scaffold(Modifier.fillMaxSize()) { innerPadding ->
                 Box(
                     Modifier.background(MaterialTheme.colorScheme.background).fillMaxSize()
                 ) {

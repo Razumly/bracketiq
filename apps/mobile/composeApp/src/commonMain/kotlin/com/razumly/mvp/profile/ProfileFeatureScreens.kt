@@ -49,7 +49,6 @@ import com.razumly.mvp.core.data.repositories.ProfileDocumentCard
 import com.razumly.mvp.core.data.repositories.ProfileDocumentType
 import com.razumly.mvp.core.presentation.composables.EmbeddedWebModal
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
-import com.razumly.mvp.core.presentation.NoScaffoldContentInsets
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import com.razumly.mvp.core.presentation.composables.NetworkAvatar
 import com.razumly.mvp.core.presentation.composables.PlatformDateTimePicker
@@ -1986,7 +1985,6 @@ fun ProfileSectionScaffold(
     val navPadding = LocalNavBarPadding.current
 
     Scaffold(
-        contentWindowInsets = NoScaffoldContentInsets,
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text(title) },

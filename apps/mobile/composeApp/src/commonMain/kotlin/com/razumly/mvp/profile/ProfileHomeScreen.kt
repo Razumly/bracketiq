@@ -43,7 +43,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
-import com.razumly.mvp.core.presentation.NoScaffoldContentInsets
 import com.razumly.mvp.core.util.Platform
 import com.razumly.mvp.icons.MVPIcons
 import com.razumly.mvp.icons.ProfileActionChildren
@@ -206,7 +205,6 @@ fun ProfileHomeScreen(component: ProfileComponent) {
     }
 
     Scaffold(
-        contentWindowInsets = NoScaffoldContentInsets,
         topBar = {
             Box(
                 modifier = Modifier

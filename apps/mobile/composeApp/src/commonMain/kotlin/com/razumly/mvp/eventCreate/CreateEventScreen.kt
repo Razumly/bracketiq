@@ -43,7 +43,6 @@ import com.razumly.mvp.core.data.dataTypes.updateOfficialUserPositions
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.enums.EventType
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
-import com.razumly.mvp.core.presentation.NoScaffoldContentInsets
 import com.razumly.mvp.core.presentation.composables.BillingAddressDialog
 import com.razumly.mvp.core.presentation.composables.EmbeddedWebModal
 import com.razumly.mvp.core.presentation.composables.PreparePaymentProcessor
@@ -349,7 +348,6 @@ fun CreateEventScreen(
     ) {
         Scaffold(
             modifier = Modifier.padding(LocalNavBarPadding.current),
-            contentWindowInsets = NoScaffoldContentInsets,
             floatingActionButton = {
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp),
