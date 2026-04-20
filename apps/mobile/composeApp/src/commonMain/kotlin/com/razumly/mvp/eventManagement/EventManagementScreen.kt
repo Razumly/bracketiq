@@ -13,6 +13,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.unit.dp
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
+import com.razumly.mvp.core.presentation.NoScaffoldContentInsets
 import com.razumly.mvp.core.presentation.composables.PlatformBackButton
 import com.razumly.mvp.core.util.LocalLoadingHandler
 import com.razumly.mvp.core.util.LocalPopupHandler
@@ -43,12 +44,15 @@ fun EventManagementScreen(component: EventManagementComponent) {
         }
     }
 
-    Scaffold(topBar = {
-        CenterAlignedTopAppBar(title = { Text("Event Management") },
-            navigationIcon = { PlatformBackButton(onBack = component.onBack, arrow = true) },
-            scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
-        )
-    }) { paddingValues ->
+    Scaffold(
+        contentWindowInsets = NoScaffoldContentInsets,
+        topBar = {
+            CenterAlignedTopAppBar(title = { Text("Event Management") },
+                navigationIcon = { PlatformBackButton(onBack = component.onBack, arrow = true) },
+                scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
+            )
+        },
+    ) { paddingValues ->
         val firstElementPadding = PaddingValues(top = paddingValues.calculateTopPadding())
         EventList(
             events = events,

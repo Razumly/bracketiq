@@ -88,6 +88,7 @@ import com.razumly.mvp.core.data.dataTypes.MVPPlace
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.TimeSlot
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
+import com.razumly.mvp.core.presentation.NoScaffoldContentInsets
 import com.razumly.mvp.core.presentation.composables.NetworkAvatar
 import com.razumly.mvp.core.presentation.composables.PullToRefreshContainer
 import com.razumly.mvp.core.presentation.composables.SearchBox
@@ -378,6 +379,7 @@ fun EventSearchScreen(
             },
             foregroundContent = {
                 Scaffold(
+                    contentWindowInsets = NoScaffoldContentInsets,
                     topBar = {
                         Spacer(
                             modifier = Modifier
