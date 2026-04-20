@@ -1,6 +1,5 @@
 package com.razumly.mvp.teamManagement
 
-import com.razumly.mvp.core.network.userMessage
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -10,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -19,6 +19,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -61,14 +62,16 @@ import com.razumly.mvp.core.data.util.normalizeDivisionIdentifier
 import com.razumly.mvp.core.data.util.normalizeDivisionIdentifiers
 import com.razumly.mvp.core.data.util.parseCombinedDivisionTypeId
 import com.razumly.mvp.core.data.util.toDivisionDisplayLabel
+import com.razumly.mvp.core.network.userMessage
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
+import com.razumly.mvp.core.presentation.NoScaffoldContentInsets
 import com.razumly.mvp.core.presentation.composables.DropdownOption
 import com.razumly.mvp.core.presentation.composables.InvitePlayerCard
-import com.razumly.mvp.core.presentation.composables.PlatformDropdown
 import com.razumly.mvp.core.presentation.composables.PlatformBackButton
-import com.razumly.mvp.core.presentation.composables.StandardTextField
+import com.razumly.mvp.core.presentation.composables.PlatformDropdown
 import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.SearchPlayerDialog
+import com.razumly.mvp.core.presentation.composables.StandardTextField
 import kotlinx.coroutines.launch
 
 private enum class TeamInviteTarget(val label: String, val inviteType: String?) {
@@ -83,6 +86,20 @@ private val TEAM_DIVISION_GENDER_OPTIONS = listOf(
     DropdownOption(value = "F", label = "Women"),
     DropdownOption(value = "C", label = "Coed"),
 )
+
+private fun normalizeJerseyNumberInput(value: String?): String =
+    value.orEmpty().filter(Char::isDigit).take(3)
+
+private fun formatRegistrationCost(openRegistration: Boolean, registrationPriceCents: Int): String =
+    when {
+        !openRegistration -> "Not open"
+        registrationPriceCents <= 0 -> "Free"
+        else -> {
+            val dollars = registrationPriceCents / 100
+            val cents = registrationPriceCents % 100
+            "\$$dollars.${cents.toString().padStart(2, '0')}"
+        }
+    }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -102,6 +119,8 @@ fun CreateOrEditTeamScreen(
     isCaptain: Boolean,
     currentUser: UserData,
     isNewTeam: Boolean,
+    isSaving: Boolean = false,
+    saveError: String? = null,
     staffUsersById: Map<String, UserData> = emptyMap(),
     onEnsureUserByEmail: (suspend (email: String) -> Result<UserData>)? = null,
     onInviteTeamRole: ((teamId: String, userId: String, inviteType: String) -> Unit)? = null,
@@ -125,7 +144,7 @@ fun CreateOrEditTeamScreen(
     var jerseyNumbersByUserId by remember(team.team.id, syncedTeam.playerRegistrations) {
         mutableStateOf(
             syncedTeam.playerRegistrations.associate { registration ->
-                registration.userId to registration.jerseyNumber.orEmpty()
+                registration.userId to normalizeJerseyNumberInput(registration.jerseyNumber)
             }
         )
     }
@@ -136,6 +155,7 @@ fun CreateOrEditTeamScreen(
     var sportInput by remember(team.team.id) { mutableStateOf(team.team.sport?.trim().orEmpty()) }
     val scope = rememberCoroutineScope()
     val showEditDetails = isCaptain || isNewTeam
+    val canEditFields = showEditDetails && !isSaving
     val canChargeRegistration = currentUser.hasStripeAccount == true || team.team.registrationPriceCents > 0
     val parsedTeamSize = teamSizeInput.toIntOrNull()
     val isTeamSizeValid = parsedTeamSize != null && parsedTeamSize > 0
@@ -386,7 +406,7 @@ fun CreateOrEditTeamScreen(
     fun jerseyNumberForUser(userId: String): String = jerseyNumbersByUserId[userId].orEmpty()
 
     fun updateJerseyNumber(userId: String, jerseyNumber: String) {
-        jerseyNumbersByUserId = jerseyNumbersByUserId + (userId to jerseyNumber)
+        jerseyNumbersByUserId = jerseyNumbersByUserId + (userId to normalizeJerseyNumberInput(jerseyNumber))
     }
 
     fun buildUpdatedTeam(
@@ -408,6 +428,7 @@ fun CreateOrEditTeamScreen(
             activePlayerIds.forEach { userId ->
                 val existing = existingPlayerRegistrationsByUserId[userId]
                 val jerseyNumberInput = jerseyNumbersByUserId[userId]
+                val normalizedJerseyNumberInput = normalizeJerseyNumberInput(jerseyNumberInput)
                 add(
                     TeamPlayerRegistration(
                         id = existing?.id ?: "${syncedTeam.id}__player__active__${userId}",
@@ -415,9 +436,9 @@ fun CreateOrEditTeamScreen(
                         userId = userId,
                         status = "ACTIVE",
                         jerseyNumber = if (jerseyNumberInput != null) {
-                            jerseyNumberInput.trim().takeIf(String::isNotBlank)
+                            normalizedJerseyNumberInput.takeIf(String::isNotBlank)
                         } else {
-                            existing?.jerseyNumber
+                            normalizeJerseyNumberInput(existing?.jerseyNumber).takeIf(String::isNotBlank)
                         },
                         position = existing?.position,
                         isCaptain = userId == resolvedCaptainId,
@@ -427,6 +448,7 @@ fun CreateOrEditTeamScreen(
             invitedPlayerIds.forEach { userId ->
                 val existing = existingPlayerRegistrationsByUserId[userId]
                 val jerseyNumberInput = jerseyNumbersByUserId[userId]
+                val normalizedJerseyNumberInput = normalizeJerseyNumberInput(jerseyNumberInput)
                 add(
                     TeamPlayerRegistration(
                         id = existing?.id ?: "${syncedTeam.id}__player__invited__${userId}",
@@ -434,9 +456,9 @@ fun CreateOrEditTeamScreen(
                         userId = userId,
                         status = "INVITED",
                         jerseyNumber = if (jerseyNumberInput != null) {
-                            jerseyNumberInput.trim().takeIf(String::isNotBlank)
+                            normalizedJerseyNumberInput.takeIf(String::isNotBlank)
                         } else {
-                            existing?.jerseyNumber
+                            normalizeJerseyNumberInput(existing?.jerseyNumber).takeIf(String::isNotBlank)
                         },
                         position = existing?.position,
                         isCaptain = false,
@@ -473,12 +495,13 @@ fun CreateOrEditTeamScreen(
 
     Scaffold(
         modifier = Modifier.padding(LocalNavBarPadding.current),
+        contentWindowInsets = NoScaffoldContentInsets,
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text(if (isNewTeam) "Create Team" else "Edit Team") },
                 navigationIcon = {
                     PlatformBackButton(
-                        onBack = onDismiss,
+                        onBack = { if (!isSaving) onDismiss() },
                         arrow = true,
                     )
                 },
@@ -503,6 +526,14 @@ fun CreateOrEditTeamScreen(
                 )
             }
 
+            saveError?.let {
+                Text(
+                    text = it,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+            }
+
             StandardTextField(
                 value = teamName,
                 onValueChange = {
@@ -516,7 +547,7 @@ fun CreateOrEditTeamScreen(
                 } else {
                     ""
                 },
-                readOnly = !showEditDetails
+                readOnly = !canEditFields
             )
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -527,7 +558,7 @@ fun CreateOrEditTeamScreen(
                 label = "Team Size",
                 keyboardType = "number",
                 inputFilter = { value -> value.filter(Char::isDigit) },
-                readOnly = !showEditDetails,
+                readOnly = !canEditFields,
                 isError = showEditDetails && !isTeamSizeValid,
                 supportingText = if (showEditDetails && !isTeamSizeValid) {
                     "Enter a team size greater than 0."
@@ -544,7 +575,7 @@ fun CreateOrEditTeamScreen(
                 modifier = Modifier.fillMaxWidth(),
                 label = "Sport",
                 placeholder = "Select sport",
-                enabled = showEditDetails,
+                enabled = canEditFields,
             )
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -564,7 +595,7 @@ fun CreateOrEditTeamScreen(
                     modifier = Modifier.weight(1f),
                     label = "Gender",
                     placeholder = "Select gender",
-                    enabled = showEditDetails,
+                    enabled = canEditFields,
                 )
                 PlatformDropdown(
                     selectedValue = skillDivisionTypeInput,
@@ -575,7 +606,7 @@ fun CreateOrEditTeamScreen(
                     modifier = Modifier.weight(1f),
                     label = "Skill Division",
                     placeholder = "Select skill",
-                    enabled = showEditDetails,
+                    enabled = canEditFields,
                 )
             }
             Spacer(modifier = Modifier.height(8.dp))
@@ -588,7 +619,7 @@ fun CreateOrEditTeamScreen(
                 modifier = Modifier.fillMaxWidth(),
                 label = "Age Division",
                 placeholder = "Select age",
-                enabled = showEditDetails,
+                enabled = canEditFields,
             )
             if (showEditDetails && !isTeamDivisionValid) {
                 Text(
@@ -600,40 +631,62 @@ fun CreateOrEditTeamScreen(
             }
 
             Spacer(modifier = Modifier.height(12.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Checkbox(
-                    checked = openRegistrationInput,
-                    onCheckedChange = { checked -> openRegistrationInput = checked },
-                    enabled = showEditDetails,
-                )
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Open registration")
-                    Text(
-                        text = "Players can register from the readonly team view.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+            if (showEditDetails) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Checkbox(
+                        checked = openRegistrationInput,
+                        onCheckedChange = { checked -> openRegistrationInput = checked },
+                        enabled = canEditFields,
                     )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Open registration")
+                        Text(
+                            text = "Players can join this team without an invite.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
+                Spacer(modifier = Modifier.height(8.dp))
+                StandardTextField(
+                    value = registrationCostInput,
+                    onValueChange = { registrationCostInput = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = "Registration cost",
+                    keyboardType = "money",
+                    inputFilter = { value -> value.filter(Char::isDigit).take(7) },
+                    readOnly = !canEditFields || !openRegistrationInput || !canChargeRegistration,
+                    supportingText = if (canChargeRegistration) {
+                        "Leave blank for free registration."
+                    } else {
+                        "Connect Stripe to charge for registration. Free registration is still available."
+                    },
+                )
+            } else {
+                ReadOnlyLabeledValue(
+                    label = "Open registration",
+                    value = if (openRegistrationInput) "Yes" else "No",
+                    supportingText = if (openRegistrationInput) {
+                        "Players can join this team without an invite."
+                    } else {
+                        "Players need an invite to join this team."
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                ReadOnlyLabeledValue(
+                    label = "Registration cost",
+                    value = formatRegistrationCost(
+                        openRegistration = openRegistrationInput,
+                        registrationPriceCents = team.team.registrationPriceCents,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
-            Spacer(modifier = Modifier.height(8.dp))
-            StandardTextField(
-                value = registrationCostInput,
-                onValueChange = { registrationCostInput = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = "Registration cost",
-                keyboardType = "money",
-                inputFilter = { value -> value.filter(Char::isDigit).take(7) },
-                readOnly = !showEditDetails || !openRegistrationInput || !canChargeRegistration,
-                supportingText = if (canChargeRegistration) {
-                    "Leave blank for free registration."
-                } else {
-                    "Connect Stripe to charge for registration. Free registration is still available."
-                },
-            )
 
             Spacer(modifier = Modifier.height(12.dp))
             Text("Players")
@@ -653,14 +706,17 @@ fun CreateOrEditTeamScreen(
                                 JerseyNumberField(
                                     value = jerseyNumber,
                                     onValueChange = { updateJerseyNumber(player.id, it) },
-                                    canEdit = showEditDetails,
+                                    canEdit = canEditFields,
                                 )
                             },
                         )
                         if (showEditDetails) {
-                            Button(onClick = {
-                                playersInTeam = playersInTeam - player
-                            }) {
+                            Button(
+                                onClick = {
+                                    playersInTeam = playersInTeam - player
+                                },
+                                enabled = canEditFields,
+                            ) {
                                 Text("Remove")
                             }
                         }
@@ -682,20 +738,23 @@ fun CreateOrEditTeamScreen(
                                 JerseyNumberField(
                                     value = jerseyNumber,
                                     onValueChange = { updateJerseyNumber(player.id, it) },
-                                    canEdit = showEditDetails,
+                                    canEdit = canEditFields,
                                 )
                             },
                         )
                         if (showEditDetails) {
-                            Button(onClick = {
-                                invitedPlayers = invitedPlayers - player
-                            }) {
+                            Button(
+                                onClick = {
+                                    invitedPlayers = invitedPlayers - player
+                                },
+                                enabled = canEditFields,
+                            ) {
                                 Text("Remove")
                             }
                         }
                     }
                 }
-                if (showEditDetails && (playersInTeam.size + invitedPlayers.size < resolvedTeamSize || resolvedTeamSize == 7)) {
+                if (canEditFields && (playersInTeam.size + invitedPlayers.size < resolvedTeamSize || resolvedTeamSize == 7)) {
                     InvitePlayerCard {
                         inviteTarget = TeamInviteTarget.PLAYER
                         showSearchDialog = true
@@ -728,6 +787,7 @@ fun CreateOrEditTeamScreen(
                             showSearchDialog = true
                         },
                         modifier = Modifier.weight(1f),
+                        enabled = canEditFields,
                     ) { Text("Invite Manager") }
                     OutlinedButton(
                         onClick = {
@@ -735,6 +795,7 @@ fun CreateOrEditTeamScreen(
                             showSearchDialog = true
                         },
                         modifier = Modifier.weight(1f),
+                        enabled = canEditFields,
                     ) { Text("Invite Head Coach") }
                 }
                 Spacer(modifier = Modifier.height(8.dp))
@@ -744,6 +805,7 @@ fun CreateOrEditTeamScreen(
                         showSearchDialog = true
                     },
                     modifier = Modifier.fillMaxWidth(),
+                    enabled = canEditFields,
                 ) { Text("Invite Assistant Coach") }
             } else if (showEditDetails && isNewTeam) {
                 Text(
@@ -757,7 +819,7 @@ fun CreateOrEditTeamScreen(
             Row(
                 Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                OutlinedButton(onClick = onDismiss) {
+                OutlinedButton(onClick = onDismiss, enabled = !isSaving) {
                     Text("Cancel")
                 }
                 if (showEditDetails) {
@@ -770,18 +832,27 @@ fun CreateOrEditTeamScreen(
                                 resolvedSize = resolvedTeamSize,
                             )
                         )
-                    }, enabled = isTeamSizeValid && isTeamDivisionValid && isTeamNameValid) {
-                        Text("Finish")
+                    }, enabled = !isSaving && isTeamSizeValid && isTeamDivisionValid && isTeamNameValid) {
+                        if (isSaving) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(if (isNewTeam) "Creating..." else "Saving...")
+                        } else {
+                            Text(if (isNewTeam) "Create" else "Save")
+                        }
                     }
                 } else {
-                    Button(onClick = { showLeaveTeamDialog = true }) {
+                    Button(onClick = { showLeaveTeamDialog = true }, enabled = !isSaving) {
                         Text("Leave Team")
                     }
                 }
             }
 
             if (isCaptain) {
-                IconButton(onClick = { showDeleteDialog = true }, enabled = deleteEnabled,
+                IconButton(onClick = { showDeleteDialog = true }, enabled = deleteEnabled && !isSaving,
                     colors = IconButtonColors(
                         containerColor = MaterialTheme.colorScheme.error,
                         contentColor = MaterialTheme.colorScheme.onError,
@@ -902,6 +973,11 @@ private fun JerseyNumberField(
     onValueChange: (String) -> Unit,
     canEdit: Boolean,
 ) {
+    if (!canEdit) {
+        JerseyNumberReadOnlyView(value = value)
+        return
+    }
+
     StandardTextField(
         value = value,
         onValueChange = onValueChange,
@@ -913,4 +989,52 @@ private fun JerseyNumberField(
         height = 56.dp,
         contentPadding = PaddingValues(0.dp),
     )
+}
+
+@Composable
+private fun JerseyNumberReadOnlyView(value: String) {
+    Column(
+        modifier = Modifier.width(96.dp),
+        horizontalAlignment = Alignment.Start,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text(
+            text = "Jersey",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = normalizeJerseyNumberInput(value).ifBlank { " " },
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+@Composable
+private fun ReadOnlyLabeledValue(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    supportingText: String? = null,
+) {
+    Column(modifier = modifier.padding(vertical = 4.dp)) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        supportingText?.let { text ->
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
 }

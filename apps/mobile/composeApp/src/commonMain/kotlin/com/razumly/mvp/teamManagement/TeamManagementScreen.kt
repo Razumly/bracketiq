@@ -37,7 +37,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.razumly.mvp.core.data.dataTypes.isCaptainOrManager
+import com.razumly.mvp.core.network.userMessage
 import com.razumly.mvp.core.presentation.LocalNavBarPadding
+import com.razumly.mvp.core.presentation.NoScaffoldContentInsets
 import com.razumly.mvp.core.presentation.composables.PlatformBackButton
 import com.razumly.mvp.core.presentation.composables.PlayerCard
 import com.razumly.mvp.core.presentation.composables.TeamCard
@@ -61,6 +63,8 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
     val currentUser = component.currentUser
     val isCaptain = selectedTeam?.team?.isCaptainOrManager(currentUser.id) == true
     var createTeam by remember { mutableStateOf(false) }
+    var isSavingTeam by remember(selectedTeam?.team?.id, createTeam) { mutableStateOf(false) }
+    var saveError by remember(selectedTeam?.team?.id, createTeam) { mutableStateOf<String?>(null) }
     val deleteEnabled by component.enableDeleteTeam.collectAsState()
 
     LaunchedEffect(component, loadingHandler) {
@@ -84,12 +88,21 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
             onSearch = { query -> component.searchPlayers(query) },
             suggestions = suggestions,
             onFinish = { newTeam ->
-                if (createTeam) {
-                    component.createTeam(newTeam)
-                } else {
-                    component.updateTeam(newTeam)
+                if (!isSavingTeam) {
+                    isSavingTeam = true
+                    saveError = null
+                    val onResult: (Result<Unit>) -> Unit = { result ->
+                        isSavingTeam = false
+                        result
+                            .onSuccess { onCloseTeamEditor() }
+                            .onFailure { saveError = it.userMessage("Save failed") }
+                    }
+                    if (createTeam) {
+                        component.createTeam(newTeam, onResult)
+                    } else {
+                        component.updateTeam(newTeam, onResult)
+                    }
                 }
-                createTeam = false
             },
             onLeaveTeam = { teamToLeave ->
                 component.leaveTeam(teamToLeave)
@@ -105,6 +118,8 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
             isCaptain = isCaptain,
             currentUser = currentUser,
             isNewTeam = createTeam,
+            isSaving = isSavingTeam,
+            saveError = saveError,
             staffUsersById = staffUsersById,
             onEnsureUserByEmail = { email -> component.ensureUserByEmail(email) },
             onInviteTeamRole = { teamId, userId, inviteType ->
@@ -116,6 +131,7 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
 
     Scaffold(
         modifier = Modifier.padding(LocalNavBarPadding.current),
+        contentWindowInsets = NoScaffoldContentInsets,
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text("Team Management") },

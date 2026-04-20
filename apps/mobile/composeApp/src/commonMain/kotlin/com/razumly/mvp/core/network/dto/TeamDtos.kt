@@ -182,6 +182,13 @@ data class UpdateTeamRequestDto(
     val team: TeamUpdateDto,
 )
 
+private fun normalizeJerseyNumber(value: String?): String? =
+    value
+        .orEmpty()
+        .filter(Char::isDigit)
+        .take(3)
+        .takeIf(String::isNotBlank)
+
 fun Team.toUpdateDto(): TeamUpdateDto {
     val synced = withSynchronizedMembership()
     return TeamUpdateDto(
@@ -213,7 +220,7 @@ fun Team.toUpdateDto(): TeamUpdateDto {
                 teamId = registration.teamId,
                 userId = registration.userId,
                 status = registration.status,
-                jerseyNumber = registration.jerseyNumber,
+                jerseyNumber = normalizeJerseyNumber(registration.jerseyNumber),
                 position = registration.position,
                 isCaptain = registration.isCaptain,
             )

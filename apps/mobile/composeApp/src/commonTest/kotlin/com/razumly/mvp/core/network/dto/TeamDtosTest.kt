@@ -39,15 +39,23 @@ class TeamDtosTest {
                     status = "INVITED",
                     jerseyNumber = "12",
                 ),
+                TeamPlayerRegistration(
+                    id = "registration-4",
+                    teamId = "team-1",
+                    userId = "user-4",
+                    status = "INVITED",
+                    jerseyNumber = "abc",
+                ),
             ),
             id = "team-1",
         )
 
         val registrations = team.toUpdateDto().playerRegistrations.orEmpty()
 
-        assertEquals(3, registrations.size)
+        assertEquals(4, registrations.size)
         assertEquals("7", registrations.first { it.userId == "user-1" }.jerseyNumber)
         assertNull(registrations.first { it.userId == "user-2" }.jerseyNumber)
         assertEquals("12", registrations.first { it.userId == "user-3" }.jerseyNumber)
+        assertNull(registrations.first { it.userId == "user-4" }.jerseyNumber)
     }
 }

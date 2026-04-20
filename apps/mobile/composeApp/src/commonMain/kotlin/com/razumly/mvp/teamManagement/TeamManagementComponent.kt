@@ -1,6 +1,5 @@
 package com.razumly.mvp.teamManagement
 
-import com.razumly.mvp.core.network.userMessage
 import com.arkivanov.decompose.ComponentContext
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Sport
@@ -15,8 +14,10 @@ import com.razumly.mvp.core.data.repositories.ISportsRepository
 import com.razumly.mvp.core.data.repositories.ITeamRepository
 import com.razumly.mvp.core.data.repositories.IUserRepository
 import com.razumly.mvp.core.data.repositories.UserVisibilityContext
+import com.razumly.mvp.core.network.userMessage
 import com.razumly.mvp.core.presentation.INavigationHandler
 import com.razumly.mvp.core.util.LoadingHandler
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -52,9 +53,9 @@ interface TeamManagementComponent {
 
     fun setLoadingHandler(handler: LoadingHandler)
     fun selectTeam(team: TeamWithPlayers?)
-    fun createTeam(team: Team)
+    fun createTeam(team: Team, onResult: (Result<Unit>) -> Unit = {})
     fun joinTeam(team: Team)
-    fun updateTeam(team: Team)
+    fun updateTeam(team: Team, onResult: (Result<Unit>) -> Unit = {})
     fun leaveTeam(team: Team)
     fun deselectTeam()
     fun deleteTeam(team: TeamWithPlayers)
@@ -237,8 +238,7 @@ class DefaultTeamManagementComponent(
         refreshSelectedTeamStaffUsers(resolvedTeam)
     }
 
-    override fun createTeam(team: Team) {
-        deselectTeam()
+    override fun createTeam(team: Team, onResult: (Result<Unit>) -> Unit) {
         scope.launch {
             try {
                 loadingHandler?.showLoading("Creating team...")
@@ -251,10 +251,11 @@ class DefaultTeamManagementComponent(
 
                 createResult.onFailure {
                     _errorState.value = it.userMessage()
+                    onResult(Result.failure(it))
                     return@launch
                 }
 
-                val createdTeam = createResult.getOrNull() ?: return@launch
+                val createdTeam = createResult.getOrThrow()
 
                 loadingHandler?.showLoading("Fetching teams...")
                 val teamIdsToRefresh = (currentTeams.value.map { teamWithPlayers ->
@@ -268,6 +269,11 @@ class DefaultTeamManagementComponent(
                         _errorState.value = it.userMessage()
                     }
                 }
+                onResult(Result.success(Unit))
+            } catch (throwable: Throwable) {
+                if (throwable is CancellationException) throw throwable
+                _errorState.value = throwable.userMessage()
+                onResult(Result.failure(throwable))
             } finally {
                 loadingHandler?.hideLoading()
             }
@@ -282,13 +288,23 @@ class DefaultTeamManagementComponent(
         }
     }
 
-    override fun updateTeam(team: Team) {
+    override fun updateTeam(team: Team, onResult: (Result<Unit>) -> Unit) {
         scope.launch {
-            teamRepository.updateTeam(team).onFailure {
-                _errorState.value = it.userMessage()
+            try {
+                teamRepository.updateTeam(team)
+                    .onSuccess {
+                        onResult(Result.success(Unit))
+                    }
+                    .onFailure {
+                        _errorState.value = it.userMessage()
+                        onResult(Result.failure(it))
+                    }
+            } catch (throwable: Throwable) {
+                if (throwable is CancellationException) throw throwable
+                _errorState.value = throwable.userMessage()
+                onResult(Result.failure(throwable))
             }
         }
-        deselectTeam()
     }
 
     override fun leaveTeam(team: Team) {
