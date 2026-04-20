@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -93,6 +94,7 @@ fun CreateOrEditTeamScreen(
     suggestions: List<UserData>,
     onSearch: (String) -> Unit,
     onFinish: (Team) -> Unit,
+    onLeaveTeam: (Team) -> Unit = {},
     onDelete: (TeamWithPlayers) -> Unit,
     onDismiss: () -> Unit,
     deleteEnabled: Boolean,
@@ -107,6 +109,16 @@ fun CreateOrEditTeamScreen(
     val syncedTeam = remember(team.team) { team.team.withSynchronizedMembership() }
     var teamName by remember { mutableStateOf(team.team.name) }
     var teamSizeInput by remember { mutableStateOf(team.team.teamSize.toString()) }
+    var openRegistrationInput by remember(team.team.id) { mutableStateOf(team.team.openRegistration) }
+    var registrationCostInput by remember(team.team.id) {
+        mutableStateOf(
+            if (team.team.registrationPriceCents > 0) {
+                team.team.registrationPriceCents.toString()
+            } else {
+                ""
+            }
+        )
+    }
     var showSearchDialog by remember { mutableStateOf(false) }
     var invitedPlayers by remember { mutableStateOf(team.pendingPlayers) }
     var playersInTeam by remember { mutableStateOf(team.players) }
@@ -124,9 +136,12 @@ fun CreateOrEditTeamScreen(
     var sportInput by remember(team.team.id) { mutableStateOf(team.team.sport?.trim().orEmpty()) }
     val scope = rememberCoroutineScope()
     val showEditDetails = isCaptain || isNewTeam
+    val canChargeRegistration = currentUser.hasStripeAccount == true || team.team.registrationPriceCents > 0
     val parsedTeamSize = teamSizeInput.toIntOrNull()
     val isTeamSizeValid = parsedTeamSize != null && parsedTeamSize > 0
     val resolvedTeamSize = parsedTeamSize ?: team.team.teamSize
+    val registrationPriceCentsInput = (registrationCostInput.toIntOrNull() ?: 0)
+        .coerceAtLeast(0)
     val normalizedEventDivisionDetails = remember(
         selectedEvent?.id,
         selectedEvent?.divisions,
@@ -447,6 +462,12 @@ fun CreateOrEditTeamScreen(
             pending = invitedPlayerIds,
             playerRegistrations = updatedPlayerRegistrations,
             staffAssignments = syncedTeam.staffAssignments,
+            openRegistration = openRegistrationInput,
+            registrationPriceCents = if (openRegistrationInput && canChargeRegistration) {
+                registrationPriceCentsInput
+            } else {
+                0
+            },
         ).withSynchronizedMembership()
     }
 
@@ -577,6 +598,42 @@ fun CreateOrEditTeamScreen(
                     modifier = Modifier.padding(top = 4.dp),
                 )
             }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Checkbox(
+                    checked = openRegistrationInput,
+                    onCheckedChange = { checked -> openRegistrationInput = checked },
+                    enabled = showEditDetails,
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Open registration")
+                    Text(
+                        text = "Players can register from the readonly team view.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            StandardTextField(
+                value = registrationCostInput,
+                onValueChange = { registrationCostInput = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = "Registration cost",
+                keyboardType = "money",
+                inputFilter = { value -> value.filter(Char::isDigit).take(7) },
+                readOnly = !showEditDetails || !openRegistrationInput || !canChargeRegistration,
+                supportingText = if (canChargeRegistration) {
+                    "Leave blank for free registration."
+                } else {
+                    "Connect Stripe to charge for registration. Free registration is still available."
+                },
+            )
 
             Spacer(modifier = Modifier.height(12.dp))
             Text("Players")
@@ -767,14 +824,7 @@ fun CreateOrEditTeamScreen(
             text = { Text("Are you sure you want to leave this team?") },
             confirmButton = {
                 Button(onClick = {
-                    onFinish(
-                        buildUpdatedTeam(
-                            activePlayers = playersInTeam - currentUser,
-                            invitedPlayers = invitedPlayers,
-                            resolvedName = normalizedTeamName,
-                            resolvedSize = resolvedTeamSize,
-                        )
-                    )
+                    onLeaveTeam(team.team)
                     showLeaveTeamDialog = false
                 }) {
                     Text("Leave")

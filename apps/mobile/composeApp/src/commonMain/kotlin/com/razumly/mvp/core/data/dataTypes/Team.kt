@@ -37,6 +37,10 @@ data class Team(
     val ageDivisionTypeId: String? = null,
     val ageDivisionTypeName: String? = null,
     val divisionGender: String? = null,
+    val organizationId: String? = null,
+    val createdBy: String? = null,
+    val openRegistration: Boolean = false,
+    val registrationPriceCents: Int = 0,
     val playerRegistrations: List<TeamPlayerRegistration> = emptyList(),
     val staffAssignments: List<TeamStaffAssignment> = emptyList(),
     @PrimaryKey override val id: String
@@ -78,6 +82,10 @@ data class Team(
                 ageDivisionTypeId = defaultAgeDivisionTypeId,
                 ageDivisionTypeName = defaultAgeDivisionTypeName,
                 divisionGender = "C",
+                organizationId = null,
+                createdBy = captainId,
+                openRegistration = false,
+                registrationPriceCents = 0,
                 playerRegistrations = emptyList(),
                 staffAssignments = emptyList(),
             ).withSynchronizedMembership()
@@ -108,6 +116,10 @@ data class Team(
             ageDivisionTypeId = synced.ageDivisionTypeId,
             ageDivisionTypeName = synced.ageDivisionTypeName,
             divisionGender = synced.divisionGender,
+            organizationId = synced.organizationId,
+            createdBy = synced.createdBy,
+            openRegistration = synced.openRegistration,
+            registrationPriceCents = synced.registrationPriceCents,
         )
     }
 }

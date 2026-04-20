@@ -319,6 +319,8 @@ private object EventRepositoryHttp_UnusedTeamRepository : ITeamRepository {
     override suspend fun removePlayerFromTeam(team: Team, player: UserData): Result<Unit> = error("unused")
     override suspend fun createTeam(newTeam: Team): Result<Team> = error("unused")
     override suspend fun updateTeam(newTeam: Team): Result<Team> = error("unused")
+    override suspend fun registerForTeam(teamId: String): Result<Team> = error("unused")
+    override suspend fun leaveTeam(teamId: String): Result<Team> = error("unused")
     override suspend fun deleteTeam(team: TeamWithPlayers): Result<Unit> = error("unused")
     override fun getTeamsWithPlayersFlow(id: String): Flow<Result<List<TeamWithPlayers>>> = error("unused")
     override fun getTeamWithPlayersFlow(id: String): Flow<Result<TeamWithRelations>> = error("unused")

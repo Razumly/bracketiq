@@ -15,6 +15,7 @@ import com.razumly.mvp.core.data.dataTypes.ProductTaxCategory
 import com.razumly.mvp.core.data.dataTypes.RefundRequest
 import com.razumly.mvp.core.data.dataTypes.RefundRequestWithRelations
 import com.razumly.mvp.core.data.dataTypes.Subscription
+import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.network.ApiException
 import com.razumly.mvp.core.network.MvpApiClient
 import com.razumly.mvp.core.network.stripeRedirectBaseUrl
@@ -235,6 +236,7 @@ interface IBillingRepository : IMVPRepository {
         timeSlotContext: PurchaseIntentTimeSlotContext? = null,
         occurrence: EventOccurrenceSelection? = null,
     ): Result<PurchaseIntent>
+    suspend fun createTeamRegistrationPurchaseIntent(team: Team): Result<PurchaseIntent>
     suspend fun getRequiredSignLinks(eventId: String): Result<List<SignStep>>
     suspend fun getRequiredSignLinks(
         eventId: String,
@@ -367,6 +369,31 @@ class BillingRepository(
                 },
                 slotId = occurrence?.slotId?.trim()?.takeIf(String::isNotBlank),
                 occurrenceDate = occurrence?.occurrenceDate?.trim()?.takeIf(String::isNotBlank),
+            ),
+        )
+
+        if (!response.error.isNullOrBlank()) {
+            throw Exception(response.error)
+        }
+        response
+    }
+
+    override suspend fun createTeamRegistrationPurchaseIntent(team: Team): Result<PurchaseIntent> = runCatching {
+        val user = userRepository.currentUser.value.getOrThrow()
+        val email = userRepository.currentAccount.value.getOrNull()?.email
+        val normalizedTeamId = team.id.trim().takeIf(String::isNotBlank)
+            ?: error("Team id is required for registration checkout.")
+
+        val response = api.post<PurchaseIntentRequestDto, PurchaseIntent>(
+            path = "api/billing/purchase-intent",
+            body = PurchaseIntentRequestDto(
+                purchaseType = "team_registration",
+                user = BillingUserRefDto(id = user.id, email = email),
+                team = BillingTeamRefDto(
+                    id = normalizedTeamId,
+                    name = team.name,
+                ),
+                teamRegistration = BillingTeamRefDto(teamId = normalizedTeamId),
             ),
         )
 

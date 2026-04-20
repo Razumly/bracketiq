@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -26,6 +27,7 @@ import com.razumly.mvp.core.data.dataTypes.TeamPlayerRegistration
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.activePlayerRegistrations
 import com.razumly.mvp.core.data.dataTypes.isActive
+import com.razumly.mvp.core.data.dataTypes.isStarted
 import com.razumly.mvp.core.data.dataTypes.normalizedRole
 import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 
@@ -39,6 +41,10 @@ fun TeamDetailsDialog(
     onPlayerAction: (UserData, PlayerAction) -> Unit = { _, _ -> },
     onBlockPlayer: (UserData, Boolean) -> Unit = { _, _ -> },
     onUnblockPlayer: (UserData) -> Unit = {},
+    isRegistering: Boolean = false,
+    isLeaving: Boolean = false,
+    onRegisterForTeam: (() -> Unit)? = null,
+    onLeaveTeam: (() -> Unit)? = null,
 ) {
     Dialog(onDismissRequest = onDismiss) {
         Card(
@@ -57,6 +63,20 @@ fun TeamDetailsDialog(
                 val activePlayerRegistrationsByUserId = syncedTeam
                     .activePlayerRegistrations()
                     .associateBy(TeamPlayerRegistration::userId)
+                val currentUserRegistration = syncedTeam.playerRegistrations
+                    .firstOrNull { registration -> registration.userId == currentUser.id }
+                val isCurrentUserActive = currentUserRegistration?.isActive() == true ||
+                    syncedTeam.playerIds.contains(currentUser.id)
+                val isCurrentUserPending = currentUserRegistration?.isStarted() == true
+                val reservedOrActiveCount = syncedTeam.playerRegistrations.count { registration ->
+                    registration.isActive() || registration.isStarted()
+                }.coerceAtLeast(syncedTeam.playerIds.size)
+                val teamHasCapacity = syncedTeam.teamSize <= 0 || reservedOrActiveCount < syncedTeam.teamSize
+                val canRegister = syncedTeam.openRegistration &&
+                    !isCurrentUserActive &&
+                    !isCurrentUserPending &&
+                    teamHasCapacity &&
+                    onRegisterForTeam != null
                 val activeStaffAssignments = syncedTeam.staffAssignments
                     .filter(TeamStaffAssignment::isActive)
                     .sortedWith(
@@ -180,6 +200,34 @@ fun TeamDetailsDialog(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // Actions
+                if (onRegisterForTeam != null || onLeaveTeam != null) {
+                    if (isCurrentUserActive && onLeaveTeam != null) {
+                        Button(
+                            onClick = onLeaveTeam,
+                            enabled = !isLeaving,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(if (isLeaving) "Leaving..." else "Leave Team")
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                    } else if (syncedTeam.openRegistration || isCurrentUserPending) {
+                        Button(
+                            onClick = { onRegisterForTeam?.invoke() },
+                            enabled = canRegister && !isRegistering,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                when {
+                                    isRegistering -> "Registering..."
+                                    isCurrentUserPending -> "Registration Pending"
+                                    !teamHasCapacity -> "Team Full"
+                                    else -> "Register for Team"
+                                }
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End

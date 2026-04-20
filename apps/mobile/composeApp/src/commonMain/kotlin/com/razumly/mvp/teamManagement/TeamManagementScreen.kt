@@ -91,6 +91,10 @@ fun TeamManagementScreen(component: TeamManagementComponent) {
                 }
                 createTeam = false
             },
+            onLeaveTeam = { teamToLeave ->
+                component.leaveTeam(teamToLeave)
+                createTeam = false
+            },
             onDismiss = onCloseTeamEditor,
             onDelete = { teamToDelete ->
                 component.deleteTeam(teamToDelete)

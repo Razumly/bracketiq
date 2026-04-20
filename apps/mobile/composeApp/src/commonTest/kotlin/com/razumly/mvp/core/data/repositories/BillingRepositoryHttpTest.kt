@@ -8,6 +8,7 @@ import com.razumly.mvp.core.data.dataTypes.OrganizationVerificationReviewStatus
 import com.razumly.mvp.core.data.dataTypes.OrganizationVerificationStatus
 import com.razumly.mvp.core.data.dataTypes.RefundRequest
 import com.razumly.mvp.core.data.dataTypes.RefundRequestWithRelations
+import com.razumly.mvp.core.data.dataTypes.Team
 import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.dataTypes.daos.ChatGroupDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventDao
@@ -954,6 +955,57 @@ class BillingRepositoryHttpTest {
         val event = Event(id = "e1", hostId = "h1", priceCents = 1000, eventType = EventType.EVENT)
         repo.createPurchaseIntent(event = event, teamId = "team_123").getOrThrow()
 
+        assertTrue(capturedBody.contains("\"team\""))
+        assertTrue(capturedBody.contains("\"id\":\"team_123\""))
+    }
+
+    @Test
+    fun createTeamRegistrationPurchaseIntent_posts_team_registration_payload() = runTest {
+        val tokenStore = BillingRepositoryHttp_InMemoryAuthTokenStore("t123")
+        val userRepo = BillingRepositoryHttp_FakeUserRepository(
+            currentUser = billingMakeUser("u1"),
+            currentAccount = AuthAccount(id = "u1", email = "u1@example.test", name = "Test User"),
+        )
+        val db = BillingRepositoryHttp_FakeDatabaseService()
+        var capturedBody = ""
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/billing/purchase-intent", request.url.encodedPath)
+            assertEquals(HttpMethod.Post, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+            capturedBody = (request.body as? OutgoingContent.ByteArrayContent)
+                ?.bytes()
+                ?.decodeToString()
+                .orEmpty()
+
+            respond(
+                content = """
+                    {
+                      "paymentIntent": "pi_team_registration",
+                      "publishableKey": "pk_test_123"
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) { install(ContentNegotiation) { json(jsonMVP) } }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = BillingRepository(api, userRepo, BillingRepositoryHttp_UnusedEventRepository, db)
+
+        val team = Team(captainId = "u1").copy(
+            id = "team_123",
+            name = "Open Team",
+            openRegistration = true,
+            registrationPriceCents = 2500,
+        )
+        val intent = repo.createTeamRegistrationPurchaseIntent(team).getOrThrow()
+
+        assertEquals("pi_team_registration", intent.paymentIntent)
+        assertTrue(capturedBody.contains("\"purchaseType\":\"team_registration\""))
+        assertTrue(capturedBody.contains("\"teamRegistration\""))
+        assertTrue(capturedBody.contains("\"teamId\":\"team_123\""))
         assertTrue(capturedBody.contains("\"team\""))
         assertTrue(capturedBody.contains("\"id\":\"team_123\""))
     }

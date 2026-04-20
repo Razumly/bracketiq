@@ -55,6 +55,7 @@ interface TeamManagementComponent {
     fun createTeam(team: Team)
     fun joinTeam(team: Team)
     fun updateTeam(team: Team)
+    fun leaveTeam(team: Team)
     fun deselectTeam()
     fun deleteTeam(team: TeamWithPlayers)
     fun searchPlayers(query: String)
@@ -284,6 +285,15 @@ class DefaultTeamManagementComponent(
     override fun updateTeam(team: Team) {
         scope.launch {
             teamRepository.updateTeam(team).onFailure {
+                _errorState.value = it.userMessage()
+            }
+        }
+        deselectTeam()
+    }
+
+    override fun leaveTeam(team: Team) {
+        scope.launch {
+            teamRepository.leaveTeam(team.id).onFailure {
                 _errorState.value = it.userMessage()
             }
         }

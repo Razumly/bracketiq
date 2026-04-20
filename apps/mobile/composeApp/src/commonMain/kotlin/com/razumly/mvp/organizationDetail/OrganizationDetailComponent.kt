@@ -8,6 +8,7 @@ import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Organization
 import com.razumly.mvp.core.data.dataTypes.Product
 import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
+import com.razumly.mvp.core.data.dataTypes.UserData
 import com.razumly.mvp.core.data.repositories.IBillingRepository
 import com.razumly.mvp.core.data.repositories.IEventRepository
 import com.razumly.mvp.core.data.repositories.IFieldRepository
@@ -31,6 +32,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.launch
 
 private fun Product.isSinglePurchase(): Boolean =
@@ -53,6 +57,8 @@ interface OrganizationDetailComponent : IPaymentProcessor {
     val errorState: StateFlow<ErrorMessage?>
     val message: StateFlow<String?>
     val billingAddressPrompt: StateFlow<BillingAddressDraft?>
+    val currentUser: StateFlow<UserData>
+    val startingTeamRegistrationId: StateFlow<String?>
 
     fun setLoadingHandler(handler: LoadingHandler)
     fun refreshOrganization(force: Boolean = false)
@@ -62,6 +68,8 @@ interface OrganizationDetailComponent : IPaymentProcessor {
     fun refreshRentals(force: Boolean = false)
     fun clearRentalData()
     fun startProductPurchase(product: Product)
+    fun startTeamRegistration(team: TeamWithPlayers)
+    fun leaveTeam(team: TeamWithPlayers)
     fun submitBillingAddress(address: BillingAddressDraft)
     fun dismissBillingAddressPrompt()
     fun startRentalCreate(context: RentalCreateContext)
@@ -131,6 +139,11 @@ class DefaultOrganizationDetailComponent(
     override val message: StateFlow<String?> = _message.asStateFlow()
     private val _billingAddressPrompt = MutableStateFlow<BillingAddressDraft?>(null)
     override val billingAddressPrompt: StateFlow<BillingAddressDraft?> = _billingAddressPrompt.asStateFlow()
+    override val currentUser: StateFlow<UserData> = userRepository.currentUser
+        .map { result -> result.getOrNull() ?: UserData() }
+        .stateIn(scope, SharingStarted.Eagerly, UserData())
+    private val _startingTeamRegistrationId = MutableStateFlow<String?>(null)
+    override val startingTeamRegistrationId: StateFlow<String?> = _startingTeamRegistrationId.asStateFlow()
 
     private var organizationLoaded = false
     private var eventsLoaded = false
@@ -138,6 +151,7 @@ class DefaultOrganizationDetailComponent(
     private var productsLoaded = false
     private var rentalsLoaded = false
     private var pendingProductPurchase: Product? = null
+    private var pendingTeamRegistration: TeamWithPlayers? = null
     private var pendingBillingAddressAction: (() -> Unit)? = null
 
     private lateinit var loadingHandler: LoadingHandler
@@ -152,18 +166,24 @@ class DefaultOrganizationDetailComponent(
                     PaymentResult.Canceled -> {
                         _errorState.value = ErrorMessage("Payment canceled.")
                         _startingProductCheckoutId.value = null
+                        _startingTeamRegistrationId.value = null
                         pendingProductPurchase = null
+                        pendingTeamRegistration = null
                     }
 
                     is PaymentResult.Failed -> {
                         _errorState.value = ErrorMessage(result.error)
                         _startingProductCheckoutId.value = null
+                        _startingTeamRegistrationId.value = null
                         pendingProductPurchase = null
+                        pendingTeamRegistration = null
                     }
 
                     PaymentResult.Completed -> {
                         val pendingProduct = pendingProductPurchase
+                        val pendingTeam = pendingTeamRegistration
                         _startingProductCheckoutId.value = null
+                        _startingTeamRegistrationId.value = null
                         if (pendingProduct != null) {
                             _message.value = if (pendingProduct.isSinglePurchase()) {
                                 "Purchase completed for ${pendingProduct.name}."
@@ -172,6 +192,11 @@ class DefaultOrganizationDetailComponent(
                             }
                             refreshProducts(force = true)
                             pendingProductPurchase = null
+                        }
+                        if (pendingTeam != null) {
+                            _message.value = "Registration completed for ${pendingTeam.team.name}."
+                            refreshTeams(force = true)
+                            pendingTeamRegistration = null
                         }
                     }
                 }
@@ -370,6 +395,83 @@ class DefaultOrganizationDetailComponent(
 
     override fun startRentalCreate(context: RentalCreateContext) {
         navigationHandler.navigateToCreate(context)
+    }
+
+    override fun startTeamRegistration(team: TeamWithPlayers) {
+        scope.launch {
+            val teamId = team.team.id.trim()
+            if (teamId.isBlank() || _startingTeamRegistrationId.value != null) return@launch
+
+            _startingTeamRegistrationId.value = teamId
+            try {
+                val user = userRepository.currentUser.value.getOrNull()
+                val account = userRepository.currentAccount.value.getOrNull()
+                if (user == null || user.id.isBlank()) {
+                    _errorState.value = ErrorMessage("Please sign in to register.")
+                    return@launch
+                }
+
+                if (team.team.registrationPriceCents > 0) {
+                    if (!ensureBillingAddressOrPrompt { startTeamRegistration(team) }) {
+                        return@launch
+                    }
+                    if (::loadingHandler.isInitialized) {
+                        loadingHandler.showLoading("Preparing checkout...")
+                    }
+                    billingRepository.createTeamRegistrationPurchaseIntent(team.team)
+                        .onSuccess { intent ->
+                            pendingTeamRegistration = team
+                            showPaymentSheet(intent, account?.email.orEmpty(), user.fullName)
+                        }
+                        .onFailure { error ->
+                            _errorState.value = ErrorMessage("Unable to start registration: ${error.userMessage()}")
+                            if (::loadingHandler.isInitialized) {
+                                loadingHandler.hideLoading()
+                            }
+                        }
+                } else {
+                    if (::loadingHandler.isInitialized) {
+                        loadingHandler.showLoading("Registering...")
+                    }
+                    teamRepository.registerForTeam(teamId)
+                        .onSuccess {
+                            _message.value = "You are registered for ${team.team.name}."
+                            refreshTeams(force = true)
+                        }
+                        .onFailure { error ->
+                            _errorState.value = ErrorMessage("Unable to register: ${error.userMessage()}")
+                        }
+                    if (::loadingHandler.isInitialized) {
+                        loadingHandler.hideLoading()
+                    }
+                }
+            } finally {
+                if (pendingTeamRegistration == null) {
+                    _startingTeamRegistrationId.value = null
+                }
+            }
+        }
+    }
+
+    override fun leaveTeam(team: TeamWithPlayers) {
+        scope.launch {
+            val teamId = team.team.id.trim()
+            if (teamId.isBlank()) return@launch
+            if (::loadingHandler.isInitialized) {
+                loadingHandler.showLoading("Leaving team...")
+            }
+            teamRepository.leaveTeam(teamId)
+                .onSuccess {
+                    _message.value = "You left ${team.team.name}."
+                    refreshTeams(force = true)
+                }
+                .onFailure { error ->
+                    _errorState.value = ErrorMessage("Unable to leave team: ${error.userMessage()}")
+                }
+            if (::loadingHandler.isInitialized) {
+                loadingHandler.hideLoading()
+            }
+        }
     }
 
     override fun submitBillingAddress(address: BillingAddressDraft) {

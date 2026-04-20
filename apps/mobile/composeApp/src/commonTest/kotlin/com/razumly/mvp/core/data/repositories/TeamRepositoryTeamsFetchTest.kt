@@ -25,6 +25,7 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
@@ -333,7 +334,11 @@ class TeamRepositoryTeamsFetchTest {
                           "playerIds": ["u1"],
                           "captainId": "u1",
                           "pending": [],
-                          "teamSize": 2
+                          "teamSize": 2,
+                          "organizationId": "org_1",
+                          "createdBy": "owner_1",
+                          "openRegistration": true,
+                          "registrationPriceCents": 2500
                         }
                       ]
                     }
@@ -353,12 +358,113 @@ class TeamRepositoryTeamsFetchTest {
         val teams = repo.getTeams(listOf("t1", "t2")).getOrThrow()
         assertEquals(1, teams.size)
         assertEquals("t1", teams.first().id)
+        assertEquals("org_1", teams.first().organizationId)
+        assertEquals("owner_1", teams.first().createdBy)
+        assertTrue(teams.first().openRegistration)
+        assertEquals(2500, teams.first().registrationPriceCents)
 
         val cached = teamDao.getTeams(listOf("t1"))
         assertEquals(1, cached.size)
         assertEquals("t1", cached.first().id)
 
         assertEquals(listOf("u1"), userRepo.lastGetUsersInput)
+    }
+
+    @Test
+    fun registerForTeam_posts_self_registration_endpoint_and_caches_team() = runTest {
+        val tokenStore = InMemoryAuthTokenStore("t123")
+        val teamDao = FakeTeamDao()
+        val db = FakeDatabaseService(teamDao)
+        val userRepo = FakeUserRepository()
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/teams/team_1/registrations/self", request.url.encodedPath)
+            assertEquals(HttpMethod.Post, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+
+            respond(
+                content = """
+                    {
+                      "registrationId": "registration_1",
+                      "status": "ACTIVE",
+                      "team": {
+                        "id": "team_1",
+                        "name": "Open Team",
+                        "division": "Open",
+                        "playerIds": ["u1"],
+                        "captainId": "captain_1",
+                        "pending": [],
+                        "teamSize": 6,
+                        "openRegistration": true,
+                        "registrationPriceCents": 0
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = TeamRepository(api, db, userRepo, FakePushNotificationsRepository)
+
+        val team = repo.registerForTeam("team_1").getOrThrow()
+
+        assertEquals("team_1", team.id)
+        assertTrue(team.openRegistration)
+        assertEquals(listOf("u1", "captain_1"), team.playerIds)
+        assertEquals("team_1", teamDao.getTeam("team_1").id)
+    }
+
+    @Test
+    fun leaveTeam_deletes_self_registration_endpoint_and_caches_team() = runTest {
+        val tokenStore = InMemoryAuthTokenStore("t123")
+        val teamDao = FakeTeamDao()
+        val db = FakeDatabaseService(teamDao)
+        val userRepo = FakeUserRepository()
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/teams/team_1/registrations/self", request.url.encodedPath)
+            assertEquals(HttpMethod.Delete, request.method)
+            assertEquals("Bearer t123", request.headers[HttpHeaders.Authorization])
+
+            respond(
+                content = """
+                    {
+                      "left": true,
+                      "team": {
+                        "id": "team_1",
+                        "name": "Open Team",
+                        "division": "Open",
+                        "playerIds": [],
+                        "captainId": "captain_1",
+                        "pending": [],
+                        "teamSize": 6,
+                        "openRegistration": true,
+                        "registrationPriceCents": 0
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = TeamRepository(api, db, userRepo, FakePushNotificationsRepository)
+
+        val team = repo.leaveTeam("team_1").getOrThrow()
+
+        assertEquals("team_1", team.id)
+        assertTrue(team.openRegistration)
+        assertEquals(listOf("captain_1"), team.playerIds)
+        assertEquals("team_1", teamDao.getTeam("team_1").id)
     }
 
     @Test

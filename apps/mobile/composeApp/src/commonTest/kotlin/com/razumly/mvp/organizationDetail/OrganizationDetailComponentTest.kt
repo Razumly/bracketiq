@@ -187,6 +187,12 @@ private object NoopTeamRepository : ITeamRepository {
 
     override suspend fun updateTeam(newTeam: Team): Result<Team> = Result.success(newTeam)
 
+    override suspend fun registerForTeam(teamId: String): Result<Team> =
+        Result.failure(IllegalStateException("unused"))
+
+    override suspend fun leaveTeam(teamId: String): Result<Team> =
+        Result.failure(IllegalStateException("unused"))
+
     override suspend fun deleteTeam(team: TeamWithPlayers): Result<Unit> = Result.success(Unit)
 
     override fun getTeamsWithPlayersFlow(id: String): Flow<Result<List<TeamWithPlayers>>> =

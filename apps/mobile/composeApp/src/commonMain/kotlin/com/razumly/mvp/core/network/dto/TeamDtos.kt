@@ -56,6 +56,10 @@ data class TeamApiDto(
     val ageDivisionTypeId: String? = null,
     val ageDivisionTypeName: String? = null,
     val divisionGender: String? = null,
+    val organizationId: String? = null,
+    val createdBy: String? = null,
+    val openRegistration: Boolean? = null,
+    val registrationPriceCents: Int? = null,
     val playerRegistrations: List<TeamPlayerRegistrationApiDto>? = null,
     val staffAssignments: List<TeamStaffAssignmentApiDto>? = null,
 ) {
@@ -114,6 +118,10 @@ data class TeamApiDto(
             ageDivisionTypeId = ageDivisionTypeId,
             ageDivisionTypeName = ageDivisionTypeName,
             divisionGender = divisionGender,
+            organizationId = organizationId?.trim()?.takeIf(String::isNotBlank),
+            createdBy = createdBy?.trim()?.takeIf(String::isNotBlank),
+            openRegistration = openRegistration == true,
+            registrationPriceCents = (registrationPriceCents ?: 0).coerceAtLeast(0),
             playerRegistrations = resolvedPlayerRegistrations,
             staffAssignments = resolvedStaffAssignments,
             id = resolvedId,
@@ -131,6 +139,15 @@ data class TeamInviteFreeAgentsResponseDto(
     val users: List<UserProfileDto> = emptyList(),
     val eventIds: List<String> = emptyList(),
     val freeAgentIds: List<String> = emptyList(),
+)
+
+@Serializable
+data class TeamRegistrationResponseDto(
+    val registrationId: String? = null,
+    val status: String? = null,
+    val left: Boolean? = null,
+    val team: TeamApiDto? = null,
+    val error: String? = null,
 )
 
 @Serializable
@@ -155,6 +172,8 @@ data class TeamUpdateDto(
     val ageDivisionTypeId: String? = null,
     val ageDivisionTypeName: String? = null,
     val divisionGender: String? = null,
+    val openRegistration: Boolean? = null,
+    val registrationPriceCents: Int? = null,
     val playerRegistrations: List<TeamPlayerRegistrationApiDto>? = null,
 )
 
@@ -186,6 +205,8 @@ fun Team.toUpdateDto(): TeamUpdateDto {
         ageDivisionTypeId = synced.ageDivisionTypeId,
         ageDivisionTypeName = synced.ageDivisionTypeName,
         divisionGender = synced.divisionGender,
+        openRegistration = synced.openRegistration,
+        registrationPriceCents = synced.registrationPriceCents.coerceAtLeast(0),
         playerRegistrations = synced.playerRegistrations.map { registration ->
             TeamPlayerRegistrationApiDto(
                 id = registration.id,

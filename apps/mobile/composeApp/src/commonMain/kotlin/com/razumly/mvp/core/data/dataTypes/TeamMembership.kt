@@ -4,6 +4,7 @@ import kotlinx.serialization.Serializable
 
 private const val TEAM_MEMBERSHIP_STATUS_ACTIVE = "ACTIVE"
 private const val TEAM_MEMBERSHIP_STATUS_INVITED = "INVITED"
+private const val TEAM_MEMBERSHIP_STATUS_STARTED = "STARTED"
 private const val TEAM_MEMBERSHIP_STATUS_LEFT = "LEFT"
 private const val TEAM_MEMBERSHIP_STATUS_REMOVED = "REMOVED"
 
@@ -41,6 +42,7 @@ private fun normalizeIdToken(value: String?): String? =
 private fun normalizeTeamMembershipStatus(value: String?): String =
     when (value?.trim()?.uppercase()) {
         TEAM_MEMBERSHIP_STATUS_INVITED -> TEAM_MEMBERSHIP_STATUS_INVITED
+        TEAM_MEMBERSHIP_STATUS_STARTED -> TEAM_MEMBERSHIP_STATUS_STARTED
         TEAM_MEMBERSHIP_STATUS_LEFT -> TEAM_MEMBERSHIP_STATUS_LEFT
         TEAM_MEMBERSHIP_STATUS_REMOVED -> TEAM_MEMBERSHIP_STATUS_REMOVED
         else -> TEAM_MEMBERSHIP_STATUS_ACTIVE
@@ -65,6 +67,8 @@ fun TeamPlayerRegistration.normalizedStatus(): String = normalizeTeamMembershipS
 fun TeamPlayerRegistration.isActive(): Boolean = normalizedStatus() == TEAM_MEMBERSHIP_STATUS_ACTIVE
 
 fun TeamPlayerRegistration.isInvited(): Boolean = normalizedStatus() == TEAM_MEMBERSHIP_STATUS_INVITED
+
+fun TeamPlayerRegistration.isStarted(): Boolean = normalizedStatus() == TEAM_MEMBERSHIP_STATUS_STARTED
 
 fun TeamStaffAssignment.normalizedStatus(): String = normalizeTeamStaffStatus(status)
 

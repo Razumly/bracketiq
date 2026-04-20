@@ -17,6 +17,7 @@ import com.razumly.mvp.core.network.dto.InviteCreateDto
 import com.razumly.mvp.core.network.dto.InvitesResponseDto
 import com.razumly.mvp.core.network.dto.TeamApiDto
 import com.razumly.mvp.core.network.dto.TeamInviteFreeAgentsResponseDto
+import com.razumly.mvp.core.network.dto.TeamRegistrationResponseDto
 import com.razumly.mvp.core.network.dto.TeamsResponseDto
 import com.razumly.mvp.core.network.dto.UpdateTeamRequestDto
 import com.razumly.mvp.core.network.dto.toUpdateDto
@@ -33,6 +34,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
 
 interface ITeamRepository : IMVPRepository {
     fun getTeamsFlow(ids: List<String>): Flow<Result<List<TeamWithPlayers>>>
@@ -43,6 +45,8 @@ interface ITeamRepository : IMVPRepository {
     suspend fun removePlayerFromTeam(team: Team, player: UserData): Result<Unit>
     suspend fun createTeam(newTeam: Team): Result<Team>
     suspend fun updateTeam(newTeam: Team): Result<Team>
+    suspend fun registerForTeam(teamId: String): Result<Team>
+    suspend fun leaveTeam(teamId: String): Result<Team>
     suspend fun deleteTeam(team: TeamWithPlayers): Result<Unit>
     fun getTeamsWithPlayersFlow(id: String): Flow<Result<List<TeamWithPlayers>>>
     fun getTeamsWithPlayersLoadingFlow(id: String): Flow<Boolean> = flowOf(false)
@@ -58,6 +62,11 @@ interface ITeamRepository : IMVPRepository {
     suspend fun deleteInvite(inviteId: String): Result<Unit>
     suspend fun acceptTeamInvite(inviteId: String, teamId: String): Result<Unit>
 }
+
+@Serializable
+private data class TeamRegistrationRequestDto(
+    val noop: Boolean = true,
+)
 
 class TeamRepository(
     private val api: MvpApiClient,
@@ -236,6 +245,42 @@ class TeamRepository(
                     createdBy = newData.captainId,
                 )
             }
+        },
+        onReturn = { team -> team },
+    )
+
+    override suspend fun registerForTeam(teamId: String): Result<Team> = singleResponse(
+        networkCall = {
+            val response = api.post<TeamRegistrationRequestDto, TeamRegistrationResponseDto>(
+                path = "api/teams/$teamId/registrations/self",
+                body = TeamRegistrationRequestDto(),
+            )
+            response.error?.takeIf(String::isNotBlank)?.let { message -> error(message) }
+            val team = response.team?.toTeamOrNull() ?: error("Team registration response missing team")
+            ensureUsersCachedForTeam(team)
+            team
+        },
+        saveCall = { team ->
+            databaseService.getTeamDao.upsertTeamWithRelations(team)
+            runCatching { userRepository.getCurrentAccount().getOrThrow() }
+        },
+        onReturn = { team -> team },
+    )
+
+    override suspend fun leaveTeam(teamId: String): Result<Team> = singleResponse(
+        networkCall = {
+            val response = api.delete<TeamRegistrationRequestDto, TeamRegistrationResponseDto>(
+                path = "api/teams/$teamId/registrations/self",
+                body = TeamRegistrationRequestDto(),
+            )
+            response.error?.takeIf(String::isNotBlank)?.let { message -> error(message) }
+            val team = response.team?.toTeamOrNull() ?: error("Team leave response missing team")
+            ensureUsersCachedForTeam(team)
+            team
+        },
+        saveCall = { team ->
+            databaseService.getTeamDao.upsertTeamWithRelations(team)
+            runCatching { userRepository.getCurrentAccount().getOrThrow() }
         },
         onReturn = { team -> team },
     )

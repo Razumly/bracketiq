@@ -622,6 +622,9 @@ internal class CreateEvent_FakeBillingRepository : IBillingRepository {
         return Result.success(PurchaseIntent(paymentIntent = "pi_test", publishableKey = "pk_test"))
     }
 
+    override suspend fun createTeamRegistrationPurchaseIntent(team: Team): Result<PurchaseIntent> =
+        Result.success(PurchaseIntent(paymentIntent = "pi_team_registration", publishableKey = "pk_test"))
+
     override suspend fun createBill(request: CreateBillRequest): Result<Bill> = Result.success(
         Bill(
             ownerType = request.ownerType,
