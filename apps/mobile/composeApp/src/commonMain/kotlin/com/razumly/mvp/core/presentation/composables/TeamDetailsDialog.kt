@@ -74,8 +74,7 @@ fun TeamDetailsDialog(
                 val teamHasCapacity = syncedTeam.teamSize <= 0 || reservedOrActiveCount < syncedTeam.teamSize
                 val canRegister = syncedTeam.openRegistration &&
                     !isCurrentUserActive &&
-                    !isCurrentUserPending &&
-                    teamHasCapacity &&
+                    (isCurrentUserPending || teamHasCapacity) &&
                     onRegisterForTeam != null
                 val activeStaffAssignments = syncedTeam.staffAssignments
                     .filter(TeamStaffAssignment::isActive)
@@ -219,7 +218,7 @@ fun TeamDetailsDialog(
                             Text(
                                 when {
                                     isRegistering -> "Registering..."
-                                    isCurrentUserPending -> "Registration Pending"
+                                    isCurrentUserPending -> "Resume Payment"
                                     !teamHasCapacity -> "Team Full"
                                     else -> "Register for Team"
                                 }
