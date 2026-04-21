@@ -1137,7 +1137,6 @@ class UserRepository(
                 firstName = normalizedUser.firstName,
                 lastName = normalizedUser.lastName,
                 userName = normalizedUser.userName,
-                teamIds = normalizedUser.teamIds,
                 friendIds = normalizedUser.friendIds,
                 friendRequestIds = normalizedUser.friendRequestIds,
                 friendRequestSentIds = normalizedUser.friendRequestSentIds,

@@ -154,13 +154,14 @@ class TeamRepository(
 
     override suspend fun addPlayerToTeam(team: Team, player: UserData): Result<Unit> {
         val syncedTeam = team.withSynchronizedMembership()
+        val membershipChanged = !syncedTeam.playerIds.contains(player.id) || syncedTeam.pending.contains(player.id)
         val addResult = runCatching {
             databaseService.getTeamDao.upsertTeamPlayerCrossRef(
                 TeamPlayerCrossRef(syncedTeam.id, player.id)
             )
         }
 
-        if (!syncedTeam.playerIds.contains(player.id) || syncedTeam.pending.contains(player.id)) {
+        if (membershipChanged) {
             val updatedTeam = syncedTeam.copy(
                 playerIds = (syncedTeam.playerIds + player.id).distinct(),
                 pending = syncedTeam.pending - player.id,
@@ -170,13 +171,8 @@ class TeamRepository(
                 return Result.failure(it)
             }
         }
-
-        if (!player.teamIds.contains(syncedTeam.id)) {
-            val updatedUserData = player.copy(teamIds = player.teamIds + syncedTeam.id)
-            userRepository.updateUser(updatedUserData).onFailure {
-                databaseService.getTeamDao.deleteTeamPlayerCrossRef(TeamPlayerCrossRef(syncedTeam.id, player.id))
-                return Result.failure(it)
-            }
+        if (membershipChanged) {
+            refreshCurrentUserProfileIfAffected(player.id)
         }
 
         pushNotificationRepository.subscribeUserToTeamNotifications(player.id, syncedTeam.id)
@@ -185,11 +181,12 @@ class TeamRepository(
 
     override suspend fun removePlayerFromTeam(team: Team, player: UserData): Result<Unit> {
         val syncedTeam = team.withSynchronizedMembership()
+        val membershipChanged = syncedTeam.playerIds.contains(player.id)
         val deleteResult = runCatching {
             databaseService.getTeamDao.deleteTeamPlayerCrossRef(TeamPlayerCrossRef(syncedTeam.id, player.id))
         }
 
-        if (syncedTeam.playerIds.contains(player.id)) {
+        if (membershipChanged) {
             val updatedTeam = syncedTeam.copy(playerIds = syncedTeam.playerIds - player.id)
                 .withSynchronizedMembership()
             updateTeam(updatedTeam).onFailure {
@@ -197,13 +194,8 @@ class TeamRepository(
                 return Result.failure(it)
             }
         }
-
-        if (player.teamIds.contains(syncedTeam.id)) {
-            val updatedUserData = player.copy(teamIds = player.teamIds - syncedTeam.id)
-            userRepository.updateUser(updatedUserData).onFailure {
-                databaseService.getTeamDao.upsertTeamPlayerCrossRef(TeamPlayerCrossRef(syncedTeam.id, player.id))
-                return Result.failure(it)
-            }
+        if (membershipChanged) {
+            refreshCurrentUserProfileIfAffected(player.id)
         }
 
         pushNotificationRepository.unsubscribeUserFromTeamNotifications(player.id, syncedTeam.id)
@@ -234,8 +226,7 @@ class TeamRepository(
             },
             saveCall = { created ->
                 databaseService.getTeamDao.upsertTeamWithRelations(created)
-                userRepository.updateUser(currentUser.copy(teamIds = currentUser.teamIds + created.id))
-                    .getOrThrow()
+                refreshCurrentUserProfileIfAffected(currentUser.id)
 
                 syncInvitesForPendingDiff(
                     teamId = created.id,
@@ -277,7 +268,7 @@ class TeamRepository(
             databaseService.getTeamDao.upsertTeamWithRelations(newData)
 
             if (oldTeam != null) {
-                // Propagate player removals to user profiles and notifications.
+                // Propagate player removals to local membership cache and notifications.
                 userRepository.getUsers(oldTeam.playerIds.filterNot { it in newData.playerIds })
                     .onSuccess { removedPlayers ->
                         removedPlayers.forEach { player -> removePlayerFromTeam(newData, player) }
@@ -338,13 +329,10 @@ class TeamRepository(
     )
 
     override suspend fun deleteTeam(team: TeamWithPlayers): Result<Unit> = runCatching {
-        api.deleteNoResponse("api/teams/${team.team.id}")
-
-        team.players.forEach { player ->
-            userRepository.updateUser(player.copy(teamIds = player.teamIds - team.team.id))
-        }
-
-        databaseService.getTeamDao.deleteTeam(team.team)
+        val syncedTeam = team.team.withSynchronizedMembership()
+        api.deleteNoResponse("api/teams/${syncedTeam.id}")
+        databaseService.getTeamDao.deleteTeam(syncedTeam)
+        refreshCurrentUserProfileIfTeamMember(syncedTeam)
     }
 
     override fun getTeamsWithPlayersFlow(id: String): Flow<Result<List<TeamWithPlayers>>> {
@@ -452,16 +440,39 @@ class TeamRepository(
         api.deleteNoResponse("api/invites/$inviteId")
     }
 
-	    override suspend fun acceptTeamInvite(inviteId: String, teamId: String): Result<Unit> = runCatching {
-	        // Accepting an invite mutates team membership; this must be done server-side (non-captains cannot PATCH teams).
-	        userRepository.acceptInvite(inviteId).getOrThrow()
+    override suspend fun acceptTeamInvite(inviteId: String, teamId: String): Result<Unit> = runCatching {
+        // Accepting an invite mutates team membership; this must be done server-side (non-captains cannot PATCH teams).
+        userRepository.acceptInvite(inviteId).getOrThrow()
 
-	        // Refresh local caches so UI updates (team membership + relations).
-	        getTeamWithPlayers(teamId).getOrThrow()
+        // Refresh local caches so UI updates (team membership + relations).
+        getTeamWithPlayers(teamId).getOrThrow()
 
-	        // Keep current user profile in sync (teamIds is used across the app). This is a refresh, not a mutation.
-	        runCatching { userRepository.getCurrentAccount().getOrThrow() }
-	    }
+        // Keep current user profile in sync (teamIds is used across the app). This is a refresh, not a mutation.
+        runCatching { userRepository.getCurrentAccount().getOrThrow() }
+    }
+
+    private suspend fun refreshCurrentUserProfileIfAffected(vararg userIds: String?) {
+        val currentUserId = userRepository.currentUser.value.getOrNull()?.id
+            ?: userRepository.currentAccount.value.getOrNull()?.id
+            ?: return
+        if (userIds.any { candidateId -> candidateId == currentUserId }) {
+            runCatching { userRepository.refreshCurrentUserProfile().getOrThrow() }
+        }
+    }
+
+    private suspend fun refreshCurrentUserProfileIfTeamMember(team: Team) {
+        val currentUserId = userRepository.currentUser.value.getOrNull()?.id
+            ?: userRepository.currentAccount.value.getOrNull()?.id
+            ?: return
+        val syncedTeam = team.withSynchronizedMembership()
+        val isCurrentUserMember = currentUserId in syncedTeam.playerIds ||
+            syncedTeam.managerId == currentUserId ||
+            syncedTeam.headCoachId == currentUserId ||
+            currentUserId in syncedTeam.coachIds
+        if (isCurrentUserMember) {
+            runCatching { userRepository.refreshCurrentUserProfile().getOrThrow() }
+        }
+    }
 
     private suspend fun fetchRemoteTeamsByIds(ids: List<String>): List<Team> {
         val encodedIds = ids.joinToString(",") { it.trim() }.encodeURLQueryComponent()

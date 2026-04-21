@@ -398,6 +398,91 @@ class UserRepositoryHttpTest {
         assertEquals(emptyList(), cachedUser?.blockedUserIds)
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun updateUser_omits_teamIds_from_patch_and_uses_server_memberships() = runTest {
+        var requestBody = ""
+        val engine = MockEngine { request ->
+            assertEquals("/api/users/user_1", request.url.encodedPath)
+            assertEquals(HttpMethod.Patch, request.method)
+            requestBody = outgoingBodyText(request.body)
+            respond(
+                content = """
+                    {
+                      "user": {
+                        "id": "user_1",
+                        "firstName": "Sam",
+                        "lastName": "Player",
+                        "teamIds": ["team_server"],
+                        "friendIds": [],
+                        "friendRequestIds": [],
+                        "friendRequestSentIds": [],
+                        "followingIds": [],
+                        "blockedUserIds": [],
+                        "hiddenEventIds": [],
+                        "userName": "sam_player",
+                        "hasStripeAccount": false,
+                        "uploadedImages": [],
+                        "profileImageId": null,
+                        "chatTermsAcceptedAt": null,
+                        "chatTermsVersion": null
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+        val client = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val prefsStore = UserRepositoryHttp_InMemoryPreferencesDataStore()
+        val repository = UserRepository(
+            databaseService = UserRepositoryHttp_FakeDatabaseService(),
+            api = MvpApiClient(client, "http://localhost", UserRepositoryHttp_InMemoryAuthTokenStore()),
+            tokenStore = UserRepositoryHttp_InMemoryAuthTokenStore(),
+            currentUserDataSource = CurrentUserDataSource(prefsStore),
+        )
+        advanceUntilIdle()
+        repository.setCachedCurrentUserProfile(
+            UserData(
+                firstName = "Sam",
+                lastName = "Player",
+                teamIds = listOf("team_client"),
+                friendIds = emptyList(),
+                friendRequestIds = emptyList(),
+                friendRequestSentIds = emptyList(),
+                followingIds = emptyList(),
+                userName = "sam_player",
+                hasStripeAccount = false,
+                uploadedImages = emptyList(),
+                profileImageId = null,
+                id = "user_1",
+            )
+        ).getOrThrow()
+
+        val updated = repository.updateUser(
+            UserData(
+                firstName = "Sam",
+                lastName = "Player",
+                teamIds = listOf("team_client"),
+                friendIds = emptyList(),
+                friendRequestIds = emptyList(),
+                friendRequestSentIds = emptyList(),
+                followingIds = emptyList(),
+                userName = "sam_player",
+                hasStripeAccount = false,
+                uploadedImages = emptyList(),
+                profileImageId = null,
+                id = "user_1",
+            )
+        ).getOrThrow()
+
+        assertTrue(!requestBody.contains("\"teamIds\""), "Expected teamIds to be omitted from user PATCH payloads.")
+        assertEquals(listOf("team_server"), updated.teamIds)
+        assertEquals(listOf("team_server"), repository.currentUser.value.getOrThrow().teamIds)
+    }
+
     @Test
     fun createInvites_posts_replace_staff_types_and_returns_invites() = runTest {
         var requestBody = ""

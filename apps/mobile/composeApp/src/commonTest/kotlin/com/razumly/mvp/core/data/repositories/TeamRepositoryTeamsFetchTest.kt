@@ -5,7 +5,9 @@ import com.razumly.mvp.core.data.dataTypes.AuthAccount
 import com.razumly.mvp.core.data.dataTypes.ChatGroup
 import com.razumly.mvp.core.data.dataTypes.Event
 import com.razumly.mvp.core.data.dataTypes.Team
+import com.razumly.mvp.core.data.dataTypes.TeamWithPlayers
 import com.razumly.mvp.core.data.dataTypes.UserData
+import com.razumly.mvp.core.data.dataTypes.withSynchronizedMembership
 import com.razumly.mvp.core.data.dataTypes.crossRef.TeamPlayerCrossRef
 import com.razumly.mvp.core.data.dataTypes.daos.ChatGroupDao
 import com.razumly.mvp.core.data.dataTypes.daos.EventDao
@@ -156,9 +158,16 @@ private class FakeUserRepository : IUserRepository {
     var lastGetUsersInput: List<String>? = null
     var lastListInvitesInput: Pair<String, String?>? = null
     var invitesResult: List<com.razumly.mvp.core.data.dataTypes.Invite> = emptyList()
+    var refreshCurrentUserProfileCalls: Int = 0
+    private val currentUserState = MutableStateFlow(Result.failure<UserData>(Exception("unused")))
+    private val currentAccountState = MutableStateFlow(Result.failure<AuthAccount>(Exception("unused")))
 
-    override val currentUser: StateFlow<Result<UserData>> = MutableStateFlow(Result.failure(Exception("unused")))
-    override val currentAccount: StateFlow<Result<AuthAccount>> = MutableStateFlow(Result.failure(Exception("unused")))
+    override val currentUser: StateFlow<Result<UserData>> = currentUserState
+    override val currentAccount: StateFlow<Result<AuthAccount>> = currentAccountState
+
+    fun setCurrentUser(user: UserData) {
+        currentUserState.value = Result.success(user)
+    }
 
     override suspend fun login(email: String, password: String): Result<UserData> = error("unused")
     override suspend fun logout(): Result<Unit> = error("unused")
@@ -250,6 +259,10 @@ private class FakeUserRepository : IUserRepository {
     override suspend fun followUser(userId: String): Result<Unit> = error("unused")
     override suspend fun unfollowUser(userId: String): Result<Unit> = error("unused")
     override suspend fun removeFriend(userId: String): Result<Unit> = error("unused")
+    override suspend fun refreshCurrentUserProfile(): Result<UserData> {
+        refreshCurrentUserProfileCalls += 1
+        return currentUserState.value
+    }
 }
 
 private object FakePushNotificationsRepository : IPushNotificationsRepository {
@@ -475,6 +488,137 @@ class TeamRepositoryTeamsFetchTest {
         assertTrue(team.openRegistration)
         assertEquals(listOf("captain_1"), team.playerIds)
         assertEquals("team_1", teamDao.getTeam("team_1").id)
+    }
+
+    @Test
+    fun createTeam_refreshes_current_user_profile_without_user_patch() = runTest {
+        val tokenStore = InMemoryAuthTokenStore("t123")
+        val teamDao = FakeTeamDao()
+        val db = FakeDatabaseService(teamDao)
+        val currentUser = testUser(id = "captain_1")
+        val userRepo = FakeUserRepository().apply { setCurrentUser(currentUser) }
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/teams", request.url.encodedPath)
+            assertEquals(HttpMethod.Post, request.method)
+
+            respond(
+                content = """
+                    {
+                      "id": "team_new",
+                      "name": "Pacific Spike Volleyball",
+                      "division": "Open",
+                      "playerIds": ["captain_1"],
+                      "captainId": "captain_1",
+                      "pending": [],
+                      "teamSize": 6
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = TeamRepository(api, db, userRepo, FakePushNotificationsRepository)
+
+        val created = repo.createTeam(testTeam(id = "temp_team")).getOrThrow()
+
+        assertEquals("team_new", created.id)
+        assertEquals(1, userRepo.refreshCurrentUserProfileCalls)
+        assertEquals("team_new", teamDao.getTeam("team_new").id)
+    }
+
+    @Test
+    fun removePlayerFromTeam_removes_other_player_without_user_patch() = runTest {
+        val tokenStore = InMemoryAuthTokenStore("t123")
+        val teamDao = FakeTeamDao()
+        val db = FakeDatabaseService(teamDao)
+        val currentUser = testUser(id = "captain_1", teamIds = listOf("team_1"))
+        val removedPlayer = testUser(id = "player_1", teamIds = listOf("team_1"))
+        val userRepo = FakeUserRepository().apply { setCurrentUser(currentUser) }
+        val team = testTeam(
+            id = "team_1",
+            playerIds = listOf("captain_1", "player_1"),
+        )
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/teams/team_1", request.url.encodedPath)
+            assertEquals(HttpMethod.Patch, request.method)
+
+            respond(
+                content = """
+                    {
+                      "id": "team_1",
+                      "name": "Pacific Spike Volleyball",
+                      "division": "Open",
+                      "playerIds": ["captain_1"],
+                      "captainId": "captain_1",
+                      "pending": [],
+                      "teamSize": 6
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = TeamRepository(api, db, userRepo, FakePushNotificationsRepository)
+
+        repo.removePlayerFromTeam(team, removedPlayer).getOrThrow()
+
+        assertEquals(listOf("captain_1"), teamDao.getTeam("team_1").playerIds)
+        assertEquals(0, userRepo.refreshCurrentUserProfileCalls)
+    }
+
+    @Test
+    fun deleteTeam_refreshes_current_user_profile_without_user_patch() = runTest {
+        val tokenStore = InMemoryAuthTokenStore("t123")
+        val teamDao = FakeTeamDao()
+        val db = FakeDatabaseService(teamDao)
+        val currentUser = testUser(id = "captain_1", teamIds = listOf("team_1"))
+        val otherPlayer = testUser(id = "player_1", teamIds = listOf("team_1"))
+        val userRepo = FakeUserRepository().apply { setCurrentUser(currentUser) }
+        val team = testTeam(
+            id = "team_1",
+            playerIds = listOf("captain_1", "player_1"),
+        )
+        teamDao.upsertTeamWithRelations(team)
+
+        val engine = MockEngine { request ->
+            assertEquals("/api/teams/team_1", request.url.encodedPath)
+            assertEquals(HttpMethod.Delete, request.method)
+            respond(
+                content = "",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+        }
+
+        val http = HttpClient(engine) {
+            install(ContentNegotiation) { json(jsonMVP) }
+        }
+        val api = MvpApiClient(http, "http://example.test", tokenStore)
+        val repo = TeamRepository(api, db, userRepo, FakePushNotificationsRepository)
+
+        repo.deleteTeam(
+            TeamWithPlayers(
+                team = team,
+                captain = currentUser,
+                players = listOf(currentUser, otherPlayer),
+                pendingPlayers = emptyList(),
+            )
+        ).getOrThrow()
+
+        assertTrue(teamDao.getTeams(listOf("team_1")).isEmpty())
+        assertEquals(1, userRepo.refreshCurrentUserProfileCalls)
     }
 
     @Test
@@ -727,3 +871,37 @@ class TeamRepositoryTeamsFetchTest {
         assertEquals(2, requestCount)
     }
 }
+
+private fun testUser(
+    id: String,
+    teamIds: List<String> = emptyList(),
+): UserData = UserData(
+    firstName = id.substringBefore('_').replaceFirstChar(Char::uppercaseChar),
+    lastName = "Player",
+    teamIds = teamIds,
+    friendIds = emptyList(),
+    friendRequestIds = emptyList(),
+    friendRequestSentIds = emptyList(),
+    followingIds = emptyList(),
+    userName = id,
+    hasStripeAccount = false,
+    uploadedImages = emptyList(),
+    profileImageId = null,
+    id = id,
+)
+
+private fun testTeam(
+    id: String = "team_1",
+    name: String = "Pacific Spike Volleyball",
+    captainId: String = "captain_1",
+    playerIds: List<String> = listOf(captainId),
+): Team = Team(
+    division = "Open",
+    name = name,
+    captainId = captainId,
+    managerId = captainId,
+    playerIds = playerIds,
+    pending = emptyList(),
+    teamSize = 6,
+    id = id,
+).withSynchronizedMembership()
